@@ -45,6 +45,56 @@ export const AUDIT_ACTIONS = {
     LEAVE_REJECT: 'leave.reject',
     LEAVE_CANCEL: 'leave.cancel',
 
+    // Project lifecycle (Phase 2 Step 16 — projects + members + clients +
+    // sprints + custom statuses). Each verb stores a before/after diff so the
+    // future Step-31 admin UI can render a "who changed what" timeline. The
+    // member/client variants log the resolved user_id list in `metadata` so
+    // a viewer doesn't need to dereference the snapshots to see the delta.
+    PROJECT_CREATE: 'project.create',
+    PROJECT_UPDATE: 'project.update',
+    PROJECT_ARCHIVE: 'project.archive',
+    PROJECT_MEMBERS_UPDATE: 'project.members_update',
+    PROJECT_CLIENTS_UPDATE: 'project.clients_update',
+    PROJECT_CUSTOM_STATUS_CREATE: 'project.custom_status_create',
+    PROJECT_CUSTOM_STATUS_UPDATE: 'project.custom_status_update',
+    PROJECT_CUSTOM_STATUS_DELETE: 'project.custom_status_delete',
+    SPRINT_CREATE: 'sprint.create',
+    SPRINT_UPDATE: 'sprint.update',
+    SPRINT_DELETE: 'sprint.delete',
+
+    // Story lifecycle (Phase 2 Step 17). `STORY_DELETE` records the list of
+    // task IDs whose `story_id` was unset in `metadata.unset_task_ids` so a
+    // future Step-31 audit UI can render a "what got detached" summary
+    // without re-reading the tasks collection.
+    STORY_CREATE: 'story.create',
+    STORY_UPDATE: 'story.update',
+    STORY_DELETE: 'story.delete',
+    STORY_REORDER: 'story.reorder',
+
+    // Task lifecycle (Phase 2 Step 18 — tasks + subtasks + dependencies).
+    // Reorder, story-attach, sprint-move, and dependency add/remove are
+    // their own verbs (rather than collapsing into TASK_UPDATE) so the
+    // Step-31 audit UI can render meaningful per-event summaries without
+    // diffing the full task snapshot. The dependency verbs record the
+    // counterpart task id in `metadata.depends_on_task_id` so the UI can
+    // link both sides of the edge.
+    TASK_CREATE: 'task.create',
+    TASK_UPDATE: 'task.update',
+    TASK_DELETE: 'task.delete',
+    TASK_REORDER: 'task.reorder',
+    TASK_ASSIGN_STORY: 'task.assign_story',
+    TASK_MOVE_SPRINT: 'task.move_sprint',
+    TASK_DEPENDENCY_ADD: 'task.dependency_add',
+    TASK_DEPENDENCY_REMOVE: 'task.dependency_remove',
+
+    // Task comments (Phase 2 Step 19). `metadata.task_id` and
+    // `metadata.mention_count` are recorded so the Step-31 audit UI can
+    // surface "user X mentioned 3 people on task Y" without re-reading
+    // the comment row (which may be soft-deleted by then).
+    COMMENT_CREATE: 'comment.create',
+    COMMENT_UPDATE: 'comment.update',
+    COMMENT_DELETE: 'comment.delete',
+
     // Scheduled jobs (Step 14). One generic "run" action; per-job detail
     // lives in `metadata.{job_name, run_key, summary}` so the action enum
     // stays small as we add jobs over time.
@@ -65,6 +115,11 @@ export const AUDIT_TARGET_KINDS = {
     LEAVE_REQUEST: 'leave_request',
     SYSTEM_SETTINGS: 'system_settings',
     JOB: 'job',
+    PROJECT: 'project',
+    SPRINT: 'sprint',
+    STORY: 'story',
+    TASK: 'task',
+    COMMENT: 'task_comment',
 } as const;
 
 export type AuditTargetKind = (typeof AUDIT_TARGET_KINDS)[keyof typeof AUDIT_TARGET_KINDS];

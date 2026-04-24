@@ -188,3 +188,36 @@ export const renderCorrectionDecidedEmail = (input: CorrectionDecidedEmailInput)
         `\nView: ${url}\n`;
     return { subject, html, text };
 };
+
+// ─── Task: @mention in a comment (to mentioned user) ──────────────────────
+
+export interface TaskCommentMentionEmailInput {
+    recipient_full_name: string;
+    author_full_name: string;
+    task_id: string;
+    /** Pre-sanitised, plain-text comment body. We truncate before send. */
+    body_preview: string;
+}
+
+const TASK_COMMENT_PREVIEW_MAX = 280;
+
+export const renderTaskCommentMentionEmail = (input: TaskCommentMentionEmailInput): RenderedEmail => {
+    const url = buildAppLink(`/tasks/${input.task_id}`);
+    const subject = `${input.author_full_name} mentioned you in a comment`;
+    const previewRaw =
+        input.body_preview.length > TASK_COMMENT_PREVIEW_MAX
+            ? `${input.body_preview.slice(0, TASK_COMMENT_PREVIEW_MAX).trimEnd()}…`
+            : input.body_preview;
+    const html = wrap(`
+        <p>Hi ${escapeHtml(input.recipient_full_name)},</p>
+        <p><strong>${escapeHtml(input.author_full_name)}</strong> mentioned you in a comment on a task.</p>
+        <blockquote style="margin:8px 0;padding:8px 12px;border-left:3px solid #d1d5db;color:#4b5563;white-space:pre-wrap;">${escapeHtml(previewRaw)}</blockquote>
+        <p>${link(url, 'Open the task')}.</p>
+    `);
+    const text =
+        `Hi ${input.recipient_full_name},\n\n` +
+        `${input.author_full_name} mentioned you in a comment on a task.\n\n` +
+        `${previewRaw}\n\n` +
+        `Open: ${url}\n`;
+    return { subject, html, text };
+};

@@ -37,6 +37,7 @@ export const COLLECTIONS = {
     TASK_COMMENTS: 'task_comments',
     TASK_ATTACHMENTS: 'task_attachments',
     TASK_DEPENDENCIES: 'task_dependencies',
+    TASK_ACTIVITIES: 'task_activities',
     PROJECT_MEMBERS: 'project_members',
     PROJECT_SHARE_LINKS: 'project_share_links',
 

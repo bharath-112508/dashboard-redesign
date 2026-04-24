@@ -12,6 +12,12 @@ import leaveRequestRoutes from './leave-request.routes.js';
 import compOffRoutes from './comp-off.routes.js';
 import notificationRoutes from './notification.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
+import projectRoutes from './project.routes.js';
+import sprintRoutes, { customStatusRouter } from './sprint.routes.js';
+import storyRoutes from './story.routes.js';
+import taskRoutes from './task.routes.js';
+import { commentsRouter, taskCommentsNestedRouter } from './task-comment.routes.js';
+import { taskActivityRouter } from './task-activity.routes.js';
 
 const appRoutes = Router();
 
@@ -27,5 +33,13 @@ appRoutes.use('/leaves', leaveRequestRoutes);
 appRoutes.use('/comp-off', compOffRoutes);
 appRoutes.use('/notifications', notificationRoutes);
 appRoutes.use('/dashboard', dashboardRoutes);
+appRoutes.use('/projects', projectRoutes);
+appRoutes.use('/sprints', sprintRoutes);
+appRoutes.use('/stories', storyRoutes);
+appRoutes.use('/tasks', taskRoutes);
+appRoutes.use('/tasks', taskCommentsNestedRouter());
+appRoutes.use('/tasks', taskActivityRouter());
+appRoutes.use('/comments', commentsRouter());
+appRoutes.use('/project-custom-statuses', customStatusRouter());
 
 export default appRoutes;

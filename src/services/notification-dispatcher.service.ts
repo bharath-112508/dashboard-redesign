@@ -13,6 +13,7 @@ import {
     renderCorrectionSubmittedEmail,
     renderLeaveDecisionEmail,
     renderLeaveSubmittedEmail,
+    renderTaskCommentMentionEmail,
     renderUserInviteEmail,
     type RenderedEmail,
 } from '../utils/email-templates.js';
@@ -470,6 +471,92 @@ export const notifyUserInvited = async (input: UserInviteDispatchInput): Promise
         logger.warn(
             { err, code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED, dispatch_event: context },
             'User-invite dispatch failed'
+        );
+    }
+};
+
+// ─── Public API: task comment mention ────────────────────────────────────
+//
+// Fan-out: one in-app row + one best-effort email per mentioned user.
+// Author is excluded from the recipient list defensively (the service
+// also de-dupes mentions before calling, but a self-mention shouldn't
+// notify the author even if it slipped through).
+//
+// Slack channel is intentionally a no-op slot (Step 25, Phase 2) — the
+// shared `dispatchToRecipient` helper will pick it up automatically once
+// `sendSlack` lands.
+
+export interface TaskCommentMentionDispatchInput {
+    comment_id: Types.ObjectId;
+    task_id: Types.ObjectId;
+    project_id: Types.ObjectId;
+    author_id: Types.ObjectId;
+    mentioned_user_ids: Types.ObjectId[];
+    /** Pre-sanitised, plain-text comment body. Used for the email preview. */
+    body_preview: string;
+}
+
+export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatchInput): Promise<void> => {
+    const context = 'notify.task_comment_mention';
+    try {
+        if (input.mentioned_user_ids.length === 0) return;
+
+        const recipientIds = input.mentioned_user_ids.filter((id) => !id.equals(input.author_id));
+        if (recipientIds.length === 0) return;
+
+        const [author, recipients] = await Promise.all([
+            findUserById(input.author_id),
+            User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
+                .select('_id email full_name role')
+                .lean<RecipientUser[]>(),
+        ]);
+
+        if (!author) {
+            logger.warn({ context, author_id: input.author_id.toString() }, 'author missing — skipping');
+            return;
+        }
+        if (recipients.length === 0) {
+            logger.info({ context }, 'No active recipients to notify');
+            return;
+        }
+
+        const linkUrl = `/tasks/${input.task_id.toString()}`;
+        const taskIdStr = input.task_id.toString();
+        // The in-app `body` field caps at NOTIFICATION_BODY_MAX (2 000),
+        // but the comment body cap is 5 000. Truncate defensively so a
+        // long comment doesn't push the validator into rejecting the
+        // notification row entirely.
+        const inAppBody =
+            input.body_preview.length > 1_900 ? `${input.body_preview.slice(0, 1_900).trimEnd()}…` : input.body_preview;
+
+        await Promise.all(
+            recipients.map((r) =>
+                dispatchToRecipient(
+                    r,
+                    {
+                        type: NOTIFICATION_TYPES.TASK_COMMENT,
+                        title: `${author.full_name} mentioned you in a comment`,
+                        body: inAppBody,
+                        link_url: linkUrl,
+                        related_entity: {
+                            kind: RELATED_ENTITY_KINDS.TASK,
+                            id: input.task_id,
+                        },
+                    },
+                    renderTaskCommentMentionEmail({
+                        recipient_full_name: r.full_name,
+                        author_full_name: author.full_name,
+                        task_id: taskIdStr,
+                        body_preview: input.body_preview,
+                    }),
+                    context
+                )
+            )
+        );
+    } catch (err) {
+        logger.warn(
+            { err, code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED, dispatch_event: context },
+            'Task-comment mention dispatch failed'
         );
     }
 };
