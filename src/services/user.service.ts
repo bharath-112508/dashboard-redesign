@@ -15,6 +15,9 @@ import { USER_STATUSES } from '../constants/user-statuses.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { AssignableQuery, CreateUserBody, ListUsersQuery, UpdateUserBody } from '../validators/user.validator.js';
 import { initializeBalancesForUserYear } from './leave-balance.service.js';
+import { notifyUserInvited } from './notification-dispatcher.service.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -69,7 +72,8 @@ const revokeAllRefreshTokens = async (user_id: Types.ObjectId): Promise<void> =>
 
 export const createUser = async (
     input: CreateUserBody,
-    created_by: Types.ObjectId
+    created_by: Types.ObjectId,
+    audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     assertPasswordPolicy(input.initial_password);
 
@@ -135,6 +139,26 @@ export const createUser = async (
                 'Leave-balance initialization failed for new user — will self-heal on first /leave-balances/me read'
             );
         }
+    }
+
+    // Welcome / invite email — best effort, never blocks the create. Logs
+    // `NOTIFICATION_DISPATCH_FAILED` if the mailer chokes (Step 11).
+    await notifyUserInvited({
+        recipient_user_id: created._id,
+        invited_by: { id: created_by },
+        initial_password: input.initial_password,
+    });
+
+    // Step 12 — audit trail. The `after` snapshot is the public projection
+    // so we never accidentally persist `password_hash` (toPublicUser already
+    // strips sensitive fields via the model's toJSON).
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.USER_CREATE,
+            target: { kind: AUDIT_TARGET_KINDS.USER, id: created._id },
+            after: toPublicUser(created),
+            metadata: { created_role: created.role },
+        });
     }
 
     return toPublicUser(created);
@@ -275,6 +299,7 @@ export const deactivateUser = async (input: {
     target_id: Types.ObjectId;
     caller_id: Types.ObjectId;
     reason?: string;
+    audit?: AuditContext;
 }): Promise<Record<string, unknown>> => {
     if (input.caller_id.equals(input.target_id)) {
         throw AppError.forbidden('You cannot deactivate your own account');
@@ -289,22 +314,33 @@ export const deactivateUser = async (input: {
         return toPublicUser(target);
     }
 
+    const beforeSnapshot = { status: target.status, deactivated_at: target.deactivated_at };
+
     target.status = USER_STATUSES.DEACTIVATED;
     target.deactivated_at = new Date();
     await target.save();
 
     await revokeAllRefreshTokens(target._id);
 
-    // TODO: reason is accepted from the contract but not persisted yet — audit
-    // log collection is part of the observability slice.
-    void input.reason;
+    if (input.audit) {
+        await recordAudit(input.audit, {
+            action: AUDIT_ACTIONS.USER_DEACTIVATE,
+            target: { kind: AUDIT_TARGET_KINDS.USER, id: target._id },
+            before: beforeSnapshot,
+            after: { status: target.status, deactivated_at: target.deactivated_at },
+            metadata: input.reason ? { reason: input.reason } : {},
+        });
+    }
 
     return toPublicUser(target);
 };
 
 // ─── POST /users/:id/reactivate ────────────────────────────────────────────
 
-export const reactivateUser = async (target_id: Types.ObjectId): Promise<Record<string, unknown>> => {
+export const reactivateUser = async (
+    target_id: Types.ObjectId,
+    audit?: AuditContext
+): Promise<Record<string, unknown>> => {
     const target = await User.findById(target_id);
     if (!target) {
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
@@ -319,9 +355,20 @@ export const reactivateUser = async (target_id: Types.ObjectId): Promise<Record<
         await assertSingleAdmin(target._id);
     }
 
+    const beforeSnapshot = { status: target.status, deactivated_at: target.deactivated_at };
+
     target.status = USER_STATUSES.ACTIVE;
     target.deactivated_at = null;
     await target.save();
+
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.USER_REACTIVATE,
+            target: { kind: AUDIT_TARGET_KINDS.USER, id: target._id },
+            before: beforeSnapshot,
+            after: { status: target.status, deactivated_at: target.deactivated_at },
+        });
+    }
 
     return toPublicUser(target);
 };
@@ -332,6 +379,7 @@ export const changeUserRole = async (input: {
     target_id: Types.ObjectId;
     caller_id: Types.ObjectId;
     new_role: RoleType;
+    audit?: AuditContext;
 }): Promise<Record<string, unknown>> => {
     if (input.caller_id.equals(input.target_id)) {
         throw AppError.forbidden('You cannot change your own role');
@@ -361,10 +409,20 @@ export const changeUserRole = async (input: {
         );
     }
 
+    const previousRole = target.role;
     target.role = input.new_role;
     await target.save();
 
     await revokeAllRefreshTokens(target._id);
+
+    if (input.audit) {
+        await recordAudit(input.audit, {
+            action: AUDIT_ACTIONS.USER_ROLE_CHANGE,
+            target: { kind: AUDIT_TARGET_KINDS.USER, id: target._id },
+            before: { role: previousRole },
+            after: { role: target.role },
+        });
+    }
 
     return toPublicUser(target);
 };

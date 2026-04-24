@@ -4,6 +4,7 @@ import { Types } from 'mongoose';
 import * as mfaService from '../services/mfa.service.js';
 import { ok, noContent } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import type {
     MfaDisableBody,
     MfaRegenerateBody,
@@ -44,20 +45,29 @@ export const postMfaSetupInit = async (req: Request, res: Response): Promise<Res
 export const postMfaSetupConfirm = async (req: Request, res: Response): Promise<Response> => {
     const id = callerId(req);
     const body = req.body as MfaSetupConfirmBody;
-    const result = await mfaService.setupConfirm(id, body.code);
+    const result = await mfaService.setupConfirm(id, body.code, buildAuditContext(req));
     return ok(res, result);
 };
 
 export const postMfaDisable = async (req: Request, res: Response): Promise<Response> => {
     const id = callerId(req);
     const body = req.body as MfaDisableBody;
-    await mfaService.disable({ user_id: id, password: body.password, code: body.code });
+    await mfaService.disable({
+        user_id: id,
+        password: body.password,
+        code: body.code,
+        audit: buildAuditContext(req),
+    });
     return noContent(res);
 };
 
 export const postMfaRegenerateBackupCodes = async (req: Request, res: Response): Promise<Response> => {
     const id = callerId(req);
     const body = req.body as MfaRegenerateBody;
-    const result = await mfaService.regenerateBackupCodes({ user_id: id, code: body.code });
+    const result = await mfaService.regenerateBackupCodes({
+        user_id: id,
+        code: body.code,
+        audit: buildAuditContext(req),
+    });
     return ok(res, result);
 };

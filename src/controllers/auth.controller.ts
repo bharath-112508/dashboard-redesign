@@ -5,6 +5,7 @@ import * as authService from '../services/auth.service.js';
 import * as passwordResetService from '../services/password-reset.service.js';
 import { ok, noContent } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import type {
     LoginBody,
     RefreshBody,
@@ -70,6 +71,7 @@ export const postChangePassword = async (req: Request, res: Response): Promise<R
         user_id,
         old_password: body.old_password,
         new_password: body.new_password,
+        audit: buildAuditContext(req),
     });
     return ok(res, { message: 'Password changed. Please login again on all devices.' });
 };
@@ -97,6 +99,10 @@ export const postResetPassword = async (req: Request, res: Response): Promise<Re
     await passwordResetService.resetPassword({
         token: body.token,
         new_password: body.new_password,
+        // The token validates the actor inside the service — pass a base
+        // context with `unauthenticated` actor; the service overrides
+        // `actor_id` + `actor_role` once the token is verified.
+        audit: buildAuditContext(req),
     });
     return ok(res, { message: 'Password reset successful.' });
 };

@@ -47,6 +47,7 @@ export const COLLECTIONS = {
     // Cross-cutting
     NOTIFICATIONS: 'notifications',
     AUDIT_LOGS: 'audit_logs',
+    JOB_RUNS: 'job_runs',
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

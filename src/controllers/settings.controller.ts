@@ -4,6 +4,7 @@ import { Types } from 'mongoose';
 import * as settingsService from '../services/settings.service.js';
 import { ok } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import type { PatchSettingsBody } from '../validators/settings.validator.js';
 
 const callerId = (req: Request): Types.ObjectId => {
@@ -31,6 +32,10 @@ export const getSettings = async (req: Request, res: Response): Promise<Response
 // ─── PATCH /settings ───────────────────────────────────────────────────────
 // Admin only. Partial deep-merge per section.
 export const patchSettings = async (req: Request, res: Response): Promise<Response> => {
-    const result = await settingsService.patchSettings(req.body as PatchSettingsBody, callerId(req));
+    const result = await settingsService.patchSettings(
+        req.body as PatchSettingsBody,
+        callerId(req),
+        buildAuditContext(req)
+    );
     return ok(res, result);
 };

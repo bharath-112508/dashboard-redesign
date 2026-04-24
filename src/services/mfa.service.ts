@@ -15,6 +15,8 @@ import {
 } from '../utils/mfa.js';
 import { verifyMfaSession } from '../utils/mfa-session.js';
 import { applyFailedLoginAttempt, completeLoginAfterMfa, type LoginTokenResult } from './auth.service.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 
@@ -71,7 +73,11 @@ interface SetupConfirmResult {
     backup_codes: string[];
 }
 
-export const setupConfirm = async (user_id: Types.ObjectId, code: string): Promise<SetupConfirmResult> => {
+export const setupConfirm = async (
+    user_id: Types.ObjectId,
+    code: string,
+    audit?: AuditContext
+): Promise<SetupConfirmResult> => {
     const user = await User.findById(user_id).select('+mfa_secret_encrypted +mfa_backup_codes_hashed');
     if (!user) {
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
@@ -99,6 +105,15 @@ export const setupConfirm = async (user_id: Types.ObjectId, code: string): Promi
             },
         }
     );
+
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.AUTH_MFA_ENABLE,
+            target: { kind: AUDIT_TARGET_KINDS.USER, id: user._id },
+            before: { mfa_enabled: false },
+            after: { mfa_enabled: true },
+        });
+    }
 
     return { mfa_enabled: true, backup_codes: plain };
 };
@@ -176,6 +191,7 @@ interface DisableInput {
     user_id: Types.ObjectId;
     password: string;
     code: string;
+    audit?: AuditContext;
 }
 
 export const disable = async (input: DisableInput): Promise<void> => {
@@ -208,6 +224,15 @@ export const disable = async (input: DisableInput): Promise<void> => {
             },
         }
     );
+
+    if (input.audit) {
+        await recordAudit(input.audit, {
+            action: AUDIT_ACTIONS.AUTH_MFA_DISABLE,
+            target: { kind: AUDIT_TARGET_KINDS.USER, id: user._id },
+            before: { mfa_enabled: true },
+            after: { mfa_enabled: false },
+        });
+    }
 };
 
 // ─── Regenerate backup codes ───────────────────────────────────────────────
@@ -215,6 +240,7 @@ export const disable = async (input: DisableInput): Promise<void> => {
 interface RegenerateInput {
     user_id: Types.ObjectId;
     code: string;
+    audit?: AuditContext;
 }
 
 interface RegenerateResult {
@@ -236,5 +262,14 @@ export const regenerateBackupCodes = async (input: RegenerateInput): Promise<Reg
 
     const { plain, hashed } = await generateBackupCodes();
     await User.updateOne({ _id: user._id }, { $set: { mfa_backup_codes_hashed: hashed } });
+
+    if (input.audit) {
+        await recordAudit(input.audit, {
+            action: AUDIT_ACTIONS.AUTH_MFA_REGENERATE_BACKUP_CODES,
+            target: { kind: AUDIT_TARGET_KINDS.USER, id: user._id },
+            metadata: { backup_codes_count: plain.length },
+        });
+    }
+
     return { backup_codes: plain };
 };

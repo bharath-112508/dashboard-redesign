@@ -4,6 +4,8 @@ import { Types } from 'mongoose';
 import * as service from '../services/leave-request.service.js';
 import { created, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
+import { buildAuditContext } from '../utils/audit-context.js';
+import type { AuditContext } from '../services/audit.service.js';
 import type { RoleType } from '../constants/roles.js';
 import type {
     ApplyLeaveBody,
@@ -18,6 +20,16 @@ const caller = (req: Request): { id: Types.ObjectId; role: RoleType } => {
     if (!req.user?.user_id) throw AppError.unauthenticated();
     return { id: new Types.ObjectId(req.user.user_id), role: req.user.role };
 };
+
+/**
+ * Caller plus the audit context. Used by approve/reject/cancel — those are
+ * the only lifecycle endpoints that emit audit rows. Read-only endpoints
+ * keep using the bare `caller(req)` helper to avoid the extra plumbing.
+ */
+const auditingCaller = (req: Request): { id: Types.ObjectId; role: RoleType; audit: AuditContext } => {
+    return { ...caller(req), audit: buildAuditContext(req) };
+};
+
 const parseId = (req: Request): Types.ObjectId => new Types.ObjectId(req.params.id as string);
 
 // ─── POST /leaves/preview-split ───────────────────────────────────────────
@@ -58,20 +70,20 @@ export const getOne = async (req: Request, res: Response): Promise<Response> => 
 // ─── POST /leaves/:id/approve ────────────────────────────────────────────
 
 export const postApprove = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.approveLeave(parseId(req), req.body as ApproveLeaveBody, caller(req));
+    const data = await service.approveLeave(parseId(req), req.body as ApproveLeaveBody, auditingCaller(req));
     return ok(res, data);
 };
 
 // ─── POST /leaves/:id/reject ─────────────────────────────────────────────
 
 export const postReject = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.rejectLeave(parseId(req), req.body as RejectLeaveBody, caller(req));
+    const data = await service.rejectLeave(parseId(req), req.body as RejectLeaveBody, auditingCaller(req));
     return ok(res, data);
 };
 
 // ─── POST /leaves/:id/cancel ─────────────────────────────────────────────
 
 export const postCancel = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.cancelLeave(parseId(req), req.body as CancelLeaveBody, caller(req));
+    const data = await service.cancelLeave(parseId(req), req.body as CancelLeaveBody, auditingCaller(req));
     return ok(res, data);
 };

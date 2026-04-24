@@ -5,6 +5,7 @@ import * as userService from '../services/user.service.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import { ROLES } from '../constants/roles.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import type {
     AssignableQuery,
     ChangeRoleBody,
@@ -27,7 +28,7 @@ const parseTargetId = (req: Request): Types.ObjectId => {
 
 // ─── POST /users ────────────────────────────────────────────────────────────
 export const postCreateUser = async (req: Request, res: Response): Promise<Response> => {
-    const user = await userService.createUser(req.body as CreateUserBody, callerId(req));
+    const user = await userService.createUser(req.body as CreateUserBody, callerId(req), buildAuditContext(req));
     return created(res, user);
 };
 
@@ -69,13 +70,14 @@ export const postDeactivateUser = async (req: Request, res: Response): Promise<R
         target_id: parseTargetId(req),
         caller_id: callerId(req),
         reason: body.reason,
+        audit: buildAuditContext(req),
     });
     return ok(res, user);
 };
 
 // ─── POST /users/:id/reactivate ─────────────────────────────────────────────
 export const postReactivateUser = async (req: Request, res: Response): Promise<Response> => {
-    const user = await userService.reactivateUser(parseTargetId(req));
+    const user = await userService.reactivateUser(parseTargetId(req), buildAuditContext(req));
     return ok(res, user);
 };
 
@@ -86,6 +88,7 @@ export const postChangeUserRole = async (req: Request, res: Response): Promise<R
         target_id: parseTargetId(req),
         caller_id: callerId(req),
         new_role: body.new_role,
+        audit: buildAuditContext(req),
     });
     return ok(res, user);
 };

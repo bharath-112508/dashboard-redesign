@@ -7,7 +7,9 @@ import { hashPassword } from '../utils/password.js';
 import { sha256Hex } from '../utils/token-hash.js';
 import { sendPasswordResetEmail } from '../utils/mailer.js';
 import { logoutAll } from './auth.service.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
 import { RESET_TOKEN_BYTES, RESET_TOKEN_TTL_MS } from '../constants/auth.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 
@@ -66,6 +68,14 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
 interface ResetInput {
     token: string;
     new_password: string;
+    /**
+     * Optional audit context. The actor in the recorded row is *the user the
+     * token belongs to*, regardless of who hit the endpoint — so callers
+     * usually pass `{ actor_id: null, actor_role: 'unauthenticated', ip, user_agent }`
+     * and let `resetPassword` rebuild the actor from the token. We override
+     * `actor_id` + `actor_role` here once we've validated the token.
+     */
+    audit?: AuditContext;
 }
 
 export const resetPassword = async (input: ResetInput): Promise<void> => {
@@ -119,4 +129,20 @@ export const resetPassword = async (input: ResetInput): Promise<void> => {
 
     // Force logout everywhere (plan §7.2 & API_Contract §2.6).
     await logoutAll(user._id);
+
+    if (input.audit) {
+        await recordAudit(
+            {
+                ...input.audit,
+                // Stamp the user as the actor — the reset link proved control
+                // of their inbox, even though no JWT was used to call the API.
+                actor_id: user._id,
+                actor_role: user.role,
+            },
+            {
+                action: AUDIT_ACTIONS.AUTH_PASSWORD_RESET,
+                target: { kind: AUDIT_TARGET_KINDS.USER, id: user._id },
+            }
+        );
+    }
 };

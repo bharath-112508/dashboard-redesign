@@ -15,6 +15,7 @@ import { API_PREFIX, ERROR_CODES } from './constants/index.js';
 import { ok } from './utils/api-response.js';
 import logger from './utils/logger.js';
 import { seedDefaultLeaveTypes } from './services/leave-type.service.js';
+import { startScheduler, stopScheduler } from './jobs/index.js';
 
 const app = express();
 
@@ -81,10 +82,16 @@ const startServer = async () => {
 
         const server = app.listen(PORT, () => {
             logger.info({ port: PORT, env: NODE_ENV, api_prefix: API_PREFIX }, 'Server is running');
+            // Start scheduled jobs only after the HTTP server is up so a
+            // boot failure can't leave a half-initialized cron registry
+            // running against a half-initialized DB connection. Disabled
+            // automatically when JOBS_ENABLED=false (tests + smoke).
+            startScheduler();
         });
 
         const shutdown = (signal: string) => {
             logger.info({ signal }, 'Shutdown signal received, closing gracefully');
+            stopScheduler();
             server.close(async () => {
                 logger.info('HTTP server closed');
                 await disconnectDB();

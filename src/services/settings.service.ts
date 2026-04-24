@@ -9,6 +9,8 @@ import {
     SETTINGS_SINGLETON_KEY,
     type SettingsSection,
 } from '../constants/settings.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
 import type { PatchSettingsBody } from '../validators/settings.validator.js';
 
 /**
@@ -117,14 +119,31 @@ export const getPublicSettings = async (): Promise<PublicSettings> => {
 
 export const patchSettings = async (
     patch: PatchSettingsBody,
-    actor_id: Types.ObjectId
+    actor_id: Types.ObjectId,
+    audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     const settings = await getOrInitSettings();
+
+    // Snapshot the affected sections BEFORE merging so the audit `before` is
+    // a focused diff, not the entire settings document.
+    const sectionsTouched = Object.keys(patch) as Array<keyof PatchSettingsBody>;
+    const beforeSnapshot: Record<string, unknown> = {};
+    for (const section of sectionsTouched) {
+        if (section === 'default_timezone') {
+            beforeSnapshot.default_timezone = settings.default_timezone;
+            continue;
+        }
+        const key = section as SettingsSection;
+        const raw = settings[key] as unknown;
+        const maybeSubdoc = raw as { toObject?: () => Record<string, unknown> } | null | undefined;
+        beforeSnapshot[section] =
+            maybeSubdoc && typeof maybeSubdoc.toObject === 'function' ? maybeSubdoc.toObject() : (raw ?? null);
+    }
 
     // Deep-merge each section explicitly so we don't accidentally allow new
     // top-level keys outside the schema. `default_timezone` is a primitive top-
     // level field and is handled separately.
-    for (const section of Object.keys(patch) as Array<keyof PatchSettingsBody>) {
+    for (const section of sectionsTouched) {
         if (section === 'default_timezone') continue;
         const sectionPatch = patch[section];
         if (!sectionPatch) continue;
@@ -154,6 +173,30 @@ export const patchSettings = async (
 
     settings.updated_by = actor_id;
     await settings.save();
+
+    // Build the after snapshot using the same focused-section view.
+    const afterSnapshot: Record<string, unknown> = {};
+    for (const section of sectionsTouched) {
+        if (section === 'default_timezone') {
+            afterSnapshot.default_timezone = settings.default_timezone;
+            continue;
+        }
+        const key = section as SettingsSection;
+        const raw = settings[key] as unknown;
+        const maybeSubdoc = raw as { toObject?: () => Record<string, unknown> } | null | undefined;
+        afterSnapshot[section] =
+            maybeSubdoc && typeof maybeSubdoc.toObject === 'function' ? maybeSubdoc.toObject() : (raw ?? null);
+    }
+
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.SETTINGS_UPDATE,
+            target: { kind: AUDIT_TARGET_KINDS.SYSTEM_SETTINGS, id: null },
+            before: beforeSnapshot,
+            after: afterSnapshot,
+            metadata: { sections_touched: sectionsTouched },
+        });
+    }
 
     return stripInternalFields(settings.toJSON() as Record<string, unknown>);
 };

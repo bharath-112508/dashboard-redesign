@@ -15,6 +15,10 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { getOrInitSettings } from './settings.service.js';
+import {
+    notifyAttendanceCorrectionDecided,
+    notifyAttendanceCorrectionSubmitted,
+} from './notification-dispatcher.service.js';
 import { haversineDistanceMeters, ATTENDANCE_REVIEW_ROLES } from '../constants/attendance.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
@@ -429,6 +433,13 @@ export const submitCorrection = async (
             reason: body.requested_changes.reason,
         },
     });
+
+    await notifyAttendanceCorrectionSubmitted({
+        request_id: created._id,
+        requester_id: user_id,
+        local_date: record.local_date,
+    });
+
     return created.toJSON() as unknown as Record<string, unknown>;
 };
 
@@ -539,6 +550,15 @@ export const approveCorrection = async (
     reqDoc.acted_at = new Date();
     await reqDoc.save();
 
+    await notifyAttendanceCorrectionDecided({
+        request_id: reqDoc._id,
+        requester_id: reqDoc.user_id,
+        local_date: record.local_date,
+        decision: 'approved',
+        actor: { id: reviewer_id },
+        remarks: body.reviewer_remarks ?? null,
+    });
+
     return {
         request: reqDoc.toJSON(),
         record: record.toJSON(),
@@ -561,6 +581,21 @@ export const rejectCorrection = async (
     reqDoc.reviewer_remarks = body.reviewer_remarks ?? '';
     reqDoc.acted_at = new Date();
     await reqDoc.save();
+
+    // Look up the underlying record only for `local_date` — the rest of the
+    // notification payload is already on `reqDoc`. If the record vanished
+    // (extremely unlikely; correction targets are immutable) fall back to a
+    // placeholder string so the dispatcher never throws.
+    const record = await AttendanceRecord.findById(reqDoc.attendance_record_id).select('local_date');
+    await notifyAttendanceCorrectionDecided({
+        request_id: reqDoc._id,
+        requester_id: reqDoc.user_id,
+        local_date: record?.local_date ?? 'unknown',
+        decision: 'rejected',
+        actor: { id: reviewer_id },
+        remarks: body.reviewer_remarks ?? null,
+    });
+
     return reqDoc.toJSON() as unknown as Record<string, unknown>;
 };
 

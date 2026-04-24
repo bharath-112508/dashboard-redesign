@@ -10,6 +10,8 @@ import leaveTypeRoutes from './leave-type.routes.js';
 import leaveBalanceRoutes from './leave-balance.routes.js';
 import leaveRequestRoutes from './leave-request.routes.js';
 import compOffRoutes from './comp-off.routes.js';
+import notificationRoutes from './notification.routes.js';
+import dashboardRoutes from './dashboard.routes.js';
 
 const appRoutes = Router();
 
@@ -23,5 +25,7 @@ appRoutes.use('/leave-types', leaveTypeRoutes);
 appRoutes.use('/leave-balances', leaveBalanceRoutes);
 appRoutes.use('/leaves', leaveRequestRoutes);
 appRoutes.use('/comp-off', compOffRoutes);
+appRoutes.use('/notifications', notificationRoutes);
+appRoutes.use('/dashboard', dashboardRoutes);
 
 export default appRoutes;

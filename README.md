@@ -52,7 +52,10 @@ See `.env.example` for the full list. Key ones:
 | `npm run type-check` | TypeScript type-check only (no emit) |
 | `npm run lint` / `lint:fix` | ESLint |
 | `npm run format` | Prettier |
-| `npm test` / `test:watch` | Vitest |
+| `npm test` / `test:watch` | Vitest unit tests |
+| `npm run coverage` | Vitest with v8 coverage report (text + html → `coverage/`) |
+| `npm run smoke` | Phase-1 black-box smoke runner (curl + bash). Requires a dev server at `:3001`. |
+| `npm run smoke:no-reset` | Same as above without re-seeding the users collection. |
 
 ## Project structure
 
@@ -97,6 +100,30 @@ Uses **Pino** (high-perf structured JSON logs) with `pino-http` for request logg
 - **Field naming:** `snake_case` across DB, request/response bodies, and query params (per `Data_Model.md`).
 - **Dates:** UTC timestamps on the wire; user-facing dates are `YYYY-MM-DD` with per-user timezone (default `Asia/Kolkata`).
 - **API versioning:** all routes mount under `/api/v1/...` (see `API_Contract.md`).
+
+## Phase-1 smoke runner
+
+The `scripts/smoke-*.sh` files are black-box `bash + curl` suites that hit a
+running dev server on `:3001` and assert end-to-end behaviour for each Phase-1
+domain (auth, MFA, password reset, users, settings, office locations,
+attendance, holidays, leaves, notifications). The umbrella runner
+`scripts/smoke-all.sh` orchestrates them in dependency order:
+
+```bash
+# in one terminal
+npm run dev
+
+# in another, with the dev server's stdout captured for the forgot-password smoke
+SERVER_LOG=/tmp/vjt-dev.log npm run smoke
+# or skip the user-table reset (faster on subsequent runs)
+SERVER_LOG=/tmp/vjt-dev.log npm run smoke:no-reset
+# or pin to a single smoke
+bash scripts/smoke-all.sh smoke-leaves.sh
+```
+
+Exit code is the cumulative count of assertion failures across smokes
+(0 = all green). Each smoke is `set -u` clean and bash-3.2 compatible
+(works on stock macOS).
 
 ## Status
 

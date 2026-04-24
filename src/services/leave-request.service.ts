@@ -22,6 +22,9 @@ import { ROLES, type RoleType } from '../constants/roles.js';
 import { getOrInitSettings } from './settings.service.js';
 import { findOrInitBalance, initializeBalancesForUserYear } from './leave-balance.service.js';
 import { generateSegments, type ComputedSegment, type SegmentEngineResult } from './leave-segment.engine.js';
+import { notifyLeaveDecided, notifyLeaveSubmitted } from './notification-dispatcher.service.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     ApplyLeaveBody,
@@ -402,8 +405,9 @@ export const applyLeave = async (
     await reserveBalances({ user_id: caller.id, segments, requestedType, allowNegative: false });
 
     // Persist the request.
+    let created: LeaveRequestDocument;
     try {
-        const created = await LeaveRequest.create({
+        created = await LeaveRequest.create({
             user_id: caller.id,
             requested_leave_type_id: requestedType._id,
             start_date: body.start_date,
@@ -421,12 +425,38 @@ export const applyLeave = async (
             approver_remarks: '',
             acted_at: null,
         });
-        return await toRequestPublic(created, ctx.typesById);
     } catch (err) {
         // Rollback reservations if the LeaveRequest insert fails for any reason.
         await releaseReservations({ user_id: caller.id, segments });
         throw err;
     }
+
+    // Notify reviewers in-app + email. The dispatcher never throws — failures
+    // are logged as `NOTIFICATION_DISPATCH_FAILED` and the apply still
+    // returns 2xx (API_Contract §15.500).
+    await notifyLeaveSubmitted({
+        request_id: created._id,
+        requester_id: caller.id,
+        leave_type_label: leaveTypeLabel(requestedType),
+        start_date: body.start_date,
+        end_date: body.end_date,
+        total_days: engine.total_days,
+    });
+
+    return toRequestPublic(created, ctx.typesById);
+};
+
+/**
+ * Render a leave type as "CL — Casual Leave" (or just the name when the code
+ * already starts the string). Used in notification titles + bodies so the
+ * recipient sees the human label, not a hex id.
+ */
+const leaveTypeLabel = (lt: LeaveTypeDocument): string => {
+    if (!lt) return 'leave';
+    if (lt.code && lt.name && !lt.name.toLowerCase().includes(lt.code.toLowerCase())) {
+        return `${lt.code} — ${lt.name}`;
+    }
+    return lt.name ?? lt.code ?? 'leave';
 };
 
 // ─── Reservation logic (atomic conditional updates) ──────────────────────
@@ -593,7 +623,7 @@ export const getLeave = async (
 export const approveLeave = async (
     id: Types.ObjectId,
     body: ApproveLeaveBody,
-    caller: { id: Types.ObjectId; role: RoleType }
+    caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
     const existing = await LeaveRequest.findById(id);
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
@@ -642,13 +672,59 @@ export const approveLeave = async (
         );
     }
 
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.LEAVE_APPROVE,
+            target: { kind: AUDIT_TARGET_KINDS.LEAVE_REQUEST, id: updated._id },
+            before: { status: existing.status },
+            after: {
+                status: updated.status,
+                approver_id: updated.approver_id?.toString() ?? null,
+                approver_remarks: updated.approver_remarks,
+                additional_approval_reason: updated.additional_approval_reason,
+            },
+            metadata: {
+                requester_id: updated.user_id.toString(),
+                requires_additional_approval: existing.requires_additional_approval,
+                total_days: updated.total_days,
+            },
+        });
+    }
+
+    await notifyLeaveDecisionFromRequest(updated, 'approved', caller.id, body.approver_remarks ?? null);
     return toRequestPublic(updated);
+};
+
+/**
+ * Helper used by approve/reject/cancel to look up the requested leave type
+ * once and emit the correct decision notification. Centralised so the three
+ * lifecycle endpoints share one call shape — and adding a new decision type
+ * later (e.g. `partially_approved`) only touches this function.
+ */
+const notifyLeaveDecisionFromRequest = async (
+    req: LeaveRequestDocument,
+    decision: 'approved' | 'rejected' | 'cancelled',
+    actor_id: Types.ObjectId,
+    remarks: string | null
+): Promise<void> => {
+    const requestedType = await LeaveType.findById(req.requested_leave_type_id).select('code name');
+    await notifyLeaveDecided({
+        request_id: req._id,
+        requester_id: req.user_id,
+        leave_type_label: requestedType ? leaveTypeLabel(requestedType) : 'leave',
+        start_date: req.start_date,
+        end_date: req.end_date,
+        total_days: req.total_days,
+        decision,
+        actor: { id: actor_id },
+        remarks,
+    });
 };
 
 export const rejectLeave = async (
     id: Types.ObjectId,
     body: RejectLeaveBody,
-    caller: { id: Types.ObjectId; role: RoleType }
+    caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
     const existing = await LeaveRequest.findById(id);
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
@@ -672,13 +748,29 @@ export const rejectLeave = async (
 
     // Refund pending → 0 (no used change since it never approved).
     await releaseReservations({ user_id: updated.user_id, segments: updated.leave_segments });
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.LEAVE_REJECT,
+            target: { kind: AUDIT_TARGET_KINDS.LEAVE_REQUEST, id: updated._id },
+            before: { status: existing.status },
+            after: {
+                status: updated.status,
+                approver_id: updated.approver_id?.toString() ?? null,
+                approver_remarks: updated.approver_remarks,
+            },
+            metadata: { requester_id: updated.user_id.toString() },
+        });
+    }
+
+    await notifyLeaveDecisionFromRequest(updated, 'rejected', caller.id, body.approver_remarks ?? null);
     return toRequestPublic(updated);
 };
 
 export const cancelLeave = async (
     id: Types.ObjectId,
     body: CancelLeaveBody,
-    caller: { id: Types.ObjectId; role: RoleType }
+    caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
     const existing = await LeaveRequest.findById(id);
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
@@ -742,6 +834,27 @@ export const cancelLeave = async (
         await releaseReservations({ user_id: updated.user_id, segments: updated.leave_segments });
     }
 
+    if (caller.audit) {
+        const isSelfCancel = caller.id.equals(existing.user_id);
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.LEAVE_CANCEL,
+            target: { kind: AUDIT_TARGET_KINDS.LEAVE_REQUEST, id: updated._id },
+            before: { status: existing.status },
+            after: {
+                status: updated.status,
+                cancelled_at: updated.cancelled_at,
+                cancelled_by: updated.cancelled_by?.toString() ?? null,
+                cancellation_reason: updated.cancellation_reason,
+            },
+            metadata: {
+                requester_id: updated.user_id.toString(),
+                self_cancel: isSelfCancel,
+                previous_status: expectedStatus,
+            },
+        });
+    }
+
+    await notifyLeaveDecisionFromRequest(updated, 'cancelled', caller.id, body.cancellation_reason ?? null);
     return toRequestPublic(updated);
 };
 

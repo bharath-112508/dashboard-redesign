@@ -12,6 +12,8 @@ import { issueMfaSession } from '../utils/mfa-session.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { MAX_LOGIN_ATTEMPTS, LOGIN_LOCKOUT_MS } from '../constants/auth.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
 import type { AuthTokenPair, BaseJWTPayload } from '../types/index.js';
 
 interface LoginInput {
@@ -314,6 +316,7 @@ export const changePassword = async (input: {
     user_id: Types.ObjectId;
     old_password: string;
     new_password: string;
+    audit?: AuditContext;
 }): Promise<void> => {
     const user = await User.findById(input.user_id).select('+password_hash');
     if (!user) {
@@ -333,6 +336,13 @@ export const changePassword = async (input: {
     );
 
     await logoutAll(user._id);
+
+    if (input.audit) {
+        await recordAudit(input.audit, {
+            action: AUDIT_ACTIONS.AUTH_PASSWORD_CHANGE,
+            target: { kind: AUDIT_TARGET_KINDS.USER, id: user._id },
+        });
+    }
 };
 
 /**
