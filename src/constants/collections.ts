@@ -27,6 +27,7 @@ export const COLLECTIONS = {
     // Attendance
     OFFICE_LOCATIONS: 'office_locations',
     ATTENDANCE_RECORDS: 'attendance_records',
+    ATTENDANCE_CORRECTION_REQUESTS: 'attendance_correction_requests',
 
     // Projects
     PROJECTS: 'projects',

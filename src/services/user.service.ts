@@ -186,9 +186,16 @@ export const updateUser = async (input: {
         ) as UpdateUserBody;
 
         if (patch.internal_profile) {
-            patch.internal_profile = Object.fromEntries(
+            const filtered = Object.fromEntries(
                 Object.entries(patch.internal_profile).filter(([k]) => SELF_EDITABLE_INTERNAL_PROFILE_FIELDS.has(k))
             );
+            // If the caller only sent disallowed nested keys, drop the key
+            // entirely so it doesn't count toward "patch non-empty" below.
+            if (Object.keys(filtered).length === 0) {
+                delete patch.internal_profile;
+            } else {
+                patch.internal_profile = filtered;
+            }
         }
 
         if (Object.keys(patch).length === 0) {
