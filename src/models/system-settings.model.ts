@@ -1,0 +1,296 @@
+import { Schema, model, Types, type Document, type Model } from 'mongoose';
+
+import { BASE_SCHEMA_OPTIONS } from './_base.js';
+import { COLLECTIONS } from '../constants/collections.js';
+import { SETTINGS_SINGLETON_KEY } from '../constants/settings.js';
+
+/**
+ * `system_settings` — Data_Model.md §2.1
+ *
+ * A single-document collection: the entire app reads from / writes to one row.
+ * Race-safe upsert is achieved with a `singleton_key` field carrying the literal
+ * value `'system'` and a unique index on it — concurrent inserts collide on the
+ * index and only one wins.
+ *
+ * The schema mirrors the planning doc verbatim (snake_case throughout). Sub-docs
+ * use `_id: false` so they don't accumulate ids on patch-merge round-trips.
+ */
+
+// ─── Sub-doc interfaces ────────────────────────────────────────────────────
+
+export interface WorkScheduleSettings {
+    start_time: string; // "HH:MM"
+    end_time: string; // "HH:MM"
+    working_days: number[]; // 0=Sun..6=Sat
+    daily_expected_hours: number;
+}
+
+export interface LeavePolicySettings {
+    cl_carry_forward_cap: number;
+    comp_off_hours_per_day: number;
+    cl_advance_notice_days: number;
+    pro_rata_for_joiners: boolean;
+}
+
+export interface TimesheetSettings {
+    self_edit_window_days: number;
+    daily_warn_threshold_hours: number;
+}
+
+export interface GeofenceSettings {
+    enabled: boolean;
+    center_latitude: number | null;
+    center_longitude: number | null;
+    radius_meters: number;
+}
+
+export interface WifiRestrictionSettings {
+    enabled: boolean;
+    allowed_ssids: string[];
+    allowed_ip_ranges: string[];
+}
+
+export interface AttendanceSettings {
+    geofence: GeofenceSettings;
+    wifi_restriction: WifiRestrictionSettings;
+    forgot_checkout_flag_time: string; // "HH:MM"
+}
+
+export interface SecuritySettings {
+    password_min_length: number;
+    password_max_length: number;
+    password_require_upper: boolean;
+    password_require_lower: boolean;
+    password_require_number: boolean;
+    password_require_special: boolean;
+    failed_login_threshold: number;
+    lockout_duration_minutes: number;
+    access_token_ttl_minutes: number;
+    refresh_token_ttl_days: number;
+    password_reset_ttl_minutes: number;
+}
+
+export interface UploadSettings {
+    max_file_size_mb: number;
+    allowed_mime_types: string[];
+    sas_token_ttl_minutes: number;
+}
+
+export interface SlackChannelMap {
+    leaves: string;
+    attendance: string;
+    projects: string;
+    timesheet: string;
+    general: string;
+}
+
+export interface SlackSettings {
+    enabled: boolean;
+    channels: SlackChannelMap;
+}
+
+export interface EmailSettings {
+    from_address: string;
+    reply_to_address: string;
+}
+
+export interface ReminderSettings {
+    timesheet_reminder_time: string; // "HH:MM"
+    task_due_reminder_run_interval_hours: number;
+}
+
+export interface CompanySettings {
+    name: string;
+    logo_blob_key: string | null;
+    primary_color: string; // "#xxxxxx"
+    login_page_tagline: string;
+}
+
+export interface SystemSettingsDocument extends Document {
+    _id: Types.ObjectId;
+    singleton_key: typeof SETTINGS_SINGLETON_KEY;
+
+    work_schedule: WorkScheduleSettings;
+    leave_policy: LeavePolicySettings;
+    timesheet: TimesheetSettings;
+    attendance: AttendanceSettings;
+    security: SecuritySettings;
+    uploads: UploadSettings;
+    slack: SlackSettings;
+    email: EmailSettings;
+    reminders: ReminderSettings;
+    company: CompanySettings;
+
+    default_timezone: string;
+
+    updated_by: Types.ObjectId | null;
+    created_at: Date;
+    updated_at: Date;
+}
+
+// ─── Sub-doc schemas ───────────────────────────────────────────────────────
+
+const workScheduleSchema = new Schema<WorkScheduleSettings>(
+    {
+        start_time: { type: String, required: true },
+        end_time: { type: String, required: true },
+        working_days: { type: [Number], required: true },
+        daily_expected_hours: { type: Number, required: true, min: 0, max: 24 },
+    },
+    { _id: false }
+);
+
+const leavePolicySchema = new Schema<LeavePolicySettings>(
+    {
+        cl_carry_forward_cap: { type: Number, required: true, min: 0 },
+        comp_off_hours_per_day: { type: Number, required: true, min: 0, max: 24 },
+        cl_advance_notice_days: { type: Number, required: true, min: 0 },
+        pro_rata_for_joiners: { type: Boolean, required: true },
+    },
+    { _id: false }
+);
+
+const timesheetSchema = new Schema<TimesheetSettings>(
+    {
+        self_edit_window_days: { type: Number, required: true, min: 0 },
+        daily_warn_threshold_hours: { type: Number, required: true, min: 0, max: 24 },
+    },
+    { _id: false }
+);
+
+const geofenceSchema = new Schema<GeofenceSettings>(
+    {
+        enabled: { type: Boolean, required: true, default: false },
+        center_latitude: { type: Number, default: null, min: -90, max: 90 },
+        center_longitude: { type: Number, default: null, min: -180, max: 180 },
+        radius_meters: { type: Number, required: true, min: 0 },
+    },
+    { _id: false }
+);
+
+const wifiRestrictionSchema = new Schema<WifiRestrictionSettings>(
+    {
+        enabled: { type: Boolean, required: true, default: false },
+        allowed_ssids: { type: [String], required: true, default: [] },
+        allowed_ip_ranges: { type: [String], required: true, default: [] },
+    },
+    { _id: false }
+);
+
+const attendanceSchema = new Schema<AttendanceSettings>(
+    {
+        geofence: { type: geofenceSchema, required: true },
+        wifi_restriction: { type: wifiRestrictionSchema, required: true },
+        forgot_checkout_flag_time: { type: String, required: true },
+    },
+    { _id: false }
+);
+
+const securitySchema = new Schema<SecuritySettings>(
+    {
+        password_min_length: { type: Number, required: true, min: 6 },
+        password_max_length: { type: Number, required: true, min: 6 },
+        password_require_upper: { type: Boolean, required: true },
+        password_require_lower: { type: Boolean, required: true },
+        password_require_number: { type: Boolean, required: true },
+        password_require_special: { type: Boolean, required: true },
+        failed_login_threshold: { type: Number, required: true, min: 1 },
+        lockout_duration_minutes: { type: Number, required: true, min: 0 },
+        access_token_ttl_minutes: { type: Number, required: true, min: 1 },
+        refresh_token_ttl_days: { type: Number, required: true, min: 1 },
+        password_reset_ttl_minutes: { type: Number, required: true, min: 1 },
+    },
+    { _id: false }
+);
+
+const uploadSchema = new Schema<UploadSettings>(
+    {
+        max_file_size_mb: { type: Number, required: true, min: 1 },
+        allowed_mime_types: { type: [String], required: true, default: [] },
+        sas_token_ttl_minutes: { type: Number, required: true, min: 1 },
+    },
+    { _id: false }
+);
+
+const slackChannelsSchema = new Schema<SlackChannelMap>(
+    {
+        leaves: { type: String, required: true },
+        attendance: { type: String, required: true },
+        projects: { type: String, required: true },
+        timesheet: { type: String, required: true },
+        general: { type: String, required: true },
+    },
+    { _id: false }
+);
+
+const slackSchema = new Schema<SlackSettings>(
+    {
+        enabled: { type: Boolean, required: true, default: false },
+        channels: { type: slackChannelsSchema, required: true },
+    },
+    { _id: false }
+);
+
+const emailSchema = new Schema<EmailSettings>(
+    {
+        from_address: { type: String, required: true },
+        reply_to_address: { type: String, required: true },
+    },
+    { _id: false }
+);
+
+const remindersSchema = new Schema<ReminderSettings>(
+    {
+        timesheet_reminder_time: { type: String, required: true },
+        task_due_reminder_run_interval_hours: { type: Number, required: true, min: 1 },
+    },
+    { _id: false }
+);
+
+const companySchema = new Schema<CompanySettings>(
+    {
+        name: { type: String, required: true, trim: true },
+        logo_blob_key: { type: String, default: null },
+        primary_color: { type: String, required: true },
+        login_page_tagline: { type: String, default: '' },
+    },
+    { _id: false }
+);
+
+// ─── Top-level schema ──────────────────────────────────────────────────────
+
+const systemSettingsSchema = new Schema<SystemSettingsDocument>(
+    {
+        singleton_key: {
+            type: String,
+            enum: [SETTINGS_SINGLETON_KEY],
+            default: SETTINGS_SINGLETON_KEY,
+            required: true,
+            unique: true,
+        },
+
+        work_schedule: { type: workScheduleSchema, required: true },
+        leave_policy: { type: leavePolicySchema, required: true },
+        timesheet: { type: timesheetSchema, required: true },
+        attendance: { type: attendanceSchema, required: true },
+        security: { type: securitySchema, required: true },
+        uploads: { type: uploadSchema, required: true },
+        slack: { type: slackSchema, required: true },
+        email: { type: emailSchema, required: true },
+        reminders: { type: remindersSchema, required: true },
+        company: { type: companySchema, required: true },
+
+        default_timezone: { type: String, required: true },
+
+        updated_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
+    },
+    {
+        ...BASE_SCHEMA_OPTIONS,
+        collection: COLLECTIONS.SYSTEM_SETTINGS,
+    }
+);
+
+export const SystemSettings: Model<SystemSettingsDocument> = model<SystemSettingsDocument>(
+    COLLECTIONS.SYSTEM_SETTINGS,
+    systemSettingsSchema
+);
