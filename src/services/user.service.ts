@@ -14,6 +14,8 @@ import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { AssignableQuery, CreateUserBody, ListUsersQuery, UpdateUserBody } from '../validators/user.validator.js';
+import { initializeBalancesForUserYear } from './leave-balance.service.js';
+import logger from '../utils/logger.js';
 
 /**
  * User management service (API_Contract §3).
@@ -107,6 +109,34 @@ export const createUser = async (
     }
 
     const created = await User.create(doc);
+
+    // Internal users get their leave-balance rows seeded for the current year
+    // (and the joining year if different). Failure here must not block the
+    // user create — surface as a warning so admin can re-run init manually.
+    if (created.role !== ROLES.CLIENT && created.internal_profile?.date_of_joining) {
+        try {
+            const joining = created.internal_profile.date_of_joining;
+            const [yStr, mStr] = joining.split('-');
+            const joiningYear = Number.parseInt(yStr, 10);
+            const joiningMonth = Number.parseInt(mStr, 10);
+            const thisYear = new Date().getUTCFullYear();
+            const yearsToInit = new Set<number>([joiningYear, thisYear]);
+            for (const year of yearsToInit) {
+                await initializeBalancesForUserYear({
+                    user_id: created._id,
+                    year,
+                    joining_year: joiningYear,
+                    joining_month: joiningMonth,
+                });
+            }
+        } catch (err) {
+            logger.warn(
+                { err, user_id: created._id.toString() },
+                'Leave-balance initialization failed for new user — will self-heal on first /leave-balances/me read'
+            );
+        }
+    }
+
     return toPublicUser(created);
 };
 

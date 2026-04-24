@@ -14,6 +14,7 @@ import { generalRateLimiter } from './middlewares/rate-limit.middleware.js';
 import { API_PREFIX, ERROR_CODES } from './constants/index.js';
 import { ok } from './utils/api-response.js';
 import logger from './utils/logger.js';
+import { seedDefaultLeaveTypes } from './services/leave-type.service.js';
 
 const app = express();
 
@@ -73,6 +74,10 @@ app.use(globalErrorHandler);
 const startServer = async () => {
     try {
         await connectDB();
+
+        // Make sure the seven canonical leave types exist (idempotent).
+        // Admin-tweaked rows are preserved via $setOnInsert.
+        await seedDefaultLeaveTypes();
 
         const server = app.listen(PORT, () => {
             logger.info({ port: PORT, env: NODE_ENV, api_prefix: API_PREFIX }, 'Server is running');

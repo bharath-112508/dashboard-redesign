@@ -40,6 +40,8 @@ DEFAULT_SMOKES=(
     smoke-settings.sh
     smoke-office-locations.sh
     smoke-attendance.sh
+    smoke-holidays.sh
+    smoke-leaves.sh
 )
 
 if [[ ${#ARGS[@]} -gt 0 ]]; then
