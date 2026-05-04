@@ -14,6 +14,8 @@ import { USER_STATUSES } from '../constants/user-statuses.js';
 import { MAX_LOGIN_ATTEMPTS, LOGIN_LOCKOUT_MS } from '../constants/auth.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
+import { resolveProfilePhotoTtlMinutes, signProfilePhotoUrl } from './profile-photo.service.js';
+import { getOrInitSettings } from './settings.service.js';
 import type { AuthTokenPair, BaseJWTPayload } from '../types/index.js';
 
 interface LoginInput {
@@ -347,12 +349,20 @@ export const changePassword = async (input: {
 
 /**
  * GET /auth/me — fresh load from DB so status / MFA toggles are up to date.
+ *
+ * `profile_photo_url` is a freshly-minted SAS read URL (Step 22). Its
+ * lifetime is `system_settings.uploads.sas_token_ttl_minutes` (clamped to
+ * the safe range). The FE re-fetches `/auth/me` whenever it refreshes
+ * the access token, so the URL never expires before the user notices.
  */
 export const getMe = async (user_id: Types.ObjectId): Promise<Record<string, unknown>> => {
     const user = await User.findById(user_id);
     if (!user) {
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
     }
+
+    const settings = await getOrInitSettings();
+    const photoTtl = resolveProfilePhotoTtlMinutes(settings.uploads.sas_token_ttl_minutes);
 
     return {
         id: user._id.toString(),
@@ -362,7 +372,7 @@ export const getMe = async (user_id: Types.ObjectId): Promise<Record<string, unk
         status: user.status,
         timezone: user.timezone,
         mfa_enabled: user.mfa_enabled,
-        profile_photo_url: null, // TODO (profile-photo slice): sign a SAS URL when a blob key exists.
+        profile_photo_url: signProfilePhotoUrl(user.profile_photo_blob_key, photoTtl),
         permissions: [], // TODO (RBAC slice): derive from role.
     };
 };

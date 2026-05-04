@@ -18,6 +18,7 @@ import storyRoutes from './story.routes.js';
 import taskRoutes from './task.routes.js';
 import { commentsRouter, taskCommentsNestedRouter } from './task-comment.routes.js';
 import { taskActivityRouter } from './task-activity.routes.js';
+import { attachmentsRouter, taskAttachmentsNestedRouter } from './task-attachment.routes.js';
 
 const appRoutes = Router();
 
@@ -39,7 +40,9 @@ appRoutes.use('/stories', storyRoutes);
 appRoutes.use('/tasks', taskRoutes);
 appRoutes.use('/tasks', taskCommentsNestedRouter());
 appRoutes.use('/tasks', taskActivityRouter());
+appRoutes.use('/tasks', taskAttachmentsNestedRouter());
 appRoutes.use('/comments', commentsRouter());
+appRoutes.use('/attachments', attachmentsRouter());
 appRoutes.use('/project-custom-statuses', customStatusRouter());
 
 export default appRoutes;

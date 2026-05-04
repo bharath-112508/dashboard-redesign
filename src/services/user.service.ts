@@ -19,6 +19,8 @@ import { notifyUserInvited } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import logger from '../utils/logger.js';
+import { resolveProfilePhotoTtlMinutes, signProfilePhotoUrl } from './profile-photo.service.js';
+import { getOrInitSettings } from './settings.service.js';
 
 /**
  * User management service (API_Contract §3).
@@ -45,9 +47,34 @@ const SELF_EDITABLE_INTERNAL_PROFILE_FIELDS = new Set(['emergency_contact']);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-const toPublicUser = (user: UserDocument): Record<string, unknown> => {
-    // toJSON strips sensitive fields via `sensitiveToJSON` on the model.
-    return user.toJSON();
+/**
+ * Public projection of a user.
+ *
+ *  - `toJSON` strips sensitive fields via `sensitiveToJSON` on the model.
+ *  - `profile_photo_blob_key` is dropped from the public surface (it's an
+ *    internal storage pointer); a freshly-minted, time-limited SAS URL
+ *    is exposed as `profile_photo_url` instead — `null` when no photo
+ *    is set or when Azure isn't configured. The TTL knob is
+ *    `system_settings.uploads.sas_token_ttl_minutes`; pass it in via
+ *    `photoTtlMinutes` so list endpoints can load settings once and
+ *    re-use the value for every row instead of hitting the settings
+ *    collection per user.
+ */
+const toPublicUser = (user: UserDocument, photoTtlMinutes: number): Record<string, unknown> => {
+    const json = user.toJSON() as Record<string, unknown>;
+    const blobKey = typeof json.profile_photo_blob_key === 'string' ? json.profile_photo_blob_key : null;
+    delete json.profile_photo_blob_key;
+    json.profile_photo_url = signProfilePhotoUrl(blobKey, photoTtlMinutes);
+    return json;
+};
+
+/**
+ * Resolve the read-SAS TTL once per request, clamped to the safe range.
+ * Cheap (single doc lookup) but worth caching across a list page.
+ */
+const loadPhotoTtlMinutes = async (): Promise<number> => {
+    const settings = await getOrInitSettings();
+    return resolveProfilePhotoTtlMinutes(settings.uploads.sas_token_ttl_minutes);
 };
 
 const assertSingleAdmin = async (excludeUserId?: Types.ObjectId): Promise<void> => {
@@ -152,16 +179,18 @@ export const createUser = async (
     // Step 12 — audit trail. The `after` snapshot is the public projection
     // so we never accidentally persist `password_hash` (toPublicUser already
     // strips sensitive fields via the model's toJSON).
+    const photoTtl = await loadPhotoTtlMinutes();
+
     if (audit) {
         await recordAudit(audit, {
             action: AUDIT_ACTIONS.USER_CREATE,
             target: { kind: AUDIT_TARGET_KINDS.USER, id: created._id },
-            after: toPublicUser(created),
+            after: toPublicUser(created, photoTtl),
             metadata: { created_role: created.role },
         });
     }
 
-    return toPublicUser(created);
+    return toPublicUser(created, photoTtl);
 };
 
 // ─── GET /users ────────────────────────────────────────────────────────────
@@ -179,13 +208,14 @@ export const listUsers = async (
 
     const skip = (query.page - 1) * query.limit;
 
-    const [rows, total] = await Promise.all([
+    const [rows, total, photoTtl] = await Promise.all([
         User.find(filter).sort({ created_at: -1 }).skip(skip).limit(query.limit),
         User.countDocuments(filter),
+        loadPhotoTtlMinutes(),
     ]);
 
     return {
-        data: rows.map(toPublicUser),
+        data: rows.map((u) => toPublicUser(u, photoTtl)),
         meta: {
             page: query.page,
             limit: query.limit,
@@ -202,7 +232,7 @@ export const getUser = async (id: Types.ObjectId): Promise<Record<string, unknow
     if (!user) {
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
     }
-    return toPublicUser(user);
+    return toPublicUser(user, await loadPhotoTtlMinutes());
 };
 
 // ─── PATCH /users/:id ──────────────────────────────────────────────────────
@@ -290,7 +320,7 @@ export const updateUser = async (input: {
     if (patch.slack_user_id !== undefined) target.slack_user_id = patch.slack_user_id;
 
     await target.save();
-    return toPublicUser(target);
+    return toPublicUser(target, await loadPhotoTtlMinutes());
 };
 
 // ─── POST /users/:id/deactivate ────────────────────────────────────────────
@@ -311,7 +341,7 @@ export const deactivateUser = async (input: {
     }
 
     if (target.status === USER_STATUSES.DEACTIVATED) {
-        return toPublicUser(target);
+        return toPublicUser(target, await loadPhotoTtlMinutes());
     }
 
     const beforeSnapshot = { status: target.status, deactivated_at: target.deactivated_at };
@@ -332,7 +362,7 @@ export const deactivateUser = async (input: {
         });
     }
 
-    return toPublicUser(target);
+    return toPublicUser(target, await loadPhotoTtlMinutes());
 };
 
 // ─── POST /users/:id/reactivate ────────────────────────────────────────────
@@ -347,7 +377,7 @@ export const reactivateUser = async (
     }
 
     if (target.status === USER_STATUSES.ACTIVE) {
-        return toPublicUser(target);
+        return toPublicUser(target, await loadPhotoTtlMinutes());
     }
 
     // Single-admin check in case they're being reactivated back into admin role.
@@ -370,7 +400,7 @@ export const reactivateUser = async (
         });
     }
 
-    return toPublicUser(target);
+    return toPublicUser(target, await loadPhotoTtlMinutes());
 };
 
 // ─── POST /users/:id/change-role ───────────────────────────────────────────
@@ -391,7 +421,7 @@ export const changeUserRole = async (input: {
     }
 
     if (target.role === input.new_role) {
-        return toPublicUser(target);
+        return toPublicUser(target, await loadPhotoTtlMinutes());
     }
 
     if (input.new_role === ROLES.ADMIN) {
@@ -424,7 +454,7 @@ export const changeUserRole = async (input: {
         });
     }
 
-    return toPublicUser(target);
+    return toPublicUser(target, await loadPhotoTtlMinutes());
 };
 
 // ─── GET /users/assignable ─────────────────────────────────────────────────

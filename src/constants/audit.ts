@@ -29,6 +29,12 @@ export const AUDIT_ACTIONS = {
     USER_ROLE_CHANGE: 'user.role_change',
     USER_DEACTIVATE: 'user.deactivate',
     USER_REACTIVATE: 'user.reactivate',
+    // Profile photo lifecycle (Phase 2 Step 22). `metadata.size_bytes` /
+    // `metadata.mime_type` recorded on set; `metadata.previous_blob_key`
+    // recorded on replace + clear so a forensic recovery of the prior
+    // image is possible until the blob is GC'd.
+    USER_PROFILE_PHOTO_SET: 'user.profile_photo_set',
+    USER_PROFILE_PHOTO_CLEAR: 'user.profile_photo_clear',
 
     // Auth / credentials
     AUTH_PASSWORD_CHANGE: 'auth.password_change',
@@ -95,6 +101,17 @@ export const AUDIT_ACTIONS = {
     COMMENT_UPDATE: 'comment.update',
     COMMENT_DELETE: 'comment.delete',
 
+    // Task attachments (Phase 2 Step 21). `metadata.task_id`,
+    // `metadata.project_id`, `metadata.size_bytes`, and `metadata.mime_type`
+    // are recorded so the Step-31 audit UI can render "user X uploaded
+    // 2 MiB image/png to task Y" without dereferencing the (possibly
+    // soft-deleted) attachment row. The blob_key is intentionally
+    // captured in the `before/after` snapshot so an admin can correlate
+    // the audit trail to the storage account if a forensic recovery is
+    // ever needed.
+    ATTACHMENT_CREATE: 'attachment.create',
+    ATTACHMENT_DELETE: 'attachment.delete',
+
     // Scheduled jobs (Step 14). One generic "run" action; per-job detail
     // lives in `metadata.{job_name, run_key, summary}` so the action enum
     // stays small as we add jobs over time.
@@ -120,6 +137,7 @@ export const AUDIT_TARGET_KINDS = {
     STORY: 'story',
     TASK: 'task',
     COMMENT: 'task_comment',
+    ATTACHMENT: 'task_attachment',
 } as const;
 
 export type AuditTargetKind = (typeof AUDIT_TARGET_KINDS)[keyof typeof AUDIT_TARGET_KINDS];

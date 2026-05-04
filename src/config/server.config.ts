@@ -41,6 +41,28 @@ export const MFA_ISSUER = getEnv('MFA_ISSUER', 'Viljetech');
 export const APP_BASE_URL = getEnv('APP_BASE_URL', 'http://localhost:5173');
 export const PASSWORD_RESET_URL_PATH = getEnv('PASSWORD_RESET_URL_PATH', '/reset-password');
 
+// Azure Blob Storage — used by `task_attachments` (Step 21) and profile
+// photos (Step 22). All blobs live in **private** containers; the API mints
+// short-lived SAS tokens for upload + download.
+//
+// Auth: prefer `AZURE_STORAGE_CONNECTION_STRING` (one variable, the SDK pulls
+// account name + key out of it); fall back to the explicit name + key pair
+// for environments that pass them separately. SAS signing requires the
+// account key — managed-identity / SAS-only credentials cannot mint child
+// SAS, so we don't accept them here.
+//
+// All four are optional at boot — startup must not fail when the platform is
+// being bootstrapped without storage. The Blob client throws a clear error
+// the first time a SAS is requested if the env is missing.
+export const AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING ?? null;
+export const AZURE_STORAGE_ACCOUNT_NAME = process.env.AZURE_STORAGE_ACCOUNT_NAME ?? null;
+export const AZURE_STORAGE_ACCOUNT_KEY = process.env.AZURE_STORAGE_ACCOUNT_KEY ?? null;
+export const AZURE_BLOB_TASK_ATTACHMENTS_CONTAINER = getEnv(
+    'AZURE_BLOB_TASK_ATTACHMENTS_CONTAINER',
+    'task-attachments'
+);
+export const AZURE_BLOB_PROFILE_PHOTOS_CONTAINER = getEnv('AZURE_BLOB_PROFILE_PHOTOS_CONTAINER', 'profile-photos');
+
 // Rate limits (per IP, in-memory).
 //   GENERAL_RATE_LIMIT_MAX — applied to /api/* (window: 60 s)
 //   AUTH_RATE_LIMIT_MAX    — applied to /auth/login, /auth/refresh, /auth/forgot-password,

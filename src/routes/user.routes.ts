@@ -14,6 +14,10 @@ import {
     updateUserBodySchema,
     userIdParamSchema,
 } from '../validators/user.validator.js';
+import {
+    finalizeBodySchema as profilePhotoFinalizeBodySchema,
+    uploadUrlBodySchema as profilePhotoUploadUrlBodySchema,
+} from '../validators/profile-photo.validator.js';
 
 const router = Router();
 
@@ -33,10 +37,26 @@ router.get(
 
 router.post('/', authorize(ROLES.ADMIN), validate({ body: createUserBodySchema }), asyncHandler(users.postCreateUser));
 
-// ─── Deferred profile-photo surface (returns 501) ──────────────────────────
+// ─── Profile photo (Step 22) ──────────────────────────────────────────────
+//
+// `/me` endpoints — caller is always the subject. No authorize() needed
+// beyond `authenticate` (set at the router root above): every active user
+// can manage their own avatar. Spec keeps this path as POST (mint via
+// POST /upload-url, finalize via POST), aligning with task-attachments.
 
-router.post('/me/profile-photo', asyncHandler(users.notImplemented));
-router.get('/me/profile-photo-upload-url', asyncHandler(users.notImplemented));
+router.post(
+    '/me/profile-photo-upload-url',
+    validate({ body: profilePhotoUploadUrlBodySchema }),
+    asyncHandler(users.postProfilePhotoUploadUrl)
+);
+
+router.post(
+    '/me/profile-photo',
+    validate({ body: profilePhotoFinalizeBodySchema }),
+    asyncHandler(users.postProfilePhotoFinalize)
+);
+
+router.delete('/me/profile-photo', asyncHandler(users.deleteProfilePhoto));
 
 // ─── Item routes — id param must appear AFTER the named collection routes ──
 

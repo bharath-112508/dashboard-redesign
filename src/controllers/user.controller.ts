@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as userService from '../services/user.service.js';
+import * as profilePhotoService from '../services/profile-photo.service.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import { ROLES } from '../constants/roles.js';
@@ -14,6 +15,7 @@ import type {
     ListUsersQuery,
     UpdateUserBody,
 } from '../validators/user.validator.js';
+import type { ProfilePhotoFinalizeBody, ProfilePhotoUploadUrlBody } from '../validators/profile-photo.validator.js';
 
 const callerId = (req: Request): Types.ObjectId => {
     if (!req.user?.user_id) {
@@ -99,15 +101,41 @@ export const getAssignableUsers = async (req: Request, res: Response): Promise<R
     return ok(res, rows);
 };
 
-// ─── Deferred endpoints (profile-photo, admin-reset-password) ──────────────
-// These depend on Azure Blob Storage / Azure Communication Services wiring
-// tracked in Build_Decisions.md. They respond with 501 for now so the route
-// surface is visible without pretending to work.
+// ─── Profile photo endpoints (Step 22) ─────────────────────────────────────
+//
+// Routes are `/users/me/*` only — admins do not manage other users' photos
+// in v1 (the deactivate flow archives the user record, not the avatar).
+
+const callerForPhoto = (req: Request): profilePhotoService.ProfilePhotoCaller => ({
+    id: callerId(req),
+    audit: buildAuditContext(req),
+});
+
+export const postProfilePhotoUploadUrl = async (req: Request, res: Response): Promise<Response> => {
+    const data = await profilePhotoService.mintUploadUrl(req.body as ProfilePhotoUploadUrlBody, callerForPhoto(req));
+    return ok(res, data);
+};
+
+export const postProfilePhotoFinalize = async (req: Request, res: Response): Promise<Response> => {
+    const data = await profilePhotoService.finalizeProfilePhoto(
+        req.body as ProfilePhotoFinalizeBody,
+        callerForPhoto(req)
+    );
+    return ok(res, data);
+};
+
+export const deleteProfilePhoto = async (req: Request, res: Response): Promise<Response> => {
+    const data = await profilePhotoService.clearProfilePhoto(callerForPhoto(req));
+    return ok(res, data);
+};
+
+// ─── Deferred endpoints (admin-reset-password) ─────────────────────────────
+// Pending Azure Communication Services email integration.
 export const notImplemented = async (_req: Request, res: Response): Promise<Response> => {
     return res.status(501).json({
         error: {
             code: 'NOT_IMPLEMENTED',
-            message: 'Endpoint pending Azure Blob / Communication Services integration',
+            message: 'Endpoint pending Azure Communication Services integration',
         },
     });
 };
