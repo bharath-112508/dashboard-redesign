@@ -112,6 +112,34 @@ export const AUDIT_ACTIONS = {
     ATTACHMENT_CREATE: 'attachment.create',
     ATTACHMENT_DELETE: 'attachment.delete',
 
+    // Timesheet lifecycle (Phase 2 Step 23). `timesheet.edit_out_of_window`
+    // is its own verb (not collapsed into `timesheet.update`) so the
+    // Step-31 audit UI can flag manager overrides without diffing the row.
+    // Metadata captures `user_id` (subject of the entry, who may differ
+    // from the actor on manager edits), `local_date`, and the derived
+    // `total_minutes` for at-a-glance reporting.
+    TIMESHEET_CREATE: 'timesheet.create',
+    TIMESHEET_UPDATE: 'timesheet.update',
+    TIMESHEET_EDIT_OUT_OF_WINDOW: 'timesheet.edit_out_of_window',
+    TIMESHEET_DELETE: 'timesheet.delete',
+
+    // Billing-rate lifecycle (Phase 2 Step 23). `billing_rate.create`
+    // records the auto-closed predecessor (when one existed) in
+    // `metadata.previous_rate_id` so the Step-31 audit UI can render a
+    // chronological "rate history" for a `(user, project, task)` tuple
+    // without re-deriving it from raw rows.
+    BILLING_RATE_CREATE: 'billing_rate.create',
+    BILLING_RATE_UPDATE: 'billing_rate.update',
+    BILLING_RATE_END: 'billing_rate.end',
+    BILLING_RATE_DELETE: 'billing_rate.delete',
+
+    // Project share-link lifecycle (Phase 2 Step 24). `share_link.revoke`
+    // captures `metadata.reason ∈ {manual, client_deactivated}` so the
+    // Step-31 audit UI can distinguish admin-driven revokes from the
+    // automatic cascade fired by `user.deactivate` for client users.
+    SHARE_LINK_CREATE: 'share_link.create',
+    SHARE_LINK_REVOKE: 'share_link.revoke',
+
     // Scheduled jobs (Step 14). One generic "run" action; per-job detail
     // lives in `metadata.{job_name, run_key, summary}` so the action enum
     // stays small as we add jobs over time.
@@ -138,6 +166,9 @@ export const AUDIT_TARGET_KINDS = {
     TASK: 'task',
     COMMENT: 'task_comment',
     ATTACHMENT: 'task_attachment',
+    TIMESHEET_ENTRY: 'timesheet_entry',
+    BILLING_RATE: 'billing_rate',
+    SHARE_LINK: 'project_share_link',
 } as const;
 
 export type AuditTargetKind = (typeof AUDIT_TARGET_KINDS)[keyof typeof AUDIT_TARGET_KINDS];

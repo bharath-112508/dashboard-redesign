@@ -44,6 +44,7 @@ export const COLLECTIONS = {
     // Timesheets
     TIMESHEETS: 'timesheets',
     TIMESHEET_ENTRIES: 'timesheet_entries',
+    BILLING_RATES: 'billing_rates',
 
     // Cross-cutting
     NOTIFICATIONS: 'notifications',

@@ -221,3 +221,27 @@ export const renderTaskCommentMentionEmail = (input: TaskCommentMentionEmailInpu
         `Open: ${url}\n`;
     return { subject, html, text };
 };
+
+// ─── Timesheet daily reminder (Step 23 cron addition) ─────────────────────
+
+export interface TimesheetReminderEmailInput {
+    recipient_full_name: string;
+    local_date: string;
+    expected_hours: number;
+}
+
+export const renderTimesheetReminderEmail = (input: TimesheetReminderEmailInput): RenderedEmail => {
+    const url = buildAppLink(`/timesheets/me/day/${input.local_date}`);
+    const subject = `Don't forget to log your time for ${input.local_date}`;
+    const hoursLabel = `${input.expected_hours} hour${input.expected_hours === 1 ? '' : 's'}`;
+    const html = wrap(`
+        <p>Hi ${escapeHtml(input.recipient_full_name)},</p>
+        <p>You haven't logged your full timesheet for <strong>${escapeHtml(input.local_date)}</strong> yet — the day's expected total is ${escapeHtml(hoursLabel)}.</p>
+        <p>${link(url, 'Log your time')} before EOD so reports are accurate.</p>
+    `);
+    const text =
+        `Hi ${input.recipient_full_name},\n\n` +
+        `You haven't logged your full timesheet for ${input.local_date} yet — the day's expected total is ${hoursLabel}.\n\n` +
+        `Log your time: ${url}\n`;
+    return { subject, html, text };
+};

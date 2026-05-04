@@ -53,6 +53,7 @@ export const JOB_NAMES = {
     SL_MONTHLY_FORFEITURE: 'sl_monthly_forfeiture',
     LEAVE_YEAR_ROLLOVER: 'leave_year_rollover',
     TOKEN_CLEANUP: 'token_cleanup',
+    TIMESHEET_REMINDER: 'timesheet_reminder',
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -75,6 +76,11 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
 
     // Sunday 02:00 IST.
     [JOB_NAMES.TOKEN_CLEANUP]: '0 2 * * 0',
+
+    // Daily 20:00 IST — gives users a window between EOD and bedtime to
+    // log time before the reminder fires. Idempotent on the same day so
+    // a manual re-run by ops is safe.
+    [JOB_NAMES.TIMESHEET_REMINDER]: '0 20 * * *',
 };
 
 // ─── Per-run idempotency key derivation ──────────────────────────────────
@@ -101,6 +107,16 @@ export const leaveYearRolloverRunKey = (now: Date = new Date()): string => {
 export const tokenCleanupRunKey = (now: Date = new Date()): string => {
     const d = dayjs(now).tz(JOB_TIMEZONE);
     return `${d.isoWeekYear()}-W${String(d.isoWeek()).padStart(2, '0')}`;
+};
+
+/**
+ * Timesheet reminder keys off **today** (IST). The 20:00 fire is about
+ * the day that's about to end, so a manual re-run before midnight is
+ * idempotent (same key) and after midnight produces a fresh row for the
+ * new day.
+ */
+export const timesheetReminderRunKey = (now: Date = new Date()): string => {
+    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
 };
 
 // ─── Job-run row lifecycle ───────────────────────────────────────────────

@@ -19,6 +19,9 @@ import taskRoutes from './task.routes.js';
 import { commentsRouter, taskCommentsNestedRouter } from './task-comment.routes.js';
 import { taskActivityRouter } from './task-activity.routes.js';
 import { attachmentsRouter, taskAttachmentsNestedRouter } from './task-attachment.routes.js';
+import timesheetRoutes from './timesheet.routes.js';
+import billingRateRoutes from './billing-rate.routes.js';
+import { projectShareLinksNestedRouter, publicShareLinksRouter, shareLinksRouter } from './share-link.routes.js';
 
 const appRoutes = Router();
 
@@ -43,6 +46,15 @@ appRoutes.use('/tasks', taskActivityRouter());
 appRoutes.use('/tasks', taskAttachmentsNestedRouter());
 appRoutes.use('/comments', commentsRouter());
 appRoutes.use('/attachments', attachmentsRouter());
+appRoutes.use('/timesheets', timesheetRoutes);
+appRoutes.use('/billing-rates', billingRateRoutes);
+appRoutes.use('/projects', projectShareLinksNestedRouter());
+appRoutes.use('/share-links', shareLinksRouter());
+// Public router mounted last on the same prefix. The auth-required
+// `/share-links/:id/revoke` route is matched first by the previous
+// mount because Express tries routers in registration order; the
+// public router only owns `/resolve/:token`, so there's no overlap.
+appRoutes.use('/share-links', publicShareLinksRouter());
 appRoutes.use('/project-custom-statuses', customStatusRouter());
 
 export default appRoutes;

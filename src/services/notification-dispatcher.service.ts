@@ -14,6 +14,7 @@ import {
     renderLeaveDecisionEmail,
     renderLeaveSubmittedEmail,
     renderTaskCommentMentionEmail,
+    renderTimesheetReminderEmail,
     renderUserInviteEmail,
     type RenderedEmail,
 } from '../utils/email-templates.js';
@@ -557,6 +558,53 @@ export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatch
         logger.warn(
             { err, code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED, dispatch_event: context },
             'Task-comment mention dispatch failed'
+        );
+    }
+};
+
+/**
+ * notifyTimesheetReminder — Step 23 cron addition (Plan §8 row 5).
+ *
+ * Fired by `runTimesheetReminder` once per matching user per day. The
+ * dispatcher does NOT do its own user-loading — the caller already has
+ * a `RecipientUser` shape because the job has already filtered by
+ * "logged < expected hours AND not on leave" against the headcount.
+ * That keeps the per-user blast radius tight: a single bad recipient
+ * doesn't take down the whole batch.
+ */
+export const notifyTimesheetReminder = async (input: {
+    recipient: RecipientUser;
+    local_date: string;
+    expected_hours: number;
+}): Promise<void> => {
+    const context = 'timesheet-reminder';
+    try {
+        const linkUrl = `/timesheets/me/day/${input.local_date}`;
+        await dispatchToRecipient(
+            input.recipient,
+            {
+                type: NOTIFICATION_TYPES.TIMESHEET_REMINDER,
+                title: `Log your time for ${input.local_date}`,
+                body: `You haven't logged your full timesheet for ${input.local_date} yet.`,
+                link_url: linkUrl,
+                related_entity: null,
+            },
+            renderTimesheetReminderEmail({
+                recipient_full_name: input.recipient.full_name,
+                local_date: input.local_date,
+                expected_hours: input.expected_hours,
+            }),
+            context
+        );
+    } catch (err) {
+        logger.warn(
+            {
+                err,
+                code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED,
+                dispatch_event: context,
+                recipient_id: input.recipient._id.toString(),
+            },
+            'Timesheet-reminder dispatch failed'
         );
     }
 };

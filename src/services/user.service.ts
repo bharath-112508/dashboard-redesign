@@ -21,6 +21,7 @@ import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import logger from '../utils/logger.js';
 import { resolveProfilePhotoTtlMinutes, signProfilePhotoUrl } from './profile-photo.service.js';
 import { getOrInitSettings } from './settings.service.js';
+import { revokeLinksForDeactivatedClient } from './share-link.service.js';
 
 /**
  * User management service (API_Contract §3).
@@ -352,13 +353,31 @@ export const deactivateUser = async (input: {
 
     await revokeAllRefreshTokens(target._id);
 
+    // Step-24 cascade: a deactivated client can no longer log in, but
+    // any share links they were the named owner of are still publicly
+    // resolvable until revoked. Fan-out revoke before the audit fires
+    // so the audit row's metadata can reflect the count and the cascade
+    // is bundled with the deactivation in the timeline.
+    let shareLinksRevoked = 0;
+    if (target.role === ROLES.CLIENT) {
+        const result = await revokeLinksForDeactivatedClient({
+            client_id: target._id,
+            revoked_by: input.caller_id,
+            audit: input.audit,
+        });
+        shareLinksRevoked = result.revoked_count;
+    }
+
     if (input.audit) {
+        const metadata: Record<string, unknown> = {};
+        if (input.reason) metadata.reason = input.reason;
+        if (target.role === ROLES.CLIENT) metadata.share_links_revoked = shareLinksRevoked;
         await recordAudit(input.audit, {
             action: AUDIT_ACTIONS.USER_DEACTIVATE,
             target: { kind: AUDIT_TARGET_KINDS.USER, id: target._id },
             before: beforeSnapshot,
             after: { status: target.status, deactivated_at: target.deactivated_at },
-            metadata: input.reason ? { reason: input.reason } : {},
+            metadata,
         });
     }
 

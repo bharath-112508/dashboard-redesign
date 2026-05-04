@@ -74,6 +74,18 @@ export class AppError extends Error {
         return new AppError({ statusCode: StatusCodes.CONFLICT, code, message, details });
     }
 
+    // ─── 410 ───────────────────────────────────────────────────────────────
+    /**
+     * Resource is gone permanently — the caller had a previously-valid
+     * reference that has now been deliberately removed (revoked share
+     * link, expired one-time token, etc.). Distinct from 404 because
+     * the reference WAS valid; the caller's stale knowledge is the
+     * point of the response.
+     */
+    static gone(message: string, code: ErrorCode, details?: unknown): AppError {
+        return new AppError({ statusCode: StatusCodes.GONE, code, message, details });
+    }
+
     // ─── 422 ───────────────────────────────────────────────────────────────
     static unprocessable(message: string, code: ErrorCode, details?: unknown): AppError {
         return new AppError({ statusCode: StatusCodes.UNPROCESSABLE_ENTITY, code, message, details });
