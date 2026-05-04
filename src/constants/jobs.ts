@@ -54,6 +54,7 @@ export const JOB_NAMES = {
     LEAVE_YEAR_ROLLOVER: 'leave_year_rollover',
     TOKEN_CLEANUP: 'token_cleanup',
     TIMESHEET_REMINDER: 'timesheet_reminder',
+    REPORT_EXPORT_CLEANUP: 'report_export_cleanup',
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -81,6 +82,12 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // log time before the reminder fires. Idempotent on the same day so
     // a manual re-run by ops is safe.
     [JOB_NAMES.TIMESHEET_REMINDER]: '0 20 * * *',
+
+    // Daily 03:00 IST — purges report-export rows past `expires_at`
+    // (default 7 days) and best-effort deletes their blobs. Off-peak so
+    // a longer-than-expected delete loop on a busy storage account
+    // doesn't compete with morning HTTP traffic.
+    [JOB_NAMES.REPORT_EXPORT_CLEANUP]: '0 3 * * *',
 };
 
 // ─── Per-run idempotency key derivation ──────────────────────────────────
@@ -116,6 +123,15 @@ export const tokenCleanupRunKey = (now: Date = new Date()): string => {
  * new day.
  */
 export const timesheetReminderRunKey = (now: Date = new Date()): string => {
+    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
+};
+
+/**
+ * Report-export cleanup keys off **today** (IST). One sweep per calendar
+ * day; an ops re-run within the same day is idempotent (the second pass
+ * finds the rows already deleted by the first).
+ */
+export const reportExportCleanupRunKey = (now: Date = new Date()): string => {
     return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
 };
 

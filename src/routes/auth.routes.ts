@@ -20,6 +20,7 @@ import {
     mfaSetupConfirmBodySchema,
     mfaVerifyBodySchema,
 } from '../validators/mfa.validator.js';
+import { sessionIdPathSchema } from '../validators/session.validator.js';
 
 const router = Router();
 
@@ -60,6 +61,23 @@ router.post(
 );
 
 router.get('/me', authenticate, asyncHandler(auth.getAuthMe));
+
+// ─── Session management (Step 27) ──────────────────────────────────────────
+//
+// Both endpoints are caller-only — `authenticate` plus the service-layer
+// `user_id` filter prevent cross-account access. The list takes no params
+// (no pagination — typical user has < 10 active devices); the revoke
+// endpoint accepts a single ObjectId path param. A per-user-id GET is
+// deferred to a Phase-3 admin tool (Step 31 audit-viewer territory).
+
+router.get('/sessions', authenticate, asyncHandler(auth.getAuthSessions));
+
+router.post(
+    '/sessions/:id/revoke',
+    authenticate,
+    validate({ params: sessionIdPathSchema }),
+    asyncHandler(auth.postRevokeSession)
+);
 
 // ─── MFA ────────────────────────────────────────────────────────────────────
 // /mfa/verify is "public" in that it does not require an access token —

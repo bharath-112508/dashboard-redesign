@@ -42,6 +42,12 @@ export const AUDIT_ACTIONS = {
     AUTH_MFA_ENABLE: 'auth.mfa_enable',
     AUTH_MFA_DISABLE: 'auth.mfa_disable',
     AUTH_MFA_REGENERATE_BACKUP_CODES: 'auth.mfa_regenerate_backup_codes',
+    // Session revocation (Phase 3 Step 27). The actor is the user
+    // themselves (this is a self-service "log out other devices" flow);
+    // the audit row's `target.id` points at the revoked refresh-token
+    // row so the Step-31 audit UI can render "user X revoked session Y
+    // from device 'Chrome on macOS'".
+    AUTH_SESSION_REVOKE: 'auth.session_revoke',
 
     // System config
     SETTINGS_UPDATE: 'settings.update',
@@ -154,6 +160,17 @@ export const AUDIT_ACTIONS = {
     // lives in `metadata.{job_name, run_key, summary}` so the action enum
     // stays small as we add jobs over time.
     SYSTEM_JOB_RUN: 'system.job_run',
+
+    // Report exports (Phase 3 Step 30). `report_export.create` records the
+    // report name, format, and filter snapshot so the Step-31 audit UI can
+    // render "user X exported the billing report for project Y" without
+    // re-reading the (eventually-purged) export row. `report_export.complete`
+    // and `report_export.fail` are emitted by the worker as system audits
+    // — operators grep `report_export.fail` to find generator / storage
+    // failures.
+    REPORT_EXPORT_CREATE: 'report_export.create',
+    REPORT_EXPORT_COMPLETE: 'report_export.complete',
+    REPORT_EXPORT_FAIL: 'report_export.fail',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
@@ -179,6 +196,8 @@ export const AUDIT_TARGET_KINDS = {
     TIMESHEET_ENTRY: 'timesheet_entry',
     BILLING_RATE: 'billing_rate',
     SHARE_LINK: 'project_share_link',
+    SESSION: 'session',
+    REPORT_EXPORT: 'report_export',
 } as const;
 
 export type AuditTargetKind = (typeof AUDIT_TARGET_KINDS)[keyof typeof AUDIT_TARGET_KINDS];
@@ -210,6 +229,19 @@ export const AUDIT_ACTION_MAX = 80;
 export const AUDIT_TARGET_KIND_MAX = 80;
 export const AUDIT_SNAPSHOT_BYTES_MAX = 16 * 1024; // 16 KiB per snapshot
 export const AUDIT_METADATA_BYTES_MAX = 4 * 1024; // 4 KiB for ip + ua + extras
+
+// ─── Read endpoint defaults (Phase 3 Step 31) ────────────────────────────
+//
+// `GET /audit-logs` paginates with the same shape API_Contract §1.6 uses
+// elsewhere (`page` / `limit`, max 100). The list payload deliberately
+// drops `before` / `after` snapshots — they can each be 16 KiB and a
+// 100-row page would otherwise hit ~3 MB. The detail endpoint
+// `GET /audit-logs/:id` returns the full row including snapshots.
+
+export const AUDIT_LOG_LIST_DEFAULT_LIMIT = 20;
+export const AUDIT_LOG_LIST_MAX_LIMIT = 100;
+
+export const AUDIT_LOG_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN];
 
 // Pagination defaults are reserved for the Phase 3 read endpoint; defining
 // them here keeps the constant collocated with the rest of the audit shape.

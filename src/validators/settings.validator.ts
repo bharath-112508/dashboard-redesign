@@ -94,6 +94,7 @@ const securitySchema = z
         access_token_ttl_minutes: z.number().int().min(1),
         refresh_token_ttl_days: z.number().int().min(1),
         password_reset_ttl_minutes: z.number().int().min(1),
+        require_mfa_for_admins: z.boolean(),
     })
     .partial()
     .refine(

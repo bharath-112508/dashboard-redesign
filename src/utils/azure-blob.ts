@@ -324,6 +324,37 @@ export const deleteBlob = async (container: string, blobKey: string): Promise<vo
     }
 };
 
+/**
+ * Upload bytes to a blob from server-side code (Step 30 — async export
+ * worker). The FE-driven flow uses a SAS instead (single PUT from the
+ * browser); this helper is for cases where the server itself produces the
+ * payload and there's no client to hand a SAS to.
+ *
+ * Container is auto-created on first use (`createIfNotExists`) so the
+ * dev-loop doesn't require a manual setup step. The container is private —
+ * downloads still go through `mintDownloadSas`.
+ *
+ * `contentType` is pinned at upload time to match the SAS download
+ * contract (browser uses the stored content-type header to decide
+ * disposition). Caller passes the canonical MIME for the payload format.
+ */
+export const putBlob = async (input: {
+    container: string;
+    blobKey: string;
+    body: Buffer;
+    contentType: string;
+}): Promise<{ size: number }> => {
+    const { serviceClient } = getContext();
+    const containerClient = serviceClient.getContainerClient(input.container);
+    // Idempotent — a 409 ContainerAlreadyExists is silently absorbed.
+    await containerClient.createIfNotExists();
+    const blockBlob = containerClient.getBlockBlobClient(input.blobKey);
+    await blockBlob.uploadData(input.body, {
+        blobHTTPHeaders: { blobContentType: input.contentType },
+    });
+    return { size: input.body.length };
+};
+
 // ─── Path encoding ───────────────────────────────────────────────────────
 //
 // Blob keys may contain `/` (we use them for namespacing — `tasks/{id}/...`).

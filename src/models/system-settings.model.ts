@@ -68,6 +68,17 @@ export interface SecuritySettings {
     access_token_ttl_minutes: number;
     refresh_token_ttl_days: number;
     password_reset_ttl_minutes: number;
+    /**
+     * Step 28 — when true, every admin-role mutation (POST/PATCH/PUT/DELETE)
+     * is blocked with `403 MFA_REQUIRED` until the admin enables MFA.
+     * The MFA-setup endpoints themselves are exempt from the gate so
+     * an admin can still bootstrap their second factor; everything
+     * else (including settings PATCH itself) is gated.
+     *
+     * Default `false` for backward-compat; flipping it on is a Phase-3
+     * security-hardening decision the operator makes deliberately.
+     */
+    require_mfa_for_admins: boolean;
 }
 
 export interface UploadSettings {
@@ -212,6 +223,7 @@ const securitySchema = new Schema<SecuritySettings>(
         access_token_ttl_minutes: { type: Number, required: true, min: 1 },
         refresh_token_ttl_days: { type: Number, required: true, min: 1 },
         password_reset_ttl_minutes: { type: Number, required: true, min: 1 },
+        require_mfa_for_admins: { type: Boolean, required: true, default: false },
     },
     { _id: false }
 );

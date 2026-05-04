@@ -78,6 +78,67 @@ const stripInternalFields = (json: Record<string, unknown>): Record<string, unkn
     return json;
 };
 
+// ─── Step-33 resolvers (compile-time defaults → settings hot-wiring) ─────
+//
+// These resolvers expose the `security.*` block to the auth/password
+// surfaces that previously hard-coded the matching policy. They return
+// `null` for any field when the singleton hasn't been seeded yet (a
+// fresh-install bootstrap window) so the caller can fall back to the
+// `constants/auth.ts` compile-time defaults without crashing.
+//
+// Why a per-resolver narrow shape rather than just exporting
+// `getOrInitSettings().security`? Two reasons:
+//   1. Each call site cares about 1-2 fields; narrowing keeps the import
+//      surface honest.
+//   2. The resolvers are easy mock points in tests — auth.service tests
+//      can stub the resolver without dragging the whole settings doc.
+//
+// Failure mode: if the settings read itself throws (e.g. transient
+// Mongo blip during a login burst), the resolver re-raises and the
+// auth flow surfaces a 500. That's the right answer — silently
+// reverting to compile-time defaults during a partial outage would
+// hide configuration drift.
+
+export interface LoginLockoutPolicy {
+    failed_login_threshold: number | null;
+    lockout_duration_minutes: number | null;
+}
+
+export const resolveLoginLockoutPolicy = async (): Promise<LoginLockoutPolicy> => {
+    const settings = await getOrInitSettings();
+    return {
+        failed_login_threshold: settings.security?.failed_login_threshold ?? null,
+        lockout_duration_minutes: settings.security?.lockout_duration_minutes ?? null,
+    };
+};
+
+export interface PasswordPolicy {
+    min_length: number | null;
+    max_length: number | null;
+    require_upper: boolean | null;
+    require_lower: boolean | null;
+    require_number: boolean | null;
+    require_special: boolean | null;
+}
+
+export const resolvePasswordPolicy = async (): Promise<PasswordPolicy> => {
+    const settings = await getOrInitSettings();
+    const s = settings.security;
+    return {
+        min_length: s?.password_min_length ?? null,
+        max_length: s?.password_max_length ?? null,
+        require_upper: s?.password_require_upper ?? null,
+        require_lower: s?.password_require_lower ?? null,
+        require_number: s?.password_require_number ?? null,
+        require_special: s?.password_require_special ?? null,
+    };
+};
+
+export const resolvePasswordResetTtlMinutes = async (): Promise<number | null> => {
+    const settings = await getOrInitSettings();
+    return settings.security?.password_reset_ttl_minutes ?? null;
+};
+
 /**
  * Strip the raw Slack `bot_token` from a settings JSON / slack-section
  * snapshot, replacing it with a presence flag (`has_bot_token`).

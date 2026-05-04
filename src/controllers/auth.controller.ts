@@ -82,6 +82,25 @@ export const getAuthMe = async (req: Request, res: Response): Promise<Response> 
     return ok(res, me);
 };
 
+// ─── Session management (Step 27) ────────────────────────────────────────
+
+export const getAuthSessions = async (req: Request, res: Response): Promise<Response> => {
+    const user_id = requireAuthUserId(req);
+    const sessions = await authService.listSessions(user_id);
+    return ok(res, sessions);
+};
+
+export const postRevokeSession = async (req: Request, res: Response): Promise<Response> => {
+    const user_id = requireAuthUserId(req);
+    const session_id = new Types.ObjectId(req.params.id as string);
+    const result = await authService.revokeSession({
+        user_id,
+        session_id,
+        audit: buildAuditContext(req),
+    });
+    return ok(res, result);
+};
+
 // Always returns the same generic success regardless of whether the email
 // matches an account — this is the contract's enumeration guard.
 const FORGOT_PASSWORD_GENERIC_RESPONSE = {

@@ -71,4 +71,12 @@ const sprintSchema = new Schema<SprintDocument>(
 sprintSchema.index({ project_id: 1, start_date: -1 });
 sprintSchema.index({ project_id: 1, status: 1 });
 
+/**
+ * Text index for global search (Data_Model.md §Text Indexes line 1122;
+ * Step 33 indexes audit). The Step-32 search currently regexes only
+ * `name`; adding `goal` here ahead of the Phase-4 `$text` cutover
+ * lets goal-keyword search land without a follow-up migration.
+ */
+sprintSchema.index({ name: 'text', goal: 'text' });
+
 export const Sprint: Model<SprintDocument> = model<SprintDocument>(COLLECTIONS.SPRINTS, sprintSchema);

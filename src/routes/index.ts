@@ -21,6 +21,9 @@ import { taskActivityRouter } from './task-activity.routes.js';
 import { attachmentsRouter, taskAttachmentsNestedRouter } from './task-attachment.routes.js';
 import timesheetRoutes from './timesheet.routes.js';
 import billingRateRoutes from './billing-rate.routes.js';
+import reportRoutes from './report.routes.js';
+import auditLogRoutes from './audit-log.routes.js';
+import searchRoutes from './search.routes.js';
 import { projectShareLinksNestedRouter, publicShareLinksRouter, shareLinksRouter } from './share-link.routes.js';
 
 const appRoutes = Router();
@@ -48,6 +51,9 @@ appRoutes.use('/comments', commentsRouter());
 appRoutes.use('/attachments', attachmentsRouter());
 appRoutes.use('/timesheets', timesheetRoutes);
 appRoutes.use('/billing-rates', billingRateRoutes);
+appRoutes.use('/reports', reportRoutes);
+appRoutes.use('/audit-logs', auditLogRoutes);
+appRoutes.use('/search', searchRoutes);
 appRoutes.use('/projects', projectShareLinksNestedRouter());
 appRoutes.use('/share-links', shareLinksRouter());
 // Public router mounted last on the same prefix. The auth-required

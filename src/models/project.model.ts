@@ -173,4 +173,13 @@ projectSchema.index(
     { partialFilterExpression: { 'custom_task_statuses.0': { $exists: true } } }
 );
 
+/**
+ * Text index for global search (Data_Model.md §Text Indexes line 1121;
+ * Step 33 indexes audit). One text index per collection — combines all
+ * three searchable fields. The Step-32 search service still uses regex
+ * by default (Phase-4 cutover to `$text: {$search}` documented in its
+ * upgrade-path note); this lands the index ahead of that migration.
+ */
+projectSchema.index({ name: 'text', code: 'text', description: 'text' });
+
 export const Project: Model<ProjectDocument> = model<ProjectDocument>(COLLECTIONS.PROJECTS, projectSchema);

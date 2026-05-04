@@ -50,6 +50,7 @@ export const COLLECTIONS = {
     NOTIFICATIONS: 'notifications',
     AUDIT_LOGS: 'audit_logs',
     JOB_RUNS: 'job_runs',
+    REPORT_EXPORTS: 'report_exports',
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

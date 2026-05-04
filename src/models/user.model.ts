@@ -186,4 +186,20 @@ userSchema.index({ role: 1, status: 1 });
 userSchema.index({ 'internal_profile.reporting_manager_id': 1 });
 userSchema.index({ 'internal_profile.employee_id': 1 }, { unique: true, sparse: true });
 
+/**
+ * Text index for global search (Data_Model.md §Text Indexes line 1120;
+ * Step 33 indexes audit). One text index per collection — Mongo's hard
+ * limit — so we combine the four searchable fields into a single
+ * declaration. The Step-32 search service still uses regex by default
+ * (Phase-4 will swap to `$text: {$search: q}` per its upgrade-path
+ * note); this index lands ahead of that migration so the cutover is
+ * code-only.
+ */
+userSchema.index({
+    full_name: 'text',
+    email: 'text',
+    'internal_profile.employee_id': 'text',
+    'internal_profile.job_title': 'text',
+});
+
 export const User: Model<UserDocument> = model<UserDocument>(COLLECTIONS.USERS, userSchema);

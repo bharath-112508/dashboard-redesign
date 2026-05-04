@@ -7,6 +7,7 @@ import { runSlMonthlyForfeiture } from './sl-monthly-forfeiture.job.js';
 import { runLeaveYearRollover } from './leave-year-rollover.job.js';
 import { runTokenCleanup } from './token-cleanup.job.js';
 import { runTimesheetReminder } from './timesheet-reminder.job.js';
+import { runReportExportCleanup } from './report-export-cleanup.job.js';
 
 /**
  * Job scheduler — wires every Phase-1 cron job to its `node-cron` trigger.
@@ -38,6 +39,7 @@ const REGISTRY: Record<JobName, JobRunner> = {
     [JOB_NAMES.LEAVE_YEAR_ROLLOVER]: () => runLeaveYearRollover(),
     [JOB_NAMES.TOKEN_CLEANUP]: () => runTokenCleanup(),
     [JOB_NAMES.TIMESHEET_REMINDER]: () => runTimesheetReminder(),
+    [JOB_NAMES.REPORT_EXPORT_CLEANUP]: () => runReportExportCleanup(),
 };
 
 const isJobsDisabled = (): boolean => {

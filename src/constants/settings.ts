@@ -63,6 +63,8 @@ export const DEFAULT_SETTINGS = {
         access_token_ttl_minutes: 480, // 8h
         refresh_token_ttl_days: 5,
         password_reset_ttl_minutes: 60,
+        // Step 28 — opt-in admin-MFA enforcement. Off by default.
+        require_mfa_for_admins: false,
     },
 
     uploads: {

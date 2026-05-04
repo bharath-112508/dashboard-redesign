@@ -9,6 +9,7 @@ import { sendPasswordResetEmail } from '../utils/mailer.js';
 import { logoutAll } from './auth.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { RESET_TOKEN_BYTES, RESET_TOKEN_TTL_MS } from '../constants/auth.js';
+import { resolvePasswordResetTtlMinutes } from './settings.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
@@ -50,10 +51,15 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
     await PasswordResetToken.updateMany({ user_id: user._id, used_at: null }, { $set: { used_at: new Date() } });
 
     const rawToken = base64Url(randomBytes(RESET_TOKEN_BYTES));
+    // Step 33: TTL is read from `system_settings.security.password_reset_ttl_minutes`,
+    // falling back to the compile-time default during the fresh-install
+    // bootstrap window when the singleton hasn't been seeded yet.
+    const ttlMinutes = await resolvePasswordResetTtlMinutes();
+    const ttlMs = ttlMinutes !== null ? ttlMinutes * 60_000 : RESET_TOKEN_TTL_MS;
     await PasswordResetToken.create({
         user_id: user._id,
         token_hash: sha256Hex(rawToken),
-        expires_at: new Date(Date.now() + RESET_TOKEN_TTL_MS),
+        expires_at: new Date(Date.now() + ttlMs),
     });
 
     await sendPasswordResetEmail({
