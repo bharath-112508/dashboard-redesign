@@ -27,13 +27,39 @@ import { ROLES } from '../constants/roles.js';
 // declare them inside `vi.hoisted` so vitest hoists the bindings together
 // with the factory.
 
-const { notificationCreateMock, sendEmailMock, userFindByIdMock, userFindMock, loggerWarnMock } = vi.hoisted(() => {
+const {
+    notificationCreateMock,
+    sendEmailMock,
+    userFindByIdMock,
+    userFindMock,
+    loggerWarnMock,
+    getOrInitSettingsMock,
+    postSlackMessageMock,
+} = vi.hoisted(() => {
     return {
         notificationCreateMock: vi.fn(),
         sendEmailMock: vi.fn(),
         userFindByIdMock: vi.fn(),
         userFindMock: vi.fn(),
         loggerWarnMock: vi.fn(),
+        // Step-25 dispatcher gates Slack on `system_settings.slack`. The
+        // existing tests don't care about Slack, so the default is "Slack
+        // disabled" — `loadSlackDispatchForType` returns null and the
+        // notify helpers skip Slack entirely.
+        getOrInitSettingsMock: vi.fn().mockResolvedValue({
+            slack: {
+                enabled: false,
+                bot_token: null,
+                channels: {
+                    leaves: '#leaves',
+                    attendance: '#attendance',
+                    projects: '#projects',
+                    timesheet: '#timesheet',
+                    general: '#general',
+                },
+            },
+        }),
+        postSlackMessageMock: vi.fn().mockResolvedValue(true),
     };
 });
 
@@ -80,6 +106,21 @@ vi.mock('../utils/mailer.js', async (importOriginal) => {
 vi.mock('../utils/logger.js', () => ({
     default: { warn: loggerWarnMock, info: vi.fn() },
 }));
+
+// Step-25 — dispatcher loads `system_settings` to gate Slack fan-out.
+// Mock returns "Slack disabled" by default; the per-test overrides flip
+// it on when needed.
+vi.mock('./settings.service.js', () => ({
+    getOrInitSettings: getOrInitSettingsMock,
+}));
+
+vi.mock('../utils/slack.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../utils/slack.js')>();
+    return {
+        ...actual,
+        postSlackMessage: postSlackMessageMock,
+    };
+});
 
 // Pull dispatcher AFTER the mocks are wired so the SUT picks them up.
 const dispatcher = await import('./notification-dispatcher.service.js');
@@ -323,5 +364,176 @@ describe('notifyUserInvited', () => {
                 initial_password: 'p',
             })
         ).resolves.toBeUndefined();
+    });
+});
+
+// ─── Slack integration (Step 25) ─────────────────────────────────────────
+
+describe('Slack integration', () => {
+    const enabledSlackSettings = {
+        slack: {
+            enabled: true,
+            bot_token: 'xoxb-test',
+            channels: {
+                leaves: '#leaves',
+                attendance: '#attendance',
+                projects: '#projects',
+                timesheet: '#timesheet',
+                general: '#general',
+            },
+        },
+    };
+
+    const requesterWithSlack = { ...requester, slack_user_id: 'U-EMP', slack_notifications_enabled: true };
+    const adminWithSlack = { ...admin, slack_user_id: 'U-ADM', slack_notifications_enabled: true };
+    const managerNoSlackId = { ...manager, slack_user_id: null, slack_notifications_enabled: true };
+    const adminOptedOut = { ...admin, slack_user_id: 'U-ADM', slack_notifications_enabled: false };
+
+    beforeEach(() => {
+        notificationCreateMock.mockResolvedValue({});
+        sendEmailMock.mockResolvedValue(undefined);
+        postSlackMessageMock.mockReset().mockResolvedValue(true);
+    });
+
+    it('skips Slack entirely when settings.enabled is false', async () => {
+        // Default mock returns enabled=false; this is a sanity check.
+        userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
+        userFindMock.mockReturnValue(queryReturning([adminWithSlack]));
+
+        await dispatcher.notifyLeaveSubmitted({
+            request_id: requestId,
+            requester_id: requesterId,
+            leave_type_label: 'Casual Leave',
+            start_date: '2026-04-22',
+            end_date: '2026-04-22',
+            total_days: 1,
+        });
+
+        expect(postSlackMessageMock).not.toHaveBeenCalled();
+    });
+
+    it('fires ONE channel broadcast + ONE per-recipient DM when fully configured', async () => {
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
+        userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
+        userFindMock.mockReturnValue(queryReturning([adminWithSlack]));
+
+        await dispatcher.notifyLeaveSubmitted({
+            request_id: requestId,
+            requester_id: requesterId,
+            leave_type_label: 'Casual Leave',
+            start_date: '2026-04-22',
+            end_date: '2026-04-22',
+            total_days: 1,
+        });
+
+        // 1 broadcast to #leaves + 1 DM to admin = 2 calls
+        expect(postSlackMessageMock).toHaveBeenCalledTimes(2);
+        const channels = postSlackMessageMock.mock.calls.map((c) => (c[1] as { channel: string }).channel);
+        expect(channels).toContain('#leaves');
+        expect(channels).toContain('U-ADM');
+    });
+
+    it('skips DM for recipients without slack_user_id (broadcast still fires)', async () => {
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
+        userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
+        userFindMock.mockReturnValue(queryReturning([managerNoSlackId]));
+
+        await dispatcher.notifyLeaveSubmitted({
+            request_id: requestId,
+            requester_id: requesterId,
+            leave_type_label: 'CL',
+            start_date: '2026-04-22',
+            end_date: '2026-04-22',
+            total_days: 1,
+        });
+
+        // Only the broadcast — no DM target available.
+        expect(postSlackMessageMock).toHaveBeenCalledTimes(1);
+        const channel = (postSlackMessageMock.mock.calls[0][1] as { channel: string }).channel;
+        expect(channel).toBe('#leaves');
+    });
+
+    it('skips DM when recipient has slack_notifications_enabled = false', async () => {
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
+        userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
+        userFindMock.mockReturnValue(queryReturning([adminOptedOut]));
+
+        await dispatcher.notifyLeaveSubmitted({
+            request_id: requestId,
+            requester_id: requesterId,
+            leave_type_label: 'CL',
+            start_date: '2026-04-22',
+            end_date: '2026-04-22',
+            total_days: 1,
+        });
+
+        // Broadcast yes; opted-out admin = no DM.
+        expect(postSlackMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not block the in-app + email fan-out when Slack send throws (best-effort contract)', async () => {
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
+        // postSlackMessage always returns true/false (never throws by
+        // design). Simulate a `false` return to confirm the dispatcher
+        // proceeds to the next step regardless.
+        postSlackMessageMock.mockResolvedValue(false);
+        userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
+        userFindMock.mockReturnValue(queryReturning([adminWithSlack]));
+
+        await dispatcher.notifyLeaveSubmitted({
+            request_id: requestId,
+            requester_id: requesterId,
+            leave_type_label: 'CL',
+            start_date: '2026-04-22',
+            end_date: '2026-04-22',
+            total_days: 1,
+        });
+
+        // In-app + email still happen.
+        expect(notificationCreateMock).toHaveBeenCalledTimes(1);
+        expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('routes attendance-correction broadcasts to #attendance, not #leaves (category mapping regression)', async () => {
+        // The type→category map drives broadcast channel selection.
+        // A regression that flipped attendance events to #leaves would
+        // be silent unless we pin the actual channel value.
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
+        userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
+        userFindMock.mockReturnValue(queryReturning([adminWithSlack]));
+
+        await dispatcher.notifyAttendanceCorrectionSubmitted({
+            request_id: requestId,
+            requester_id: requesterId,
+            local_date: '2026-04-22',
+        });
+
+        const broadcastCall = postSlackMessageMock.mock.calls.find((c) =>
+            (c[1] as { channel: string }).channel.startsWith('#')
+        );
+        expect(broadcastCall).toBeDefined();
+        expect((broadcastCall![1] as { channel: string }).channel).toBe('#attendance');
+    });
+
+    it('routes task-comment mentions as DM-only (no #projects broadcast)', async () => {
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
+        const author = { ...admin, slack_user_id: 'U-ADM', slack_notifications_enabled: true };
+        const mentioned = { ...manager, slack_user_id: 'U-MGR', slack_notifications_enabled: true };
+        userFindByIdMock.mockReturnValue(queryReturning(author));
+        userFindMock.mockReturnValue(queryReturning([mentioned]));
+
+        await dispatcher.notifyTaskCommentMention({
+            comment_id: new Types.ObjectId(),
+            task_id: new Types.ObjectId(),
+            project_id: new Types.ObjectId(),
+            author_id: adminId,
+            mentioned_user_ids: [managerId],
+            body_preview: 'hey check this',
+        });
+
+        // Only the DM — task-comment mentions are deliberately personal.
+        expect(postSlackMessageMock).toHaveBeenCalledTimes(1);
+        const channel = (postSlackMessageMock.mock.calls[0][1] as { channel: string }).channel;
+        expect(channel).toBe('U-MGR');
     });
 });

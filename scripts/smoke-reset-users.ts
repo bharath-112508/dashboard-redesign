@@ -31,13 +31,12 @@ async function main() {
             },
         }
     );
-    // eslint-disable-next-line no-console
+
     console.log('Reset complete');
     await disconnectDB();
 }
 
 main().catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
 });

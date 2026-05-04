@@ -33,13 +33,12 @@ async function main() {
         },
         { upsert: true }
     );
-    // eslint-disable-next-line no-console
+
     console.log(`Seeded ${EMAIL} / ${PASSWORD}`);
     await disconnectDB();
 }
 
 main().catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
 });

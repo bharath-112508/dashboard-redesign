@@ -78,8 +78,44 @@ const stripInternalFields = (json: Record<string, unknown>): Record<string, unkn
     return json;
 };
 
+/**
+ * Strip the raw Slack `bot_token` from a settings JSON / slack-section
+ * snapshot, replacing it with a presence flag (`has_bot_token`).
+ *
+ * Step 25 added a dedicated `/settings/slack` surface that does this
+ * redaction inline, but the legacy `/settings` GET + the generic
+ * `/settings` PATCH (and its audit row) flow through `getSettingsForCaller`
+ * + `patchSettings` here. Both must apply the same redaction so an
+ * admin caller — or, worse, an audit-log reader (Step-31 UI) — cannot
+ * extract the live or historical bot token through the pre-existing
+ * settings surface. Operates in-place on a shallow JSON object; safe to
+ * call on either a full settings doc or a single `slack` section.
+ */
+const redactSlackBotTokenInPlace = (
+    holder: Record<string, unknown> | null | undefined,
+    isFullSettingsJson: boolean
+): void => {
+    if (!holder || typeof holder !== 'object') return;
+    const slack = (isFullSettingsJson ? holder.slack : holder) as Record<string, unknown> | undefined;
+    if (!slack || typeof slack !== 'object') return;
+    if ('bot_token' in slack) {
+        slack.has_bot_token = Boolean(slack.bot_token);
+        delete slack.bot_token;
+    } else if (!('has_bot_token' in slack)) {
+        // Always emit the presence flag so the FE has a stable shape
+        // whether or not the field was previously set.
+        slack.has_bot_token = false;
+    }
+};
+
 const redactForRole = (settings: Record<string, unknown>, role: RoleType): Record<string, unknown> => {
-    if (role === ROLES.ADMIN) return settings;
+    if (role === ROLES.ADMIN) {
+        // Admin sees the slack section but NEVER the raw token —
+        // `has_bot_token: bool` only. Same contract the dedicated
+        // `/settings/slack` GET enforces; this is the legacy path.
+        redactSlackBotTokenInPlace(settings, true);
+        return settings;
+    }
     const out = { ...settings };
     for (const section of ADMIN_ONLY_SECTIONS) {
         delete out[section];
@@ -136,8 +172,15 @@ export const patchSettings = async (
         const key = section as SettingsSection;
         const raw = settings[key] as unknown;
         const maybeSubdoc = raw as { toObject?: () => Record<string, unknown> } | null | undefined;
-        beforeSnapshot[section] =
+        const sectionJson =
             maybeSubdoc && typeof maybeSubdoc.toObject === 'function' ? maybeSubdoc.toObject() : (raw ?? null);
+        // Redact `slack.bot_token` so the audit row never carries a
+        // raw or historical secret. The dedicated /settings/slack
+        // PATCH does the same; this covers the legacy entry point.
+        if (section === 'slack' && sectionJson && typeof sectionJson === 'object') {
+            redactSlackBotTokenInPlace(sectionJson as Record<string, unknown>, false);
+        }
+        beforeSnapshot[section] = sectionJson;
     }
 
     // Deep-merge each section explicitly so we don't accidentally allow new
@@ -184,8 +227,12 @@ export const patchSettings = async (
         const key = section as SettingsSection;
         const raw = settings[key] as unknown;
         const maybeSubdoc = raw as { toObject?: () => Record<string, unknown> } | null | undefined;
-        afterSnapshot[section] =
+        const sectionJson =
             maybeSubdoc && typeof maybeSubdoc.toObject === 'function' ? maybeSubdoc.toObject() : (raw ?? null);
+        if (section === 'slack' && sectionJson && typeof sectionJson === 'object') {
+            redactSlackBotTokenInPlace(sectionJson as Record<string, unknown>, false);
+        }
+        afterSnapshot[section] = sectionJson;
     }
 
     if (audit) {
@@ -198,5 +245,9 @@ export const patchSettings = async (
         });
     }
 
-    return stripInternalFields(settings.toJSON() as Record<string, unknown>);
+    const json = stripInternalFields(settings.toJSON() as Record<string, unknown>);
+    // Same redaction as `getSettingsForCaller` — even an admin caller
+    // never sees the raw bot token in the response shape.
+    redactSlackBotTokenInPlace(json, true);
+    return json;
 };

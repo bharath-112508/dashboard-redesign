@@ -140,6 +140,16 @@ export const AUDIT_ACTIONS = {
     SHARE_LINK_CREATE: 'share_link.create',
     SHARE_LINK_REVOKE: 'share_link.revoke',
 
+    // Slack integration (Phase 2 Step 25). `settings.slack_update` is
+    // its own verb (not collapsed into `settings.update`) so the
+    // Step-31 audit UI can highlight bot-token rotations + channel
+    // remappings without diffing the full settings document.
+    // `slack.test_message` records `metadata.channel` + `metadata.delivered`
+    // so an admin re-running the test can see whether the workspace
+    // actually accepted the post.
+    SETTINGS_SLACK_UPDATE: 'settings.slack_update',
+    SLACK_TEST_MESSAGE: 'slack.test_message',
+
     // Scheduled jobs (Step 14). One generic "run" action; per-job detail
     // lives in `metadata.{job_name, run_key, summary}` so the action enum
     // stays small as we add jobs over time.

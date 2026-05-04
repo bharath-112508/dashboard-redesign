@@ -94,6 +94,7 @@ export const DEFAULT_SETTINGS = {
             timesheet: '#timesheet',
             general: '#general',
         },
+        bot_token: null as string | null,
     },
 
     email: {

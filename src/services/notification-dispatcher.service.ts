@@ -8,6 +8,10 @@ import { NOTIFICATION_TYPES, RELATED_ENTITY_KINDS, type NotificationType } from 
 import { ERROR_CODES } from '../constants/error-codes.js';
 import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/mailer.js';
+import { postSlackMessage, slackContextFrom, type SlackContext } from '../utils/slack.js';
+import { NOTIFICATION_TYPE_TO_SLACK_CATEGORY, type SlackEventCategory } from '../constants/slack.js';
+import type { SlackChannelMap } from '../models/system-settings.model.js';
+import { getOrInitSettings } from './settings.service.js';
 import {
     renderCorrectionDecidedEmail,
     renderCorrectionSubmittedEmail,
@@ -31,9 +35,12 @@ import {
  *      business action (apply leave / approve correction / etc.) still
  *      returns 2xx as required by API_Contract §15.500.
  *
- * Slack channel is intentionally a no-op slot — adding it later (Step 25,
- * Phase 2) means dropping a `sendSlack(...)` call into `dispatchToRecipient`
- * without touching any of the per-event helpers.
+ * Slack — Step 25 wired in. Each `notify*` calls `loadSlackDispatch`
+ * once per event; broadcast posts to the type-mapped channel; per-recipient
+ * DM is fired inside `dispatchToRecipient` when the recipient has set
+ * `slack_user_id` AND not opted out via `slack_notifications_enabled`.
+ * All paths are gated on `system_settings.slack.enabled` + bot token
+ * configured.
  *
  * Implementation notes:
  *   - We deliberately do NOT use a worker queue here. The fan-out is small
@@ -66,7 +73,10 @@ interface NotificationPayload {
     related_entity?: { kind: string; id: Types.ObjectId } | null;
 }
 
-type RecipientUser = Pick<UserDocument, '_id' | 'email' | 'full_name' | 'role'>;
+type RecipientUser = Pick<
+    UserDocument,
+    '_id' | 'email' | 'full_name' | 'role' | 'slack_user_id' | 'slack_notifications_enabled'
+>;
 
 // ─── Internal: per-recipient fan-out ─────────────────────────────────────
 
@@ -74,7 +84,8 @@ const dispatchToRecipient = async (
     recipient: RecipientUser,
     payload: NotificationPayload,
     email: RenderedEmail | null,
-    context: string
+    context: string,
+    slack?: SlackDispatch | null
 ): Promise<NotificationDocument | null> => {
     let inAppRow: NotificationDocument | null = null;
 
@@ -128,7 +139,90 @@ const dispatchToRecipient = async (
         }
     }
 
+    // 3. Slack DM — Step 25. Best-effort (`postSlackMessage` swallows
+    // its own errors). Gated on three conditions:
+    //   (a) Slack workspace is configured + enabled — passed in as
+    //       `slack` from the caller (loaded once per event so we don't
+    //       hit the settings collection per recipient).
+    //   (b) Recipient supplied a `slack_user_id` — implicit opt-in.
+    //   (c) Recipient hasn't explicitly toggled `slack_notifications_enabled = false`.
+    if (slack && recipient.slack_user_id && recipient.slack_notifications_enabled !== false) {
+        await postSlackMessage(slack.ctx, {
+            channel: recipient.slack_user_id,
+            text: buildSlackText(payload),
+            context: `${context}.dm`,
+        });
+    }
+
     return inAppRow;
+};
+
+// ─── Slack: per-event setup + broadcast ──────────────────────────────────
+
+interface SlackDispatch {
+    ctx: SlackContext;
+    channels: SlackChannelMap;
+}
+
+/**
+ * Load the Slack section once per `notify*` invocation. Returns null
+ * (and no error) when Slack is disabled or unconfigured — the dispatcher
+ * paths that consume this short-circuit cleanly without logging spam.
+ *
+ * Intentionally never throws: a stuck settings collection should not
+ * block the email/in-app fan-out, and the wider notification dispatcher
+ * already swallows failures.
+ *
+ * The category mapping happens at broadcast time via
+ * `NOTIFICATION_TYPE_TO_SLACK_CATEGORY` — this loader is type-agnostic.
+ */
+const loadSlackDispatch = async (): Promise<SlackDispatch | null> => {
+    try {
+        const settings = await getOrInitSettings();
+        const ctx = slackContextFrom(settings.slack);
+        if (!ctx) return null;
+        return { ctx, channels: settings.slack.channels };
+    } catch (err) {
+        logger.warn(
+            { err, code: ERROR_CODES.SLACK_DISPATCH_FAILED },
+            'Failed to load Slack settings — skipping Slack fan-out'
+        );
+        return null;
+    }
+};
+
+/**
+ * Plain-text Slack body. The notification's `title` + `body` fields
+ * are already prose; the matching email template (when present) is
+ * HTML so we don't reuse it here. Slack mrkdwn would let us format
+ * with `*bold*` but for v1 we keep the body as a single text run
+ * that's safe to paste anywhere — channel post, DM, or future audit
+ * replay.
+ */
+const buildSlackText = (payload: NotificationPayload): string => {
+    const link = payload.link_url ? ` (${payload.link_url})` : '';
+    return `${payload.title}\n${payload.body}${link}`;
+};
+
+/**
+ * Fire a single channel broadcast for the given event. Caller has
+ * already loaded the Slack dispatch context (`loadSlackDispatch`)
+ * so this is a pure mapping + send. Best-effort.
+ */
+const dispatchSlackBroadcast = async (
+    slack: SlackDispatch,
+    type: NotificationType,
+    text: string,
+    context: string
+): Promise<void> => {
+    const category: SlackEventCategory = NOTIFICATION_TYPE_TO_SLACK_CATEGORY[type];
+    const channel = slack.channels[category];
+    if (!channel) return;
+    await postSlackMessage(slack.ctx, {
+        channel,
+        text,
+        context: `${context}.broadcast`,
+    });
 };
 
 // ─── Internal: recipient resolution ──────────────────────────────────────
@@ -145,12 +239,18 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
     };
     if (excludeUserId) filter._id = { $ne: excludeUserId };
 
-    const rows = await User.find(filter).select('_id email full_name role').lean<RecipientUser[]>();
+    const rows = await User.find(filter)
+        .select('_id email full_name role slack_user_id slack_notifications_enabled')
+        .lean<RecipientUser[]>();
     return rows ?? [];
 };
 
 const findUserById = async (id: Types.ObjectId): Promise<RecipientUser | null> => {
-    return (await User.findById(id).select('_id email full_name role').lean<RecipientUser>()) ?? null;
+    return (
+        (await User.findById(id)
+            .select('_id email full_name role slack_user_id slack_notifications_enabled')
+            .lean<RecipientUser>()) ?? null
+    );
 };
 
 const resolveActorName = async (actor: ActorRef, fallback = 'a user'): Promise<string> => {
@@ -191,6 +291,21 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
             link_url: linkUrl,
             related_entity: { kind: RELATED_ENTITY_KINDS.LEAVE_REQUEST, id: input.request_id },
         };
+        const broadcastBody = `${requester.full_name} requested ${input.leave_type_label} for ${input.start_date} → ${input.end_date} (${input.total_days} day${input.total_days === 1 ? '' : 's'}).`;
+
+        // Step 25 — load Slack settings ONCE per event so the broadcast
+        // and every per-recipient DM share a single settings read. Null
+        // when Slack is disabled / unconfigured; downstream paths
+        // short-circuit.
+        const slack = await loadSlackDispatch();
+        if (slack) {
+            await dispatchSlackBroadcast(
+                slack,
+                NOTIFICATION_TYPES.LEAVE_REQUESTED,
+                `Leave request from ${requester.full_name}\n${broadcastBody}`,
+                context
+            );
+        }
 
         await Promise.all(
             reviewers.map((r) =>
@@ -199,7 +314,7 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
                     {
                         ...payloadBase,
                         title: `Leave request from ${requester.full_name}`,
-                        body: `${requester.full_name} requested ${input.leave_type_label} for ${input.start_date} → ${input.end_date} (${input.total_days} day${input.total_days === 1 ? '' : 's'}).`,
+                        body: broadcastBody,
                     },
                     renderLeaveSubmittedEmail({
                         recipient_full_name: r.full_name,
@@ -210,7 +325,8 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
                         total_days: input.total_days,
                         request_id: input.request_id.toString(),
                     }),
-                    context
+                    context,
+                    slack
                 )
             )
         );
@@ -276,6 +392,18 @@ export const notifyLeaveDecided = async (input: LeaveDecisionDispatchInput): Pro
             cancelled: 'Leave request cancelled',
         } as const;
 
+        // Step 25 — single broadcast (per-recipient DMs are handled
+        // inside `dispatchToRecipient`).
+        const slack = await loadSlackDispatch();
+        if (slack) {
+            await dispatchSlackBroadcast(
+                slack,
+                typeMap[input.decision],
+                `Leave ${verb}: ${requester.full_name} — ${input.leave_type_label} ${range} (${input.total_days}d) — by ${actorName}`,
+                context
+            );
+        }
+
         await Promise.all(
             recipients.map((r) => {
                 const isRequester = r._id.equals(input.requester_id);
@@ -307,7 +435,8 @@ export const notifyLeaveDecided = async (input: LeaveDecisionDispatchInput): Pro
                               remarks: input.remarks ?? null,
                           })
                         : null,
-                    context
+                    context,
+                    slack
                 );
             })
         );
@@ -344,6 +473,16 @@ export const notifyAttendanceCorrectionSubmitted = async (input: CorrectionSubmi
         }
 
         const linkUrl = `/attendance/correction-requests/${input.request_id.toString()}`;
+        const slack = await loadSlackDispatch();
+        if (slack) {
+            await dispatchSlackBroadcast(
+                slack,
+                NOTIFICATION_TYPES.ATTENDANCE_CORRECTION_REQUESTED,
+                `Attendance correction from ${requester.full_name} for ${input.local_date}`,
+                context
+            );
+        }
+
         await Promise.all(
             reviewers.map((r) =>
                 dispatchToRecipient(
@@ -364,7 +503,8 @@ export const notifyAttendanceCorrectionSubmitted = async (input: CorrectionSubmi
                         local_date: input.local_date,
                         request_id: input.request_id.toString(),
                     }),
-                    context
+                    context,
+                    slack
                 )
             )
         );
@@ -402,6 +542,10 @@ export const notifyAttendanceCorrectionDecided = async (input: CorrectionDecided
 
         const linkUrl = `/attendance/correction-requests/${input.request_id.toString()}`;
 
+        // No broadcast for decisions — single requester is the only stakeholder.
+        // The DM is handled inside `dispatchToRecipient` via `slack`.
+        const slack = await loadSlackDispatch();
+
         await dispatchToRecipient(
             requester,
             {
@@ -422,7 +566,8 @@ export const notifyAttendanceCorrectionDecided = async (input: CorrectionDecided
                 actor_full_name: actorName,
                 remarks: input.remarks ?? null,
             }),
-            context
+            context,
+            slack
         );
     } catch (err) {
         logger.warn(
@@ -508,7 +653,7 @@ export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatch
         const [author, recipients] = await Promise.all([
             findUserById(input.author_id),
             User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
-                .select('_id email full_name role')
+                .select('_id email full_name role slack_user_id slack_notifications_enabled')
                 .lean<RecipientUser[]>(),
         ]);
 
@@ -530,6 +675,12 @@ export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatch
         const inAppBody =
             input.body_preview.length > 1_900 ? `${input.body_preview.slice(0, 1_900).trimEnd()}…` : input.body_preview;
 
+        // Mentions are DM-only: a channel broadcast would surface
+        // private team chatter into a noisy #projects feed. Per-recipient
+        // DM is the right channel — the mentioned user gets pinged
+        // directly, which is what `@mention` on Slack already feels like.
+        const slack = await loadSlackDispatch();
+
         await Promise.all(
             recipients.map((r) =>
                 dispatchToRecipient(
@@ -550,7 +701,8 @@ export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatch
                         task_id: taskIdStr,
                         body_preview: input.body_preview,
                     }),
-                    context
+                    context,
+                    slack
                 )
             )
         );
@@ -580,6 +732,11 @@ export const notifyTimesheetReminder = async (input: {
     const context = 'timesheet-reminder';
     try {
         const linkUrl = `/timesheets/me/day/${input.local_date}`;
+        // Personal nudge — DM only, no channel broadcast (a daily
+        // "these N people forgot to log time" feed in #timesheet would
+        // be embarrassing). The cron loops over each user; loading
+        // settings per call is fine for a once-a-day batch.
+        const slack = await loadSlackDispatch();
         await dispatchToRecipient(
             input.recipient,
             {
@@ -594,7 +751,8 @@ export const notifyTimesheetReminder = async (input: {
                 local_date: input.local_date,
                 expected_hours: input.expected_hours,
             }),
-            context
+            context,
+            slack
         );
     } catch (err) {
         logger.warn(

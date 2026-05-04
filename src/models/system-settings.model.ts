@@ -87,6 +87,19 @@ export interface SlackChannelMap {
 export interface SlackSettings {
     enabled: boolean;
     channels: SlackChannelMap;
+    /**
+     * Slack Bot User OAuth token (`xoxb-...`). Stored verbatim on the
+     * row but **never** echoed back to a caller:
+     *  - Non-admin reads have the entire `slack` section stripped via
+     *    `ADMIN_ONLY_SECTIONS`.
+     *  - Admin reads (both `/settings` and `/settings/slack`) replace
+     *    `bot_token` with a presence flag `has_bot_token: bool` —
+     *    enforced in `settings.service.redactSlackBotTokenInPlace` and
+     *    `slack-settings.service.toAuditSnapshot`. The same redaction
+     *    is applied to the audit `before/after` snapshots so a Step-31
+     *    audit-log reader can never extract a historical secret.
+     */
+    bot_token: string | null;
 }
 
 export interface EmailSettings {
@@ -227,6 +240,7 @@ const slackSchema = new Schema<SlackSettings>(
     {
         enabled: { type: Boolean, required: true, default: false },
         channels: { type: slackChannelsSchema, required: true },
+        bot_token: { type: String, default: null },
     },
     { _id: false }
 );

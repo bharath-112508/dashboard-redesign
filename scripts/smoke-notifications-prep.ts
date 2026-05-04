@@ -27,7 +27,6 @@ async function main() {
     await connectDB();
     const users = await User.find({ email: { $in: SMOKE_NOTIF_EMAILS } }).select('_id email');
     if (users.length === 0) {
-        // eslint-disable-next-line no-console
         console.log('No smoke-notifications users present yet — nothing to wipe.');
         await disconnectDB();
         return;
@@ -42,7 +41,6 @@ async function main() {
         LeaveRequest.deleteMany({ user_id: { $in: ids } }),
     ]);
 
-    // eslint-disable-next-line no-console
     console.log(
         `Wiped ${notif.deletedCount ?? 0} notification(s) and ${leaves.deletedCount ?? 0} leave_request(s) ` +
             `for ${users.length} smoke user(s).`
@@ -51,7 +49,6 @@ async function main() {
 }
 
 main().catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
 });

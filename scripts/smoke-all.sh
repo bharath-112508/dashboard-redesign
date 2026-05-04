@@ -43,6 +43,9 @@ DEFAULT_SMOKES=(
     smoke-holidays.sh
     smoke-leaves.sh
     smoke-notifications.sh
+    # Phase-2 surfaces (Step 26 exit criterion). Covers projects + sprints
+    # + stories + tasks + comments AND the cross-project @mention scope.
+    smoke-projects.sh
 )
 
 if [[ ${#ARGS[@]} -gt 0 ]]; then

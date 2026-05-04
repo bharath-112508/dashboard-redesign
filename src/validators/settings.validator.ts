@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { SLACK_BOT_TOKEN_MAX } from '../constants/slack.js';
+
 /**
  * Zod schemas for `PATCH /settings`.
  *
@@ -124,6 +126,12 @@ const slackSchema = z
     .object({
         enabled: z.boolean(),
         channels: slackChannelsSchema,
+        // Bot User OAuth token. Empty string is the explicit "clear"
+        // signal — Mongo coerces it to null in the service layer so
+        // the model's `String | null` shape stays clean. Cap shared
+        // with the dedicated `/settings/slack` PATCH so a future bump
+        // only happens in one place.
+        bot_token: z.string().max(SLACK_BOT_TOKEN_MAX).nullable(),
     })
     .partial();
 

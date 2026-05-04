@@ -23,11 +23,7 @@ import { AttendanceCorrectionRequest } from '../src/models/attendance-correction
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-const DEFAULT_EMAILS = [
-    'smoke-emp@example.com',
-    'smoke-emp2@example.com',
-    'smoke-mgr@example.com',
-];
+const DEFAULT_EMAILS = ['smoke-emp@example.com', 'smoke-emp2@example.com', 'smoke-mgr@example.com'];
 
 async function main() {
     const emails = process.argv.slice(2).length > 0 ? process.argv.slice(2) : DEFAULT_EMAILS;
@@ -35,7 +31,6 @@ async function main() {
     await connectDB();
     const users = await User.find({ email: { $in: emails } }).select({ _id: 1, email: 1 });
     if (users.length === 0) {
-        // eslint-disable-next-line no-console
         console.log('No matching users — nothing to reset');
         await disconnectDB();
         return;
@@ -59,7 +54,6 @@ async function main() {
     }
     const att = await AttendanceRecord.deleteMany({ _id: { $in: recordIds } });
 
-    // eslint-disable-next-line no-console
     console.log(
         `Reset complete — emails=${users.map((u) => u.email).join(',')} date=${today} attendance_deleted=${att.deletedCount ?? 0} corrections_deleted=${deletedCorrections}`
     );
@@ -67,7 +61,6 @@ async function main() {
 }
 
 main().catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
 });

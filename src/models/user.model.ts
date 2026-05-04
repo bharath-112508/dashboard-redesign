@@ -58,6 +58,14 @@ export interface UserDocument extends Document {
     status: UserStatus;
     timezone: string;
     slack_user_id: string | null;
+    /**
+     * Step 25 — global Slack DM opt-in. Defaults to `true` so a user
+     * who provides their `slack_user_id` automatically receives Slack
+     * notifications. Toggle this to `false` to keep the handle on
+     * record (for, e.g., team directory display) without the DM
+     * fan-out.
+     */
+    slack_notifications_enabled: boolean;
     comp_off_balance: number;
 
     // Role-specific
@@ -147,6 +155,7 @@ const userSchema = new Schema<UserDocument>(
         },
         timezone: { type: String, default: DEFAULT_TIMEZONE },
         slack_user_id: { type: String, default: null },
+        slack_notifications_enabled: { type: Boolean, required: true, default: true },
         comp_off_balance: { type: Number, default: 0, min: 0 },
 
         internal_profile: { type: internalProfileSchema, required: false },

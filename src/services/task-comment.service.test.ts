@@ -257,6 +257,163 @@ describe('createComment', () => {
     });
 });
 
+// ─── Phase-2 exit criterion (Step 26): cross-project mention scoping ─────
+//
+// BUILD_PROGRESS Step 26 calls out "Client `@mention` scoping automated
+// tests (no cross-project leakage)" as a Phase-2 exit gate. The existing
+// `createComment` block above covers the simple stranger case; this block
+// pins the explicit cross-project scenarios from the spec.
+//
+// Architecture invariants under test:
+//   - The mention check uses ONLY `project.member_ids ∪ project.client_ids`.
+//     Global role (admin / manager) does NOT exempt the user — admin@orgwide
+//     who isn't on this project's `member_ids` cannot be mentioned.
+//   - The check is symmetric across author roles: a client author trying to
+//     leak across projects, an employee author trying the same, and an admin
+//     author trying it all hit the same `MENTION_NOT_PROJECT_MEMBER`.
+//   - Deactivated users who ARE still on `project.member_ids` pass the
+//     mention check (membership is the gate). The fan-out `User.find({status: ACTIVE})`
+//     filter inside the dispatcher silently drops them at delivery time —
+//     that's the dispatcher's contract, not this service's.
+
+describe('cross-project mention scoping (Step 26 exit criterion)', () => {
+    it('client author on project A is rejected when mentioning a member of project B', async () => {
+        // Two distinct projects. The client is a client of project A.
+        // The user they're trying to mention is a member of project B
+        // only — exactly the cross-project leakage path the spec
+        // forbids.
+        const author = new Types.ObjectId();
+        const projectAMember = new Types.ObjectId();
+        const projectBMember = new Types.ObjectId();
+        const projectA = makeProject({ member_ids: [projectAMember], client_ids: [author] });
+        const taskInA = makeTaskRow(projectA._id);
+        stubTaskLookup(taskInA);
+        loadProjectForCallerMock.mockResolvedValueOnce(projectA);
+
+        await expect(
+            svc.createComment(
+                taskInA._id,
+                { body: '@stranger fyi', mentioned_user_ids: [projectBMember.toString()] },
+                clientCaller(author)
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.MENTION_NOT_PROJECT_MEMBER });
+
+        expect(commentCreateMock).not.toHaveBeenCalled();
+        expect(notifyTaskCommentMentionMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects an admin user who is not a member of the project — global role does not exempt', async () => {
+        // The "admin" being mentioned is the platform admin (system-wide
+        // privilege), but they aren't on this project's member_ids.
+        // Mention scoping is membership-based, NOT role-based.
+        const author = new Types.ObjectId();
+        const adminNotInProject = new Types.ObjectId();
+        const projectMember = new Types.ObjectId();
+        const project = makeProject({ member_ids: [projectMember], client_ids: [author] });
+        const task = makeTaskRow(project._id);
+        stubTaskLookup(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await expect(
+            svc.createComment(
+                task._id,
+                { body: 'asking @admin', mentioned_user_ids: [adminNotInProject.toString()] },
+                clientCaller(author)
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.MENTION_NOT_PROJECT_MEMBER });
+    });
+
+    it('accepts the mention when the target IS a member of the same project (positive sanity)', async () => {
+        const author = new Types.ObjectId();
+        const fellowMember = new Types.ObjectId();
+        const project = makeProject({ member_ids: [fellowMember], client_ids: [author] });
+        const task = makeTaskRow(project._id);
+        stubTaskLookup(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        const created = makeComment({ task_id: task._id, author_id: author });
+        commentCreateMock.mockResolvedValueOnce(created);
+
+        await svc.createComment(
+            task._id,
+            { body: 'hi @member', mentioned_user_ids: [fellowMember.toString()] },
+            clientCaller(author)
+        );
+
+        expect(commentCreateMock).toHaveBeenCalledTimes(1);
+        expect(notifyTaskCommentMentionMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('client-to-client mention within the same project is allowed', async () => {
+        // Two clients sharing a project — client A mentions client B.
+        // Both are in `client_ids`, so the membership-set gate accepts.
+        const authorClient = new Types.ObjectId();
+        const otherClient = new Types.ObjectId();
+        const project = makeProject({ member_ids: [], client_ids: [authorClient, otherClient] });
+        const task = makeTaskRow(project._id);
+        stubTaskLookup(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        commentCreateMock.mockResolvedValueOnce(makeComment({ task_id: task._id, author_id: authorClient }));
+
+        await svc.createComment(
+            task._id,
+            { body: 'fyi @them', mentioned_user_ids: [otherClient.toString()] },
+            clientCaller(authorClient)
+        );
+
+        expect(commentCreateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects a partial mention list — fails on the FIRST out-of-project id without persisting any', async () => {
+        // Mixed list: one valid project member + one out-of-project id.
+        // The whole mention list must be rejected as a unit; we don't
+        // silently drop the bad ids and accept the rest, because that
+        // would surface a confusing UX (the FE thinks @bob was
+        // mentioned but server-side he wasn't).
+        const author = new Types.ObjectId();
+        const insider = new Types.ObjectId();
+        const outsider = new Types.ObjectId();
+        const project = makeProject({ member_ids: [insider], client_ids: [author] });
+        const task = makeTaskRow(project._id);
+        stubTaskLookup(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await expect(
+            svc.createComment(
+                task._id,
+                {
+                    body: 'hi @insider @outsider',
+                    mentioned_user_ids: [insider.toString(), outsider.toString()],
+                },
+                clientCaller(author)
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.MENTION_NOT_PROJECT_MEMBER });
+
+        expect(commentCreateMock).not.toHaveBeenCalled();
+        expect(notifyTaskCommentMentionMock).not.toHaveBeenCalled();
+    });
+
+    it('symmetric for employee authors — cross-project mention is rejected regardless of author role', async () => {
+        // The spec calls out "client @mention scoping" because clients
+        // are the most likely cross-project leakage vector — but the
+        // service rule is symmetric. Pin that an employee author hits
+        // the same gate.
+        const employeeAuthor = new Types.ObjectId();
+        const otherProjectMember = new Types.ObjectId();
+        const project = makeProject({ member_ids: [employeeAuthor], client_ids: [] });
+        const task = makeTaskRow(project._id);
+        stubTaskLookup(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await expect(
+            svc.createComment(
+                task._id,
+                { body: '@x', mentioned_user_ids: [otherProjectMember.toString()] },
+                employeeCaller(employeeAuthor)
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.MENTION_NOT_PROJECT_MEMBER });
+    });
+});
+
 // ─── updateComment ───────────────────────────────────────────────────────
 
 describe('updateComment', () => {

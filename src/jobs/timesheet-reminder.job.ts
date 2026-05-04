@@ -50,7 +50,7 @@ const loadInternalUsers = async (): Promise<UserDocument[]> => {
     return User.find({
         status: USER_STATUSES.ACTIVE,
         role: { $in: [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE] },
-    }).select('_id email full_name role');
+    }).select('_id email full_name role slack_user_id slack_notifications_enabled');
 };
 
 const loadOnLeaveUserIds = async (localDate: string): Promise<Set<string>> => {
@@ -96,7 +96,14 @@ export const remindUnloggedUsers = async (now: Date, log: JobContext['log']): Pr
             continue;
         }
         await notifyTimesheetReminder({
-            recipient: { _id: u._id, email: u.email, full_name: u.full_name, role: u.role },
+            recipient: {
+                _id: u._id,
+                email: u.email,
+                full_name: u.full_name,
+                role: u.role,
+                slack_user_id: u.slack_user_id,
+                slack_notifications_enabled: u.slack_notifications_enabled,
+            },
             local_date: targetDate,
             expected_hours: expectedHours,
         });

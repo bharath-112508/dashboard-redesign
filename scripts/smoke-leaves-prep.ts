@@ -37,17 +37,15 @@ async function main() {
             RefreshToken.deleteMany({ user_id: { $in: ids } }),
         ]);
         await User.deleteMany({ _id: { $in: ids } });
-        // eslint-disable-next-line no-console
+
         console.log(`Removed ${users.length} stale smoke-leaves user(s): ${users.map((u) => u.email).join(', ')}`);
     } else {
-        // eslint-disable-next-line no-console
         console.log('No stale smoke-leaves users to remove.');
     }
     await disconnectDB();
 }
 
 main().catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
 });
