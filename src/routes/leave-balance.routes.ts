@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/leave-balance.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { LEAVE_BALANCE_ADJUST_ROLES, LEAVE_BALANCE_LIST_ROLES } from '../constants/leave.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     adjustLeaveBalanceBodySchema,
     initializeYearBodySchema,
@@ -22,21 +22,21 @@ router.get('/me', validate({ query: myBalancesQuerySchema }), asyncHandler(ctrl.
 
 router.get(
     '/',
-    authorize(...LEAVE_BALANCE_LIST_ROLES),
+    requirePermission(PERMISSIONS.LEAVE_BALANCE_READ_TEAM),
     validate({ query: listLeaveBalancesQuerySchema }),
     asyncHandler(ctrl.getList)
 );
 
 router.post(
     '/initialize-year',
-    authorize(...LEAVE_BALANCE_ADJUST_ROLES),
+    requirePermission(PERMISSIONS.LEAVE_BALANCE_ADJUST),
     validate({ body: initializeYearBodySchema }),
     asyncHandler(ctrl.postInitializeYear)
 );
 
 router.patch(
     '/:id',
-    authorize(...LEAVE_BALANCE_ADJUST_ROLES),
+    requirePermission(PERMISSIONS.LEAVE_BALANCE_ADJUST),
     validate({ params: leaveBalanceIdParamSchema, body: adjustLeaveBalanceBodySchema }),
     asyncHandler(ctrl.patchOne)
 );

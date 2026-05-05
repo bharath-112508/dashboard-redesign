@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/task-activity.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { ACTIVITY_READ_ROLES } from '../constants/task-activity.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { listActivitiesQuerySchema, taskActivityPathSchema } from '../validators/task-activity.validator.js';
 
 /**
@@ -25,7 +25,7 @@ export const taskActivityRouter = (): Router => {
 
     router.get(
         '/:task_id/activity',
-        authorize(...ACTIVITY_READ_ROLES),
+        requirePermission(PERMISSIONS.TASK_READ),
         validate({ params: taskActivityPathSchema, query: listActivitiesQuerySchema }),
         asyncHandler(ctrl.getList)
     );

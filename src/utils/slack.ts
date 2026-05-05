@@ -1,6 +1,7 @@
 import logger from './logger.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { SLACK_API_POST_MESSAGE, SLACK_REQUEST_TIMEOUT_MS, SLACK_TEXT_MAX } from '../constants/slack.js';
+import { decryptSecret } from './crypto-aes.js';
 import type { SlackSettings } from '../models/system-settings.model.js';
 
 /**
@@ -51,15 +52,70 @@ export const isSlackConfigured = (settings: SlackSettings | null | undefined): b
 };
 
 /**
+ * Heuristic: does this stored bot_token already look encrypted?
+ *
+ * Two on-the-wire formats from `crypto-aes.ts`:
+ *   - Legacy:   `<b64url>.<b64url>.<b64url>`  (three dot-separated parts)
+ *   - Rotation: `kid:<kid>:<b64url>.<b64url>.<b64url>`
+ *
+ * Slack bot tokens are `xoxb-…` / `xoxa-…` / `xapp-…` and never contain
+ * the `.<b64>.<b64>` shape, so the disambiguation is unambiguous in
+ * practice. False positives would only matter if a future Slack token
+ * format collided with the AES envelope shape — at which point we'd
+ * detect the decrypt failure and fall back to plaintext anyway.
+ */
+export const looksEncrypted = (token: string): boolean => {
+    if (token.startsWith('kid:')) return true;
+    const parts = token.split('.');
+    return parts.length === 3 && parts.every((p) => p.length > 0 && /^[A-Za-z0-9_-]+$/.test(p));
+};
+
+/**
+ * Resolve the live plaintext bot_token from a stored value. Pre-J1
+ * tokens were plaintext; J1 encrypts on PATCH. This helper:
+ *   - Detects the encrypted-envelope shape and decrypts;
+ *   - Falls back to treating the value as legacy plaintext when the
+ *     envelope shape doesn't match (so existing deployments keep
+ *     working until the operator next PATCHes the slack settings,
+ *     at which point the value is migrated to encrypted form);
+ *   - Returns `null` and logs a warn if a value LOOKS encrypted but
+ *     decryption fails (key mismatch, corrupted blob) — better to
+ *     refuse to send than ship garbage as a Bearer header.
+ */
+const resolveBotTokenPlaintext = (stored: string): string | null => {
+    if (!looksEncrypted(stored)) {
+        // Legacy plaintext — pre-J1 deployments still in flight. The next
+        // PATCH /settings/slack will migrate to encrypted form.
+        return stored;
+    }
+    try {
+        return decryptSecret(stored);
+    } catch (err) {
+        logger.warn(
+            { err },
+            'Failed to decrypt stored Slack bot_token — encryption key may be misconfigured. ' +
+                'Refusing to send to avoid leaking ciphertext as a Bearer header.'
+        );
+        return null;
+    }
+};
+
+/**
  * Build a `SlackContext` from the live settings doc. A null result
  * means "Slack isn't ready" — callers should short-circuit instead of
  * attempting a send.
+ *
+ * J1: the stored `bot_token` may be encrypted (post-J1) or plaintext
+ * (legacy / freshly migrated DB). The helper transparently resolves
+ * either form.
  */
 export const slackContextFrom = (settings: SlackSettings | null | undefined): SlackContext | null => {
     if (!isSlackConfigured(settings)) return null;
+    const plaintext = resolveBotTokenPlaintext(settings!.bot_token!);
+    if (!plaintext) return null;
     return {
         enabled: true,
-        botToken: settings!.bot_token!,
+        botToken: plaintext,
     };
 };
 

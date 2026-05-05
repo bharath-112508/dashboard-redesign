@@ -13,7 +13,7 @@ import {
     generateTotpSecret,
     verifyTotp,
 } from '../utils/mfa.js';
-import { verifyMfaSession } from '../utils/mfa-session.js';
+import { consumeMfaSessionJti, MfaSessionReplayError, verifyMfaSession } from '../utils/mfa-session.js';
 import { applyFailedLoginAttempt, completeLoginAfterMfa, type LoginTokenResult } from './auth.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
@@ -180,6 +180,21 @@ export const verify = async (input: VerifyInput): Promise<LoginTokenResult> => {
         // Single-use: remove the matched hash so the same code can never be reused.
         const remaining = user.mfa_backup_codes_hashed.filter((_, i) => i !== consumedBackupIndex);
         await User.updateOne({ _id: user._id }, { $set: { mfa_backup_codes_hashed: remaining } });
+    }
+
+    // R10 — burn the JTI so the MFA-session token can never be replayed.
+    // Runs AFTER the TOTP/backup check so a user mistyping their code
+    // doesn't burn the session and force a re-login. We're now committed
+    // to issuing tokens, so this is the right moment to consume.
+    try {
+        await consumeMfaSessionJti(payload.jti, new Date(payload.exp * 1000));
+    } catch (err) {
+        if (err instanceof MfaSessionReplayError) {
+            // A concurrent replay won the race. Reject this verify cleanly —
+            // the user can re-login if they need fresh tokens.
+            throw AppError.unauthenticated('Invalid MFA session');
+        }
+        throw err;
     }
 
     return completeLoginAfterMfa(user, input.device_info, input.ip_address);

@@ -30,6 +30,7 @@ const callerOf = (req: Request): ProjectCaller => {
     return {
         id: new Types.ObjectId(req.user.user_id),
         role: req.user.role as RoleType,
+        role_keys: req.user.role_keys,
         audit: buildAuditContext(req),
     };
 };

@@ -1,5 +1,5 @@
 /**
- * Comment-body sanitiser (Step 19).
+ * Comment-body sanitiser (Step 19, BACKEND_AUDIT.md P2-11).
  *
  * Per BUILD_PROGRESS Step 19:
  *  - Strip HTML.
@@ -8,17 +8,23 @@
  *    markdown subset enforcement on the FE side).
  *  - Length cap (enforced by the validator, not here).
  *
- * Approach:
- *  1. Drop `<script>` and `<style>` blocks **including their content** so
- *     a sneaky `<script>alert(1)</script>` doesn't leave the JS literal
- *     visible in the comment.
- *  2. Strip every other HTML tag, keeping the inner text.
- *  3. Decode the small set of HTML entities Mongo will round-trip
- *     identically (`&amp; &lt; &gt; &quot; &#39; &nbsp;`) so common copy-
- *     paste from the web doesn't render as `&amp;` in the comment.
- *  4. Collapse runs of more than 2 consecutive blank lines (paste-bomb
+ * Implementation note: switched from regex passes to `sanitize-html`
+ * (P2-11). The DOM-aware parser handles broken-up tags
+ * (`<scr<script>ipt>alert(1)</script>`), invalid HTML, and `<script>` /
+ * `<style>` content removal correctly without us hand-rolling each
+ * edge case. sanitize-html is configured to drop *every* tag — the
+ * markdown renderer on the FE is the only thing that's allowed to emit
+ * markup, and it consumes a tag-free string.
+ *
+ * Pipeline:
+ *  1. `sanitize-html` strips every tag. `<script>` / `<style>` content
+ *     is dropped (sanitize-html's `nonTextTags` default includes both).
+ *  2. Decode the small set of HTML entities Mongo round-trips
+ *     identically (`&amp; &lt; &gt; &quot; &#39; &nbsp;`) so common
+ *     copy-paste from the web doesn't render as `&amp;`.
+ *  3. Collapse runs of more than 2 consecutive blank lines (paste-bomb
  *     defence — markdown only ever needs one blank line between blocks).
- *  5. Trim leading/trailing whitespace.
+ *  4. Trim outer whitespace.
  *
  * What we deliberately do NOT do:
  *  - Markdown parsing. Storing the raw text means we can swap the FE
@@ -27,6 +33,8 @@
  *  - URL / scheme blocking. Markdown links are validated by the
  *    renderer; the body itself is plain text.
  */
+
+import sanitizeHtml from 'sanitize-html';
 
 const HTML_ENTITIES: Record<string, string> = {
     '&amp;': '&',
@@ -38,13 +46,23 @@ const HTML_ENTITIES: Record<string, string> = {
     '&nbsp;': ' ',
 };
 
-const SCRIPT_OR_STYLE = /<\s*(script|style)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi;
-const STRAY_OPENING_DANGER_TAG = /<\s*(script|style)\b[^>]*>/gi;
-const ANY_HTML_TAG = /<\/?[a-z][^>]*>/gi;
-const HTML_COMMENT = /<!--[\s\S]*?-->/g;
 const ENTITY = /&(?:amp|lt|gt|quot|apos|nbsp|#39);/g;
 // Match 3+ newlines (allowing intermediate spaces/tabs) and collapse to 2.
 const EXCESSIVE_BLANK_LINES = /(?:\r?\n[\t ]*){3,}/g;
+
+const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
+    allowedTags: [],
+    allowedAttributes: {},
+    // sanitize-html's default `nonTextTags` (script, style, textarea, option,
+    // noscript) strips both the tags AND their contents — so a sneaky
+    // `<script>alert(1)</script>` doesn't leave the JS literal visible.
+    // Keep the default; declared explicitly so a future contributor can
+    // see the contract.
+    nonTextTags: ['script', 'style', 'textarea', 'option', 'noscript'],
+    // Don't re-encode `&` in surviving text — we run our own entity
+    // decoder right after.
+    disallowedTagsMode: 'discard',
+};
 
 export interface SanitiseResult {
     text: string;
@@ -60,26 +78,16 @@ export interface SanitiseResult {
 export const sanitiseCommentBody = (input: string): SanitiseResult => {
     const original = input;
 
-    let out = original;
+    // 1. Strip every tag (and the contents of `<script>` / `<style>`).
+    let out = sanitizeHtml(original, SANITIZE_OPTIONS);
 
-    // 1. Kill `<script>` / `<style>` blocks AND their contents.
-    out = out.replace(SCRIPT_OR_STYLE, '');
-    // Stray unclosed `<script ...>` opening tags — drop them too.
-    out = out.replace(STRAY_OPENING_DANGER_TAG, '');
-
-    // 2. Strip HTML comments.
-    out = out.replace(HTML_COMMENT, '');
-
-    // 3. Strip every remaining tag, keeping inner text.
-    out = out.replace(ANY_HTML_TAG, '');
-
-    // 4. Decode safe entities so `&amp;` doesn't render literally.
+    // 2. Decode safe entities so `&amp;` doesn't render literally.
     out = out.replace(ENTITY, (match) => HTML_ENTITIES[match] ?? match);
 
-    // 5. Normalise excessive blank lines.
+    // 3. Normalise excessive blank lines.
     out = out.replace(EXCESSIVE_BLANK_LINES, '\n\n');
 
-    // 6. Trim outer whitespace.
+    // 4. Trim outer whitespace.
     out = out.trim();
 
     return { text: out, modified: out !== original.trim() };

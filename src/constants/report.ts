@@ -7,18 +7,12 @@
  * shapes returned by these endpoints are also what the export workers
  * consume, so the field names should be stable.
  *
- * RBAC: every report endpoint is **manager + admin only** per spec
- * §10.1. Report data crosses user boundaries (billing rolls up by
- * project, utilization spans the team) so an employee or client
- * cannot read them — the route gate enforces this; the service
- * doesn't re-check.
+ * RBAC (Step 47): every report endpoint is gated on `report.read`
+ * (held by manager + admin only). Report data crosses user
+ * boundaries (billing rolls up by project, utilization spans the
+ * team) so an employee or client cannot read them. Exports require
+ * the additional `report_export.write` permission.
  */
-
-import { ROLES, type RoleType } from './roles.js';
-
-// ─── RBAC ───────────────────────────────────────────────────────────────
-
-export const REPORT_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
 
 // ─── Date-range cap ─────────────────────────────────────────────────────
 //
@@ -40,7 +34,6 @@ export const REPORT_ROW_CAP = 1_000;
 // ─── Billing report — group-by enum (per API_Contract §10.2) ────────────
 
 export const BILLING_REPORT_GROUP_BY = ['employee', 'task'] as const;
-export type BillingReportGroupBy = (typeof BILLING_REPORT_GROUP_BY)[number];
 
 // ─── Default expected hours (utilization) ───────────────────────────────
 //

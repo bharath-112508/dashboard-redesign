@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/report-preset.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { REPORT_PRESET_ROLES } from '../constants/report-preset.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     createReportPresetBodySchema,
     listReportPresetsQuerySchema,
@@ -24,7 +24,7 @@ import {
 const router = Router();
 
 router.use(authenticate);
-router.use(authorize(...REPORT_PRESET_ROLES));
+router.use(requirePermission(PERMISSIONS.REPORT_READ));
 
 router.get('/', validate({ query: listReportPresetsQuerySchema }), asyncHandler(ctrl.getList));
 router.post('/', validate({ body: createReportPresetBodySchema }), asyncHandler(ctrl.postCreate));

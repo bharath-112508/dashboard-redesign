@@ -14,17 +14,9 @@
  * sessions).
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
-// ─── RBAC ───────────────────────────────────────────────────────────────
-//
-// Mirrors Step-29 `REPORT_READ_ROLES`. A preset's value is gated by
-// the report's role: an employee can't read the billing report, so
-// they have nothing to save. Keeping the role surface aligned avoids
-// the awkward "preset created by manager X showed up to employee Y"
-// state if RBAC is ever loosened on one side and not the other.
-
-export const REPORT_PRESET_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
+// Step 47: route gate is `requirePermission(report.read)` — same
+// permission that gates the underlying `/reports/*` reads, so a user
+// can never save a preset for a report they can't run.
 
 // ─── Field caps ────────────────────────────────────────────────────────
 

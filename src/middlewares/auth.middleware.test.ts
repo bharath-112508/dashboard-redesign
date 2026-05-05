@@ -71,11 +71,15 @@ const settingsWithFlag = (require_mfa_for_admins: boolean) => ({
 // Records the exact arg passed to `.select(...)` so a future regression
 // that fetches the full user doc (PII bloat / perf cost) is caught at
 // the test layer, not by an audit reviewer noticing logs.
+//
+// T1: the middleware now reads `status` + `mfa_enabled` in a single
+// findById, so the mock factory accepts both fields and defaults to
+// `status: 'active'` (the dominant case).
 const userMfaSelectArgs: string[] = [];
-const userMfa = (mfa_enabled: boolean) => ({
+const userMfa = (mfa_enabled: boolean, status: string = 'active') => ({
     select: (arg: string) => {
         userMfaSelectArgs.push(arg);
-        return { lean: () => Promise.resolve({ mfa_enabled }) };
+        return { lean: () => Promise.resolve({ status, mfa_enabled }) };
     },
 });
 
@@ -108,6 +112,10 @@ beforeEach(() => {
         user_id: adminId.toString(),
         role: ROLES.ADMIN,
     });
+    // T1 — `authenticate` now ALWAYS does a single `findById` reading
+    // `status` + `mfa_enabled`. Default mock returns an active user
+    // with MFA off; tests exercising deactivation / MFA-on override.
+    userFindByIdMock.mockReturnValue(userMfa(false));
 });
 
 // ─── Flag OFF — true no-op ───────────────────────────────────────────────
@@ -124,7 +132,9 @@ describe('authenticate (flag OFF — default)', () => {
         expect(result.ok).toBe(true);
         // Short-circuit on role — settings never loaded.
         expect(getOrInitSettingsMock).not.toHaveBeenCalled();
-        expect(userFindByIdMock).not.toHaveBeenCalled();
+        // T1: `findById` IS called (status check); but only once
+        // — the MFA-gate path does not hit it again.
+        expect(userFindByIdMock).toHaveBeenCalledTimes(1);
     });
 
     it('reads settings ONCE for an admin write but no-ops when require_mfa_for_admins is false', async () => {
@@ -134,8 +144,9 @@ describe('authenticate (flag OFF — default)', () => {
 
         expect(result.ok).toBe(true);
         expect(getOrInitSettingsMock).toHaveBeenCalledTimes(1);
-        // Flag is false → user lookup never fires.
-        expect(userFindByIdMock).not.toHaveBeenCalled();
+        // T1 — `findById` runs unconditionally now (status check);
+        // the MFA gate just consumes the same row.
+        expect(userFindByIdMock).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -154,25 +165,24 @@ describe('authenticate (flag ON — admin gate)', () => {
             code: ERROR_CODES.MFA_REQUIRED,
         });
         // Lock in the projection — the gate must NOT pull the full
-        // user document. A regression that switches to .select('+something')
-        // or drops the projection would balloon the per-write payload.
-        expect(userMfaSelectArgs).toEqual(['mfa_enabled']);
+        // user document. A regression that drops the projection would
+        // balloon the per-write payload. T1 changed the projection to
+        // include `status` so the deactivate-but-token-still-valid
+        // window is closed in the same query.
+        expect(userMfaSelectArgs).toEqual(['status mfa_enabled']);
     });
 
-    it('returns 403 MFA_REQUIRED when the user row was deleted between JWT issue and gate evaluation', async () => {
-        // Edge case: admin's JWT is still valid (8h TTL) but the user
-        // row was hard-deleted. Optional-chaining on `userRow?.mfa_enabled`
-        // collapses null to "not enabled" → gate fires. The alternative
-        // (passing through because the user doesn't exist) would let a
-        // tombstoned admin's JWT continue to mutate state — much worse
-        // than a 403.
-        getOrInitSettingsMock.mockResolvedValueOnce(settingsWithFlag(true));
+    it('returns 401 UNAUTHENTICATED when the user row was deleted between JWT issue and middleware run', async () => {
+        // T1: a token whose user_id no longer resolves is treated as
+        // forged. Pre-T1 this case fell through to the MFA gate's
+        // null-coalesce and returned 403 MFA_REQUIRED — the new
+        // semantics are stricter and more defensible.
         userFindByIdMock.mockReturnValueOnce(userMfaDeleted());
 
         const result = await runAuthenticate(makeReq({ method: 'POST', path: '/users' }));
 
         expect(result.ok).toBe(false);
-        expect(result.err).toMatchObject({ code: ERROR_CODES.MFA_REQUIRED });
+        expect(result.err).toMatchObject({ code: ERROR_CODES.UNAUTHENTICATED });
     });
 
     it('passes an admin WITH MFA enabled on the same write', async () => {
@@ -217,7 +227,11 @@ describe('authenticate (method short-circuits)', () => {
             expect(result.ok).toBe(true);
             // Read short-circuit is BEFORE the settings load.
             expect(getOrInitSettingsMock).not.toHaveBeenCalled();
-            expect(userFindByIdMock).not.toHaveBeenCalled();
+            // T1 — `findById` is called once for the status check
+            // regardless of method. The MFA gate's read-method
+            // short-circuit just means it doesn't read the row a
+            // second time.
+            expect(userFindByIdMock).toHaveBeenCalledTimes(1);
         }
     );
 });
@@ -292,3 +306,182 @@ describe('authenticate (brick-safety regression)', () => {
         expect(result.err).toMatchObject({ code: ERROR_CODES.MFA_REQUIRED });
     });
 });
+
+// ─── T1 — Status check (deactivate-but-token-still-valid) ────────────────
+
+describe('authenticate (T1 — user status gate)', () => {
+    it('rejects a deactivated user with 403 ACCOUNT_DEACTIVATED even when their JWT is still valid', async () => {
+        // The headline T1 case: an admin deactivates a user; refresh
+        // tokens are revoked but the access token (8h TTL) is still
+        // signed. Without T1, that user could keep mutating data for
+        // hours. With T1, every authenticated request reads the
+        // status and refuses if it isn't `active`.
+        userFindByIdMock.mockReturnValueOnce(userMfa(false, 'deactivated'));
+
+        const result = await runAuthenticate(makeReq({ method: 'POST', path: '/users' }));
+
+        expect(result.ok).toBe(false);
+        expect(result.err).toMatchObject({
+            statusCode: 403,
+            code: ERROR_CODES.ACCOUNT_DEACTIVATED,
+        });
+    });
+
+    it('the status check runs BEFORE the MFA gate (settings never read for a deactivated user)', async () => {
+        // Ordering matters: a deactivated user should fail fast,
+        // without burning the settings round-trip.
+        userFindByIdMock.mockReturnValueOnce(userMfa(true, 'deactivated'));
+
+        const result = await runAuthenticate(makeReq({ method: 'POST', path: '/users' }));
+
+        expect(result.ok).toBe(false);
+        expect(result.err).toMatchObject({ code: ERROR_CODES.ACCOUNT_DEACTIVATED });
+        expect(getOrInitSettingsMock).not.toHaveBeenCalled();
+    });
+
+    it('reads `status mfa_enabled` in ONE projection (cost-coalesced with the MFA gate)', async () => {
+        // The status check + admin-MFA gate share the same row; we
+        // pin the projection to ensure neither slot is dropped when
+        // either gate is touched.
+        userFindByIdMock.mockReturnValueOnce(userMfa(false, 'active'));
+
+        await runAuthenticate(makeReq({ method: 'POST', path: '/users' }));
+
+        expect(userMfaSelectArgs).toEqual(['status mfa_enabled']);
+    });
+});
+
+// ─── Step 47: requirePermission ──────────────────────────────────────────
+//
+// `requirePermission(...perms)` is the new RBAC gate. It accepts a caller
+// when EITHER the wildcard `system.admin` permission is held, OR any of
+// the requested permissions is held, OR the legacy `role: 'admin'` claim
+// is present (back-compat for tokens issued before the Step-47 deploy).
+// It also throws at factory time on an empty arg list so a typo can't
+// silently allow everyone.
+
+import { PERMISSIONS } from '../constants/permissions.js';
+import { SYSTEM_ROLE_KEYS } from '../constants/role-keys.js';
+
+interface MwReqLike {
+    user?: {
+        user_id: string;
+        role: string;
+        role_keys?: string[];
+        permissions?: string[];
+    };
+}
+
+const runMiddleware = (
+    mw: (req: never, res: never, next: (err?: unknown) => void) => unknown,
+    req: MwReqLike
+): { ok: boolean; err?: unknown } => {
+    let captured: { ok: boolean; err?: unknown } = { ok: false };
+    const next = (err?: unknown): void => {
+        captured = { ok: !err, err };
+    };
+    try {
+        mw(req as never, {} as never, next);
+    } catch (err) {
+        captured = { ok: false, err };
+    }
+    return captured;
+};
+
+describe('requirePermission', () => {
+    it('throws at factory time when called with no permissions (caller bug — fail loud)', () => {
+        expect(() => middleware.requirePermission()).toThrow(/no permissions/i);
+    });
+
+    it('401s when there is no req.user (auth middleware should have already run)', () => {
+        const mw = middleware.requirePermission(PERMISSIONS.PROJECT_WRITE);
+        const result = runMiddleware(mw, {});
+        expect(result.ok).toBe(false);
+        expect(result.err).toMatchObject({ statusCode: 401 });
+    });
+
+    it('allows the caller when their permissions include the requested one', () => {
+        const mw = middleware.requirePermission(PERMISSIONS.PROJECT_WRITE);
+        const result = runMiddleware(mw, {
+            user: {
+                user_id: employeeId.toString(),
+                role: ROLES.MANAGER,
+                role_keys: [SYSTEM_ROLE_KEYS.MANAGER],
+                permissions: [PERMISSIONS.PROJECT_WRITE, PERMISSIONS.SPRINT_WRITE],
+            },
+        });
+        expect(result.ok).toBe(true);
+    });
+
+    it('allows when ANY of the requested permissions is held (OR semantics)', () => {
+        const mw = middleware.requirePermission(PERMISSIONS.PROJECT_WRITE, PERMISSIONS.PROJECT_ARCHIVE);
+        const result = runMiddleware(mw, {
+            user: {
+                user_id: employeeId.toString(),
+                role: ROLES.TEAM_LEAD,
+                role_keys: [SYSTEM_ROLE_KEYS.TEAM_LEAD],
+                // Holds only the second of the two — should still pass.
+                permissions: [PERMISSIONS.PROJECT_ARCHIVE],
+            },
+        });
+        expect(result.ok).toBe(true);
+    });
+
+    it('forbids the caller when none of the requested permissions are held', () => {
+        const mw = middleware.requirePermission(PERMISSIONS.BILLING_RATE_WRITE);
+        const result = runMiddleware(mw, {
+            user: {
+                user_id: employeeId.toString(),
+                role: ROLES.EMPLOYEE,
+                role_keys: [SYSTEM_ROLE_KEYS.EMPLOYEE],
+                permissions: [PERMISSIONS.PROJECT_READ, PERMISSIONS.TASK_READ],
+            },
+        });
+        expect(result.ok).toBe(false);
+        expect(result.err).toMatchObject({ statusCode: 403 });
+    });
+
+    it('admin wildcard (system.admin) passes any requirePermission gate', () => {
+        // Admin holds only `system.admin` in storage; the gate must
+        // recognise it as a universal pass — otherwise admin would
+        // silently 403 on every other gate.
+        const mw = middleware.requirePermission(PERMISSIONS.BILLING_RATE_WRITE);
+        const result = runMiddleware(mw, {
+            user: {
+                user_id: adminId.toString(),
+                role: ROLES.ADMIN,
+                role_keys: [SYSTEM_ROLE_KEYS.ADMIN],
+                permissions: [PERMISSIONS.SYSTEM_ADMIN],
+            },
+        });
+        expect(result.ok).toBe(true);
+    });
+
+    it('legacy admin token without role_keys / permissions still passes (Phase B compat)', () => {
+        // Tokens issued BEFORE the Step-47 deploy don't carry the new
+        // claims — the legacy `role: 'admin'` field alone must still
+        // be honoured during the migration window. Otherwise every
+        // admin in flight would 403 on the first permission-gated
+        // route after deploy, even if they have a fresh JWT.
+        const mw = middleware.requirePermission(PERMISSIONS.PROJECT_WRITE);
+        const result = runMiddleware(mw, {
+            user: { user_id: adminId.toString(), role: ROLES.ADMIN },
+        });
+        expect(result.ok).toBe(true);
+    });
+
+    it('legacy non-admin token without permissions 403s (forces re-login on permission routes)', () => {
+        // Mirror image of the above: a legacy employee/manager token
+        // without `permissions` must NOT fall through. The 403 forces
+        // re-login, which mints a fresh JWT with populated permissions.
+        const mw = middleware.requirePermission(PERMISSIONS.PROJECT_WRITE);
+        const result = runMiddleware(mw, {
+            user: { user_id: employeeId.toString(), role: ROLES.EMPLOYEE },
+        });
+        expect(result.ok).toBe(false);
+        expect(result.err).toMatchObject({ statusCode: 403 });
+    });
+});
+
+// Step 47 Phase B has dropped the `authorize(...)` compat shim. All
+// route gates now use `requirePermission(...)` exclusively.

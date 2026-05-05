@@ -5,6 +5,7 @@ import { TaskAttachment, type TaskAttachmentDocument } from '../models/task-atta
 import { Task } from '../models/task.model.js';
 import type { ProjectDocument } from '../models/project.model.js';
 import { AppError } from '../utils/app-error.js';
+import { isAdminLike } from '../utils/role-check.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
@@ -65,7 +66,16 @@ import type {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-const isManagerOrAdmin = (role: string): boolean => role === ROLES.ADMIN || role === ROLES.MANAGER;
+/**
+ * Step 47: Team Lead is a project author within their projects, so they
+ * can moderate attachments (delete others', view soft-deleted) on tasks
+ * inside those projects — same authority a Manager has across the org.
+ */
+/** R4 — recognise multi-role admins via `role_keys`. */
+const isManagerOrAdmin = (caller: ProjectCaller): boolean => {
+    if (isAdminLike(caller)) return true;
+    return caller.role === ROLES.MANAGER || caller.role === ROLES.TEAM_LEAD;
+};
 
 const toPublic = (doc: TaskAttachmentDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
 
@@ -397,7 +407,7 @@ export const listAttachments = async (
     await loadTaskAndProject(taskId, caller);
 
     const filter: Record<string, unknown> = { task_id: taskId };
-    if (!(query.include_deleted && isManagerOrAdmin(caller.role))) {
+    if (!(query.include_deleted && isManagerOrAdmin(caller))) {
         filter.deleted_at = null;
     }
 
@@ -469,7 +479,7 @@ export const deleteAttachment = async (
     const { attachment, project } = await loadAttachmentForAccess(attachmentId, caller);
 
     const isUploader = attachment.uploaded_by.equals(caller.id);
-    if (!isUploader && !isManagerOrAdmin(caller.role)) {
+    if (!isUploader && !isManagerOrAdmin(caller)) {
         throw AppError.forbidden(
             'Only the uploader or an admin/manager can delete this attachment',
             ERROR_CODES.ATTACHMENT_DELETE_FORBIDDEN

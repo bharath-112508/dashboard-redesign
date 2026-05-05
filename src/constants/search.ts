@@ -1,31 +1,32 @@
 /**
  * Global-search constants (Step 32; API_Contract §13).
  *
- * One endpoint surfaces all four searchable collections. The contract
- * deliberately keeps the surface small — no fuzzy matching, no full-
- * text indexing in v1 — because the volume is bounded (a single-org
- * deployment) and case-insensitive regex against the indexed prefix
- * fields is comfortably under the 500 ms p95 target documented in
- * BUILD_PROGRESS Step 32 for <10 k docs per collection.
+ * One endpoint surfaces all four searchable collections. Phase-4 (this
+ * file's current state) implements the hybrid `regex` + `$text` path:
  *
- * Phase-4 upgrade path:
- *   - Add a text index on each searchable collection
- *     (`{name: 'text', code: 'text', ...}`)
- *   - Switch `buildRegex` callers to `{$text: {$search: q}}`
- *   - Or graduate to Atlas Search if/when fuzzy/typo-tolerance lands
- *     on the roadmap.
+ *   - **q.length < `TEXT_SEARCH_MIN_QUERY_LENGTH`** (1-2 chars) →
+ *     case-insensitive regex on the legacy single-field set
+ *     (`name`/`code`/`title`). Required for typeahead — Mongo's
+ *     `$text` tokenises by whitespace so `proj` won't match
+ *     `project`. Regex is the only way to match prefix substrings.
+ *   - **q.length ≥ `TEXT_SEARCH_MIN_QUERY_LENGTH`** → `$text:$search`
+ *     against the per-collection text index (Step 33). Faster on
+ *     large collections (text indexes use word tries); also gains
+ *     stemming + stopword handling from Mongo.
+ *
+ * `users` bucket stays regex-only at every length: $text on users
+ * spans `full_name + email + employee_id + job_title`, but the
+ * Step-32 PII contract forbids matching on email — switching to
+ * $text would silently widen the surface. Custom per-field $text
+ * isn't a thing in Mongo, so regex is the only correct option.
+ *
+ * Future-graduation path: Atlas Search / Elasticsearch once fuzzy
+ * matching, typo tolerance, or per-field $text become must-haves.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
-// ─── RBAC ───────────────────────────────────────────────────────────────
-//
-// Every authenticated role reaches the endpoint; the *response* is
-// scoped per-role inside the service. Role-level access is broad
-// (everyone gets typeahead) so the gate just checks authentication —
-// nothing more. Per-bucket rules live in `search.service`.
-
-export const SEARCH_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT];
+// Step 47: route gate is just `authenticate` — every authenticated
+// role reaches the endpoint. Per-bucket scoping lives in
+// `search.service`.
 
 // ─── Searchable types ──────────────────────────────────────────────────
 //
@@ -52,3 +53,13 @@ export const SEARCH_MAX_LIMIT = 50;
 
 export const SEARCH_MIN_QUERY_LENGTH = 2;
 export const SEARCH_MAX_QUERY_LENGTH = 100;
+
+// ─── $text vs regex threshold ──────────────────────────────────────────
+//
+// Above this length we route through Mongo's text index; below it we
+// stay on regex (typeahead UX). 3 is the smallest length where stemming
+// + whole-word matching produce useful hits without too many false
+// negatives. A 2-char query like "al" can't be a meaningful $text token
+// — Mongo tokenises by whitespace and won't match "al" against "alice".
+
+export const TEXT_SEARCH_MIN_QUERY_LENGTH = 3;

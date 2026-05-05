@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as service from '../services/holiday.service.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import { created, noContent, ok } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import type {
@@ -23,14 +24,19 @@ const parseTargetId = (req: Request): Types.ObjectId => new Types.ObjectId(req.p
 // ─── POST /holidays ────────────────────────────────────────────────────────
 
 export const postCreate = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.createHoliday(req.body as CreateHolidayBody, callerId(req));
+    // I1 — thread audit context so admin holiday-calendar mutations are traceable.
+    const data = await service.createHoliday(req.body as CreateHolidayBody, callerId(req), buildAuditContext(req));
     return created(res, data);
 };
 
 // ─── POST /holidays/bulk ──────────────────────────────────────────────────
 
 export const postBulk = async (req: Request, res: Response): Promise<Response> => {
-    const result = await service.bulkCreateHolidays(req.body as BulkCreateHolidaysBody, callerId(req));
+    const result = await service.bulkCreateHolidays(
+        req.body as BulkCreateHolidaysBody,
+        callerId(req),
+        buildAuditContext(req)
+    );
     // 201 even when some rows skipped — the new rows were created. The
     // payload tells the caller exactly which ones got in and which didn't.
     return created(res, result);
@@ -46,13 +52,13 @@ export const getList = async (req: Request, res: Response): Promise<Response> =>
 // ─── PATCH /holidays/:id ──────────────────────────────────────────────────
 
 export const patchOne = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.updateHoliday(parseTargetId(req), req.body as PatchHolidayBody);
+    const data = await service.updateHoliday(parseTargetId(req), req.body as PatchHolidayBody, buildAuditContext(req));
     return ok(res, data);
 };
 
 // ─── DELETE /holidays/:id ─────────────────────────────────────────────────
 
 export const deleteOne = async (req: Request, res: Response): Promise<Response> => {
-    await service.deleteHoliday(parseTargetId(req));
+    await service.deleteHoliday(parseTargetId(req), buildAuditContext(req));
     return noContent(res);
 };

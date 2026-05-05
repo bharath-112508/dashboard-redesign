@@ -25,8 +25,6 @@
  *     the Data_Model enum predates the Story step.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
 // ─── Activity types (Data_Model §5.7 + Step 20 story hook) ──────────────
 
 export const TASK_ACTIVITY_TYPES = {
@@ -59,13 +57,9 @@ export const TASK_ACTIVITY_TYPE_VALUES: readonly TaskActivityType[] = Object.val
 export const ACTIVITY_LIST_DEFAULT_LIMIT = 20;
 export const ACTIVITY_LIST_MAX_LIMIT = 100;
 
-// ─── RBAC ────────────────────────────────────────────────────────────────
-//
-// Project visibility is the gate. Any role with read access to the parent
-// task can read its activity feed; the service composes the parent
-// project's visibility filter.
-
-export const ACTIVITY_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT];
+// Step 47: route gate is `requirePermission(task.read)` — same as the
+// parent task. Project visibility scoping happens inside the service
+// via `loadProjectForCaller`.
 
 // ─── Field caps ──────────────────────────────────────────────────────────
 //

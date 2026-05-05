@@ -13,8 +13,6 @@
  *    Employees / Clients receive `403 STORY_WRITE_FORBIDDEN`.
  */
 
-import { ROLES } from './roles.js';
-
 // ─── Field caps ──────────────────────────────────────────────────────────
 
 export const STORY_TITLE_MAX = 200;
@@ -57,13 +55,6 @@ export const BLOCKED_TASK_STATUS_KEY = 'blocked';
 /** Default task-status key considered terminal (joined with project's `is_terminal: true` customs). */
 export const DEFAULT_DONE_TASK_STATUS_KEY = 'done';
 
-// ─── RBAC role sets ──────────────────────────────────────────────────────
-
-/** Roles allowed to write stories (create/patch/delete/reorder). */
-export const STORY_WRITE_ROLES = [ROLES.ADMIN, ROLES.MANAGER] as const;
-
-/**
- * All authenticated roles can read; service-layer project visibility (via
- * `project.service.loadProjectForCaller`) narrows further per role.
- */
-export const STORY_READ_ROLES = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT] as const;
+// Step 47: route gates use `requirePermission(project.read)` for reads
+// and `requirePermission(story.write)` for writes. Project visibility
+// scoping is in `project.service.loadProjectForCaller`.

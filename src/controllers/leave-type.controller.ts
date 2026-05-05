@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as service from '../services/leave-type.service.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import { created, ok } from '../utils/api-response.js';
 import type {
     CreateLeaveTypeBody,
@@ -18,16 +19,18 @@ export const getList = async (req: Request, res: Response): Promise<Response> =>
 };
 
 export const postCreate = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.createLeaveType(req.body as CreateLeaveTypeBody);
+    // I1 — admin leave-type CRUD audited so changes to allocation / cap /
+    // pro-rata strategy are traceable.
+    const data = await service.createLeaveType(req.body as CreateLeaveTypeBody, buildAuditContext(req));
     return created(res, data);
 };
 
 export const patchOne = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.updateLeaveType(parseId(req), req.body as PatchLeaveTypeBody);
+    const data = await service.updateLeaveType(parseId(req), req.body as PatchLeaveTypeBody, buildAuditContext(req));
     return ok(res, data);
 };
 
 export const deactivate = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.deactivateLeaveType(parseId(req));
+    const data = await service.deactivateLeaveType(parseId(req), buildAuditContext(req));
     return ok(res, data);
 };

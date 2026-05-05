@@ -15,6 +15,24 @@ import { runJob, type JobContext, type RunJobOptions, type RunJobResult } from '
 /**
  * 14.2 Monthly SL forfeiture (Plan §8 row 2, Data_Model §3.5).
  *
+ * **CURRENT POLICY (Phase 4 cleanup):** Sick Leave's `monthly_forfeiture`
+ * flag is **`false`** in the seed (see `LEAVE_TYPE_SEEDS`) — unused
+ * monthly buckets carry forward within the same calendar year and only
+ * reset at year-end (handled by `leaveYearRolloverJob`). Under that
+ * policy this cron is a **structural no-op** for SL: the `findOne`
+ * below filters on `monthly_forfeiture: true` and returns null, the
+ * job logs the "no eligible SL leave type configured — skipping"
+ * warning once a month, and returns the empty summary.
+ *
+ * The cron is intentionally retained (not deleted) so that:
+ *  1. A future leave type that opts back into monthly forfeiture
+ *     (`monthly_forfeiture: true`) gets the same treatment without
+ *     re-introducing the cron.
+ *  2. A future business-policy change that re-enables SL forfeiture
+ *     is a one-line seed flip — code + tests already in place.
+ *
+ * ─── Original behaviour (when `monthly_forfeiture: true`) ────────────
+ *
  * Last day of each month at 23:55 IST. For every active internal user, if
  * they used **0 SL** in the closing calendar month, decrement that month's
  * entitlement by `monthly_cap` (1 in v1) and write a `sl_monthly_forfeitures`
@@ -22,18 +40,27 @@ import { runJob, type JobContext, type RunJobOptions, type RunJobResult } from '
  * `available` shrinks) and is the same record the apply-time SL engine
  * already reads for "this month is exhausted".
  *
- * Idempotency:
- *  - **Run-key** is `YYYY-MM` of today (IST). Calling the job twice in the
- *    same month is a no-op via the `job_runs` unique index.
+ * Idempotency (post-T3):
+ *  - **Run-key** is `YYYY-MM-DD` of today (IST) — one row per daily
+ *    fire. Pre-T3 the run-key was `YYYY-MM`, which combined with daily
+ *    firing locked the cron out: the day-1 fire claimed the lock, the
+ *    day-of-month gate skipped, and the row was marked `success` —
+ *    so the day-30/31 fire (when forfeiture should actually run)
+ *    found the existing `success` row and never executed. T3 fixed
+ *    this two ways: cron expression narrowed to `'55 23 28-31 * *'`
+ *    (only fires on possible-last days) AND run-key broadened to
+ *    `YYYY-MM-DD` (each fire claims its own row).
  *  - **Per-user dedupe** is enforced by the `(user_id, year, month)` unique
  *    index on `sl_monthly_forfeitures`. A duplicate insert raises E11000
  *    which we count as `already_forfeited` instead of erroring.
  *
  * Day-of-month gate:
- *  - The cron expression fires daily at 23:55 IST (because node-cron does
- *    not support the "last day" `L` token). The job no-ops unless `today`
- *    is the actual last day of the month — protecting against partial fires
- *    if you ever want to call it from a one-off script.
+ *  - The cron now fires only on days 28-31 (T3). The inner
+ *    `isLastDayOfMonth` check still no-ops the non-last days within
+ *    that window (Feb 28 in non-leap years, Apr/Jun/Sep/Nov 30) so
+ *    only the actual last-day fire runs the forfeiture pass. The
+ *    once-per-month invariant is enforced by THIS gate, not by the
+ *    run-key (which now permits multiple rows in the same month).
  */
 
 const isLastDayOfMonth = (now: Date): boolean => {
@@ -191,6 +218,11 @@ export const runSlMonthlyForfeiture = (now: Date = new Date(), opts: RunJobOptio
             const d = dayjs(now).tz(DEFAULT_TIMEZONE);
             return forfeitSlForMonth(d.year(), d.month() + 1, ctx.log);
         },
-        opts
+        // BACKEND_AUDIT.md P1-6 — retry up to 3 times on transient
+        // errors. The next scheduled run is a month away; a Mongo blip
+        // here would otherwise skip the entire month. Caller-supplied
+        // `maxAttempts` (e.g. from a manual one-off run) takes
+        // precedence.
+        { maxAttempts: 3, ...opts }
     );
 };

@@ -23,14 +23,9 @@
  *      `GET /audit-archives/:id/verify`.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
-// ─── RBAC ───────────────────────────────────────────────────────────────
-//
-// Same gate as Step-31 audit-log reads — admin-only. Even managers
-// don't see the archive list; the surface is forensic.
-
-export const AUDIT_ARCHIVE_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN];
+// Step 47: route gate is `requirePermission(audit_archive.read)` —
+// admin-only. Even managers don't see the archive list; the surface is
+// forensic.
 
 // ─── Retention threshold ────────────────────────────────────────────────
 //

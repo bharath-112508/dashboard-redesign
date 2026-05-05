@@ -3,8 +3,10 @@ import { Types } from 'mongoose';
 import { LeaveType, type LeaveTypeDocument } from '../models/leave-type.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { LEAVE_TYPE_SEEDS, type LeaveCode } from '../constants/leave.js';
 import logger from '../utils/logger.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
 import type { CreateLeaveTypeBody, PatchLeaveTypeBody } from '../validators/leave-type.validator.js';
 
 /**
@@ -73,7 +75,10 @@ export const listLeaveTypes = async (filters: { is_active?: boolean }): Promise<
 
 // ─── POST /leave-types ────────────────────────────────────────────────────
 
-export const createLeaveType = async (input: CreateLeaveTypeBody): Promise<Record<string, unknown>> => {
+export const createLeaveType = async (
+    input: CreateLeaveTypeBody,
+    audit?: AuditContext
+): Promise<Record<string, unknown>> => {
     try {
         const doc = await LeaveType.create({
             code: input.code,
@@ -92,6 +97,13 @@ export const createLeaveType = async (input: CreateLeaveTypeBody): Promise<Recor
             resets_yearly: input.resets_yearly,
             is_active: input.is_active ?? true,
         });
+        if (audit) {
+            await recordAudit(audit, {
+                action: AUDIT_ACTIONS.LEAVE_TYPE_CREATE,
+                target: { kind: AUDIT_TARGET_KINDS.LEAVE_TYPE, id: doc._id },
+                after: toPublic(doc),
+            });
+        }
         return toPublic(doc);
     } catch (err: unknown) {
         if (isE11000(err)) {
@@ -107,12 +119,15 @@ export const createLeaveType = async (input: CreateLeaveTypeBody): Promise<Recor
 
 export const updateLeaveType = async (
     id: Types.ObjectId,
-    patch: PatchLeaveTypeBody
+    patch: PatchLeaveTypeBody,
+    audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     const doc = await LeaveType.findById(id);
     if (!doc) {
         throw AppError.notFound('Leave type not found', ERROR_CODES.RESOURCE_NOT_FOUND);
     }
+
+    const before = toPublic(doc);
 
     if (patch.name !== undefined) doc.name = patch.name;
     if (patch.default_allocation_days !== undefined) doc.default_allocation_days = patch.default_allocation_days;
@@ -131,12 +146,25 @@ export const updateLeaveType = async (
     if (patch.is_active !== undefined) doc.is_active = patch.is_active;
 
     await doc.save();
+
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.LEAVE_TYPE_UPDATE,
+            target: { kind: AUDIT_TARGET_KINDS.LEAVE_TYPE, id: doc._id },
+            before,
+            after: toPublic(doc),
+        });
+    }
+
     return toPublic(doc);
 };
 
 // ─── POST /leave-types/:id/deactivate ─────────────────────────────────────
 
-export const deactivateLeaveType = async (id: Types.ObjectId): Promise<Record<string, unknown>> => {
+export const deactivateLeaveType = async (
+    id: Types.ObjectId,
+    audit?: AuditContext
+): Promise<Record<string, unknown>> => {
     const doc = await LeaveType.findById(id);
     if (!doc) {
         throw AppError.notFound('Leave type not found', ERROR_CODES.RESOURCE_NOT_FOUND);
@@ -144,6 +172,14 @@ export const deactivateLeaveType = async (id: Types.ObjectId): Promise<Record<st
     if (doc.is_active) {
         doc.is_active = false;
         await doc.save();
+        if (audit) {
+            await recordAudit(audit, {
+                action: AUDIT_ACTIONS.LEAVE_TYPE_DEACTIVATE,
+                target: { kind: AUDIT_TARGET_KINDS.LEAVE_TYPE, id: doc._id },
+                before: { is_active: true },
+                after: { is_active: false },
+            });
+        }
     }
     return toPublic(doc);
 };

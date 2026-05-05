@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/task.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { TASK_PATCH_ROLES, TASK_READ_ROLES, TASK_WRITE_ROLES } from '../constants/task.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     addDependencyBodySchema,
     assignStoryBodySchema,
@@ -42,29 +42,39 @@ router.use(authenticate);
 
 // ─── List + create ───────────────────────────────────────────────────────
 
-router.get('/', authorize(...TASK_READ_ROLES), validate({ query: listTasksQuerySchema }), asyncHandler(ctrl.getList));
+router.get(
+    '/',
+    requirePermission(PERMISSIONS.TASK_READ),
+    validate({ query: listTasksQuerySchema }),
+    asyncHandler(ctrl.getList)
+);
 
 router.post(
     '/',
-    authorize(...TASK_WRITE_ROLES),
+    requirePermission(PERMISSIONS.TASK_WRITE),
     validate({ body: createTaskBodySchema }),
     asyncHandler(ctrl.postCreate)
 );
 
 // ─── Item ────────────────────────────────────────────────────────────────
 
-router.get('/:id', authorize(...TASK_READ_ROLES), validate({ params: taskIdParamSchema }), asyncHandler(ctrl.getOne));
+router.get(
+    '/:id',
+    requirePermission(PERMISSIONS.TASK_READ),
+    validate({ params: taskIdParamSchema }),
+    asyncHandler(ctrl.getOne)
+);
 
 router.patch(
     '/:id',
-    authorize(...TASK_PATCH_ROLES),
+    requirePermission(PERMISSIONS.TASK_WRITE),
     validate({ params: taskIdParamSchema, body: patchTaskBodySchema }),
     asyncHandler(ctrl.patchOne)
 );
 
 router.delete(
     '/:id',
-    authorize(...TASK_WRITE_ROLES),
+    requirePermission(PERMISSIONS.TASK_WRITE),
     validate({ params: taskIdParamSchema }),
     asyncHandler(ctrl.deleteOne)
 );
@@ -77,35 +87,35 @@ router.post(
     // restricts to admin/manager OR the task's assignee. Putting the role
     // check there keeps the assignee logic in one place rather than
     // requiring a custom middleware that needs to load the task.
-    authorize(...TASK_READ_ROLES),
+    requirePermission(PERMISSIONS.TASK_READ),
     validate({ params: taskIdParamSchema, body: reorderTaskBodySchema }),
     asyncHandler(ctrl.postReorder)
 );
 
 router.post(
     '/:id/assign-story',
-    authorize(...TASK_WRITE_ROLES),
+    requirePermission(PERMISSIONS.TASK_WRITE),
     validate({ params: taskIdParamSchema, body: assignStoryBodySchema }),
     asyncHandler(ctrl.postAssignStory)
 );
 
 router.post(
     '/:id/move-sprint',
-    authorize(...TASK_WRITE_ROLES),
+    requirePermission(PERMISSIONS.TASK_WRITE),
     validate({ params: taskIdParamSchema, body: moveSprintBodySchema }),
     asyncHandler(ctrl.postMoveSprint)
 );
 
 router.post(
     '/:id/dependencies',
-    authorize(...TASK_WRITE_ROLES),
+    requirePermission(PERMISSIONS.TASK_WRITE),
     validate({ params: taskIdParamSchema, body: addDependencyBodySchema }),
     asyncHandler(ctrl.postAddDependency)
 );
 
 router.delete(
     '/:id/dependencies/:dep_id',
-    authorize(...TASK_WRITE_ROLES),
+    requirePermission(PERMISSIONS.TASK_WRITE),
     validate({ params: taskDependencyParamsSchema }),
     asyncHandler(ctrl.deleteDependency)
 );

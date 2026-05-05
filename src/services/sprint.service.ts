@@ -2,9 +2,11 @@ import { Types } from 'mongoose';
 
 import { Sprint, type SprintDocument } from '../models/sprint.model.js';
 import { type ProjectDocument } from '../models/project.model.js';
+import { Task } from '../models/task.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { ROLES, type RoleType } from '../constants/roles.js';
+import { type RoleType } from '../constants/roles.js';
+import { isProjectAuthor } from '../utils/role-check.js';
 import { type SprintStatus } from '../constants/project.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { recordAudit } from './audit.service.js';
@@ -86,6 +88,16 @@ export const listSprints = async (
 
     const filter: Record<string, unknown> = { project_id: project._id };
     if (query.status) filter.status = query.status;
+    // F1 — archived sprints are excluded from the default list view.
+    // When the caller wants the archive UI bucket, they pass
+    // `?is_archived=true` explicitly. When they want a mixed view
+    // (e.g. analytics) they pass `?is_archived=false` for symmetry —
+    // omitting the param keeps the default-active contract.
+    if (query.is_archived === undefined) {
+        filter.is_archived = false;
+    } else {
+        filter.is_archived = query.is_archived;
+    }
 
     const skip = (query.page - 1) * query.limit;
     const [rows, total] = await Promise.all([
@@ -128,10 +140,12 @@ export const updateSprint = async (
     patch: PatchSprintBody,
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
-    // Writes require manager-or-above; the route already gates this, but we
-    // double-check inside the service so a future call site can't accidentally
-    // bypass it.
-    if (caller.role !== ROLES.ADMIN && caller.role !== ROLES.MANAGER) {
+    // Defence-in-depth — route already enforces `requirePermission(SPRINT_WRITE)`.
+    // H2 — Team Lead holds `sprint.write` per the Step-47 role bundle, so the
+    // service-layer check must accept Admin / Manager / Team Lead. Pre-H2 the
+    // gate compared role-string against admin/manager only, contradicting the
+    // bundle and 403'ing Team Leads who'd already passed the route gate.
+    if (!isProjectAuthor(caller)) {
         throw AppError.forbidden();
     }
 
@@ -167,16 +181,37 @@ export const updateSprint = async (
 
 // ─── DELETE /sprints/:id ─────────────────────────────────────────────────
 //
-// Tasks reference `sprint_id`; until Step 18 ships there can be none, so a
-// hard delete is fine. When tasks land, this becomes "set sprint_id = null
-// on all tasks in this sprint, then delete" (a deliberate move-to-backlog).
+// Refuse the delete if any tasks reference this sprint (BACKEND_AUDIT.md
+// R3). The "move to backlog" alternative — null out `sprint_id` on every
+// task — is a deliberate user action via PATCH /tasks/:id and shouldn't
+// be a side effect of a sprint delete: a manager who deletes a sprint
+// rarely wants the work disappeared from any sprint at all.
+//
+// T11 escape hatch: an ARCHIVED sprint (`is_archived: true`) is allowed
+// to delete even with lingering tasks. The archive flag is the operator's
+// explicit acknowledgement of "this sprint is decommissioned; delete the
+// row even though tasks may still reference it" — exactly the workflow
+// R3 was missing.
 
 export const deleteSprint = async (sprintId: Types.ObjectId, caller: ProjectCaller): Promise<void> => {
-    if (caller.role !== ROLES.ADMIN && caller.role !== ROLES.MANAGER) {
+    // H2 — Team Lead holds `sprint.write`; see updateSprint comment.
+    if (!isProjectAuthor(caller)) {
         throw AppError.forbidden();
     }
 
     const { sprint, project } = await loadSprintAndProject(sprintId, caller);
+
+    if (!sprint.is_archived) {
+        const taskCount = await Task.countDocuments({ sprint_id: sprintId });
+        if (taskCount > 0) {
+            throw AppError.conflict(
+                'Sprint has tasks; archive it first (POST /sprints/:id/archive) or PATCH each task to a different sprint before deleting.',
+                ERROR_CODES.RESOURCE_HAS_DEPENDENTS,
+                { tasks: taskCount }
+            );
+        }
+    }
+
     const before = toPublic(sprint);
 
     await sprint.deleteOne();
@@ -189,4 +224,75 @@ export const deleteSprint = async (sprintId: Types.ObjectId, caller: ProjectCall
             metadata: { project_id: project._id.toString() },
         });
     }
+};
+
+// ─── POST /sprints/:id/archive (T11) ─────────────────────────────────────
+//
+// Flip `is_archived: true` on the sprint. Idempotent — calling on an
+// already-archived sprint is a no-op success. After archive, the
+// `R3` dependant-refusal in `deleteSprint` is bypassed: an archived
+// sprint can be deleted even with lingering tasks.
+
+export const archiveSprint = async (
+    sprintId: Types.ObjectId,
+    caller: ProjectCaller
+): Promise<Record<string, unknown>> => {
+    // H2 — Team Lead holds `sprint.write`; see updateSprint comment.
+    if (!isProjectAuthor(caller)) {
+        throw AppError.forbidden();
+    }
+
+    const { sprint, project } = await loadSprintAndProject(sprintId, caller);
+
+    if (sprint.is_archived) {
+        return toPublic(sprint);
+    }
+
+    const before = { is_archived: sprint.is_archived };
+    sprint.is_archived = true;
+    await sprint.save();
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.SPRINT_ARCHIVE,
+            target: { kind: AUDIT_TARGET_KINDS.SPRINT, id: sprint._id },
+            before,
+            after: { is_archived: sprint.is_archived },
+            metadata: { project_id: project._id.toString() },
+        });
+    }
+
+    return toPublic(sprint);
+};
+
+export const unarchiveSprint = async (
+    sprintId: Types.ObjectId,
+    caller: ProjectCaller
+): Promise<Record<string, unknown>> => {
+    // H2 — Team Lead holds `sprint.write`; see updateSprint comment.
+    if (!isProjectAuthor(caller)) {
+        throw AppError.forbidden();
+    }
+
+    const { sprint, project } = await loadSprintAndProject(sprintId, caller);
+
+    if (!sprint.is_archived) {
+        return toPublic(sprint);
+    }
+
+    const before = { is_archived: sprint.is_archived };
+    sprint.is_archived = false;
+    await sprint.save();
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.SPRINT_UNARCHIVE,
+            target: { kind: AUDIT_TARGET_KINDS.SPRINT, id: sprint._id },
+            before,
+            after: { is_archived: sprint.is_archived },
+            metadata: { project_id: project._id.toString() },
+        });
+    }
+
+    return toPublic(sprint);
 };

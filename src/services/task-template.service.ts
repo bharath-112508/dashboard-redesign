@@ -7,6 +7,7 @@ import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { isProjectAuthor } from '../utils/role-check.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { TASK_TEMPLATE_RECURRENCE_MAX_PER_RUN } from '../constants/task-template.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
@@ -56,9 +57,16 @@ export interface TemplateCaller {
     audit?: AuditContext;
 }
 
+// H2 — Team Lead holds `task_template.write` per the Step-47 system-role
+// bundle. Pre-H2 the gate compared role-string against admin/manager only
+// and 403'd Team Leads who'd already passed the route's
+// `requirePermission(TASK_TEMPLATE_WRITE)` gate.
 const requireWriter = (caller: TemplateCaller): void => {
-    if (caller.role !== ROLES.ADMIN && caller.role !== ROLES.MANAGER) {
-        throw AppError.forbidden('Only admins and managers can manage task templates', ERROR_CODES.FORBIDDEN);
+    if (!isProjectAuthor(caller)) {
+        throw AppError.forbidden(
+            'Only admins, managers, and team leads can manage task templates',
+            ERROR_CODES.FORBIDDEN
+        );
     }
 };
 

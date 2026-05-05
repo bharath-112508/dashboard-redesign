@@ -269,22 +269,28 @@ describe('runExport (failure paths)', () => {
         expect(putBlobMock).not.toHaveBeenCalled();
     });
 
-    it('marks failed with EXPORT_PDF_NOT_AVAILABLE for pdf format', async () => {
+    it('PDF format now succeeds via the default pdfkit engine (Step-30 follow-up landed)', async () => {
+        // Phase-4 cleanup — the legacy `EXPORT_PDF_NOT_AVAILABLE`
+        // stub was replaced by the pluggable generator factory
+        // (`pdf-generators/`). The default `pdfkit` engine works on
+        // any Node deploy without infra changes, so a `format: 'pdf'`
+        // request now produces a real PDF and uploads it. The
+        // fail-with-EXPORT_PDF_NOT_AVAILABLE path is still wired —
+        // it surfaces only when a future config selects the
+        // `puppeteer` engine without the package installed.
         const row = makeRow({ format: 'pdf' });
         reportExportFindOneAndUpdateMock.mockResolvedValueOnce(row);
         buildBillingReportMock.mockResolvedValueOnce(billingReportFixture());
 
         await svc.runExport(row._id);
 
-        const failedCall = reportExportFindByIdAndUpdateMock.mock.calls.find(
-            (c) => (c[1] as { $set: { status: string } }).$set.status === EXPORT_STATUSES.FAILED
+        const readyUpdate = reportExportFindByIdAndUpdateMock.mock.calls.find(
+            (c) => (c[1] as { $set: { status: string } }).$set.status === EXPORT_STATUSES.READY
         );
-        expect(failedCall).toBeDefined();
-        const set = (failedCall![1] as { $set: { error_code: string } }).$set;
-        expect(set.error_code).toBe('EXPORT_PDF_NOT_AVAILABLE');
-
-        // Upload never attempted — generator threw before the upload step.
-        expect(putBlobMock).not.toHaveBeenCalled();
+        expect(readyUpdate).toBeDefined();
+        // The blob upload happened — verifies the generator returned
+        // a non-empty buffer the worker actually shipped.
+        expect(putBlobMock).toHaveBeenCalledTimes(1);
     });
 
     it('is a no-op when the row was already flipped past pending (concurrent worker)', async () => {

@@ -129,6 +129,15 @@ vi.mock('./profile-photo.service.js', () => ({
     signProfilePhotoUrl: vi.fn(() => null),
 }));
 
+// Step 47 — auth.service now resolves role_keys + permissions on every
+// login / refresh / getMe via `role.service`. We mock the resolver to
+// return an inert empty set so this suite stays focused on auth.service
+// itself; the role.service tests cover the resolver in isolation.
+vi.mock('./role.service.js', () => ({
+    resolvePermissionsForUser: vi.fn(async () => ({ role_keys: ['employee'], permissions: [] })),
+    ensureLegacyRoleAssigned: vi.fn(async () => undefined),
+}));
+
 const auth = await import('./auth.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
@@ -174,6 +183,11 @@ beforeEach(() => {
     refreshUpdateOneMock.mockResolvedValue({ modifiedCount: 1 });
     refreshUpdateManyMock.mockResolvedValue({ modifiedCount: 0 });
     userUpdateOneMock.mockResolvedValue({});
+    // P2-14 — `enforceSessionCap` calls `RefreshToken.countDocuments`
+    // on every login / MFA-completion path. Default to "well under
+    // the cap" so the eviction branch isn't triggered; tests that
+    // exercise the cap override per-call.
+    refreshCountMock.mockResolvedValue(0);
 });
 
 // ─── Login ────────────────────────────────────────────────────────────────
@@ -342,6 +356,169 @@ describe('login', () => {
                 $set: expect.objectContaining({ failed_login_attempts: 0, locked_until: null }),
             })
         );
+    });
+
+    it('R7 — normalises mixed-case / padded email before the lookup query', async () => {
+        // Direct service call (bypassing the Zod validator that already
+        // lowercases). The defence-in-depth normalisation in the
+        // service must still produce the lowercased query.
+        const u = baseUser({ email: 'jane@example.com' });
+        userFindOneMock.mockReturnValueOnce(selectStub(u));
+        verifyPasswordMock.mockResolvedValueOnce(true);
+        tokenPair();
+
+        await auth.login({ email: '  Jane@Example.COM  ', password: 'right' });
+
+        const queryArg = userFindOneMock.mock.calls[0][0] as { email: string };
+        expect(queryArg.email).toBe('jane@example.com');
+    });
+});
+
+// ─── Per-user session cap (BACKEND_AUDIT.md P2-14) ───────────────────────
+
+describe('per-user session cap on login', () => {
+    // The cap kicks in only on login-style flows (no `replaces_token_id`)
+    // — refresh-rotation already revokes the predecessor row and so doesn't
+    // grow the active count. These tests pin both halves: cap enforced on
+    // login, cap NOT enforced on refresh.
+
+    const evictableSessionsMock = (oldestIds: Types.ObjectId[]) => {
+        // Mirrors the .find().sort().limit().select().lean() chain inside
+        // `enforceSessionCap`. Returns the pre-built id list as the lean
+        // payload so the helper's evict-by-id path runs.
+        refreshFindMock.mockReturnValueOnce({
+            sort: () => ({
+                limit: () => ({
+                    select: () => ({
+                        lean: () => Promise.resolve(oldestIds.map((id) => ({ _id: id }))),
+                    }),
+                }),
+            }),
+        });
+    };
+
+    it('does NOT evict when post-insert count is at or below the cap', async () => {
+        const u = baseUser();
+        userFindOneMock.mockReturnValueOnce(selectStub(u));
+        verifyPasswordMock.mockResolvedValueOnce(true);
+        tokenPair();
+        // R5 — count is sampled AFTER insert. 5 (well under MAX=20) → no eviction.
+        refreshCountMock.mockResolvedValueOnce(5);
+
+        await auth.login({ email: u.email, password: 'right' });
+
+        // No find / updateMany call from enforceSessionCap.
+        expect(refreshFindMock).not.toHaveBeenCalled();
+        expect(refreshUpdateManyMock).not.toHaveBeenCalled();
+    });
+
+    it('does NOT evict when post-insert count equals the cap exactly', async () => {
+        const u = baseUser();
+        userFindOneMock.mockReturnValueOnce(selectStub(u));
+        verifyPasswordMock.mockResolvedValueOnce(true);
+        tokenPair();
+        // R5 — count == MAX is the exact-fit case; no eviction needed.
+        refreshCountMock.mockResolvedValueOnce(20);
+
+        await auth.login({ email: u.email, password: 'right' });
+
+        expect(refreshFindMock).not.toHaveBeenCalled();
+        expect(refreshUpdateManyMock).not.toHaveBeenCalled();
+    });
+
+    it('evicts the oldest active session when post-insert count exceeds the cap', async () => {
+        const u = baseUser();
+        userFindOneMock.mockReturnValueOnce(selectStub(u));
+        verifyPasswordMock.mockResolvedValueOnce(true);
+        tokenPair();
+        // R5 — 21 active sessions post-insert → evict 1 to settle at MAX=20.
+        refreshCountMock.mockResolvedValueOnce(21);
+        const oldestId = new Types.ObjectId();
+        evictableSessionsMock([oldestId]);
+
+        await auth.login({ email: u.email, password: 'right' });
+
+        const evictCall = refreshUpdateManyMock.mock.calls.find((call) => {
+            const filter = call[0] as { _id?: { $in?: Types.ObjectId[] } };
+            return Array.isArray(filter._id?.$in);
+        });
+        expect(evictCall).toBeDefined();
+        expect((evictCall![0] as { _id: { $in: Types.ObjectId[] } })._id.$in).toEqual([oldestId]);
+        expect(refreshCreateMock).toHaveBeenCalled();
+    });
+
+    it('excludes the freshly-inserted row from eviction candidates (R5)', async () => {
+        // Race-condition guard: enforceSessionCap must never revoke the
+        // row we just minted — the find filter includes `_id: { $ne: freshRowId }`.
+        const u = baseUser();
+        userFindOneMock.mockReturnValueOnce(selectStub(u));
+        verifyPasswordMock.mockResolvedValueOnce(true);
+        const freshRowId = new Types.ObjectId();
+        // Use the longer-form tokenPair setup so we control the create return.
+        createAccessTokenMock.mockReturnValue({ token: 'a', expires_at: new Date('2026-01-01') });
+        createRefreshTokenMock.mockReturnValue({ token: 'r', expires_at: new Date('2026-01-06') });
+        sha256HexMock.mockReturnValue('hash');
+        refreshCreateMock.mockResolvedValue({ _id: freshRowId });
+        refreshCountMock.mockResolvedValueOnce(21);
+        evictableSessionsMock([new Types.ObjectId()]);
+
+        await auth.login({ email: u.email, password: 'right' });
+
+        const findFilter = refreshFindMock.mock.calls[0][0] as { _id?: { $ne?: Types.ObjectId } };
+        expect(findFilter._id?.$ne).toEqual(freshRowId);
+    });
+
+    it('evicts MULTIPLE oldest sessions when post-insert count is well over the cap', async () => {
+        // Edge case: a previous deploy ran without the cap, leaving N
+        // active sessions for one user where N >> 20. R5 — `count - MAX`
+        // rows to bring the post-insert count down to exactly 20.
+        const u = baseUser();
+        userFindOneMock.mockReturnValueOnce(selectStub(u));
+        verifyPasswordMock.mockResolvedValueOnce(true);
+        tokenPair();
+        refreshCountMock.mockResolvedValueOnce(26); // 26 - 20 = 6 evictions
+        const oldestIds = Array.from({ length: 6 }, () => new Types.ObjectId());
+        evictableSessionsMock(oldestIds);
+
+        await auth.login({ email: u.email, password: 'right' });
+
+        const evictCall = refreshUpdateManyMock.mock.calls.find((call) => {
+            const filter = call[0] as { _id?: { $in?: Types.ObjectId[] } };
+            return Array.isArray(filter._id?.$in);
+        });
+        expect(evictCall).toBeDefined();
+        const evicted = (evictCall![0] as { _id: { $in: Types.ObjectId[] } })._id.$in;
+        expect(evicted).toHaveLength(6);
+    });
+
+    it('does NOT enforce the cap on the refresh-rotation path', async () => {
+        // Refresh already revokes the prior row, so the active count
+        // is balanced. Imposing the cap there would mean a heavy-user's
+        // hourly refresh fight stale-session cleanup unnecessarily.
+        const u = baseUser();
+        const refreshTokenRow = {
+            _id: new Types.ObjectId(),
+            user_id: u._id,
+            revoked_at: null,
+            replaced_by_token_id: null,
+            expires_at: new Date(Date.now() + 86400_000),
+        };
+        verifyRefreshTokenMock.mockReturnValueOnce({
+            user_id: u._id.toString(),
+            role: u.role,
+            role_keys: ['employee'],
+            permissions: [],
+        });
+        sha256HexMock.mockReturnValueOnce('hash:incoming');
+        refreshFindOneMock.mockResolvedValueOnce(refreshTokenRow);
+        userFindByIdMock.mockReturnValueOnce(selectStub(u));
+        tokenPair();
+
+        await auth.refreshTokens({ refresh_token: 'old.jwt' });
+
+        // countDocuments must NOT have been called from the refresh
+        // path — that's the contract.
+        expect(refreshCountMock).not.toHaveBeenCalled();
     });
 });
 

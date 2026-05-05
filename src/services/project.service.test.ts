@@ -31,6 +31,10 @@ const {
     projectFindOneMock,
     userFindMock,
     recordAuditMock,
+    sprintCountDocumentsMock,
+    storyCountDocumentsMock,
+    taskCountDocumentsMock,
+    projectUpdateOneMock,
 } = vi.hoisted(() => ({
     projectCreateMock: vi.fn(),
     projectFindByIdMock: vi.fn(),
@@ -39,6 +43,10 @@ const {
     projectFindOneMock: vi.fn(),
     userFindMock: vi.fn(),
     recordAuditMock: vi.fn(),
+    sprintCountDocumentsMock: vi.fn(),
+    storyCountDocumentsMock: vi.fn(),
+    taskCountDocumentsMock: vi.fn(),
+    projectUpdateOneMock: vi.fn(),
 }));
 
 vi.mock('../models/project.model.js', () => ({
@@ -48,11 +56,22 @@ vi.mock('../models/project.model.js', () => ({
         find: projectFindMock,
         countDocuments: projectCountDocumentsMock,
         findOne: projectFindOneMock,
+        updateOne: projectUpdateOneMock,
     },
 }));
 
 vi.mock('../models/user.model.js', () => ({
     User: { find: userFindMock, findById: vi.fn() },
+}));
+
+vi.mock('../models/sprint.model.js', () => ({
+    Sprint: { countDocuments: sprintCountDocumentsMock },
+}));
+vi.mock('../models/story.model.js', () => ({
+    Story: { countDocuments: storyCountDocumentsMock },
+}));
+vi.mock('../models/task.model.js', () => ({
+    Task: { countDocuments: taskCountDocumentsMock },
 }));
 
 vi.mock('./audit.service.js', () => ({
@@ -181,6 +200,13 @@ const mkUserChain = (rows: Array<{ _id: Types.ObjectId; role: string }>): { sele
 
 beforeEach(() => {
     vi.resetAllMocks();
+    // R3 — `deleteProject` / `deleteCustomStatus` check dependant
+    // counts before allowing the delete. Default to "no dependants" so
+    // legacy happy-path tests pass; tests exercising the
+    // dependant-refusal branch override per-call.
+    sprintCountDocumentsMock.mockResolvedValue(0);
+    storyCountDocumentsMock.mockResolvedValue(0);
+    taskCountDocumentsMock.mockResolvedValue(0);
 });
 
 // ─── createProject ────────────────────────────────────────────────────────
@@ -420,14 +446,16 @@ describe('updateProject', () => {
 // ─── updateProjectMembers (bulk add/remove + role validation) ────────────
 
 describe('updateProjectMembers', () => {
-    it('validates role for added users, then computes the new array idempotently', async () => {
+    it('F4 — uses atomic $pull + $addToSet (no doc.save), validates role for new adds', async () => {
         const u1 = new Types.ObjectId();
         const u2 = new Types.ObjectId();
         const u3 = new Types.ObjectId();
         const proj = makeProject({ member_ids: [u1, u2] });
-        projectFindByIdMock.mockResolvedValueOnce(proj);
-        // u3 validated as employee
+        // Two findById calls now: once for before-snapshot + validation,
+        // once for the post-update audit + response.
+        projectFindByIdMock.mockResolvedValueOnce(proj).mockResolvedValueOnce(proj);
         userFindMock.mockReturnValueOnce(mkUserChain([{ _id: u3, role: ROLES.EMPLOYEE }]));
+        projectUpdateOneMock.mockResolvedValue({ modifiedCount: 1 });
 
         await svc.updateProjectMembers(
             proj._id,
@@ -435,12 +463,19 @@ describe('updateProjectMembers', () => {
             adminCaller()
         );
 
-        expect(proj.save).toHaveBeenCalled();
-        const ids = proj.member_ids.map((m) => m.toString()).sort();
-        expect(ids).toEqual([u1.toString(), u3.toString()].sort());
+        // Pin the atomic shape: a $pull for removes and a $addToSet for adds.
+        const calls = projectUpdateOneMock.mock.calls;
+        const pullCall = calls.find((c) => '$pull' in (c[1] as Record<string, unknown>));
+        const addCall = calls.find((c) => '$addToSet' in (c[1] as Record<string, unknown>));
+        expect(pullCall).toBeDefined();
+        expect(addCall).toBeDefined();
+        const pullArg = (pullCall![1] as { $pull: { member_ids: { $in: Types.ObjectId[] } } }).$pull;
+        expect(pullArg.member_ids.$in.map((o) => o.toString())).toEqual([u2.toString()]);
+        // doc.save MUST NOT be called.
+        expect(proj.save).not.toHaveBeenCalled();
     });
 
-    it('throws INVALID_PROJECT_MEMBER_ROLE without mutating state', async () => {
+    it('throws INVALID_PROJECT_MEMBER_ROLE before any updateOne fires', async () => {
         const u1 = new Types.ObjectId();
         const bad = new Types.ObjectId();
         const proj = makeProject({ member_ids: [u1] });
@@ -450,21 +485,34 @@ describe('updateProjectMembers', () => {
         await expect(
             svc.updateProjectMembers(proj._id, { add: [bad.toString()], remove: [] }, adminCaller())
         ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PROJECT_MEMBER_ROLE });
-        expect(proj.save).not.toHaveBeenCalled();
-        expect(proj.member_ids.map((m) => m.toString())).toEqual([u1.toString()]);
+        expect(projectUpdateOneMock).not.toHaveBeenCalled();
     });
 
-    it('removes that match nothing in the array are silently ignored (idempotent)', async () => {
+    it('skips both updateOne calls when add + remove are empty arrays (no-op idempotent)', async () => {
+        const u1 = new Types.ObjectId();
+        const proj = makeProject({ member_ids: [u1] });
+        projectFindByIdMock.mockResolvedValueOnce(proj).mockResolvedValueOnce(proj);
+        userFindMock.mockReturnValueOnce(mkUserChain([]));
+
+        await svc.updateProjectMembers(proj._id, { add: [], remove: [] }, adminCaller());
+
+        expect(projectUpdateOneMock).not.toHaveBeenCalled();
+    });
+
+    it('phantom removes still issue the $pull (Mongo no-op idempotent)', async () => {
         const u1 = new Types.ObjectId();
         const phantom = new Types.ObjectId();
         const proj = makeProject({ member_ids: [u1] });
-        projectFindByIdMock.mockResolvedValueOnce(proj);
-        userFindMock.mockReturnValueOnce(mkUserChain([])); // no add
+        projectFindByIdMock.mockResolvedValueOnce(proj).mockResolvedValueOnce(proj);
+        userFindMock.mockReturnValueOnce(mkUserChain([]));
+        projectUpdateOneMock.mockResolvedValue({ modifiedCount: 0 });
 
         await svc.updateProjectMembers(proj._id, { add: [], remove: [phantom.toString()] }, adminCaller());
 
-        expect(proj.member_ids.map((m) => m.toString())).toEqual([u1.toString()]);
-        expect(proj.save).toHaveBeenCalled();
+        // The $pull call still goes out; Mongo treats "remove a value not
+        // in the array" as a no-op. The application doesn't need to
+        // pre-check, so we don't.
+        expect(projectUpdateOneMock).toHaveBeenCalledOnce();
     });
 });
 
@@ -555,5 +603,51 @@ describe('custom statuses', () => {
 
         expect(proj.save).toHaveBeenCalled();
         expect(proj.custom_task_statuses.length).toBe(0);
+    });
+
+    it('deleteCustomStatus refuses when tasks still use the status (R3)', async () => {
+        const proj = makeProject();
+        const subId = new Types.ObjectId();
+        proj.custom_task_statuses = makeSubArray([
+            { _id: subId, key: 'qa_passed', label: 'QA Passed', order: 5, is_terminal: false as boolean },
+        ]);
+        projectFindOneMock.mockResolvedValueOnce(proj);
+        taskCountDocumentsMock.mockResolvedValueOnce(7);
+
+        await expect(svc.deleteCustomStatus(subId, adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.RESOURCE_HAS_DEPENDENTS,
+            details: { tasks: 7, status_key: 'qa_passed' },
+        });
+        // Sub-doc must still be intact + project not saved.
+        expect(proj.custom_task_statuses.length).toBe(1);
+        expect(proj.save).not.toHaveBeenCalled();
+    });
+});
+
+// ─── deleteProject (R3 dependant guard) ─────────────────────────────────
+
+describe('deleteProject', () => {
+    it('refuses with RESOURCE_HAS_DEPENDENTS when tasks/stories/sprints exist', async () => {
+        const proj = makeProject();
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        taskCountDocumentsMock.mockResolvedValueOnce(2);
+        storyCountDocumentsMock.mockResolvedValueOnce(1);
+        sprintCountDocumentsMock.mockResolvedValueOnce(0);
+
+        await expect(svc.deleteProject(proj._id, adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.RESOURCE_HAS_DEPENDENTS,
+            details: { tasks: 2, stories: 1, sprints: 0 },
+        });
+        expect(proj.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('proceeds with the delete when no dependants exist', async () => {
+        const proj = makeProject();
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        // The default beforeEach 0/0/0 is in effect.
+
+        await svc.deleteProject(proj._id, adminCaller());
+
+        expect(proj.deleteOne).toHaveBeenCalled();
     });
 });

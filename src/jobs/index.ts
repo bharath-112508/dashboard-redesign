@@ -1,7 +1,9 @@
 import cron, { type ScheduledTask } from 'node-cron';
 
 import { JOB_NAMES, JOB_SCHEDULES, JOB_TIMEZONE, type JobName } from '../constants/jobs.js';
+import { JOBS_ENABLED } from '../config/server.config.js';
 import logger from '../utils/logger.js';
+import { getInFlightRunJobs } from './runner.js';
 import { runAttendanceFinalizer } from './attendance-finalizer.job.js';
 import { runSlMonthlyForfeiture } from './sl-monthly-forfeiture.job.js';
 import { runLeaveYearRollover } from './leave-year-rollover.job.js';
@@ -11,6 +13,8 @@ import { runReportExportCleanup } from './report-export-cleanup.job.js';
 import { runAuditArchive } from './audit-archive.job.js';
 import { runRecurringTaskSweepJob } from './recurring-task.job.js';
 import { runReportSubscriptionSweepJob } from './report-subscription.job.js';
+import { runStuckJobSweeperJob } from './stuck-job-sweeper.job.js';
+import { runAuditLogMirror } from './audit-log-mirror.job.js';
 
 /**
  * Job scheduler — wires every Phase-1 cron job to its `node-cron` trigger.
@@ -46,15 +50,12 @@ const REGISTRY: Record<JobName, JobRunner> = {
     [JOB_NAMES.AUDIT_ARCHIVE]: () => runAuditArchive(),
     [JOB_NAMES.RECURRING_TASK_SWEEP]: () => runRecurringTaskSweepJob(),
     [JOB_NAMES.REPORT_SUBSCRIPTION_SWEEP]: () => runReportSubscriptionSweepJob(),
-};
-
-const isJobsDisabled = (): boolean => {
-    const v = (process.env.JOBS_ENABLED ?? 'true').toLowerCase();
-    return v === 'false' || v === '0' || v === 'no';
+    [JOB_NAMES.STUCK_JOB_SWEEPER]: () => runStuckJobSweeperJob(),
+    [JOB_NAMES.AUDIT_LOG_MIRROR]: () => runAuditLogMirror(),
 };
 
 export const startScheduler = (): void => {
-    if (isJobsDisabled()) {
+    if (!JOBS_ENABLED) {
         logger.info('Job scheduler disabled via JOBS_ENABLED=false');
         return;
     }
@@ -90,7 +91,20 @@ export const startScheduler = (): void => {
     }
 };
 
-export const stopScheduler = (): void => {
+/**
+ * F5 — graceful drain timeout. After `task.stop()` prevents new fires,
+ * we await every in-flight `runJob` promise for up to this long. A
+ * cron that's been running longer than this gets cut off when the
+ * outer SIGTERM watchdog (`src/index.ts`) fires `process.exit(1)`.
+ *
+ * 25s leaves a small buffer under the SIGTERM watchdog (30s) so the
+ * outer shutdown sequence still has time to disconnect Mongo cleanly
+ * after the cron drain.
+ */
+const SCHEDULER_DRAIN_TIMEOUT_MS = 25_000;
+
+export const stopScheduler = async (): Promise<void> => {
+    // 1. Stop all timers so no NEW handler invocations start.
     for (const [name, task] of tasks.entries()) {
         try {
             task.stop();
@@ -100,6 +114,36 @@ export const stopScheduler = (): void => {
         }
     }
     tasks.clear();
+
+    // 2. F5 — drain in-flight runJob handlers. node-cron's `.stop()`
+    //    only cancels future fires; a handler currently mid-execute
+    //    keeps running. Without this, a SIGTERM during the
+    //    `audit_log_mirror` upload or the `sl_monthly_forfeiture`
+    //    user-iteration would truncate the write. We await the
+    //    OUTER promise (the one runJob returned) so the runner's
+    //    DB-update + audit-emit lifecycle gets to complete.
+    const running = getInFlightRunJobs();
+    if (running.length === 0) return;
+
+    logger.info({ count: running.length }, 'Awaiting in-flight cron handlers to drain');
+    let timer: NodeJS.Timeout | null = null;
+    const drainTimeout = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), SCHEDULER_DRAIN_TIMEOUT_MS);
+    });
+    const settledOrTimedOut = await Promise.race([
+        Promise.allSettled(running).then(() => 'settled' as const),
+        drainTimeout,
+    ]);
+    if (timer) clearTimeout(timer);
+
+    if (settledOrTimedOut === 'timeout') {
+        logger.warn(
+            { count: running.length, timeout_ms: SCHEDULER_DRAIN_TIMEOUT_MS },
+            'Scheduler drain timed out; outer shutdown watchdog will force-exit'
+        );
+    } else {
+        logger.info('All in-flight cron handlers drained');
+    }
 };
 
 /** Number of currently-registered scheduled tasks (for tests / `/health`). */

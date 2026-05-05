@@ -17,16 +17,9 @@
  *  - Read-only; no mutations, audit rows, or notifications.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
-// ─── RBAC ───────────────────────────────────────────────────────────────
-//
-// Same gate as the project task list — anyone with project visibility
-// can see the timeline. Per-project scoping happens in the service via
-// `loadProjectForCaller` (admin/manager see all; employees see
-// member-of; clients see client-of).
-
-export const TIMELINE_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT];
+// Step 47: route gate is `requirePermission(project.read)` — same as
+// the project list. Per-project scoping happens in the service via
+// `loadProjectForCaller`.
 
 // ─── Date range cap ────────────────────────────────────────────────────
 //

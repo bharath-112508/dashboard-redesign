@@ -14,8 +14,9 @@ import { COMP_OFF_SOURCES, COMP_OFF_TYPES, type CompOffSource, type CompOffType 
  * we insert a new row.
  *
  * `source_type` + `source_ref_id` make audits trivial:
- *  - `attendance_overtime` rows are inserted by the EOD attendance job
- *    (Step 14, deferred) and reference the originating attendance record.
+ *  - `attendance_overtime` rows are inserted by the EOD attendance
+ *    finalizer job (shipped in Step 14) and reference the originating
+ *    attendance record.
  *  - `leave_request` rows are inserted when a comp-off leave is approved
  *    (consume) or refunded on cancel (earn).
  *  - `admin_adjustment` rows come from the manual `POST /comp-off/adjust`

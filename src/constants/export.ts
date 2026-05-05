@@ -7,31 +7,24 @@
  * file → the FE polls the GET endpoint for status → on `ready` the GET
  * mints a fresh download SAS.
  *
- * v1 deliberate scope (documented for the next operator):
- *  - **CSV + XLSX ship** — both run in-process, no headless Chrome.
- *  - **PDF deferred** behind a stub generator. Build_Decisions §D2/§D3 calls
- *    out that Puppeteer needs an always-on Container Apps deployment to
- *    avoid 30s+ cold-start cost on Functions; that infra isn't provisioned.
- *    PDF requests are accepted (the validator lets them through) so the FE
- *    surface is forward-compatible — the worker marks them
- *    `failed` with the canonical "PDF deferred" error message until the
- *    real generator is wired in.
- *  - **Worker = in-process `setImmediate` after enqueue.** Same pattern the
- *    notification dispatcher uses today. Lifts to a queue-backed worker
- *    when Step-D2 picks Azure Functions over Container Apps.
- *  - **Storage = Azure Blob.** When unconfigured (the dev default), the
- *    worker marks `failed` with `STORAGE_NOT_CONFIGURED` — same fail-loud
- *    contract that profile-photo + task-attachment surfaces use.
+ * v1 scope (current state, post-Phase-4 cleanup):
+ *  - **CSV / XLSX / PDF all ship.** PDF runs through the pluggable
+ *    generator factory in `services/report-exporters/pdf-generators/`
+ *    — pdfkit is the default (in-process, no Chromium); pdfmake +
+ *    puppeteer are also available, with puppeteer's Chromium binary
+ *    treated as opt-in (see `BUILD_PROGRESS.md` Step-30 follow-up).
+ *  - **Worker = in-process `setImmediate` after enqueue.** Same
+ *    pattern the notification dispatcher uses today. Lifts to a
+ *    queue-backed worker if/when the load profile demands it.
+ *  - **Storage = Azure Blob.** When unconfigured (the dev default),
+ *    the worker marks `failed` with `STORAGE_NOT_CONFIGURED` — same
+ *    fail-loud contract that profile-photo + task-attachment surfaces
+ *    use.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
-// ─── RBAC ───────────────────────────────────────────────────────────────
-//
-// Manager + admin only — same as the synchronous report endpoints, since
-// every export is a snapshot of a manager-scoped report.
-
-export const REPORT_EXPORT_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
+// Step 47: route gates use `requirePermission(report_export.write)`
+// for POST and `requirePermission(report.read)` for status-poll —
+// both held by manager + admin.
 
 // ─── Report names that can be exported ──────────────────────────────────
 //
@@ -44,10 +37,8 @@ export type ReportExportName = (typeof REPORT_EXPORT_NAMES)[number];
 
 // ─── Export formats ─────────────────────────────────────────────────────
 //
-// `csv` and `xlsx` are fully implemented; `pdf` is accepted by the
-// validator but the worker fails with "PDF deferred" until Container Apps
-// + Puppeteer is provisioned. Keeping `pdf` in the enum avoids a contract
-// break when the real generator lands.
+// All three formats are fully implemented. PDF goes through the
+// pluggable generator factory; selection via `PDF_ENGINE` env var.
 
 export const EXPORT_FORMATS = ['csv', 'xlsx', 'pdf'] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];

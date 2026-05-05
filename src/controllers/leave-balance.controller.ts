@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as service from '../services/leave-balance.service.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import { created, ok } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import type {
@@ -35,7 +36,14 @@ export const getList = async (req: Request, res: Response): Promise<Response> =>
 // ─── PATCH /leave-balances/:id ────────────────────────────────────────────
 
 export const patchOne = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.adjustBalance(parseId(req), req.body as AdjustLeaveBalanceBody, callerId(req));
+    // H3 — thread audit context through so the admin's adjust is recorded
+    // with the operator-supplied `reason` (validator demands >= 3 chars).
+    const data = await service.adjustBalance(
+        parseId(req),
+        req.body as AdjustLeaveBalanceBody,
+        callerId(req),
+        buildAuditContext(req)
+    );
     return ok(res, data);
 };
 

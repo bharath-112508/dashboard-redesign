@@ -6,7 +6,7 @@ import { Sprint } from '../models/sprint.model.js';
 import { Task } from '../models/task.model.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
-import { type SearchType } from '../constants/search.js';
+import { TEXT_SEARCH_MIN_QUERY_LENGTH, type SearchType } from '../constants/search.js';
 import { buildProjectVisibilityFilter } from './project.service.js';
 import type { SearchQuery } from '../validators/search.validator.js';
 
@@ -152,11 +152,72 @@ const searchUsers = async (q: RegExp, limit: number, caller: SearchCaller): Prom
     }));
 };
 
-const searchProjects = async (q: RegExp, limit: number, caller: SearchCaller): Promise<ProjectHit[]> => {
+// ─── Match-spec helpers ──────────────────────────────────────────────
+//
+// `MatchSpec` is the discriminated input that each bucket builder
+// translates into the right Mongo expression. Keeping the choice in
+// one place (decided in `search()`) lets the buckets stay simple.
+
+interface MatchSpec {
+    /** Original raw query — needed for `$text:$search`. */
+    q: string;
+    /** Regex form for the legacy short-query path. Always built. */
+    regex: RegExp;
+    /** True when `q` is long enough to use the text index. */
+    useText: boolean;
+}
+
+const buildMatchSpec = (q: string): MatchSpec => ({
+    q,
+    regex: buildRegex(q),
+    useText: q.length >= TEXT_SEARCH_MIN_QUERY_LENGTH,
+});
+
+/**
+ * Compose the per-bucket match clause:
+ *  - `$text:$search` when `useText`. The text index lives at the
+ *    collection level (one per collection — Mongo's hard limit), so
+ *    `$text` matches across every text-indexed field on that
+ *    collection. This widens the user-perceived search surface vs.
+ *    the legacy regex path; documented per collection below.
+ *  - Else regex-OR over the legacy single-field set, preserving
+ *    typeahead UX (`$regex` matches partial-word prefixes that
+ *    `$text`'s tokeniser doesn't).
+ */
+const projectMatchClause = (m: MatchSpec): Record<string, unknown> => {
+    if (m.useText) {
+        // Text index covers `name + code + description` (Step 33). For
+        // queries ≥ 3 chars we widen the surface to descriptions —
+        // small contract expansion, but the index was created
+        // precisely for this cutover (see model docstring).
+        return { $text: { $search: m.q } };
+    }
+    return { $or: [{ name: m.regex }, { code: m.regex }] };
+};
+
+const sprintMatchClause = (m: MatchSpec): Record<string, unknown> => {
+    if (m.useText) {
+        // Text index covers `name + goal`. Goal-keyword search comes
+        // along for free at ≥ 3 chars.
+        return { $text: { $search: m.q } };
+    }
+    return { name: m.regex };
+};
+
+const taskMatchClause = (m: MatchSpec): Record<string, unknown> => {
+    if (m.useText) {
+        // Text index covers `title + description`. Long descriptions
+        // become searchable at ≥ 3 chars.
+        return { $text: { $search: m.q } };
+    }
+    return { title: m.regex };
+};
+
+const searchProjects = async (m: MatchSpec, limit: number, caller: SearchCaller): Promise<ProjectHit[]> => {
     const filter: Record<string, unknown> = {
         ...buildProjectVisibilityFilter(caller),
         is_archived: false,
-        $or: [{ name: q }, { code: q }],
+        ...projectMatchClause(m),
     };
 
     const rows = await Project.find(filter)
@@ -172,14 +233,14 @@ const searchProjects = async (q: RegExp, limit: number, caller: SearchCaller): P
 };
 
 const searchSprints = async (
-    q: RegExp,
+    m: MatchSpec,
     limit: number,
     visibleProjectIds: Types.ObjectId[] | null
 ): Promise<SprintHit[]> => {
     // Empty visible-projects list → empty bucket; skip the DB call.
     if (visibleProjectIds && visibleProjectIds.length === 0) return [];
 
-    const filter: Record<string, unknown> = { name: q };
+    const filter: Record<string, unknown> = { ...sprintMatchClause(m) };
     if (visibleProjectIds) filter.project_id = { $in: visibleProjectIds };
 
     const rows = await Sprint.find(filter)
@@ -195,13 +256,13 @@ const searchSprints = async (
 };
 
 const searchTasks = async (
-    q: RegExp,
+    m: MatchSpec,
     limit: number,
     visibleProjectIds: Types.ObjectId[] | null
 ): Promise<TaskHit[]> => {
     if (visibleProjectIds && visibleProjectIds.length === 0) return [];
 
-    const filter: Record<string, unknown> = { title: q };
+    const filter: Record<string, unknown> = { ...taskMatchClause(m) };
     if (visibleProjectIds) filter.project_id = { $in: visibleProjectIds };
 
     const rows = await Task.find(filter)
@@ -221,7 +282,7 @@ const searchTasks = async (
 const ALL_TYPES: readonly SearchType[] = ['users', 'projects', 'sprints', 'tasks'];
 
 export const search = async (query: SearchQuery, caller: SearchCaller): Promise<SearchResult> => {
-    const regex = buildRegex(query.q);
+    const matchSpec = buildMatchSpec(query.q);
     // `types` is undefined when the caller didn't constrain — search
     // everything. Otherwise honour the explicit subset; the FE's
     // typeahead surface uses this to fetch only the bucket the active
@@ -236,12 +297,19 @@ export const search = async (query: SearchQuery, caller: SearchCaller): Promise<
     const needsVisibleIds = wanted.has('sprints') || wanted.has('tasks');
     const visibleProjectIds = needsVisibleIds ? await resolveVisibleProjectIds(caller) : null;
 
-    const userPromise = wanted.has('users') ? searchUsers(regex, query.limit, caller) : Promise.resolve([]);
-    const projectPromise = wanted.has('projects') ? searchProjects(regex, query.limit, caller) : Promise.resolve([]);
-    const sprintPromise = wanted.has('sprints')
-        ? searchSprints(regex, query.limit, visibleProjectIds)
+    // Users always use regex (the text index spans `email +
+    // employee_id + job_title` too; `$text` would silently widen the
+    // PII surface that the §13 contract forbids).
+    const userPromise = wanted.has('users') ? searchUsers(matchSpec.regex, query.limit, caller) : Promise.resolve([]);
+    const projectPromise = wanted.has('projects')
+        ? searchProjects(matchSpec, query.limit, caller)
         : Promise.resolve([]);
-    const taskPromise = wanted.has('tasks') ? searchTasks(regex, query.limit, visibleProjectIds) : Promise.resolve([]);
+    const sprintPromise = wanted.has('sprints')
+        ? searchSprints(matchSpec, query.limit, visibleProjectIds)
+        : Promise.resolve([]);
+    const taskPromise = wanted.has('tasks')
+        ? searchTasks(matchSpec, query.limit, visibleProjectIds)
+        : Promise.resolve([]);
 
     const [users, projects, sprints, tasks] = await Promise.all([
         userPromise,

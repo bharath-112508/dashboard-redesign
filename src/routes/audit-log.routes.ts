@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/audit-log.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { AUDIT_LOG_READ_ROLES } from '../constants/audit.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { auditLogIdParamSchema, listAuditLogsQuerySchema } from '../validators/audit-log.validator.js';
 
 /**
@@ -16,7 +16,7 @@ import { auditLogIdParamSchema, listAuditLogsQuerySchema } from '../validators/a
 const router = Router();
 
 router.use(authenticate);
-router.use(authorize(...AUDIT_LOG_READ_ROLES));
+router.use(requirePermission(PERMISSIONS.AUDIT_LOG_READ));
 
 router.get('/', validate({ query: listAuditLogsQuerySchema }), asyncHandler(ctrl.getList));
 router.get('/:id', validate({ params: auditLogIdParamSchema }), asyncHandler(ctrl.getOne));

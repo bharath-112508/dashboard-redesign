@@ -58,6 +58,8 @@ export const JOB_NAMES = {
     AUDIT_ARCHIVE: 'audit_archive',
     RECURRING_TASK_SWEEP: 'recurring_task_sweep',
     REPORT_SUBSCRIPTION_SWEEP: 'report_subscription_sweep',
+    STUCK_JOB_SWEEPER: 'stuck_job_sweeper',
+    AUDIT_LOG_MIRROR: 'audit_log_mirror',
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -71,9 +73,14 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // inside the job at call time so a manual trigger is also correct).
     [JOB_NAMES.ATTENDANCE_FINALIZER]: '0 23 * * *',
 
-    // Last-day-of-month at 23:55 IST. node-cron does not support "L" so we
-    // fire daily at 23:55 and let the job no-op when today isn't the last.
-    [JOB_NAMES.SL_MONTHLY_FORFEITURE]: '55 23 * * *',
+    // Last-day-of-month at 23:55 IST. node-cron does not support "L"
+    // so we fire on days 28-31 only and let the job's
+    // `isLastDayOfMonth` check no-op the non-last days. Combined
+    // with the day-scoped `slMonthlyForfeitureRunKey` (T3 fix), this
+    // closes the lockout where a non-last-day fire on day 1 would
+    // claim a `success` row for `YYYY-MM` and prevent the actual
+    // forfeiture run on day 30/31.
+    [JOB_NAMES.SL_MONTHLY_FORFEITURE]: '55 23 28-31 * *',
 
     // 00:05 IST on Jan 1.
     [JOB_NAMES.LEAVE_YEAR_ROLLOVER]: '5 0 1 1 *',
@@ -109,6 +116,23 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // start-of-business so weekly digests land in inboxes around
     // when users start work.
     [JOB_NAMES.REPORT_SUBSCRIPTION_SWEEP]: '0 7 * * *',
+
+    // Hourly at :07 — audit-log offsite mirror (BACKEND_AUDIT.md P1-7).
+    // Streams new audit_logs rows since the last watermark to a
+    // WORM Blob container. Defence-in-depth: even a compromised Mongo
+    // can't rewrite history that's already been mirrored.
+    [JOB_NAMES.AUDIT_LOG_MIRROR]: '7 * * * *',
+
+    // Every 15 minutes — stuck-job sweeper (BACKEND_AUDIT.md P1-6).
+    // Walks `job_runs` for rows still flagged `running` but past the
+    // `JOB_LOCK_STALE_MS` deadline (i.e. orphaned by a process
+    // crash) and marks them `failed` with a synthetic
+    // `error_message`. Also reports the count via metrics so the
+    // operator gets a signal beyond an audit-log dive. The
+    // existing reactive reclaim in `acquireLock` covers the next-
+    // run path; this proactive sweep makes stuck jobs observable
+    // in real time.
+    [JOB_NAMES.STUCK_JOB_SWEEPER]: '*/15 * * * *',
 };
 
 // ─── Per-run idempotency key derivation ──────────────────────────────────
@@ -121,9 +145,26 @@ export const attendanceFinalizerRunKey = (now: Date = new Date()): string => {
     return dayjs(now).tz(JOB_TIMEZONE).subtract(1, 'day').format('YYYY-MM-DD');
 };
 
-/** SL forfeiture keys off the calendar month being closed (today, IST). */
+/**
+ * SL forfeiture keys off the calendar DAY (not the month — T3 fix).
+ *
+ * Pre-T3 the runKey was `YYYY-MM`. Combined with daily firing, that
+ * meant the very first day of the month claimed the lock + the
+ * day-of-month gate skipped + the row was marked `success`. The last
+ * day's tick then found a `success` row for the same `YYYY-MM` and
+ * `acquired = false` — the actual forfeiture **never executed**.
+ *
+ * Day-scoped runKey = each daily fire claims its own row. Combined
+ * with the cron expression `'55 23 28-31 * *'` (only fires on days
+ * 28-31), the inner `isLastDayOfMonth` gate still filters non-last
+ * days, but those skips no longer block the actual last-day run.
+ *
+ * Idempotency on the same day: if ops manually re-runs the cron on
+ * the last day, the second invocation collides on the now day-scoped
+ * `(name, run_key)` unique index — exactly the behaviour we want.
+ */
 export const slMonthlyForfeitureRunKey = (now: Date = new Date()): string => {
-    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM');
+    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
 };
 
 /** Leave-year rollover keys off the target year (the year just begun, IST). */
@@ -181,6 +222,26 @@ export const recurringTaskSweepRunKey = (now: Date = new Date()): string => {
  */
 export const reportSubscriptionSweepRunKey = (now: Date = new Date()): string => {
     return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
+};
+
+/**
+ * Stuck-job sweeper keys off the 15-min wall-clock bucket so each cron
+ * tick lands on a fresh row (no idempotency dedupe across ticks — every
+ * 15 minutes is a separate audit point). Format: `YYYY-MM-DDTHH:mm`.
+ */
+export const stuckJobSweeperRunKey = (now: Date = new Date()): string => {
+    const d = dayjs(now).tz(JOB_TIMEZONE);
+    const minute = Math.floor(d.minute() / 15) * 15;
+    return `${d.format('YYYY-MM-DDTHH')}:${String(minute).padStart(2, '0')}`;
+};
+
+/**
+ * Audit-log mirror keys off the wall-clock hour (IST). One run per
+ * hour; an ops re-run within the same hour is a no-op via the
+ * `job_runs` unique index. Format: `YYYY-MM-DDTHH`.
+ */
+export const auditLogMirrorRunKey = (now: Date = new Date()): string => {
+    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DDTHH');
 };
 
 // ─── Job-run row lifecycle ───────────────────────────────────────────────

@@ -78,9 +78,34 @@ describe('slackContextFrom', () => {
         expect(slackContextFrom(makeSettings({ enabled: false }))).toBeNull();
     });
 
-    it('returns a context with the bot_token verbatim when configured', () => {
+    it('returns the legacy plaintext bot_token unchanged when the stored value is not encrypted (J1 back-compat)', () => {
+        // Pre-J1 deployments still in flight. The bot keeps working until
+        // the next PATCH /settings/slack migrates the value to encrypted form.
         const ctx = slackContextFrom(makeSettings({ bot_token: 'xoxb-real' }));
         expect(ctx).toEqual({ enabled: true, botToken: 'xoxb-real' });
+    });
+
+    it('J1 — decrypts a stored encrypted bot_token back to plaintext for the Bearer header', async () => {
+        // Encrypt the input, store it, and verify slackContextFrom hands the
+        // plaintext to consumers (so the Bearer header is correct) — without
+        // ever exposing the plaintext in the settings doc.
+        const { encryptSecret } = await import('./crypto-aes.js');
+        const stored = encryptSecret('xoxb-real-secret');
+        // Sanity: the encrypted blob is NOT the plaintext.
+        expect(stored).not.toBe('xoxb-real-secret');
+
+        const ctx = slackContextFrom(makeSettings({ bot_token: stored }));
+        expect(ctx).toEqual({ enabled: true, botToken: 'xoxb-real-secret' });
+    });
+
+    it('J1 — returns null when a value LOOKS encrypted but decryption fails (refuses to ship ciphertext as a Bearer)', () => {
+        // Three b64url-shaped segments → matches the envelope shape, but the
+        // payload is garbage. The helper must NOT fall back to "treat as
+        // plaintext" here, because that would leak the ciphertext shape into
+        // the Slack API as the Authorization header.
+        const fakeEnvelope = 'AAAA.BBBB.CCCC';
+        const ctx = slackContextFrom(makeSettings({ bot_token: fakeEnvelope }));
+        expect(ctx).toBeNull();
     });
 });
 

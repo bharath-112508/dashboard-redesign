@@ -54,5 +54,12 @@ export const rolloverLeaveYear = async (targetYear: number, log: JobContext['log
 export const runLeaveYearRollover = (now: Date = new Date(), opts: RunJobOptions = {}): Promise<RunJobResult> => {
     const runKey = leaveYearRolloverRunKey(now);
     const targetYear = dayjs(now).tz(DEFAULT_TIMEZONE).year();
-    return runJob(JOB_NAMES.LEAVE_YEAR_ROLLOVER, runKey, async (ctx) => rolloverLeaveYear(targetYear, ctx.log), opts);
+    // BACKEND_AUDIT.md P1-6 — retry up to 3 times on transient errors.
+    // The next scheduled run is a YEAR away; a transient Mongo blip
+    // here would skip the rollover and leave every user without their
+    // new-year leave balances. Caller-supplied `maxAttempts` overrides.
+    return runJob(JOB_NAMES.LEAVE_YEAR_ROLLOVER, runKey, async (ctx) => rolloverLeaveYear(targetYear, ctx.log), {
+        maxAttempts: 3,
+        ...opts,
+    });
 };

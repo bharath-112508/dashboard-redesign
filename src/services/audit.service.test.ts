@@ -171,6 +171,31 @@ describe('recordAudit — snapshot coercion', () => {
         expect(metadata.before_snapshot_dropped).toBe(true);
         expect(metadata.after_snapshot_dropped).toBeUndefined();
     });
+
+    it('G4 — preserves the snapshot-drop flags across the metadata-strip carve-out', async () => {
+        // Both snapshots over the cap (so both flags fire), AND a giant
+        // chunk of caller-supplied metadata so the metadata itself is
+        // also oversized — exercising the strip carve-out.
+        const huge = 'x'.repeat(AUDIT_SNAPSHOT_BYTES_MAX * 2);
+        const hugeMeta = 'y'.repeat(AUDIT_SNAPSHOT_BYTES_MAX * 8);
+
+        await audit.recordAudit(baseCtx, {
+            action: AUDIT_ACTIONS.SETTINGS_UPDATE,
+            target: { kind: AUDIT_TARGET_KINDS.SYSTEM_SETTINGS, id: null },
+            before: { blob: huge },
+            after: { blob: huge },
+            metadata: { caller_supplied: hugeMeta },
+        });
+
+        const arg = auditCreateMock.mock.calls[0][0] as Record<string, unknown>;
+        const metadata = arg.metadata as Record<string, unknown>;
+        // Strip carve-out fired (caller_supplied was huge):
+        expect(metadata.metadata_truncated).toBe(true);
+        expect(metadata.caller_supplied).toBeUndefined();
+        // …but the snapshot-drop flags MUST survive.
+        expect(metadata.before_snapshot_dropped).toBe(true);
+        expect(metadata.after_snapshot_dropped).toBe(true);
+    });
 });
 
 // ─── Never-throw contract ──────────────────────────────────────────────

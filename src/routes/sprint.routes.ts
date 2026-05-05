@@ -3,9 +3,9 @@ import { Router } from 'express';
 import * as ctrl from '../controllers/sprint.controller.js';
 import * as projectCtrl from '../controllers/project.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { PROJECT_READ_ROLES, PROJECT_WRITE_ROLES } from '../constants/project.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { patchSprintBodySchema, sprintIdParamSchema } from '../validators/sprint.validator.js';
 import { customStatusIdParamSchema, patchCustomStatusBodySchema } from '../validators/project.validator.js';
 
@@ -28,23 +28,41 @@ router.use(authenticate);
 
 router.get(
     '/:id',
-    authorize(...PROJECT_READ_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ params: sprintIdParamSchema }),
     asyncHandler(ctrl.getOne)
 );
 
 router.patch(
     '/:id',
-    authorize(...PROJECT_WRITE_ROLES),
+    requirePermission(PERMISSIONS.SPRINT_WRITE),
     validate({ params: sprintIdParamSchema, body: patchSprintBodySchema }),
     asyncHandler(ctrl.patchOne)
 );
 
 router.delete(
     '/:id',
-    authorize(...PROJECT_WRITE_ROLES),
+    requirePermission(PERMISSIONS.SPRINT_WRITE),
     validate({ params: sprintIdParamSchema }),
     asyncHandler(ctrl.deleteOne)
+);
+
+// T11 — archive / unarchive endpoints. Archive is the operator's
+// escape hatch for "decommission a sprint with lingering tasks
+// without forcing a status transition". Once archived, `deleteOne`
+// permits the delete even with dependant tasks.
+router.post(
+    '/:id/archive',
+    requirePermission(PERMISSIONS.SPRINT_WRITE),
+    validate({ params: sprintIdParamSchema }),
+    asyncHandler(ctrl.postArchive)
+);
+
+router.post(
+    '/:id/unarchive',
+    requirePermission(PERMISSIONS.SPRINT_WRITE),
+    validate({ params: sprintIdParamSchema }),
+    asyncHandler(ctrl.postUnarchive)
 );
 
 export default router;
@@ -56,14 +74,14 @@ export const customStatusRouter = (): Router => {
 
     r.patch(
         '/:id',
-        authorize(...PROJECT_WRITE_ROLES),
+        requirePermission(PERMISSIONS.PROJECT_WRITE),
         validate({ params: customStatusIdParamSchema, body: patchCustomStatusBodySchema }),
         asyncHandler(projectCtrl.patchCustomStatus)
     );
 
     r.delete(
         '/:id',
-        authorize(...PROJECT_WRITE_ROLES),
+        requirePermission(PERMISSIONS.PROJECT_WRITE),
         validate({ params: customStatusIdParamSchema }),
         asyncHandler(projectCtrl.deleteCustomStatus)
     );

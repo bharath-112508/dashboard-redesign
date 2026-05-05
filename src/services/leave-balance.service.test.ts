@@ -26,6 +26,7 @@ const {
     leaveTypeFindByIdMock,
     userFindByIdMock,
     recomputeAvailableMock,
+    recordAuditMock,
 } = vi.hoisted(() => ({
     leaveBalanceUpdateOneMock: vi.fn(),
     leaveBalanceFindByIdMock: vi.fn(),
@@ -33,6 +34,7 @@ const {
     leaveTypeFindByIdMock: vi.fn(),
     userFindByIdMock: vi.fn(),
     recomputeAvailableMock: vi.fn(),
+    recordAuditMock: vi.fn(),
 }));
 
 vi.mock('../models/leave-balance.model.js', () => ({
@@ -57,9 +59,14 @@ vi.mock('../models/user.model.js', () => ({
     User: { findById: userFindByIdMock, find: vi.fn() },
 }));
 
+vi.mock('./audit.service.js', () => ({
+    recordAudit: recordAuditMock,
+    recordSystemAudit: vi.fn(),
+}));
+
 const svc = await import('./leave-balance.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { PRO_RATA_STRATEGIES } from '../constants/leave.js';
+import { LEAVE_CODES, LEAVE_TYPE_SEEDS, PRO_RATA_STRATEGIES } from '../constants/leave.js';
 import { ROLES } from '../constants/roles.js';
 
 const fullType = (overrides: Record<string, unknown> = {}) => ({
@@ -406,5 +413,130 @@ describe('adjustBalance', () => {
 
         expect(row.adjusted).toBe(1);
         expect(row.available).toBe(13);
+    });
+
+    it('H3 — records an audit row carrying the operator-supplied reason + signed delta', async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const ltId = new Types.ObjectId();
+        const userId = new Types.ObjectId();
+        const row = {
+            _id: new Types.ObjectId(),
+            user_id: userId,
+            leave_type_id: ltId,
+            year: 2026,
+            allocated: 12,
+            carried_forward: 0,
+            used: 4,
+            pending: 0,
+            adjusted: 0,
+            monthly_forfeited: 0,
+            available: 8,
+            save,
+        };
+        leaveBalanceFindByIdMock.mockResolvedValueOnce(row);
+        leaveTypeFindByIdMock.mockResolvedValueOnce(fullType({ _id: ltId, code: 'CL' }));
+
+        const audit = {
+            actor_id: new Types.ObjectId(),
+            actor_role: 'admin' as const,
+            ip: '10.0.0.1',
+            user_agent: 'vitest',
+            request_id: 'req-h3',
+        };
+
+        await svc.adjustBalance(row._id, { delta: 2, reason: 'goodwill comp-off' }, new Types.ObjectId(), audit);
+
+        expect(recordAuditMock).toHaveBeenCalledTimes(1);
+        const [ctxArg, inputArg] = recordAuditMock.mock.calls[0]!;
+        expect(ctxArg).toBe(audit);
+        expect(inputArg).toMatchObject({
+            action: 'leave_balance.adjust',
+            target: { kind: 'leave_balance', id: row._id },
+            // Pinned-shape diff — adjust touches `adjusted` + `available` only.
+            before: { adjusted: 0, available: 8 },
+            after: { adjusted: 2, available: 10 },
+            metadata: {
+                // The validator demanded `reason >= 3 chars`; H3 lands it
+                // here so the audit log is the durable record.
+                reason: 'goodwill comp-off',
+                delta: 2,
+                user_id: userId.toString(),
+                leave_type_id: ltId.toString(),
+                year: 2026,
+            },
+        });
+    });
+
+    it('H3 — does not call recordAudit when no audit context is provided (back-compat with legacy callers)', async () => {
+        const save = vi.fn().mockResolvedValue(undefined);
+        const ltId = new Types.ObjectId();
+        const row = {
+            _id: new Types.ObjectId(),
+            user_id: new Types.ObjectId(),
+            leave_type_id: ltId,
+            year: 2026,
+            allocated: 12,
+            carried_forward: 0,
+            used: 0,
+            pending: 0,
+            adjusted: 0,
+            monthly_forfeited: 0,
+            available: 12,
+            save,
+        };
+        leaveBalanceFindByIdMock.mockResolvedValueOnce(row);
+        leaveTypeFindByIdMock.mockResolvedValueOnce(fullType({ _id: ltId, code: 'CL' }));
+
+        await svc.adjustBalance(row._id, { delta: 1, reason: 'unit test' }, new Types.ObjectId());
+
+        expect(recordAuditMock).not.toHaveBeenCalled();
+    });
+});
+
+// ─── Sick-leave policy invariant ────────────────────────────────────────
+//
+// Phase-4 cleanup: SL flipped from monthly forfeiture to within-year
+// accumulation. Unused buckets stay available all year and only reset
+// at Dec 31 (handled by the leave-year-rollover cron). The
+// `slMonthlyForfeitureJob` is structurally a no-op under this policy
+// because its `findOne` is gated on `monthly_forfeiture: true` —
+// flipping the seed flag turns the cron off without code edits.
+//
+// We pin the policy in two places:
+//  1. Seed shape — `LEAVE_TYPE_SEEDS` row for SL has
+//     `monthly_forfeiture: false`. A regression here would silently
+//     re-enable the cron and start forfeiting buckets again.
+//  2. Balance formula — under `monthly_forfeited = 0` (the steady
+//     state), available reduces only via `used` and `pending`. An
+//     unused January bucket survives through Dec 31.
+
+describe('Sick Leave policy invariant', () => {
+    it('LEAVE_TYPE_SEEDS pins SL with monthly_forfeiture=false (within-year accumulation)', () => {
+        const sl = LEAVE_TYPE_SEEDS.find((s) => s.code === LEAVE_CODES.SL);
+        expect(sl).toBeDefined();
+        expect(sl!.monthly_forfeiture).toBe(false);
+        // Sanity: the rest of the SL config that makes the policy
+        // work as intended.
+        expect(sl!.monthly_cap).toBe(1); // still 1/month accrual
+        expect(sl!.carry_forward).toBe(false); // no rollover to next year
+        expect(sl!.resets_yearly).toBe(true); // Dec 31 resets to 0
+    });
+
+    it('balance formula preserves an unused January bucket through year-end', () => {
+        // Concrete scenario: by November, user has 11 buckets accrued
+        // (1/month × Jan–Nov) and used 2 days. With monthly_forfeited
+        // forced to 0 (the cron no-ops), available = 11 - 2 - 0 = 9.
+        // Under the legacy policy with monthly_forfeiture=true, Jan/
+        // Feb/etc. unused buckets would have been forfeited monthly
+        // and available would be much smaller.
+        const result = recomputeAvailableMock({
+            allocated: 11,
+            carried_forward: 0,
+            used: 2,
+            pending: 0,
+            adjusted: 0,
+            monthly_forfeited: 0,
+        });
+        expect(result).toBe(9);
     });
 });

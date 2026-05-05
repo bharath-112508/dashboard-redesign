@@ -9,6 +9,17 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/mailer.js';
 import { postSlackMessage, slackContextFrom, type SlackContext } from '../utils/slack.js';
+import { runWithConcurrency } from '../utils/run-with-concurrency.js';
+
+/**
+ * Per-event recipient fan-out cap (BACKEND_AUDIT.md R11). Keeps a
+ * 50-member project from blasting 50 parallel `sendEmail` calls past
+ * ACS / Mailjet burst caps. Five concurrent dispatches is enough for
+ * a typical event to finish within a normal request timeout; downstream
+ * services see at most 5 sustained requests at a time per platform
+ * instance.
+ */
+const NOTIFICATION_FAN_OUT_CONCURRENCY = 5;
 import { NOTIFICATION_TYPE_TO_SLACK_CATEGORY, type SlackEventCategory } from '../constants/slack.js';
 import type { SlackChannelMap } from '../models/system-settings.model.js';
 import { getOrInitSettings } from './settings.service.js';
@@ -307,27 +318,27 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
             );
         }
 
-        await Promise.all(
-            reviewers.map((r) =>
-                dispatchToRecipient(
-                    r,
-                    {
-                        ...payloadBase,
-                        title: `Leave request from ${requester.full_name}`,
-                        body: broadcastBody,
-                    },
-                    renderLeaveSubmittedEmail({
-                        recipient_full_name: r.full_name,
-                        requester_full_name: requester.full_name,
-                        leave_type_label: input.leave_type_label,
-                        start_date: input.start_date,
-                        end_date: input.end_date,
-                        total_days: input.total_days,
-                        request_id: input.request_id.toString(),
-                    }),
-                    context,
-                    slack
-                )
+        // R11 — bounded fan-out so a 50-member project can't blast
+        // 50 parallel email sends past ACS / Mailjet burst caps.
+        await runWithConcurrency(reviewers, NOTIFICATION_FAN_OUT_CONCURRENCY, (r) =>
+            dispatchToRecipient(
+                r,
+                {
+                    ...payloadBase,
+                    title: `Leave request from ${requester.full_name}`,
+                    body: broadcastBody,
+                },
+                renderLeaveSubmittedEmail({
+                    recipient_full_name: r.full_name,
+                    requester_full_name: requester.full_name,
+                    leave_type_label: input.leave_type_label,
+                    start_date: input.start_date,
+                    end_date: input.end_date,
+                    total_days: input.total_days,
+                    request_id: input.request_id.toString(),
+                }),
+                context,
+                slack
             )
         );
     } catch (err) {
@@ -404,42 +415,41 @@ export const notifyLeaveDecided = async (input: LeaveDecisionDispatchInput): Pro
             );
         }
 
-        await Promise.all(
-            recipients.map((r) => {
-                const isRequester = r._id.equals(input.requester_id);
-                const title = isRequester ? titleByDecision[input.decision] : `Leave request cancelled by ${actorName}`;
-                const body = isRequester
-                    ? `Your ${input.leave_type_label} request for ${range} (${input.total_days} day${input.total_days === 1 ? '' : 's'}) was ${verb}` +
-                      (actorIsRequester ? '.' : ` by ${actorName}.`)
-                    : `${requester.full_name}'s ${input.leave_type_label} request for ${range} was cancelled by ${actorName}.`;
+        // R11 — bounded fan-out.
+        await runWithConcurrency(recipients, NOTIFICATION_FAN_OUT_CONCURRENCY, (r) => {
+            const isRequester = r._id.equals(input.requester_id);
+            const title = isRequester ? titleByDecision[input.decision] : `Leave request cancelled by ${actorName}`;
+            const body = isRequester
+                ? `Your ${input.leave_type_label} request for ${range} (${input.total_days} day${input.total_days === 1 ? '' : 's'}) was ${verb}` +
+                  (actorIsRequester ? '.' : ` by ${actorName}.`)
+                : `${requester.full_name}'s ${input.leave_type_label} request for ${range} was cancelled by ${actorName}.`;
 
-                return dispatchToRecipient(
-                    r,
-                    {
-                        type: typeMap[input.decision],
-                        title,
-                        body,
-                        link_url: linkUrl,
-                        related_entity: { kind: RELATED_ENTITY_KINDS.LEAVE_REQUEST, id: input.request_id },
-                    },
-                    isRequester
-                        ? renderLeaveDecisionEmail({
-                              recipient_full_name: r.full_name,
-                              decision: input.decision,
-                              leave_type_label: input.leave_type_label,
-                              start_date: input.start_date,
-                              end_date: input.end_date,
-                              total_days: input.total_days,
-                              request_id: input.request_id.toString(),
-                              actor_full_name: actorIsRequester ? undefined : actorName,
-                              remarks: input.remarks ?? null,
-                          })
-                        : null,
-                    context,
-                    slack
-                );
-            })
-        );
+            return dispatchToRecipient(
+                r,
+                {
+                    type: typeMap[input.decision],
+                    title,
+                    body,
+                    link_url: linkUrl,
+                    related_entity: { kind: RELATED_ENTITY_KINDS.LEAVE_REQUEST, id: input.request_id },
+                },
+                isRequester
+                    ? renderLeaveDecisionEmail({
+                          recipient_full_name: r.full_name,
+                          decision: input.decision,
+                          leave_type_label: input.leave_type_label,
+                          start_date: input.start_date,
+                          end_date: input.end_date,
+                          total_days: input.total_days,
+                          request_id: input.request_id.toString(),
+                          actor_full_name: actorIsRequester ? undefined : actorName,
+                          remarks: input.remarks ?? null,
+                      })
+                    : null,
+                context,
+                slack
+            );
+        });
     } catch (err) {
         logger.warn(
             { err, code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED, dispatch_event: context },
@@ -483,29 +493,28 @@ export const notifyAttendanceCorrectionSubmitted = async (input: CorrectionSubmi
             );
         }
 
-        await Promise.all(
-            reviewers.map((r) =>
-                dispatchToRecipient(
-                    r,
-                    {
-                        type: NOTIFICATION_TYPES.ATTENDANCE_CORRECTION_REQUESTED,
-                        title: `Attendance correction from ${requester.full_name}`,
-                        body: `${requester.full_name} requested a correction for their attendance on ${input.local_date}.`,
-                        link_url: linkUrl,
-                        related_entity: {
-                            kind: RELATED_ENTITY_KINDS.ATTENDANCE_CORRECTION_REQUEST,
-                            id: input.request_id,
-                        },
+        // R11 — bounded fan-out.
+        await runWithConcurrency(reviewers, NOTIFICATION_FAN_OUT_CONCURRENCY, (r) =>
+            dispatchToRecipient(
+                r,
+                {
+                    type: NOTIFICATION_TYPES.ATTENDANCE_CORRECTION_REQUESTED,
+                    title: `Attendance correction from ${requester.full_name}`,
+                    body: `${requester.full_name} requested a correction for their attendance on ${input.local_date}.`,
+                    link_url: linkUrl,
+                    related_entity: {
+                        kind: RELATED_ENTITY_KINDS.ATTENDANCE_CORRECTION_REQUEST,
+                        id: input.request_id,
                     },
-                    renderCorrectionSubmittedEmail({
-                        recipient_full_name: r.full_name,
-                        requester_full_name: requester.full_name,
-                        local_date: input.local_date,
-                        request_id: input.request_id.toString(),
-                    }),
-                    context,
-                    slack
-                )
+                },
+                renderCorrectionSubmittedEmail({
+                    recipient_full_name: r.full_name,
+                    requester_full_name: requester.full_name,
+                    local_date: input.local_date,
+                    request_id: input.request_id.toString(),
+                }),
+                context,
+                slack
             )
         );
     } catch (err) {
@@ -681,29 +690,28 @@ export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatch
         // directly, which is what `@mention` on Slack already feels like.
         const slack = await loadSlackDispatch();
 
-        await Promise.all(
-            recipients.map((r) =>
-                dispatchToRecipient(
-                    r,
-                    {
-                        type: NOTIFICATION_TYPES.TASK_COMMENT,
-                        title: `${author.full_name} mentioned you in a comment`,
-                        body: inAppBody,
-                        link_url: linkUrl,
-                        related_entity: {
-                            kind: RELATED_ENTITY_KINDS.TASK,
-                            id: input.task_id,
-                        },
+        // R11 — bounded fan-out.
+        await runWithConcurrency(recipients, NOTIFICATION_FAN_OUT_CONCURRENCY, (r) =>
+            dispatchToRecipient(
+                r,
+                {
+                    type: NOTIFICATION_TYPES.TASK_COMMENT,
+                    title: `${author.full_name} mentioned you in a comment`,
+                    body: inAppBody,
+                    link_url: linkUrl,
+                    related_entity: {
+                        kind: RELATED_ENTITY_KINDS.TASK,
+                        id: input.task_id,
                     },
-                    renderTaskCommentMentionEmail({
-                        recipient_full_name: r.full_name,
-                        author_full_name: author.full_name,
-                        task_id: taskIdStr,
-                        body_preview: input.body_preview,
-                    }),
-                    context,
-                    slack
-                )
+                },
+                renderTaskCommentMentionEmail({
+                    recipient_full_name: r.full_name,
+                    author_full_name: author.full_name,
+                    task_id: taskIdStr,
+                    body_preview: input.body_preview,
+                }),
+                context,
+                slack
             )
         );
     } catch (err) {

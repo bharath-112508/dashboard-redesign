@@ -6,6 +6,7 @@ import { Sprint } from '../models/sprint.model.js';
 import { User } from '../models/user.model.js';
 import type { ProjectDocument } from '../models/project.model.js';
 import { AppError } from '../utils/app-error.js';
+import { isAdminLike } from '../utils/role-check.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
@@ -63,12 +64,31 @@ import type {
 
 // ─── RBAC helpers ────────────────────────────────────────────────────────
 
-const isManagerOrAdmin = (role: string): boolean => role === ROLES.ADMIN || role === ROLES.MANAGER;
+/**
+ * Step 47: "task writer" now spans Admin / Manager / **Team Lead**.
+ * Team Leads have `task.write` in their permission bundle and the
+ * project.author bundle (`project.write`, `sprint.write`, `story.write`,
+ * `task_template.write`), so they create / delete / reassign tasks
+ * within projects they are members of — same per-row scoping that
+ * limits an Employee's task writes to their own.
+ */
+/**
+ * `isAdminLike` (BACKEND_AUDIT.md R4) recognises a multi-role admin via
+ * `role_keys.includes('admin')` even when the legacy `role` cache is a
+ * different role. The MANAGER / TEAM_LEAD branches still consult the
+ * legacy `role` directly — those are not currently distinguished in
+ * `role_keys` (the system-role keys are admin/manager/team_lead/employee/client,
+ * so a manager-only caller's `role` and `role_keys[0]` agree).
+ */
+const isManagerOrAdmin = (caller: ProjectCaller): boolean => {
+    if (isAdminLike(caller)) return true;
+    return caller.role === ROLES.MANAGER || caller.role === ROLES.TEAM_LEAD;
+};
 
 const requireWriter = (caller: ProjectCaller): void => {
-    if (!isManagerOrAdmin(caller.role)) {
+    if (!isManagerOrAdmin(caller)) {
         throw AppError.forbidden(
-            'Only admins and managers can create, delete, or reassign tasks',
+            'Only admins, managers, and team leads can create, delete, or reassign tasks',
             ERROR_CODES.TASK_WRITE_FORBIDDEN
         );
     }
@@ -82,7 +102,7 @@ const isOwnerEmployee = (task: TaskDocument, caller: ProjectCaller): boolean => 
 };
 
 const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
-    if (isManagerOrAdmin(caller.role)) return;
+    if (isManagerOrAdmin(caller)) return;
     if (caller.role === ROLES.CLIENT) {
         // Clients have read-only project access; PATCH is never theirs.
         throw AppError.forbidden('Clients cannot update tasks', ERROR_CODES.TASK_WRITE_FORBIDDEN);
@@ -120,7 +140,7 @@ const assertValidStatus = (status: string, project: ProjectDocument): void => {
     }
 };
 
-const INTERNAL_ROLES: readonly string[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE];
+const INTERNAL_ROLES: readonly string[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE];
 
 const assertActiveInternalUsers = async (
     ids: Types.ObjectId[],
@@ -399,7 +419,7 @@ export const listTasks = async (
     if (query.project_id) {
         const project = await loadProjectForCaller(new Types.ObjectId(query.project_id), caller);
         filter.project_id = project._id;
-    } else if (!isManagerOrAdmin(caller.role)) {
+    } else if (!isManagerOrAdmin(caller)) {
         const visible = buildProjectVisibilityFilter(caller);
         // Resolve to project IDs once so the task query stays simple. The
         // project list is small in practice (low hundreds at most for any
@@ -714,7 +734,7 @@ export const reorderTask = async (
     const { task, project } = await loadTaskAndProject(taskId, caller);
 
     const isAssignee = !!task.primary_assignee_id && task.primary_assignee_id.equals(caller.id);
-    if (!isManagerOrAdmin(caller.role) && !isAssignee) {
+    if (!isManagerOrAdmin(caller) && !isAssignee) {
         throw AppError.forbidden(
             'Only admins, managers, or the task assignee can reorder this task',
             ERROR_CODES.TASK_WRITE_FORBIDDEN
@@ -783,7 +803,7 @@ export const assignTaskStory = async (
     body: AssignStoryBody,
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
-    if (!isManagerOrAdmin(caller.role)) {
+    if (!isManagerOrAdmin(caller)) {
         throw AppError.forbidden(
             'Only admins and managers can change a task’s story',
             ERROR_CODES.STORY_WRITE_FORBIDDEN

@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as service from '../services/office-location.service.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import type {
@@ -24,7 +25,13 @@ const parseTargetId = (req: Request): Types.ObjectId => {
 // ─── POST /office-locations ────────────────────────────────────────────────
 
 export const postCreate = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.createOfficeLocation(req.body as CreateOfficeLocationBody, callerId(req));
+    // I1 — admin office-location mutations are audited (geofence anchors +
+    // QR rotation are security-relevant).
+    const data = await service.createOfficeLocation(
+        req.body as CreateOfficeLocationBody,
+        callerId(req),
+        buildAuditContext(req)
+    );
     return created(res, data);
 };
 
@@ -45,20 +52,24 @@ export const getOne = async (req: Request, res: Response): Promise<Response> => 
 // ─── PATCH /office-locations/:id ──────────────────────────────────────────
 
 export const patchOne = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.updateOfficeLocation(parseTargetId(req), req.body as PatchOfficeLocationBody);
+    const data = await service.updateOfficeLocation(
+        parseTargetId(req),
+        req.body as PatchOfficeLocationBody,
+        buildAuditContext(req)
+    );
     return ok(res, data);
 };
 
 // ─── POST /office-locations/:id/regenerate-qr ─────────────────────────────
 
 export const postRegenerateQr = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.regenerateQrToken(parseTargetId(req));
+    const data = await service.regenerateQrToken(parseTargetId(req), buildAuditContext(req));
     return ok(res, data);
 };
 
 // ─── DELETE /office-locations/:id ─────────────────────────────────────────
 
 export const deleteOne = async (req: Request, res: Response): Promise<Response> => {
-    await service.deactivateOfficeLocation(parseTargetId(req));
+    await service.deactivateOfficeLocation(parseTargetId(req), buildAuditContext(req));
     return noContent(res);
 };

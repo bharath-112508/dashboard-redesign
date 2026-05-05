@@ -6,6 +6,7 @@ import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { JOB_LOCK_STALE_MS, JOB_RUN_STATUSES, type JobName } from '../constants/jobs.js';
 import logger from '../utils/logger.js';
+import { jobRunDurationSeconds, jobRunsTotal } from '../utils/metrics.js';
 
 /**
  * Job runner — Step 14 plumbing shared by every cron-triggered job.
@@ -60,6 +61,21 @@ export interface RunJobOptions {
      * ticks stay non-throwing.
      */
     throwOnError?: boolean;
+    /**
+     * In-tick retry budget (BACKEND_AUDIT.md P1-6). When > 1 the runner
+     * retries a failed handler with exponential backoff (1s, 2s, 4s, …)
+     * before recording the run as failed. Defaults to 1 (no retry — the
+     * legacy behaviour). Use this on jobs where a transient Mongo / Blob
+     * blip would skip a window with downstream consequences (e.g. SL
+     * forfeiture, leave-year rollover) — there the next scheduled tick
+     * is too late to recover.
+     *
+     * Lock semantics are preserved across retries: the same `job_runs`
+     * row stays at `running`, only `error_message` is updated mid-flight
+     * if the operator queries it. The job is only marked `failed` after
+     * the final attempt fails.
+     */
+    maxAttempts?: number;
 }
 
 export interface RunJobResult {
@@ -127,10 +143,47 @@ const acquireLock = async (name: JobName, run_key: string, startedAt: Date): Pro
 // ─── Public entry point ──────────────────────────────────────────────────
 
 /**
+ * F5 — registry of in-flight `runJob` promises. `stopScheduler` awaits
+ * `Promise.allSettled([...inFlight])` before resolving so a SIGTERM
+ * during a long-running cron handler (audit-log mirror upload, monthly
+ * forfeiture user-iteration) doesn't truncate mid-write.
+ *
+ * The set holds the OUTER promise returned by `runJob`, not the raw
+ * handler — that way every concern the runner already wraps (DB
+ * lifecycle update, audit emit, retry loop) gets to drain.
+ */
+const inFlightRunJobs: Set<Promise<RunJobResult>> = new Set();
+
+/**
+ * Snapshot of currently-running `runJob` promises. Exposed so
+ * `stopScheduler` can await them; tests can inspect cardinality
+ * without colliding on import order.
+ */
+export const getInFlightRunJobs = (): readonly Promise<RunJobResult>[] => [...inFlightRunJobs];
+
+/**
  * Run a single job under the shared runner contract. See module header for
  * the lifecycle / audit / never-throw guarantees.
  */
-export const runJob = async (
+export const runJob = (
+    name: JobName,
+    runKey: string,
+    handler: JobHandler,
+    opts: RunJobOptions = {}
+): Promise<RunJobResult> => {
+    const promise = runJobInner(name, runKey, handler, opts);
+    inFlightRunJobs.add(promise);
+    promise
+        .finally(() => inFlightRunJobs.delete(promise))
+        .catch(() => {
+            // The inner already swallows + records the failure path; the
+            // .catch() here is purely to keep an unhandled-rejection
+            // warning off the bookkeeping promise.
+        });
+    return promise;
+};
+
+const runJobInner = async (
     name: JobName,
     runKey: string,
     handler: JobHandler,
@@ -157,18 +210,37 @@ export const runJob = async (
 
     if (!acquired) {
         childLog.info({ code: 'JOB_RUN_SKIPPED' }, 'Job run skipped — already done or lock held');
+        jobRunsTotal.inc({ name, status: 'skipped' });
         return { status: 'skipped', runKey, durationMs: 0, summary: {} };
     }
 
-    // Step 2 — execute.
+    // Step 2 — execute (with optional in-tick retry on transient errors).
     childLog.info({ pid: process.pid, host: HOST }, 'Job run started');
 
+    const maxAttempts = Math.max(1, opts.maxAttempts ?? 1);
     let summary: Record<string, unknown> = {};
     let runError: unknown = null;
-    try {
-        summary = await handler({ name, runKey, startedAt, log: childLog });
-    } catch (err) {
-        runError = err;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        runError = null;
+        try {
+            summary = await handler({ name, runKey, startedAt, log: childLog });
+            break;
+        } catch (err) {
+            runError = err;
+            if (attempt >= maxAttempts) break;
+            // Exponential backoff: 1s, 2s, 4s, ... — capped to keep a
+            // misbehaving handler from blocking the next cron window.
+            const backoffMs = Math.min(2 ** (attempt - 1) * 1000, 30_000);
+            try {
+                childLog.warn(
+                    { err, attempt, max_attempts: maxAttempts, backoff_ms: backoffMs },
+                    'Job handler threw — retrying after backoff'
+                );
+            } catch {
+                // swallow — never propagate from the retry log line.
+            }
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        }
     }
     const finishedAt = new Date();
     const durationMs = finishedAt.getTime() - startedAt.getTime();
@@ -176,6 +248,11 @@ export const runJob = async (
     // Step 3 — finalize the row + emit the audit. Both are wrapped in
     // try/catch so a flaky DB or audit logger can never crash the cron.
     const finalStatus = runError ? JOB_RUN_STATUSES.FAILED : JOB_RUN_STATUSES.SUCCESS;
+
+    // Prometheus signals — emit BEFORE the DB write so a flaky audit
+    // table can't suppress the metric.
+    jobRunsTotal.inc({ name, status: finalStatus });
+    jobRunDurationSeconds.observe({ name, status: finalStatus }, durationMs / 1000);
     try {
         await JobRun.updateOne(
             { name, run_key: runKey },

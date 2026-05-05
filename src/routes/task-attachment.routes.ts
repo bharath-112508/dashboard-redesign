@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/task-attachment.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { ATTACHMENT_READ_ROLES, ATTACHMENT_WRITE_ROLES } from '../constants/attachment.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     attachmentIdPathSchema,
     finalizeAttachmentBodySchema,
@@ -35,21 +35,21 @@ export const taskAttachmentsNestedRouter = (): Router => {
 
     router.get(
         '/:task_id/attachments',
-        authorize(...ATTACHMENT_READ_ROLES),
+        requirePermission(PERMISSIONS.TASK_READ),
         validate({ params: taskIdPathSchema, query: listAttachmentsQuerySchema }),
         asyncHandler(ctrl.getList)
     );
 
     router.post(
         '/:task_id/attachments/upload-url',
-        authorize(...ATTACHMENT_WRITE_ROLES),
+        requirePermission(PERMISSIONS.TASK_ATTACHMENT_WRITE),
         validate({ params: taskIdPathSchema, body: uploadUrlBodySchema }),
         asyncHandler(ctrl.postUploadUrl)
     );
 
     router.post(
         '/:task_id/attachments/finalize',
-        authorize(...ATTACHMENT_WRITE_ROLES),
+        requirePermission(PERMISSIONS.TASK_ATTACHMENT_WRITE),
         validate({ params: taskIdPathSchema, body: finalizeAttachmentBodySchema }),
         asyncHandler(ctrl.postFinalize)
     );
@@ -65,14 +65,14 @@ export const attachmentsRouter = (): Router => {
 
     router.get(
         '/:id/download-url',
-        authorize(...ATTACHMENT_READ_ROLES),
+        requirePermission(PERMISSIONS.TASK_READ),
         validate({ params: attachmentIdPathSchema }),
         asyncHandler(ctrl.getDownloadUrl)
     );
 
     router.delete(
         '/:id',
-        authorize(...ATTACHMENT_WRITE_ROLES),
+        requirePermission(PERMISSIONS.TASK_ATTACHMENT_WRITE),
         validate({ params: attachmentIdPathSchema }),
         asyncHandler(ctrl.deleteOne)
     );

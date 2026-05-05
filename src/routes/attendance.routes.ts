@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/attendance.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { ATTENDANCE_INTERNAL_ROLES, ATTENDANCE_REVIEW_ROLES } from '../constants/attendance.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     attendanceIdParamSchema,
     checkInBodySchema,
@@ -23,7 +23,9 @@ const router = Router();
 
 // All routes require an authenticated internal user (admin / manager /
 // employee). Clients have no attendance records and would only ever see 403s.
-router.use(authenticate, authorize(...ATTENDANCE_INTERNAL_ROLES));
+// All routes require `attendance.check_in_out` (employees + above);
+// Clients don't hold this permission, mirroring legacy ATTENDANCE_INTERNAL_ROLES.
+router.use(authenticate, requirePermission(PERMISSIONS.ATTENDANCE_CHECK_IN_OUT));
 
 // ─── Employee-facing collection routes ────────────────────────────────────
 // NB: Order matters — `/me/today` must come before any `/:id` parameterised
@@ -48,14 +50,14 @@ router.get('/correction-requests', validate({ query: listCorrectionsQuerySchema 
 
 router.post(
     '/correction-requests/:id/approve',
-    authorize(...ATTENDANCE_REVIEW_ROLES),
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_APPROVE),
     validate({ params: correctionRequestIdParamSchema, body: reviewCorrectionBodySchema }),
     asyncHandler(ctrl.postApproveCorrection)
 );
 
 router.post(
     '/correction-requests/:id/reject',
-    authorize(...ATTENDANCE_REVIEW_ROLES),
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_APPROVE),
     validate({ params: correctionRequestIdParamSchema, body: reviewCorrectionBodySchema }),
     asyncHandler(ctrl.postRejectCorrection)
 );
@@ -64,14 +66,14 @@ router.post(
 
 router.get(
     '/',
-    authorize(...ATTENDANCE_REVIEW_ROLES),
+    requirePermission(PERMISSIONS.ATTENDANCE_READ_TEAM),
     validate({ query: listAttendanceQuerySchema }),
     asyncHandler(ctrl.getList)
 );
 
 router.patch(
     '/:id',
-    authorize(...ATTENDANCE_REVIEW_ROLES),
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_APPROVE),
     validate({ params: attendanceIdParamSchema, body: patchAttendanceBodySchema }),
     asyncHandler(ctrl.patchOne)
 );

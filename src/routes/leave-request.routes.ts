@@ -2,13 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/leave-request.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import {
-    LEAVE_REQUEST_APPLY_ROLES,
-    LEAVE_REQUEST_LIST_ALL_ROLES,
-    LEAVE_REQUEST_REVIEW_ROLES,
-} from '../constants/leave.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     applyLeaveBodySchema,
     approveLeaveBodySchema,
@@ -27,7 +23,7 @@ router.use(authenticate);
 
 router.post(
     '/preview-split',
-    authorize(...LEAVE_REQUEST_APPLY_ROLES),
+    requirePermission(PERMISSIONS.LEAVE_REQUEST_WRITE),
     validate({ body: applyLeaveBodySchema }),
     asyncHandler(ctrl.postPreview)
 );
@@ -38,7 +34,7 @@ router.get('/', validate({ query: listLeavesQuerySchema }), asyncHandler(ctrl.ge
 
 router.post(
     '/',
-    authorize(...LEAVE_REQUEST_APPLY_ROLES),
+    requirePermission(PERMISSIONS.LEAVE_REQUEST_WRITE),
     validate({ body: applyLeaveBodySchema }),
     asyncHandler(ctrl.postApply)
 );
@@ -47,14 +43,14 @@ router.get('/:id', validate({ params: leaveIdParamSchema }), asyncHandler(ctrl.g
 
 router.post(
     '/:id/approve',
-    authorize(...LEAVE_REQUEST_REVIEW_ROLES),
+    requirePermission(PERMISSIONS.LEAVE_REQUEST_APPROVE),
     validate({ params: leaveIdParamSchema, body: approveLeaveBodySchema }),
     asyncHandler(ctrl.postApprove)
 );
 
 router.post(
     '/:id/reject',
-    authorize(...LEAVE_REQUEST_REVIEW_ROLES),
+    requirePermission(PERMISSIONS.LEAVE_REQUEST_APPROVE),
     validate({ params: leaveIdParamSchema, body: rejectLeaveBodySchema }),
     asyncHandler(ctrl.postReject)
 );
@@ -64,7 +60,5 @@ router.post(
     validate({ params: leaveIdParamSchema, body: cancelLeaveBodySchema }),
     asyncHandler(ctrl.postCancel)
 );
-
-void LEAVE_REQUEST_LIST_ALL_ROLES;
 
 export default router;

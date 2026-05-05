@@ -30,11 +30,19 @@ import { projectTimelineNestedRouter } from './timeline.routes.js';
 import reportPresetRoutes from './report-preset.routes.js';
 import reportSubscriptionRoutes from './report-subscription.routes.js';
 import { projectShareLinksNestedRouter, publicShareLinksRouter, shareLinksRouter } from './share-link.routes.js';
+import roleRoutes, { userRolesAssignRouter } from './role.routes.js';
+import commandPaletteRoutes from './command-palette.routes.js';
 
 const appRoutes = Router();
 
 appRoutes.use('/auth', authRoutes);
 appRoutes.use('/users', userRoutes);
+// Step 47 Phase C — `PATCH /users/:user_id/roles` lives next to /users
+// (the resource hierarchy is users → roles), separate from the /roles
+// CRUD surface. Mounted before more-specific user routes wouldn't
+// shadow it; `userRoutes` itself doesn't claim `/:user_id/roles`.
+appRoutes.use('/users', userRolesAssignRouter());
+appRoutes.use('/roles', roleRoutes);
 appRoutes.use('/settings', settingsRoutes);
 appRoutes.use('/office-locations', officeLocationRoutes);
 appRoutes.use('/attendance', attendanceRoutes);
@@ -73,5 +81,9 @@ appRoutes.use('/share-links', shareLinksRouter());
 // public router only owns `/resolve/:token`, so there's no overlap.
 appRoutes.use('/share-links', publicShareLinksRouter());
 appRoutes.use('/project-custom-statuses', customStatusRouter());
+// Step 49 — Command-palette / Cmd-K shortcuts. Reads only; the
+// underlying catalog is a static constant filtered per caller's
+// permissions inside the service.
+appRoutes.use('/command-palette', commandPaletteRoutes);
 
 export default appRoutes;

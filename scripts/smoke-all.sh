@@ -46,6 +46,13 @@ DEFAULT_SMOKES=(
     # Phase-2 surfaces (Step 26 exit criterion). Covers projects + sprints
     # + stories + tasks + comments AND the cross-project @mention scope.
     smoke-projects.sh
+    # Phase-4 Step 47 RBAC surface — /roles CRUD + user role assignment
+    # + Pattern B extra_permissions. Last in the order so it can mutate
+    # the employee's role assignment without affecting earlier smokes.
+    smoke-roles.sh
+    # Phase-4 Step 49 — Cmd-K command-palette action catalog.
+    # Read-only; no state mutation, safe to run anywhere in the order.
+    smoke-command-palette.sh
 )
 
 if [[ ${#ARGS[@]} -gt 0 ]]; then

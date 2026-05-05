@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/task-comment.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { COMMENT_READ_ROLES, COMMENT_WRITE_ROLES } from '../constants/comment.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     commentIdPathSchema,
     createCommentBodySchema,
@@ -34,14 +34,14 @@ export const taskCommentsNestedRouter = (): Router => {
 
     router.get(
         '/:task_id/comments',
-        authorize(...COMMENT_READ_ROLES),
+        requirePermission(PERMISSIONS.TASK_READ),
         validate({ params: taskIdPathSchema, query: listCommentsQuerySchema }),
         asyncHandler(ctrl.getList)
     );
 
     router.post(
         '/:task_id/comments',
-        authorize(...COMMENT_WRITE_ROLES),
+        requirePermission(PERMISSIONS.TASK_COMMENT_WRITE),
         validate({ params: taskIdPathSchema, body: createCommentBodySchema }),
         asyncHandler(ctrl.postCreate)
     );
@@ -57,14 +57,14 @@ export const commentsRouter = (): Router => {
 
     router.patch(
         '/:id',
-        authorize(...COMMENT_WRITE_ROLES),
+        requirePermission(PERMISSIONS.TASK_COMMENT_WRITE),
         validate({ params: commentIdPathSchema, body: patchCommentBodySchema }),
         asyncHandler(ctrl.patchOne)
     );
 
     router.delete(
         '/:id',
-        authorize(...COMMENT_WRITE_ROLES),
+        requirePermission(PERMISSIONS.TASK_COMMENT_WRITE),
         validate({ params: commentIdPathSchema }),
         asyncHandler(ctrl.deleteOne)
     );

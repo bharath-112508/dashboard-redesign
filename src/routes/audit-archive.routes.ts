@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/audit-archive.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { AUDIT_ARCHIVE_READ_ROLES } from '../constants/audit-archive.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { auditArchiveIdParamSchema, listAuditArchivesQuerySchema } from '../validators/audit-archive.validator.js';
 
 /**
@@ -16,7 +16,7 @@ import { auditArchiveIdParamSchema, listAuditArchivesQuerySchema } from '../vali
 const router = Router();
 
 router.use(authenticate);
-router.use(authorize(...AUDIT_ARCHIVE_READ_ROLES));
+router.use(requirePermission(PERMISSIONS.AUDIT_ARCHIVE_READ));
 
 router.get('/', validate({ query: listAuditArchivesQuerySchema }), asyncHandler(ctrl.getList));
 router.get('/:id', validate({ params: auditArchiveIdParamSchema }), asyncHandler(ctrl.getOne));

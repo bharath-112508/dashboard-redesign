@@ -1,16 +1,12 @@
-import { ROLES, type RoleType } from './roles.js';
-
 /**
  * Holiday calendar constants — Step 9 (`API_Contract.md §4.3`,
  * `Data_Model.md §2.3`).
  *
- * Authorization model:
- *  - Reads (`GET /holidays`, list-only — no per-id read in the contract) are
- *    available to **any authenticated user**. Employees consume the calendar
- *    on the leave/attendance UI; managers and admins also browse it for
- *    planning.
- *  - Writes (`POST`, `POST /bulk`, `PATCH`, `DELETE`) are **Admin-only**. The
- *    HR/admin team owns the calendar.
+ * Authorization model (Step 47):
+ *  - Reads gated on `holiday.read` (held by every system role).
+ *  - Writes (`POST`, `POST /bulk`, `PATCH`, `DELETE`) gated on
+ *    `holiday.write` (held only by Admin via the `system.admin`
+ *    wildcard). HR/admin owns the calendar.
  *
  * Modelling notes:
  *  - `holidays.date` is a single ISO `YYYY-MM-DD` string in IST (no timezone
@@ -22,9 +18,6 @@ import { ROLES, type RoleType } from './roles.js';
  *    collection). Future leave/attendance jobs that read holidays do so by
  *    `date`, not by foreign key, so a hard-delete won't dangle a reference.
  */
-
-export const HOLIDAY_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT];
-export const HOLIDAY_WRITE_ROLES: readonly RoleType[] = [ROLES.ADMIN];
 
 export const NAME_MAX = 100;
 export const BULK_INSERT_MAX = 200;

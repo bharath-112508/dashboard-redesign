@@ -9,7 +9,7 @@ import type { AuditLogIdParam, ListAuditLogsQuery } from '../validators/audit-lo
  * Audit-log read controllers (Step 31; API_Contract §12).
  *
  * Admin-only, read-only. The service does no row-level filtering (the
- * RBAC gate is the route's `authorize(...AUDIT_LOG_READ_ROLES)`); every
+ * RBAC gate is the route's `requirePermission(audit_log.read)`); every
  * authenticated admin can see every row. We deliberately do NOT audit
  * these reads in v1 — auditing-the-auditor is a Phase-4 concern (would
  * also need a dedicated read action verb to avoid recursion).

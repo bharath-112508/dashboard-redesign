@@ -3,8 +3,10 @@ import { Types } from 'mongoose';
 import { OfficeLocation, type OfficeLocationDocument } from '../models/office-location.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { QR_TOKEN_REGENERATION_RETRY_LIMIT } from '../constants/office-location.js';
 import { generateQrToken, renderCheckInQrDataUrl } from '../utils/office-location-qr.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     CreateOfficeLocationBody,
@@ -40,6 +42,25 @@ const toPublic = async (doc: OfficeLocationDocument): Promise<Record<string, unk
 const toPublicMany = async (docs: OfficeLocationDocument[]): Promise<Record<string, unknown>[]> => {
     return Promise.all(docs.map(toPublic));
 };
+
+/**
+ * I1 — minimal projection for audit before/after snapshots. We deliberately
+ * strip:
+ *  - `qr_code_token` — it's a secret check-in token; landing it in the
+ *    audit log would let anyone with audit-read access bypass geofence
+ *    enforcement.
+ *  - `qr_data_url` — a base64 PNG that would blow past the per-snapshot
+ *    byte cap (`AUDIT_SNAPSHOT_BYTES_MAX = 16 KiB`) on every row, causing
+ *    every office-location audit row to drop both snapshots silently.
+ * The remaining fields (`name`, `address`, `is_active`, timestamps) are
+ * what an operator actually needs to see "who changed what" later.
+ */
+const toAuditSnapshot = (doc: OfficeLocationDocument): Record<string, unknown> => ({
+    id: doc._id.toString(),
+    name: doc.name,
+    address: doc.address,
+    is_active: doc.is_active,
+});
 
 // ─── Internal: create with E11000 retry on the unique qr_code_token ──────
 
@@ -81,13 +102,21 @@ const insertWithUniqueToken = async (
 
 export const createOfficeLocation = async (
     input: CreateOfficeLocationBody,
-    created_by: Types.ObjectId
+    created_by: Types.ObjectId,
+    audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     const created = await insertWithUniqueToken({
         name: input.name,
         address: input.address,
         created_by,
     });
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.OFFICE_LOCATION_CREATE,
+            target: { kind: AUDIT_TARGET_KINDS.OFFICE_LOCATION, id: created._id },
+            after: toAuditSnapshot(created),
+        });
+    }
     return toPublic(created);
 };
 
@@ -135,33 +164,54 @@ export const getOfficeLocation = async (id: Types.ObjectId): Promise<Record<stri
 
 export const updateOfficeLocation = async (
     id: Types.ObjectId,
-    patch: PatchOfficeLocationBody
+    patch: PatchOfficeLocationBody,
+    audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     const doc = await OfficeLocation.findById(id);
     if (!doc) {
         throw AppError.notFound('Office location not found', ERROR_CODES.RESOURCE_NOT_FOUND);
     }
 
+    const before = toAuditSnapshot(doc);
+
     if (patch.name !== undefined) doc.name = patch.name;
     if (patch.address !== undefined) doc.address = patch.address;
     if (patch.is_active !== undefined) doc.is_active = patch.is_active;
 
     await doc.save();
+
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.OFFICE_LOCATION_UPDATE,
+            target: { kind: AUDIT_TARGET_KINDS.OFFICE_LOCATION, id: doc._id },
+            before,
+            after: toAuditSnapshot(doc),
+        });
+    }
+
     return toPublic(doc);
 };
 
 // ─── DELETE /office-locations/:id (soft) ────────────────────────────────
 
-export const deactivateOfficeLocation = async (id: Types.ObjectId): Promise<void> => {
+export const deactivateOfficeLocation = async (id: Types.ObjectId, audit?: AuditContext): Promise<void> => {
     const result = await OfficeLocation.findByIdAndUpdate(id, { $set: { is_active: false } }, { new: true });
     if (!result) {
         throw AppError.notFound('Office location not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+    }
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.OFFICE_LOCATION_DEACTIVATE,
+            target: { kind: AUDIT_TARGET_KINDS.OFFICE_LOCATION, id: result._id },
+            before: { is_active: true },
+            after: { is_active: false },
+        });
     }
 };
 
 // ─── POST /office-locations/:id/regenerate-qr ───────────────────────────
 
-export const regenerateQrToken = async (id: Types.ObjectId): Promise<Record<string, unknown>> => {
+export const regenerateQrToken = async (id: Types.ObjectId, audit?: AuditContext): Promise<Record<string, unknown>> => {
     const doc = await OfficeLocation.findById(id);
     if (!doc) {
         throw AppError.notFound('Office location not found', ERROR_CODES.RESOURCE_NOT_FOUND);
@@ -176,6 +226,16 @@ export const regenerateQrToken = async (id: Types.ObjectId): Promise<Record<stri
             // pointing at the old token.
             doc.qr_code_image_url = null;
             await doc.save();
+            if (audit) {
+                // I1 — record the rotation event WITHOUT echoing the new
+                // token. The token is a check-in secret; landing it in
+                // the audit log would let anyone with audit-read defeat
+                // the rotation.
+                await recordAudit(audit, {
+                    action: AUDIT_ACTIONS.OFFICE_LOCATION_QR_ROTATE,
+                    target: { kind: AUDIT_TARGET_KINDS.OFFICE_LOCATION, id: doc._id },
+                });
+            }
             return toPublic(doc);
         } catch (err: unknown) {
             if (err && typeof err === 'object' && 'code' in err && (err as { code: number }).code === 11000) {

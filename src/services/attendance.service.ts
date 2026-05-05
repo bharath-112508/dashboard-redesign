@@ -45,10 +45,10 @@ import type {
  *    a second row under race.
  *  - Geofence + WiFi gating reads `system_settings.attendance.*`. Both flags
  *    default to `false`, so the seam is inert until an admin enables them.
- *  - Comp-off ledger writes triggered by overtime are deferred to Step 10
- *    (Leave Management) — the leave module owns `comp_off_ledger`. We still
- *    compute `overtime_minutes` here so Step 10 can backfill from
- *    attendance_records with no API change.
+ *  - Comp-off ledger writes triggered by overtime are owned by the
+ *    Leave Management module (Step 10 — shipped). Attendance computes
+ *    `overtime_minutes` and the leave module reads it when posting
+ *    `attendance_overtime` rows to `comp_off_ledger`.
  *
  * Authorization helpers:
  *  - `assertCanReviewCorrections` for approve/reject/list-all surface.

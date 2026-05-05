@@ -6,10 +6,13 @@ import { SlMonthlyForfeiture } from '../models/sl-monthly-forfeiture.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { LEAVE_CODES, PRO_RATA_STRATEGIES, type ProRataStrategy } from '../constants/leave.js';
 import { ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
+import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import logger from '../utils/logger.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
 import type {
     AdjustLeaveBalanceBody,
     InitializeYearBody,
@@ -221,8 +224,12 @@ const toBalancePublic = async (
 
     // Append `sl_monthly_detail` for any type that defines a monthly cap.
     if (lt && lt.monthly_cap !== null && lt.monthly_cap !== undefined) {
-        const now = new Date();
-        const month = now.getUTCMonth() + 1;
+        // H1 — month must be derived in the org's business timezone (IST).
+        // Pre-H1 used `getUTCMonth()`, which crossed the month boundary 5h30m
+        // ahead of IST and caused the dashboard / list endpoints to look up
+        // the wrong forfeiture row in the late-night IST window between IST
+        // midnight and UTC midnight on the 1st of each month.
+        const month = dayjs().tz(DEFAULT_TIMEZONE).month() + 1;
         const forfeited = await SlMonthlyForfeiture.findOne({
             user_id: b.user_id,
             year: b.year,
@@ -250,7 +257,10 @@ const buildTypeCache = async (balances: LeaveBalanceDocument[]): Promise<Map<str
     return new Map(types.map((t) => [t._id.toString(), t]));
 };
 
-const currentYear = (): number => new Date().getUTCFullYear();
+// H1 — "current year" follows the IST business calendar so a request made
+// just after IST midnight on Jan 1 doesn't read from the previous year's
+// balance rows during the 5h30m window before UTC rolls over.
+const currentYear = (): number => dayjs().tz(DEFAULT_TIMEZONE).year();
 
 export const listOwnBalances = async (user_id: Types.ObjectId, year?: number): Promise<Record<string, unknown>[]> => {
     const targetYear = year ?? currentYear();
@@ -289,16 +299,51 @@ export const listBalances = async (query: ListLeaveBalancesQuery): Promise<Recor
 export const adjustBalance = async (
     id: Types.ObjectId,
     body: AdjustLeaveBalanceBody,
-    updated_by: Types.ObjectId
+    updated_by: Types.ObjectId,
+    audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     const row = await LeaveBalance.findById(id);
     if (!row) {
         throw AppError.notFound('Leave balance not found', ERROR_CODES.RESOURCE_NOT_FOUND);
     }
+
+    // H3 — capture the counters that actually move on adjust so the
+    // audit row's before/after diff is meaningful. The full balance row
+    // would also work but contains plenty of fields adjust never touches
+    // (allocated, carried_forward, used, pending, monthly_forfeited);
+    // pinning the diff to {adjusted, available} keeps the timeline
+    // readable in the future Step-31 audit UI.
+    const before = {
+        adjusted: row.adjusted ?? 0,
+        available: row.available,
+    };
+
     row.adjusted = (row.adjusted || 0) + body.delta;
     row.available = recomputeAvailable(row);
     row.updated_by = updated_by;
     await row.save();
+
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.LEAVE_BALANCE_ADJUST,
+            target: { kind: AUDIT_TARGET_KINDS.LEAVE_BALANCE, id: row._id },
+            before,
+            after: {
+                adjusted: row.adjusted,
+                available: row.available,
+            },
+            metadata: {
+                // Pre-H3 the validator demanded a `reason >= 3 chars` but
+                // the service silently dropped it. The audit row is the
+                // only place that text ever lands, so we surface it here.
+                reason: body.reason,
+                delta: body.delta,
+                user_id: row.user_id.toString(),
+                leave_type_id: row.leave_type_id.toString(),
+                year: row.year,
+            },
+        });
+    }
 
     const lt = await LeaveType.findById(row.leave_type_id);
     return toBalancePublic(row, new Map(lt ? [[lt._id.toString(), lt]] : []));

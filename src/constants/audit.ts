@@ -19,7 +19,7 @@
  *     events.
  */
 
-import { ROLES, type RoleType } from './roles.js';
+import { type RoleType } from './roles.js';
 
 // ─── Actions whitelist (Data_Model.md §7.2 examples + Phase 1 hookups) ──
 
@@ -35,10 +35,22 @@ export const AUDIT_ACTIONS = {
     // image is possible until the blob is GC'd.
     USER_PROFILE_PHOTO_SET: 'user.profile_photo_set',
     USER_PROFILE_PHOTO_CLEAR: 'user.profile_photo_clear',
+    /** GDPR DSAR — admin generated a JSON dump of a user's data. (BACKEND_AUDIT.md P1-8) */
+    USER_DATA_EXPORT: 'user.data_export',
+    /** GDPR right-to-erasure — admin anonymised a user's PII. (BACKEND_AUDIT.md P1-8) */
+    USER_DATA_ERASE: 'user.data_erase',
 
     // Auth / credentials
     AUTH_PASSWORD_CHANGE: 'auth.password_change',
     AUTH_PASSWORD_RESET: 'auth.password_reset',
+    /**
+     * Admin requested a password reset link for a target user
+     * (`POST /users/:id/reset-password`). Distinct from `AUTH_PASSWORD_RESET`
+     * which fires when the USER consumes the link — this verb captures the
+     * admin-side initiation. Useful for "who triggered all these reset
+     * emails" forensics.
+     */
+    AUTH_ADMIN_PASSWORD_RESET: 'auth.admin_password_reset',
     AUTH_MFA_ENABLE: 'auth.mfa_enable',
     AUTH_MFA_DISABLE: 'auth.mfa_disable',
     AUTH_MFA_REGENERATE_BACKUP_CODES: 'auth.mfa_regenerate_backup_codes',
@@ -57,6 +69,54 @@ export const AUDIT_ACTIONS = {
     LEAVE_REJECT: 'leave.reject',
     LEAVE_CANCEL: 'leave.cancel',
 
+    // Leave-balance manual adjust (H3). Admin-only PATCH /leave-balances/:id.
+    // The validator already requires a free-text `reason` so an operator
+    // adjusting balances can explain why; H3 plumbs that reason into the
+    // audit row's `metadata.reason` alongside the signed `metadata.delta`
+    // and a before/after snapshot of the row's counters. Pre-H3 the
+    // adjust path took the `reason` and silently discarded it — the
+    // sensitive action ran with no audit trail.
+    LEAVE_BALANCE_ADJUST: 'leave_balance.adjust',
+
+    // Comp-off ledger admin adjust (I1). POST /comp-off/adjust is admin /
+    // manager only — they grant or consume comp-off days against a user's
+    // ledger (`comp_off_balance` is rederived). Pre-I1 every grant/consume
+    // ran with no audit trail; H3-style fix records the signed delta,
+    // operator-supplied `remarks`, and the resulting balance.
+    COMP_OFF_ADJUST: 'comp_off.adjust',
+
+    // Holiday calendar admin CRUD (I1). Org-wide working-day calendar —
+    // every user's leave-day count and attendance roll-ups depend on the
+    // dates here, so a stray edit is observable platform-wide. Bulk
+    // create records `metadata.{inserted_count, skipped_count}` rather
+    // than emitting one row per inserted holiday so a 50-row import
+    // doesn't flood the audit log; the `after` payload still carries
+    // the inserted dates for forensic reconstruction.
+    HOLIDAY_CREATE: 'holiday.create',
+    HOLIDAY_BULK_CREATE: 'holiday.bulk_create',
+    HOLIDAY_UPDATE: 'holiday.update',
+    HOLIDAY_DELETE: 'holiday.delete',
+
+    // Leave-type catalog admin CRUD (I1). The default-allocation, monthly
+    // cap, and pro-rata strategy here drive every user's balance seeding,
+    // so renaming or recapping a type effectively rewrites everyone's
+    // entitlement going forward. Deactivate is the soft-delete path —
+    // existing balance rows survive, but new years won't seed against it.
+    LEAVE_TYPE_CREATE: 'leave_type.create',
+    LEAVE_TYPE_UPDATE: 'leave_type.update',
+    LEAVE_TYPE_DEACTIVATE: 'leave_type.deactivate',
+
+    // Office-location admin CRUD + QR-token rotation (I1). The geofence
+    // anchor + QR token drive attendance check-in eligibility; rotating
+    // a QR token is security-relevant (token compromise → unauthorised
+    // check-ins until the rotation lands). The rotation row deliberately
+    // omits the new token from `after` — only the rotation event itself
+    // is audited, never the secret value.
+    OFFICE_LOCATION_CREATE: 'office_location.create',
+    OFFICE_LOCATION_UPDATE: 'office_location.update',
+    OFFICE_LOCATION_DEACTIVATE: 'office_location.deactivate',
+    OFFICE_LOCATION_QR_ROTATE: 'office_location.qr_rotate',
+
     // Project lifecycle (Phase 2 Step 16 — projects + members + clients +
     // sprints + custom statuses). Each verb stores a before/after diff so the
     // future Step-31 admin UI can render a "who changed what" timeline. The
@@ -73,6 +133,10 @@ export const AUDIT_ACTIONS = {
     SPRINT_CREATE: 'sprint.create',
     SPRINT_UPDATE: 'sprint.update',
     SPRINT_DELETE: 'sprint.delete',
+    /** T11 — sprint archived (is_archived flipped to true). */
+    SPRINT_ARCHIVE: 'sprint.archive',
+    /** T11 — archived sprint restored (is_archived flipped to false). */
+    SPRINT_UNARCHIVE: 'sprint.unarchive',
 
     // Story lifecycle (Phase 2 Step 17). `STORY_DELETE` records the list of
     // task IDs whose `story_id` was unset in `metadata.unset_task_ids` so a
@@ -192,11 +256,19 @@ export const AUDIT_ACTIONS = {
     REPORT_SUBSCRIPTION_UPDATE: 'report_subscription.update',
     REPORT_SUBSCRIPTION_DELETE: 'report_subscription.delete',
     REPORT_SUBSCRIPTION_SEND: 'report_subscription.send',
+
+    // Custom roles (Phase 4 Step 47). System role mutations are
+    // explicitly forbidden by the role service; only `is_system: false`
+    // rows can be created / patched / deleted via API.
+    ROLE_CREATE: 'role.create',
+    ROLE_UPDATE: 'role.update',
+    ROLE_DELETE: 'role.delete',
+    USER_ROLES_ASSIGN: 'user.roles_assign',
+    // Pattern B — per-user extra permission grants (Step 47 follow-up).
+    USER_EXTRA_PERMISSIONS_UPDATE: 'user.extra_permissions_update',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
-
-export const AUDIT_ACTION_VALUES: readonly AuditAction[] = Object.values(AUDIT_ACTIONS);
 
 // ─── target_entity.kind whitelist ────────────────────────────────────────
 //
@@ -206,6 +278,11 @@ export const AUDIT_ACTION_VALUES: readonly AuditAction[] = Object.values(AUDIT_A
 export const AUDIT_TARGET_KINDS = {
     USER: 'user',
     LEAVE_REQUEST: 'leave_request',
+    LEAVE_BALANCE: 'leave_balance',
+    COMP_OFF_LEDGER: 'comp_off_ledger',
+    HOLIDAY: 'holiday',
+    LEAVE_TYPE: 'leave_type',
+    OFFICE_LOCATION: 'office_location',
     SYSTEM_SETTINGS: 'system_settings',
     JOB: 'job',
     PROJECT: 'project',
@@ -221,6 +298,7 @@ export const AUDIT_TARGET_KINDS = {
     REPORT_EXPORT: 'report_export',
     TASK_TEMPLATE: 'task_template',
     REPORT_SUBSCRIPTION: 'report_subscription',
+    ROLE: 'role',
 } as const;
 
 export type AuditTargetKind = (typeof AUDIT_TARGET_KINDS)[keyof typeof AUDIT_TARGET_KINDS];
@@ -231,12 +309,6 @@ export type AuditTargetKind = (typeof AUDIT_TARGET_KINDS)[keyof typeof AUDIT_TAR
 // reset password, MFA challenge before tokens are issued) record `'system'`
 // when the action is performed on behalf of a known user via a verified
 // token, and `'unauthenticated'` when there is no token at all.
-
-export const AUDIT_ACTOR_ROLES = {
-    ...ROLES,
-    SYSTEM: 'system',
-    UNAUTHENTICATED: 'unauthenticated',
-} as const;
 
 export type AuditActorRole = RoleType | 'system' | 'unauthenticated';
 
@@ -264,9 +336,4 @@ export const AUDIT_METADATA_BYTES_MAX = 4 * 1024; // 4 KiB for ip + ua + extras
 export const AUDIT_LOG_LIST_DEFAULT_LIMIT = 20;
 export const AUDIT_LOG_LIST_MAX_LIMIT = 100;
 
-export const AUDIT_LOG_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN];
-
-// Pagination defaults are reserved for the Phase 3 read endpoint; defining
-// them here keeps the constant collocated with the rest of the audit shape.
-export const AUDIT_LIST_DEFAULT_LIMIT = 50;
-export const AUDIT_LIST_MAX_LIMIT = 200;
+// Step 47: `GET /audit-logs` is gated on `audit_log.read` (admin-only).

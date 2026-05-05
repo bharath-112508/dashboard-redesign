@@ -52,9 +52,12 @@ export const COLLECTIONS = {
     JOB_RUNS: 'job_runs',
     REPORT_EXPORTS: 'report_exports',
     AUDIT_ARCHIVES: 'audit_archives',
+    AUDIT_LOG_MIRRORS: 'audit_log_mirrors',
+    MFA_SESSION_USED_JTIS: 'mfa_session_used_jtis',
     TASK_TEMPLATES: 'task_templates',
     REPORT_PRESETS: 'report_presets',
     REPORT_SUBSCRIPTIONS: 'report_subscriptions',
+    ROLES: 'roles',
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

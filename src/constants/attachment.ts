@@ -11,8 +11,6 @@
  * here only cover field caps, pagination, and the route-level role gate.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
 // ─── Field caps ──────────────────────────────────────────────────────────
 //
 // The display name is a separate field from the blob key — we store the
@@ -44,10 +42,7 @@ export const ATTACHMENT_SAS_TTL_MIN_MINUTES = 5;
 export const ATTACHMENT_SAS_TTL_MAX_MINUTES = 24 * 60; // 24 h
 export const ATTACHMENT_SAS_TTL_DEFAULT_MINUTES = 15;
 
-// ─── RBAC role sets ──────────────────────────────────────────────────────
-//
-// Like comments — route-level is "any project-access role". Per-row
-// uploader/admin authorisation for delete is enforced inside the service.
-
-export const ATTACHMENT_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT];
-export const ATTACHMENT_WRITE_ROLES: readonly RoleType[] = ATTACHMENT_READ_ROLES;
+// Step 47: route gates use `requirePermission(task.read)` for list /
+// download-url and `requirePermission(task_attachment.write)` for
+// upload-url / finalize / delete. Per-row uploader/admin delete check
+// is in `task-attachment.service.ts`.

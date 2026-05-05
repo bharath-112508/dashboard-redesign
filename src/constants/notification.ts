@@ -4,10 +4,12 @@
  *
  * Channels:
  *   - In-app: row written to `notifications` collection, read by the bell icon.
- *   - Email:  best-effort send via `mailer.ts` (currently a console stub —
- *             Azure Communication Services swap deferred to Phase 2).
- *   - Slack:  deferred to Step 25 (Phase 2). The dispatcher exposes a
- *             `slack` channel slot so adding it later is a single hookup.
+ *   - Email:  best-effort send via `mailer.ts`. Pluggable transport selected
+ *             by `EMAIL_TRANSPORT` env (`stub` / `acs` / `mailjet`); the
+ *             dev/test default is `stub` (logs only, no outbound), and
+ *             production deployments select `acs` or `mailjet` via env.
+ *   - Slack:  shipped in Step 25 — Slack-bot DM fan-out to channels +
+ *             handles, gated by `system_settings.slack.enabled`.
  *
  * Dispatch failure policy (API §15.500):
  *   - Notification fan-out is "soft": the dispatcher wraps every send in a
@@ -20,8 +22,6 @@
  *     a "delete read older than N days" job; for now rows live forever and the
  *     dismiss endpoint does a hard delete on the user's request.
  */
-
-import { ROLES, type RoleType } from './roles.js';
 
 // ─── Type enum (Data_Model.md §7.1 — leave + attendance + tasks + system) ─
 
@@ -56,16 +56,9 @@ export const RELATED_ENTITY_KINDS = {
     TASK: 'task',
 } as const;
 
-export type RelatedEntityKind = (typeof RELATED_ENTITY_KINDS)[keyof typeof RELATED_ENTITY_KINDS];
-
-// ─── RBAC ─────────────────────────────────────────────────────────────────
-//
-// Notifications are fully owner-scoped: every authenticated user can read /
-// mark / dismiss their own; nobody (not even Admin) sees another user's bell.
-// Admin override is intentionally not provided — managers/admins read their
-// own notifications same as anyone else.
-
-export const NOTIFICATION_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT];
+// Notifications are fully owner-scoped: every authenticated user can
+// read / mark / dismiss their own; nobody (not even Admin) sees
+// another user's bell. The route gate is just `authenticate`.
 
 // ─── List defaults (API_Contract §1.6, max-100 contract) ─────────────────
 

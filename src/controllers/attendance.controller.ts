@@ -4,7 +4,7 @@ import { Types } from 'mongoose';
 import * as service from '../services/attendance.service.js';
 import { created, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
-import { ROLES, type RoleType } from '../constants/roles.js';
+import { type RoleType } from '../constants/roles.js';
 import type {
     CheckInBody,
     CheckOutBody,
@@ -126,7 +126,3 @@ export const postRejectCorrection = async (req: Request, res: Response): Promise
     );
     return ok(res, data);
 };
-
-// Silence unused import in lint-strict config — `ROLES` is referenced by the
-// service via authorize tuples; controller stays role-agnostic.
-void ROLES;

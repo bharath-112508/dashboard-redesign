@@ -12,8 +12,6 @@
  * Step 33). Storing them now keeps the API contract honest in the meantime.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
 export const SETTINGS_SINGLETON_KEY = 'system' as const;
 
 export const DEFAULT_SETTINGS = {
@@ -131,6 +129,3 @@ export const ADMIN_ONLY_SECTIONS: ReadonlySet<SettingsSection> = new Set(['secur
 
 /** Branding fields exposed by the unauthenticated `GET /settings/public`. */
 export const PUBLIC_COMPANY_FIELDS = ['name', 'logo_blob_key', 'primary_color', 'login_page_tagline'] as const;
-
-/** Helper for the authorize check on PATCH /settings. */
-export const SETTINGS_WRITE_ROLES: readonly RoleType[] = [ROLES.ADMIN];

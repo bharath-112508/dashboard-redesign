@@ -1,0 +1,132 @@
+/**
+ * Permission catalog (Phase 4 Step 47 — RBAC).
+ *
+ * Naming: `<resource>.<verb>` — dot-separated. Verbs are usually one of:
+ *   - `read`        — list / get / detail
+ *   - `write`       — create / update / patch
+ *   - `delete`      — delete (when separate from write)
+ *   - special verbs — `approve`, `archive`, `correction_approve`, etc.
+ *
+ * Why bundle `create + update + patch` into a single `write` in most
+ * cases: the existing route allowlists already gate them as a unit
+ * (a manager who can edit a project can also create one). Splitting
+ * them produces a permission set with ~150 entries and no real
+ * authorization daylight between them — pure maintenance overhead.
+ *
+ * Special verbs exist where the RBAC contract genuinely separates
+ * the operations:
+ *   - `leave_request.approve` (vs. `leave_request.write` for own apply)
+ *   - `attendance.correction_approve` (vs. `correction_request` write)
+ *   - `timesheet.edit_out_of_window` (admin-only override)
+ *   - `project.archive` (vs. update — different audit shape)
+ *
+ * Wildcard:
+ *   - `system.admin` — held by the system "Admin" role only. The
+ *     `requirePermission` middleware treats this as "satisfies any
+ *     permission check" so admins always pass. Per-row visibility
+ *     scoping (e.g. `buildProjectVisibilityFilter`) keeps using the
+ *     `role_keys.includes('admin')` check separately.
+ *
+ * Adding a new permission: append a constant here, then add it to
+ * the relevant system role's permission set in
+ * `system-role-definitions.ts`. The `requirePermission` middleware
+ * picks it up automatically.
+ */
+
+export const PERMISSIONS = {
+    // ─── Wildcard ──────────────────────────────────────────────────────
+    SYSTEM_ADMIN: 'system.admin',
+
+    // ─── User management ───────────────────────────────────────────────
+    USER_READ: 'user.read',
+    USER_WRITE: 'user.write',
+    USER_DEACTIVATE: 'user.deactivate',
+    USER_ROLE_CHANGE: 'user.role_change',
+    /** GDPR DSAR — bundle a user's PII into a JSON dump for export. (BACKEND_AUDIT.md P1-8) */
+    USER_DATA_EXPORT: 'user.data_export',
+    /** GDPR right-to-erasure — anonymise a user's PII while preserving referential integrity. (BACKEND_AUDIT.md P1-8) */
+    USER_DATA_ERASURE: 'user.data_erasure',
+
+    // ─── Roles (Step 47 itself) ────────────────────────────────────────
+    ROLE_READ: 'role.read',
+    ROLE_WRITE: 'role.write',
+    ROLE_DELETE: 'role.delete',
+
+    // ─── Projects + structure ──────────────────────────────────────────
+    PROJECT_READ: 'project.read',
+    PROJECT_WRITE: 'project.write',
+    PROJECT_ARCHIVE: 'project.archive',
+    PROJECT_MEMBERS_WRITE: 'project.members_write',
+    PROJECT_CLIENTS_WRITE: 'project.clients_write',
+    SPRINT_WRITE: 'sprint.write',
+    STORY_WRITE: 'story.write',
+
+    // ─── Tasks + collaboration ─────────────────────────────────────────
+    TASK_READ: 'task.read',
+    TASK_WRITE: 'task.write',
+    TASK_COMMENT_WRITE: 'task_comment.write',
+    TASK_ATTACHMENT_WRITE: 'task_attachment.write',
+
+    // ─── Task templates (Step 40) ──────────────────────────────────────
+    TASK_TEMPLATE_READ: 'task_template.read',
+    TASK_TEMPLATE_WRITE: 'task_template.write',
+
+    // ─── Timesheets + billing ──────────────────────────────────────────
+    TIMESHEET_READ: 'timesheet.read',
+    TIMESHEET_WRITE: 'timesheet.write',
+    TIMESHEET_EDIT_OUT_OF_WINDOW: 'timesheet.edit_out_of_window',
+    BILLING_RATE_READ: 'billing_rate.read',
+    BILLING_RATE_WRITE: 'billing_rate.write',
+
+    // ─── Attendance ────────────────────────────────────────────────────
+    ATTENDANCE_READ_OWN: 'attendance.read_own',
+    ATTENDANCE_READ_TEAM: 'attendance.read_team',
+    ATTENDANCE_CHECK_IN_OUT: 'attendance.check_in_out',
+    ATTENDANCE_CORRECTION_REQUEST: 'attendance.correction_request',
+    ATTENDANCE_CORRECTION_APPROVE: 'attendance.correction_approve',
+
+    // ─── Leaves ────────────────────────────────────────────────────────
+    LEAVE_TYPE_READ: 'leave_type.read',
+    LEAVE_TYPE_WRITE: 'leave_type.write',
+    LEAVE_BALANCE_READ_OWN: 'leave_balance.read_own',
+    LEAVE_BALANCE_READ_TEAM: 'leave_balance.read_team',
+    LEAVE_BALANCE_ADJUST: 'leave_balance.adjust',
+    LEAVE_REQUEST_READ_OWN: 'leave_request.read_own',
+    LEAVE_REQUEST_READ_TEAM: 'leave_request.read_team',
+    LEAVE_REQUEST_WRITE: 'leave_request.write',
+    LEAVE_REQUEST_APPROVE: 'leave_request.approve',
+    COMP_OFF_READ: 'comp_off.read',
+    COMP_OFF_WRITE: 'comp_off.write',
+
+    // ─── Holidays + office locations ───────────────────────────────────
+    HOLIDAY_READ: 'holiday.read',
+    HOLIDAY_WRITE: 'holiday.write',
+    OFFICE_LOCATION_READ: 'office_location.read',
+    OFFICE_LOCATION_WRITE: 'office_location.write',
+
+    // ─── Reports + exports ─────────────────────────────────────────────
+    REPORT_READ: 'report.read',
+    REPORT_EXPORT_WRITE: 'report_export.write',
+
+    // ─── Audit + archive ───────────────────────────────────────────────
+    AUDIT_LOG_READ: 'audit_log.read',
+    AUDIT_ARCHIVE_READ: 'audit_archive.read',
+
+    // ─── System settings ───────────────────────────────────────────────
+    SETTINGS_READ: 'settings.read',
+    SETTINGS_WRITE: 'settings.write',
+    SETTINGS_SLACK_WRITE: 'settings.slack_write',
+
+    // ─── Project share-links (Step 24) ─────────────────────────────────
+    SHARE_LINK_WRITE: 'share_link.write',
+
+    // ─── Dashboards ────────────────────────────────────────────────────
+    DASHBOARD_ADMIN: 'dashboard.admin',
+    DASHBOARD_MANAGER: 'dashboard.manager',
+    DASHBOARD_EMPLOYEE: 'dashboard.employee',
+    DASHBOARD_CLIENT: 'dashboard.client',
+} as const;
+
+export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
+
+export const PERMISSION_VALUES: readonly Permission[] = Object.values(PERMISSIONS);

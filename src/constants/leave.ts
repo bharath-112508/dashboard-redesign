@@ -1,19 +1,14 @@
-import { ROLES, type RoleType } from './roles.js';
-
 /**
  * Leave-management constants — Step 10
  * (`Company_Management_Plan.md §2`, `Data_Model.md §3`, `API_Contract.md §5`).
  *
- * Authorization model:
- *  - `/leave-types` — read by all authenticated users; write Admin-only.
- *  - `/leave-balances/me` — every user reads their own; managers/admins read
- *    arbitrary users via `/leave-balances?user_id=`. Adjustments + year init
- *    are Admin-only.
- *  - `/leaves` — employees can apply / list-own / get-own / cancel-own;
- *    managers + admins can list everyone, get any, approve, reject. Admins
- *    can also cancel any pending/approved request on behalf of the user.
- *  - `/comp-off` — `me` for any user; collection list for managers; manual
- *    adjust for Admin.
+ * Authorization (Step 47): every endpoint is gated at the route layer
+ * via `requirePermission(...)` — see `permissions.ts` for the catalog
+ * (`leave_type.read/write`, `leave_balance.read_team/adjust`,
+ * `leave_request.write/approve/read_team`, `comp_off.read/write`).
+ * The legacy `*_ROLES` allowlist constants this file used to export
+ * have been removed; service-layer scoping is in `leave-request.service.ts`
+ * (`isReviewer`).
  *
  * Half-day rule (`Data_Model.md §3.3`): half-day requests must span exactly
  * one calendar day. Validator rejects any half-day with start_date != end_date.
@@ -21,21 +16,6 @@ import { ROLES, type RoleType } from './roles.js';
  * Year-spanning: a single request can be split into multiple
  * `(leave_type_id, year, days)` segments — see `leave-segment.engine.ts`.
  */
-
-// ─── Role groupings ────────────────────────────────────────────────────────
-
-export const LEAVE_TYPE_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT];
-export const LEAVE_TYPE_WRITE_ROLES: readonly RoleType[] = [ROLES.ADMIN];
-
-export const LEAVE_BALANCE_LIST_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
-export const LEAVE_BALANCE_ADJUST_ROLES: readonly RoleType[] = [ROLES.ADMIN];
-
-export const LEAVE_REQUEST_APPLY_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE];
-export const LEAVE_REQUEST_REVIEW_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
-export const LEAVE_REQUEST_LIST_ALL_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
-
-export const COMP_OFF_LIST_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
-export const COMP_OFF_ADJUST_ROLES: readonly RoleType[] = [ROLES.ADMIN];
 
 // ─── Default codes & enums ─────────────────────────────────────────────────
 
@@ -134,7 +114,22 @@ export const LEAVE_TYPE_SEEDS: ReadonlyArray<{
         carry_forward: false,
         carry_forward_cap: null,
         monthly_cap: 1,
-        monthly_forfeiture: true,
+        // Policy update: SL accrues 1/month and **carries over within
+        // the same calendar year** — an unused January bucket stays
+        // available through Dec 31. The previous `monthly_forfeiture:
+        // true` setting forfeited unused buckets at the end of each
+        // month (an unused Jan day was lost on Feb 1), which the
+        // business judged too punitive. Year-end reset still applies
+        // (`resets_yearly: true` below + the leave-year-rollover cron)
+        // — anything left on Dec 31 does NOT roll into next year.
+        //
+        // Mechanics: the `slMonthlyForfeitureJob` cron's findOne is
+        // gated on `monthly_forfeiture: true`, so flipping this flag
+        // turns the cron into a no-op for SL automatically — no cron
+        // edit needed. The cron stays in place so any future leave
+        // type that opts back in (`monthly_forfeiture: true`) gets
+        // the same monthly-bucket treatment.
+        monthly_forfeiture: false,
         is_unlimited: false,
         is_earned: false,
         is_event_based: false,

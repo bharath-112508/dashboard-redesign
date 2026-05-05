@@ -33,6 +33,15 @@ export interface SprintDocument extends Document {
     start_date: string;
     end_date: string;
     status: SprintStatus;
+    /**
+     * T11 — archive flag (mirrors `projects.is_archived` and
+     * `task_templates.is_archived`). Distinct from the lifecycle
+     * `status` so an admin can move a stuck sprint with lingering
+     * tasks into the archive UI without forcing a status transition.
+     * Once archived, `deleteSprint` permits the delete even with
+     * dependant tasks (R3 escape hatch).
+     */
+    is_archived: boolean;
     created_by: Types.ObjectId;
     created_at: Date;
     updated_at: Date;
@@ -59,6 +68,7 @@ const sprintSchema = new Schema<SprintDocument>(
             enum: SPRINT_STATUS_VALUES,
             default: SPRINT_STATUSES.PLANNED,
         },
+        is_archived: { type: Boolean, required: true, default: false },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
     },
     {
@@ -70,6 +80,10 @@ const sprintSchema = new Schema<SprintDocument>(
 // Indexes per Data_Model §5.2.
 sprintSchema.index({ project_id: 1, start_date: -1 });
 sprintSchema.index({ project_id: 1, status: 1 });
+// T11 — list endpoints filter `is_archived: false` by default; pair
+// with the existing `project_id` index so the active-sprints view is
+// covered.
+sprintSchema.index({ project_id: 1, is_archived: 1 });
 
 /**
  * Text index for global search (Data_Model.md §Text Indexes line 1122;

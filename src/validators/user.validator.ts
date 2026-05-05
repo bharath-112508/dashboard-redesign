@@ -125,7 +125,8 @@ export const listUsersQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(100).default(20),
     role: roleEnum.optional(),
     status: statusEnum.optional(),
-    q: z.string().trim().min(1).optional(),
+    // R15 — minimum 2 chars to avoid `?q=a` triggering a regex-on-collection scan.
+    q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
 });
 
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
@@ -150,6 +151,11 @@ export type DeactivateUserBody = z.infer<typeof deactivateUserBodySchema>;
 
 export const assignableQuerySchema = z.object({
     role: roleEnum.optional(),
+    /**
+     * When supplied, the response is restricted to users in the project's
+     * `member_ids[]` (i.e. people who can actually be assigned to a task /
+     * sprint within that project). Omit for a global assignee picker.
+     */
     project_id: objectIdSchema.optional(),
 });
 

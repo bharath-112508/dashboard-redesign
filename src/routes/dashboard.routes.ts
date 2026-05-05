@@ -2,23 +2,25 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/dashboard.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
-import { DASHBOARD_ADMIN_ROLES, DASHBOARD_EMPLOYEE_ROLES, DASHBOARD_MANAGER_ROLES } from '../constants/dashboard.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 
 /**
  * Dashboard routes (API_Contract.md §14, Step 13).
  *
- * Phase 1 ships admin/manager/employee. The `/dashboard/client` surface is
- * intentionally deferred until the projects module lands in Phase 2 — there
- * is no project data to summarise for clients yet, so a stub endpoint would
- * just return an empty payload. Adding it later is a route-level edit.
+ * Three surfaces shipped: admin / manager / employee. The
+ * `/dashboard/client` surface is **not yet implemented** — clients
+ * see project data via `GET /projects` filtered to their `client_ids`,
+ * which is what the FE currently renders for them. Adding the
+ * dedicated dashboard is a route-level addition (1 controller + 1
+ * service helper) when the FE has a real client landing-page design.
  */
 
 const router = Router();
 router.use(authenticate);
 
-router.get('/admin', authorize(...DASHBOARD_ADMIN_ROLES), asyncHandler(ctrl.getAdmin));
-router.get('/manager', authorize(...DASHBOARD_MANAGER_ROLES), asyncHandler(ctrl.getManager));
-router.get('/employee', authorize(...DASHBOARD_EMPLOYEE_ROLES), asyncHandler(ctrl.getEmployee));
+router.get('/admin', requirePermission(PERMISSIONS.DASHBOARD_ADMIN), asyncHandler(ctrl.getAdmin));
+router.get('/manager', requirePermission(PERMISSIONS.DASHBOARD_MANAGER), asyncHandler(ctrl.getManager));
+router.get('/employee', requirePermission(PERMISSIONS.DASHBOARD_EMPLOYEE), asyncHandler(ctrl.getEmployee));
 
 export default router;

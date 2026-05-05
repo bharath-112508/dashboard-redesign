@@ -1,6 +1,9 @@
 import { Types } from 'mongoose';
 
 import { Project, type ProjectDocument, type CustomTaskStatus } from '../models/project.model.js';
+import { Sprint } from '../models/sprint.model.js';
+import { Story } from '../models/story.model.js';
+import { Task } from '../models/task.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -53,9 +56,10 @@ import type {
  *  - `key` collisions with the four implicit defaults (`to_do` / `in_progress`
  *    / `review` / `done`) are rejected at the validator layer; key collisions
  *    *within the project* are rejected here.
- *  - Deletion is **hard** in Phase 1 — Step 18 (tasks) will need to add a
- *    "promote-to-done-or-tombstone" pass when a status that is currently
- *    referenced by tasks is removed. Until tasks ship, hard delete is fine.
+ *  - Deletion refuses (R3 — `RESOURCE_HAS_DEPENDENTS`) when any task in the
+ *    project still references the status. The admin's recourse is to PATCH
+ *    each affected task onto a different status first, then re-issue the
+ *    delete. The check is a single `Task.countDocuments({project_id, status})`.
  */
 
 // ─── Caller shape ────────────────────────────────────────────────────────
@@ -63,11 +67,26 @@ import type {
 export interface ProjectCaller {
     id: Types.ObjectId;
     role: RoleType;
+    /**
+     * Optional Step-47 RBAC signal (BACKEND_AUDIT.md R4). When present,
+     * service-layer admin checks via `isAdminLike(caller)` recognise a
+     * user as admin through `role_keys.includes('admin')` even when the
+     * legacy `role` cache is a different role. Controllers should pass
+     * `req.user.role_keys` whenever the caller carries it.
+     */
+    role_keys?: readonly string[];
     audit?: AuditContext;
 }
 
 // ─── Visibility scoping ──────────────────────────────────────────────────
 
+/**
+ * Step 47: Manager + Admin see every project; **Team Lead** + Employee
+ * see only projects where they appear in `member_ids`. Team Leads are
+ * project authors within projects they belong to (the legacy
+ * project-member scoping is the same — the difference is purely
+ * authoring permissions, which the route layer gates separately).
+ */
 const buildVisibilityFilter = (caller: { id: Types.ObjectId; role: RoleType }): Record<string, unknown> => {
     if (caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER) return {};
     if (PROJECT_MEMBER_SCOPED_ROLES.includes(caller.role)) return { member_ids: caller.id };
@@ -91,7 +110,7 @@ const toPublic = (doc: ProjectDocument): Record<string, unknown> => doc.toJSON()
 
 // ─── Member / client role validation ─────────────────────────────────────
 
-const INTERNAL_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE];
+const INTERNAL_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE];
 
 const validateMemberCandidates = async (ids: Types.ObjectId[]): Promise<void> => {
     if (ids.length === 0) return;
@@ -304,6 +323,24 @@ export const updateProject = async (
 };
 
 // ─── POST /projects/:id/members  (bulk) ──────────────────────────────────
+//
+// F4 — atomic list mutation. Pre-F4 this loaded the doc, computed the
+// new array in JS, then `doc.save()`-d. Two concurrent admin calls
+// could both observe v1, each compute their own next state, and the
+// loser's change was silently dropped (with a successful audit row).
+//
+// New shape: read once (for validation + before-snapshot), then run
+// `$pull` (removes) + `$addToSet $each` (adds) as separate atomic
+// updates. Both operators are idempotent + commute under concurrency,
+// so two interleaved calls converge to "original − all removes + all
+// adds" regardless of order. We can't combine them in a single update
+// (Mongo refuses overlapping path operators), but two sequential
+// atomic updates are still race-safe at the row level.
+//
+// Audit before/after snapshots come from the read + a re-read; under
+// heavy contention the two callers' "after" snapshots may overlap
+// (each captures the post-everyone state) — that's the right shape
+// for an audit row anyway.
 
 export const updateProjectMembers = async (
     id: Types.ObjectId,
@@ -314,7 +351,7 @@ export const updateProjectMembers = async (
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
 
     const addIds = dedupeObjectIds(body.add);
-    const removeIds = new Set(body.remove);
+    const removeIds = body.remove.map((r) => new Types.ObjectId(r));
 
     // Only validate the truly new IDs — re-adding someone who is already a
     // member is a no-op and we don't want a stale role change on an existing
@@ -325,25 +362,23 @@ export const updateProjectMembers = async (
 
     const before = doc.member_ids.map((u) => u.toString());
 
-    // Compute next state: keep current minus removed, then append new (deduped).
-    const keep = doc.member_ids.filter((u) => !removeIds.has(u.toString()));
-    const keepSet = new Set(keep.map((u) => u.toString()));
-    for (const a of addIds) {
-        if (!keepSet.has(a.toString())) {
-            keep.push(a);
-            keepSet.add(a.toString());
-        }
+    // F4 — two atomic updates instead of read-modify-save.
+    if (removeIds.length > 0) {
+        await Project.updateOne({ _id: id }, { $pull: { member_ids: { $in: removeIds } } });
+    }
+    if (addIds.length > 0) {
+        await Project.updateOne({ _id: id }, { $addToSet: { member_ids: { $each: addIds } } });
     }
 
-    doc.member_ids = keep;
-    await doc.save();
-
-    const after = doc.member_ids.map((u) => u.toString());
+    // Re-load the post-update state for the audit + the response shape.
+    const updated = await Project.findById(id);
+    if (!updated) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    const after = updated.member_ids.map((u) => u.toString());
 
     if (caller.audit) {
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.PROJECT_MEMBERS_UPDATE,
-            target: { kind: AUDIT_TARGET_KINDS.PROJECT, id: doc._id },
+            target: { kind: AUDIT_TARGET_KINDS.PROJECT, id: updated._id },
             before: { member_ids: before },
             after: { member_ids: after },
             metadata: {
@@ -353,7 +388,7 @@ export const updateProjectMembers = async (
         });
     }
 
-    return toPublic(doc);
+    return toPublic(updated);
 };
 
 // ─── GET /projects/:id/members ───────────────────────────────────────────
@@ -419,7 +454,7 @@ export const updateProjectClients = async (
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
 
     const addIds = dedupeObjectIds(body.add);
-    const removeIds = new Set(body.remove);
+    const removeIds = body.remove.map((r) => new Types.ObjectId(r));
 
     // Same idempotency guard as members: only validate the truly new IDs.
     const existingClientSet = new Set(doc.client_ids.map((u) => u.toString()));
@@ -427,24 +462,23 @@ export const updateProjectClients = async (
     await validateClientCandidates(newAddIds);
 
     const before = doc.client_ids.map((u) => u.toString());
-    const keep = doc.client_ids.filter((u) => !removeIds.has(u.toString()));
-    const keepSet = new Set(keep.map((u) => u.toString()));
-    for (const a of addIds) {
-        if (!keepSet.has(a.toString())) {
-            keep.push(a);
-            keepSet.add(a.toString());
-        }
+
+    // F4 — atomic list mutation; see `updateProjectMembers` for rationale.
+    if (removeIds.length > 0) {
+        await Project.updateOne({ _id: id }, { $pull: { client_ids: { $in: removeIds } } });
+    }
+    if (addIds.length > 0) {
+        await Project.updateOne({ _id: id }, { $addToSet: { client_ids: { $each: addIds } } });
     }
 
-    doc.client_ids = keep;
-    await doc.save();
-
-    const after = doc.client_ids.map((u) => u.toString());
+    const updated = await Project.findById(id);
+    if (!updated) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    const after = updated.client_ids.map((u) => u.toString());
 
     if (caller.audit) {
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.PROJECT_CLIENTS_UPDATE,
-            target: { kind: AUDIT_TARGET_KINDS.PROJECT, id: doc._id },
+            target: { kind: AUDIT_TARGET_KINDS.PROJECT, id: updated._id },
             before: { client_ids: before },
             after: { client_ids: after },
             metadata: {
@@ -454,7 +488,7 @@ export const updateProjectClients = async (
         });
     }
 
-    return toPublic(doc);
+    return toPublic(updated);
 };
 
 export const listProjectClients = async (
@@ -657,9 +691,18 @@ export const deleteCustomStatus = async (statusId: Types.ObjectId, caller: Proje
         is_terminal: sub.is_terminal,
     };
 
-    // TODO (Step 18 — tasks): refuse to delete a status that's currently
-    // referenced by any task; require an admin to first reassign those tasks
-    // to another status. Until tasks ship, hard delete is fine.
+    // R3 — refuse to delete a status that any task in this project
+    // is currently using. The admin's recourse is to PATCH each affected
+    // task onto a different status first, then re-issue the delete.
+    const dependentTasks = await Task.countDocuments({ project_id: doc._id, status: sub.key });
+    if (dependentTasks > 0) {
+        throw AppError.conflict(
+            'Custom status is in use; reassign the tasks to another status before deleting it.',
+            ERROR_CODES.RESOURCE_HAS_DEPENDENTS,
+            { tasks: dependentTasks, status_key: sub.key }
+        );
+    }
+
     doc.custom_task_statuses.pull({ _id: sub._id });
     await doc.save();
 
@@ -672,15 +715,33 @@ export const deleteCustomStatus = async (statusId: Types.ObjectId, caller: Proje
     }
 };
 
-// ─── DELETE /projects/:id  (hard delete in Phase 2; archive in Phase 3) ──
+// ─── DELETE /projects/:id  (hard delete with dependant guard) ────────────
 //
-// Phase 2 has no orphan-task cleanup (tasks ship in Step 18); for now this is
-// a hard delete restricted to admin/manager. When tasks land, this becomes
-// "refuse if tasks exist; admin must archive instead".
+// Refuse the delete if any tasks/stories/sprints reference this project
+// (BACKEND_AUDIT.md R3). Admin must archive (`is_archived = true`) or
+// reassign the dependants first; the archive UI is the intended path
+// for "decommission a project that already has work logged against it".
+//
+// The three counts run in parallel. We don't bother batching by
+// `Promise.all` here — the limit query is fast and the no-deps case is
+// the dominant path; an extra ~5ms on the rejection path is fine.
 
 export const deleteProject = async (id: Types.ObjectId, caller: ProjectCaller): Promise<void> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+
+    const [taskCount, storyCount, sprintCount] = await Promise.all([
+        Task.countDocuments({ project_id: id }),
+        Story.countDocuments({ project_id: id }),
+        Sprint.countDocuments({ project_id: id }),
+    ]);
+    if (taskCount > 0 || storyCount > 0 || sprintCount > 0) {
+        throw AppError.conflict(
+            'Project has dependants; archive it (or reassign the items) before deleting.',
+            ERROR_CODES.RESOURCE_HAS_DEPENDENTS,
+            { tasks: taskCount, stories: storyCount, sprints: sprintCount }
+        );
+    }
 
     const before = toPublic(doc);
 

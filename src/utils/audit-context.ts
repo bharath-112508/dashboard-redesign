@@ -43,13 +43,34 @@ const userAgentOf = (req: Request): string | null => {
     return String(ua).slice(0, 512);
 };
 
+/**
+ * T2 — extract the request id minted by `pino-http` (or the inbound
+ * `x-request-id` header it propagates). Stored on every audit row so
+ * an investigator can pivot from a pino HTTP log line to the
+ * audit row that recorded the side-effect — the use case the schema
+ * was designed for.
+ */
+const requestIdOf = (req: Request): string | null => {
+    // `pino-http` types `req.id` as `string | undefined` on its own
+    // augmented Request, but we don't depend on those types here so
+    // we read it loosely.
+    const id = (req as { id?: unknown }).id;
+    if (typeof id === 'string' && id.length > 0) return id;
+    const header = req.headers['x-request-id'];
+    if (typeof header === 'string' && header.length > 0) return header;
+    return null;
+};
+
 export const buildAuditContext = (req: Request, opts: ExtractCtxOptions = {}): AuditContext => {
+    const request_id = requestIdOf(req);
+
     if (opts.overrideActor) {
         return {
             actor_id: opts.overrideActor.actor_id,
             actor_role: opts.overrideActor.actor_role,
             ip: ipOf(req),
             user_agent: userAgentOf(req),
+            request_id,
         };
     }
 
@@ -59,6 +80,7 @@ export const buildAuditContext = (req: Request, opts: ExtractCtxOptions = {}): A
             actor_role: req.user.role as RoleType,
             ip: ipOf(req),
             user_agent: userAgentOf(req),
+            request_id,
         };
     }
 
@@ -67,5 +89,6 @@ export const buildAuditContext = (req: Request, opts: ExtractCtxOptions = {}): A
         actor_role: 'unauthenticated',
         ip: ipOf(req),
         user_agent: userAgentOf(req),
+        request_id,
     };
 };

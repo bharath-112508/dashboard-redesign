@@ -32,9 +32,9 @@ import {
  * surface is a Phase-4 concern. The user's bell only fires once per row.
  *
  * **Owner-scoped reads:** `requested_by_user_id` is the row's "owner".
- * Even an admin can only see their own exports via GET — adding a
- * cross-user surface is deferred to the Step-31 audit-log viewer where
- * the action verb is logged anyway.
+ * Even an admin can only see their own exports via GET — for a cross-
+ * user view, the Step-31 audit-log viewer (`GET /audit-logs`) surfaces
+ * every export action by every user.
  */
 
 export interface ReportExportDocument extends Document {

@@ -21,14 +21,12 @@ import {
  *    `check_in.{time, method, location_id, ip}`, `check_out=null`.
  *  - On `POST /attendance/check-out` → set `check_out`, compute
  *    `total_worked_minutes` and `overtime_minutes`.
- *  - On EOD finalizer (Step 14, deferred) → either set
+ *  - On EOD finalizer (shipped in Step 14) → either set
  *    `status="incomplete"` + `flagged_for_correction=true` for rows with a
  *    check-in but no check-out, or insert
  *    `absent / on_leave / holiday / weekend` placeholders for missing days.
  *
- * `wfh` is set by the leave module (Step 10). Until that ships it stays
- * `false` — the field is reserved here so the schema doesn't need a
- * migration when WFH semantics turn on.
+ * `wfh` is set by the leave module (shipped in Step 10).
  */
 
 export interface AttendancePunch {

@@ -133,7 +133,8 @@ export const listTasksQuerySchema = z.object({
     priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
     due_before: isoDateSchema.optional(),
     parent_task_id: z.union([objectIdSchema, z.literal('null')]).optional(),
-    q: z.string().trim().min(1).max(100).optional(),
+    // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
+    q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
 });
 export type ListTasksQuery = z.infer<typeof listTasksQuerySchema>;
 

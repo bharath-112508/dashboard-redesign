@@ -4,7 +4,7 @@ import { Story, type StoryDocument } from '../models/story.model.js';
 import { type ProjectDocument } from '../models/project.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { ROLES } from '../constants/roles.js';
+import { isProjectAuthor } from '../utils/role-check.js';
 import {
     BLOCKED_TASK_STATUS_KEY,
     DEFAULT_DONE_TASK_STATUS_KEY,
@@ -38,14 +38,15 @@ import type {
  * Architecture notes:
  *  - **Reads** delegate project visibility to `loadProjectForCaller` so the
  *    role → access rule lives in exactly one place.
- *  - **Writes** require `role ∈ [admin, manager]`. The route already gates
- *    this with `authorize`, but the service re-checks (defence in depth)
- *    and throws `STORY_WRITE_FORBIDDEN` per API_Contract §7.4.
+ *  - **Writes** require the `story.write` permission (held by admin /
+ *    manager / team_lead). The route already gates this with
+ *    `requirePermission(story.write)`, but the service re-checks
+ *    (defence in depth) and throws `STORY_WRITE_FORBIDDEN` per
+ *    API_Contract §7.4.
  *  - **Derived fields** are computed at read time via a single aggregation
- *    over the `tasks` collection (`utils/tasks-collection.ts`). Step 18
- *    will add the actual Task model; until then the aggregation runs
- *    against an empty collection and the derived-status rule cascade
- *    correctly returns `empty` for every story.
+ *    over the `tasks` collection (`utils/tasks-collection.ts`). The
+ *    aggregation is one round-trip indexed by `{project_id, story_id}`,
+ *    so the Story-board's perf target (200 tasks < 200ms P95) holds.
  *  - **Reorder** shifts neighbours rather than using fractional ranks. For
  *    Phase 1's hundreds-per-project target this is fine. The shift is a
  *    single `bulkWrite` so a 200-story reorder is one round trip.
@@ -53,10 +54,14 @@ import type {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
+// H2 — Team Lead holds `story.write` per the Step-47 system-role bundle
+// (`system-role-definitions.ts`). Pre-H2 this gate compared role-string
+// against admin/manager only, contradicting the bundle and 403'ing Team
+// Leads who'd already passed the route's `requirePermission(STORY_WRITE)`.
 const requireWriter = (caller: ProjectCaller): void => {
-    if (caller.role !== ROLES.ADMIN && caller.role !== ROLES.MANAGER) {
+    if (!isProjectAuthor(caller)) {
         throw AppError.forbidden(
-            'Only admins and managers can create, update, or delete stories',
+            'Only admins, managers, and team leads can create, update, or delete stories',
             ERROR_CODES.STORY_WRITE_FORBIDDEN
         );
     }
@@ -463,10 +468,9 @@ export const listStoryTasks = async (
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const { story } = await loadStoryAndProject(storyId, caller);
 
-    // Until Step 18 ships the Task model + service, we read the raw
-    // collection. Pagination is in-memory (the per-story task count is
-    // small enough) so the contract holds without taking a dependency on
-    // the Task service before it exists.
+    // Pagination is in-memory (the per-story task count is small enough)
+    // so the contract is simple. `findTasksByStoryId` runs a narrow
+    // `Task.find(...).select(...)` — see `utils/tasks-collection.ts`.
     const rows = await findTasksByStoryId(story._id);
     const start = (query.page - 1) * query.limit;
     const slice = rows.slice(start, start + query.limit);

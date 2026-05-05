@@ -4,10 +4,9 @@ import * as ctrl from '../controllers/project.controller.js';
 import * as sprintCtrl from '../controllers/sprint.controller.js';
 import * as storyCtrl from '../controllers/story.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { PROJECT_READ_ROLES, PROJECT_WRITE_ROLES } from '../constants/project.js';
-import { STORY_READ_ROLES, STORY_WRITE_ROLES } from '../constants/story.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     createCustomStatusBodySchema,
     createProjectBodySchema,
@@ -38,14 +37,14 @@ router.use(authenticate);
 
 router.get(
     '/',
-    authorize(...PROJECT_READ_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ query: listProjectsQuerySchema }),
     asyncHandler(ctrl.getList)
 );
 
 router.post(
     '/',
-    authorize(...PROJECT_WRITE_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_WRITE),
     validate({ body: createProjectBodySchema }),
     asyncHandler(ctrl.postCreate)
 );
@@ -54,21 +53,26 @@ router.post(
 
 router.get(
     '/:id',
-    authorize(...PROJECT_READ_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ params: projectIdParamSchema }),
     asyncHandler(ctrl.getOne)
 );
 
 router.patch(
     '/:id',
-    authorize(...PROJECT_WRITE_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_WRITE),
     validate({ params: projectIdParamSchema, body: patchProjectBodySchema }),
     asyncHandler(ctrl.patchOne)
 );
 
 router.delete(
     '/:id',
-    authorize(...PROJECT_WRITE_ROLES),
+    // G1 — `PROJECT_ARCHIVE` is the granular permission for delete /
+    // archive (Team Lead holds it; non-archive write actions use
+    // `PROJECT_WRITE`). Using `PROJECT_WRITE` here would let any
+    // role with project-write also delete projects, contradicting
+    // the role-bundle intent.
+    requirePermission(PERMISSIONS.PROJECT_ARCHIVE),
     validate({ params: projectIdParamSchema }),
     asyncHandler(ctrl.deleteOne)
 );
@@ -77,21 +81,24 @@ router.delete(
 
 router.get(
     '/:id/members',
-    authorize(...PROJECT_READ_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ params: projectIdParamSchema }),
     asyncHandler(ctrl.getMembers)
 );
 
 router.post(
     '/:id/members',
-    authorize(...PROJECT_WRITE_ROLES),
+    // G1 — granular member-roster permission. Both Manager and
+    // Team Lead hold this; future custom roles can grant member
+    // management without granting `PROJECT_WRITE`.
+    requirePermission(PERMISSIONS.PROJECT_MEMBERS_WRITE),
     validate({ params: projectIdParamSchema, body: projectMembersBulkBodySchema }),
     asyncHandler(ctrl.postMembers)
 );
 
 router.delete(
     '/:id/members/:user_id',
-    authorize(...PROJECT_WRITE_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_MEMBERS_WRITE),
     validate({ params: projectMemberIdParamSchema }),
     asyncHandler(ctrl.deleteMember)
 );
@@ -100,21 +107,25 @@ router.delete(
 
 router.get(
     '/:id/clients',
-    authorize(...PROJECT_READ_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ params: projectIdParamSchema }),
     asyncHandler(ctrl.getClients)
 );
 
 router.post(
     '/:id/clients',
-    authorize(...PROJECT_WRITE_ROLES),
+    // G1 — granular client-roster permission. Manager holds it,
+    // Team Lead does NOT (per role-bundle catalog). Pre-G1 the gate
+    // was `PROJECT_WRITE`, which Team Lead also held — so Team Lead
+    // could mutate the client roster despite the bundle's intent.
+    requirePermission(PERMISSIONS.PROJECT_CLIENTS_WRITE),
     validate({ params: projectIdParamSchema, body: projectClientsBulkBodySchema }),
     asyncHandler(ctrl.postClients)
 );
 
 router.delete(
     '/:id/clients/:user_id',
-    authorize(...PROJECT_WRITE_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_CLIENTS_WRITE),
     validate({ params: projectClientIdParamSchema }),
     asyncHandler(ctrl.deleteClient)
 );
@@ -123,14 +134,14 @@ router.delete(
 
 router.get(
     '/:id/custom-statuses',
-    authorize(...PROJECT_READ_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ params: projectIdParamSchema }),
     asyncHandler(ctrl.getCustomStatuses)
 );
 
 router.post(
     '/:id/custom-statuses',
-    authorize(...PROJECT_WRITE_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_WRITE),
     validate({ params: projectIdParamSchema, body: createCustomStatusBodySchema }),
     asyncHandler(ctrl.postCustomStatus)
 );
@@ -143,14 +154,14 @@ router.post(
 
 router.get(
     '/:project_id/sprints',
-    authorize(...PROJECT_READ_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ params: projectSprintParamsSchema, query: listSprintsQuerySchema }),
     asyncHandler(sprintCtrl.getList)
 );
 
 router.post(
     '/:project_id/sprints',
-    authorize(...PROJECT_WRITE_ROLES),
+    requirePermission(PERMISSIONS.SPRINT_WRITE),
     validate({ params: projectSprintParamsSchema, body: createSprintBodySchema }),
     asyncHandler(sprintCtrl.postCreate)
 );
@@ -163,14 +174,14 @@ router.post(
 
 router.get(
     '/:project_id/stories',
-    authorize(...STORY_READ_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ params: projectStoryParamsSchema, query: listStoriesQuerySchema }),
     asyncHandler(storyCtrl.getList)
 );
 
 router.post(
     '/:project_id/stories',
-    authorize(...STORY_WRITE_ROLES),
+    requirePermission(PERMISSIONS.STORY_WRITE),
     validate({ params: projectStoryParamsSchema, body: createStoryBodySchema }),
     asyncHandler(storyCtrl.postCreate)
 );

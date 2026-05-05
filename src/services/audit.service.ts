@@ -10,6 +10,7 @@ import {
 } from '../constants/audit.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import logger from '../utils/logger.js';
+import { auditSnapshotDroppedTotal, auditWritesTotal } from '../utils/metrics.js';
 
 /**
  * Audit-log service (Step 12 — write-only in Phase 1).
@@ -29,9 +30,9 @@ import logger from '../utils/logger.js';
  *      action itself is what users care about; the audit trail is best
  *      effort but extremely loud when it drops.
  *
- * The read endpoint (`GET /audit-logs`) is deferred to Phase 3 Step 31. This
- * service is intentionally write-only — adding a `searchAudit` here later is
- * a single function next to the existing one.
+ * The read surface lives in `audit-log.controller.ts` (Step 31 —
+ * shipped). This service is intentionally write-only; the read path
+ * is its own controller so the write hot-path stays small.
  */
 
 // ─── Public types ────────────────────────────────────────────────────────
@@ -123,17 +124,33 @@ export const recordAudit = async (ctx: AuditContext, input: RecordAuditInput): P
             if (v !== undefined) metadata[k] = v;
         }
     }
-    if (beforeOverflow) metadata.before_snapshot_dropped = true;
-    if (afterOverflow) metadata.after_snapshot_dropped = true;
+    if (beforeOverflow) {
+        metadata.before_snapshot_dropped = true;
+        // G4 — operator-visible signal beyond the per-row metadata flag.
+        auditSnapshotDroppedTotal.inc({ which: 'before' });
+    }
+    if (afterOverflow) {
+        metadata.after_snapshot_dropped = true;
+        auditSnapshotDroppedTotal.inc({ which: 'after' });
+    }
 
     // Last-resort guard: if metadata itself is oversized, strip user-provided
-    // keys to keep IP/UA only. (Keeps the row useful even when callers stuff
-    // huge blobs in.)
+    // keys to keep IP/UA + the snapshot-drop flags only. (Keeps the row
+    // useful even when callers stuff huge blobs in.)
+    //
+    // G4 — preserve `before_snapshot_dropped` / `after_snapshot_dropped`
+    // across the strip carve-out. Pre-G4 the strip discarded everything
+    // except `ip`/`user_agent`/`request_id`/`metadata_truncated`, so an
+    // operator seeing a `metadata_truncated: true` row couldn't tell
+    // whether the snapshot was dropped or simply absent (e.g. a
+    // create event with no `before`).
     if (exceedsByteCap(metadata, AUDIT_METADATA_BYTES_MAX)) {
         const stripped: Record<string, unknown> = { metadata_truncated: true };
         if (typeof metadata.ip === 'string') stripped.ip = metadata.ip;
         if (typeof metadata.user_agent === 'string') stripped.user_agent = metadata.user_agent;
         if (typeof metadata.request_id === 'string') stripped.request_id = metadata.request_id;
+        if (metadata.before_snapshot_dropped === true) stripped.before_snapshot_dropped = true;
+        if (metadata.after_snapshot_dropped === true) stripped.after_snapshot_dropped = true;
         for (const k of Object.keys(metadata)) delete metadata[k];
         Object.assign(metadata, stripped);
     }
@@ -148,7 +165,9 @@ export const recordAudit = async (ctx: AuditContext, input: RecordAuditInput): P
             after: afterOverflow ? null : afterJson,
             metadata,
         });
+        auditWritesTotal.inc({ outcome: 'ok' });
     } catch (err) {
+        auditWritesTotal.inc({ outcome: 'failed' });
         // Defence in depth — even a broken logger must not propagate. The
         // primary action (deactivate/approve/etc.) MUST succeed regardless,
         // so we belt-and-brace the warn call too.

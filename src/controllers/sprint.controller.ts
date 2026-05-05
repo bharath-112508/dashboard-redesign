@@ -14,6 +14,7 @@ const callerOf = (req: Request): ProjectCaller => {
     return {
         id: new Types.ObjectId(req.user.user_id),
         role: req.user.role as RoleType,
+        role_keys: req.user.role_keys,
         audit: buildAuditContext(req),
     };
 };
@@ -51,4 +52,17 @@ export const patchOne = async (req: Request, res: Response): Promise<Response> =
 export const deleteOne = async (req: Request, res: Response): Promise<Response> => {
     await service.deleteSprint(idOf(req), callerOf(req));
     return noContent(res);
+};
+
+// T11 — archive escape hatch. POST /sprints/:id/archive flips
+// `is_archived: true`, and an archived sprint can be deleted even
+// with lingering tasks (R3 escape hatch).
+export const postArchive = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.archiveSprint(idOf(req), callerOf(req));
+    return ok(res, data);
+};
+
+export const postUnarchive = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.unarchiveSprint(idOf(req), callerOf(req));
+    return ok(res, data);
 };

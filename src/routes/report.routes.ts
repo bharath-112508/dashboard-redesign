@@ -3,10 +3,10 @@ import { Router } from 'express';
 import * as ctrl from '../controllers/report.controller.js';
 import * as exportCtrl from '../controllers/report-export.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
+import { exportRateLimiter, reportReadRateLimiter } from '../middlewares/rate-limit.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { REPORT_READ_ROLES } from '../constants/report.js';
-import { REPORT_EXPORT_ROLES } from '../constants/export.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     attendanceReportQuerySchema,
     billingReportQuerySchema,
@@ -36,9 +36,14 @@ import { exportIdPathSchema, exportRequestPathSchema } from '../validators/repor
 const router = Router();
 
 router.use(authenticate);
-router.use(authorize(...REPORT_READ_ROLES));
+router.use(requirePermission(PERMISSIONS.REPORT_READ));
 
 // ─── Synchronous JSON reads (Step 29) ───────────────────────────────────
+// Per-user limiter (BACKEND_AUDIT.md P2-9): 60 reads / minute / user.
+// Stacked on top of the global per-IP cap so a corporate-NAT cohort
+// doesn't share one bucket. The router-level `.use` binds it to every
+// GET below this line.
+router.use(reportReadRateLimiter);
 router.get('/billing', validate({ query: billingReportQuerySchema }), asyncHandler(ctrl.getBilling));
 router.get('/utilization', validate({ query: utilizationReportQuerySchema }), asyncHandler(ctrl.getUtilization));
 router.get('/attendance', validate({ query: attendanceReportQuerySchema }), asyncHandler(ctrl.getAttendance));
@@ -56,13 +61,18 @@ router.get('/leaves', validate({ query: leaveReportQuerySchema }), asyncHandler(
 // thread a `validate({body})` middleware here for the POST.
 router.get(
     '/exports/:id',
-    authorize(...REPORT_EXPORT_ROLES),
+    requirePermission(PERMISSIONS.REPORT_EXPORT_WRITE),
     validate({ params: exportIdPathSchema }),
     asyncHandler(exportCtrl.getExportStatus)
 );
 router.post(
     '/:name/export',
-    authorize(...REPORT_EXPORT_ROLES),
+    // Per-user export limiter (P2-9): 10 exports / 15 min / user. The
+    // export worker spins up a PDF / XLSX render in the background; a
+    // tight loop here would back-pressure the worker for everyone. Lower
+    // ceiling than the read limiter to match the higher per-call cost.
+    exportRateLimiter,
+    requirePermission(PERMISSIONS.REPORT_EXPORT_WRITE),
     validate({ params: exportRequestPathSchema }),
     asyncHandler(exportCtrl.postExport)
 );

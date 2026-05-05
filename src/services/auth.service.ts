@@ -11,14 +11,18 @@ import { sha256Hex } from '../utils/token-hash.js';
 import { issueMfaSession } from '../utils/mfa-session.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
-import { MAX_LOGIN_ATTEMPTS, LOGIN_LOCKOUT_MS } from '../constants/auth.js';
+import { MAX_LOGIN_ATTEMPTS, LOGIN_LOCKOUT_MS, MAX_ACTIVE_SESSIONS_PER_USER } from '../constants/auth.js';
 import { resolveLoginLockoutPolicy } from './settings.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { resolveProfilePhotoTtlMinutes, signProfilePhotoUrl } from './profile-photo.service.js';
 import { getOrInitSettings } from './settings.service.js';
+import { ensureLegacyRoleAssigned, resolvePermissionsForUser } from './role.service.js';
+import { SYSTEM_ROLE_KEYS, type SystemRoleKey } from '../constants/role-keys.js';
 import logger from '../utils/logger.js';
+import { refreshTokensIssuedTotal } from '../utils/metrics.js';
 import type { AuthTokenPair, BaseJWTPayload } from '../types/index.js';
+import type { Permission } from '../constants/permissions.js';
 
 interface LoginInput {
     email: string;
@@ -47,18 +51,124 @@ export type LoginResult = LoginTokenResult | LoginMfaChallenge;
  */
 const TIMING_DUMMY_HASH = '$2b$12$CwTycUXWue0Thq9StjUM0uJ8Y8l0yPb3xYqK2yL4V1.9mNRBrTf3e';
 
+/**
+ * The set of legacy `users.role` values that map 1:1 onto a seeded system
+ * role. All current values qualify; this guard exists so the type-system
+ * rejects any future addition to `ROLES` that doesn't have a matching
+ * system role.
+ */
+const isSystemRoleKey = (value: string): value is SystemRoleKey =>
+    (Object.values(SYSTEM_ROLE_KEYS) as string[]).includes(value);
+
+/**
+ * Resolve the auth context (role_keys + permissions) used to populate
+ * the JWT payload. Self-heals legacy users whose `role_ids` is empty
+ * by back-assigning the system role matching their legacy `role`
+ * string before resolving — so a user logging in pre-bootstrap-
+ * migration still gets a working permission set on the first call
+ * (and a populated `role_ids` thereafter).
+ *
+ * Falls back to an empty set if the user has no role_ids AND the
+ * legacy `role` is unknown — `requirePermission` will then 403 every
+ * privileged route, which is the correct fail-closed behaviour.
+ */
+const resolveAuthContext = async (
+    user_id: Types.ObjectId,
+    legacyRole: UserDocument['role']
+): Promise<{ role_keys: string[]; permissions: Permission[] }> => {
+    let resolved = await resolvePermissionsForUser(user_id);
+    if (resolved.role_keys.length === 0 && isSystemRoleKey(legacyRole)) {
+        // Pre-bootstrap user — back-assign now so future logins skip
+        // this branch + so other surfaces (admin views, audits) see
+        // the role assignment too.
+        await ensureLegacyRoleAssigned(user_id, legacyRole);
+        resolved = await resolvePermissionsForUser(user_id);
+    }
+    return resolved;
+};
+
 interface IssueTokensInput {
     user_id: Types.ObjectId;
     role: UserDocument['role'];
+    role_keys: string[];
+    permissions: Permission[];
     device_info: string;
     ip_address: string;
     replaces_token_id?: Types.ObjectId;
 }
 
+/**
+ * Enforce the per-user active-session cap AFTER the new row has been
+ * inserted (BACKEND_AUDIT.md R5). The pre-insert pattern was racy: two
+ * simultaneous logins could both observe `count = 19`, both pass the
+ * `< MAX` short-circuit, both insert, and end up at 21 sessions.
+ *
+ * Post-insert flow:
+ *   1. Fresh row is created by the caller (`issueTokenPair`).
+ *   2. `freshRowId` is passed in and EXCLUDED from the eviction
+ *      candidates so we never revoke the row we just minted.
+ *   3. Count again. If still over `MAX_ACTIVE_SESSIONS_PER_USER`,
+ *      evict the oldest `count - MAX` rows (oldest by `created_at`).
+ *
+ * Even under high concurrency this converges: every concurrent login
+ * runs the post-insert sweep, so the worst case after N parallel
+ * logins is one final extra eviction in each — the count settles to
+ * MAX. The window where two callers both observe N+1, both evict 1,
+ * and end up at N is acceptable; what we never do is leave the user
+ * stuck at N+k indefinitely.
+ *
+ * Selection rule: oldest by `created_at` first — mirrors GitHub /
+ * Google "X devices have access" semantics where the most-recently-
+ * used device is preserved.
+ *
+ * Best-effort: a Mongo blip mid-eviction logs a warn but does NOT
+ * fail the login (the user already has their fresh token; cleanup
+ * retries on the next login).
+ */
+const enforceSessionCap = async (user_id: Types.ObjectId, freshRowId: Types.ObjectId): Promise<void> => {
+    try {
+        const activeCount = await RefreshToken.countDocuments({
+            user_id,
+            revoked_at: null,
+            expires_at: { $gt: new Date() },
+        });
+        if (activeCount <= MAX_ACTIVE_SESSIONS_PER_USER) return;
+        const evictCount = activeCount - MAX_ACTIVE_SESSIONS_PER_USER;
+        const oldest = await RefreshToken.find({
+            user_id,
+            // Never evict the row we just inserted — even under racing
+            // concurrent logins each caller protects their own freshly
+            // minted row.
+            _id: { $ne: freshRowId },
+            revoked_at: null,
+            expires_at: { $gt: new Date() },
+        })
+            .sort({ created_at: 1 })
+            .limit(evictCount)
+            .select('_id')
+            .lean<{ _id: Types.ObjectId }[]>();
+        if (oldest.length === 0) return;
+        await RefreshToken.updateMany({ _id: { $in: oldest.map((r) => r._id) } }, { $set: { revoked_at: new Date() } });
+        logger.info(
+            { user_id: user_id.toString(), evicted_count: oldest.length, cap: MAX_ACTIVE_SESSIONS_PER_USER },
+            'Per-user session cap reached; oldest sessions revoked to make room for new login'
+        );
+    } catch (err) {
+        // Cleanup must not fail the login — the fresh token is already
+        // minted. Next login retries the sweep.
+        logger.warn(
+            { err, user_id: user_id.toString(), code: 'SESSION_CAP_SWEEP_FAILED' },
+            'Failed to enforce per-user session cap after login — will retry on next login'
+        );
+    }
+};
+
 const issueTokenPair = async (input: IssueTokensInput): Promise<AuthTokenPair & { refresh_row_id: Types.ObjectId }> => {
     const basePayload: BaseJWTPayload = {
         user_id: input.user_id.toString(),
         role: input.role,
+        role_keys: input.role_keys,
+        permissions: input.permissions,
     };
 
     const access = createAccessToken(basePayload);
@@ -72,9 +182,23 @@ const issueTokenPair = async (input: IssueTokensInput): Promise<AuthTokenPair & 
         expires_at: refresh.expires_at,
     });
 
+    // Per-user session cap (BACKEND_AUDIT.md P2-14, race fix R5). Run
+    // AFTER the row is inserted so concurrent logins can't both pass
+    // a pre-insert `< MAX` check. Skip on the refresh-rotation path —
+    // that flow already revokes the prior row, so the active count is
+    // balanced. Apply only to login-style flows (`replaces_token_id`
+    // absent) where a brand-new row is being added without a
+    // corresponding revoke.
+    if (!input.replaces_token_id) {
+        await enforceSessionCap(input.user_id, row._id);
+    }
+
     // Back-link the rotated row (if any) to this freshly minted one.
     if (input.replaces_token_id) {
         await RefreshToken.updateOne({ _id: input.replaces_token_id }, { $set: { replaced_by_token_id: row._id } });
+        refreshTokensIssuedTotal.inc({ reason: 'rotation' });
+    } else {
+        refreshTokensIssuedTotal.inc({ reason: 'login' });
     }
 
     return {
@@ -138,9 +262,12 @@ export const completeLoginAfterMfa = async (
     ip_address?: string
 ): Promise<LoginTokenResult> => {
     await clearLoginCounters(user._id);
+    const ctx = await resolveAuthContext(user._id, user.role);
     const tokens = await issueTokenPair({
         user_id: user._id,
         role: user.role,
+        role_keys: ctx.role_keys,
+        permissions: ctx.permissions,
         device_info: device_info ?? '',
         ip_address: ip_address ?? '',
     });
@@ -162,7 +289,14 @@ export const completeLoginAfterMfa = async (
  * to an authenticated existence check the attacker already has signal for.
  */
 export const login = async (input: LoginInput): Promise<LoginResult> => {
-    const user = await User.findOne({ email: input.email }).select(
+    // R7 — defence-in-depth: validators already `.trim().toLowerCase()`
+    // the email, but normalising at the service boundary too means a
+    // future direct caller (admin script, integration test, internal
+    // tool) that skips the Zod validator still hits the lowercased
+    // email index correctly. The schema's `lowercase: true` ensures
+    // stored emails match this form.
+    const normalisedEmail = input.email.trim().toLowerCase();
+    const user = await User.findOne({ email: normalisedEmail }).select(
         '+password_hash +failed_login_attempts +locked_until +mfa_enabled'
     );
 
@@ -202,9 +336,12 @@ export const login = async (input: LoginInput): Promise<LoginResult> => {
 
     await clearLoginCounters(user._id);
 
+    const ctx = await resolveAuthContext(user._id, user.role);
     const tokens = await issueTokenPair({
         user_id: user._id,
         role: user.role,
+        role_keys: ctx.role_keys,
+        permissions: ctx.permissions,
         device_info: input.device_info ?? '',
         ip_address: input.ip_address ?? '',
     });
@@ -286,9 +423,16 @@ export const refreshTokens = async (input: {
         });
     }
 
+    // Re-resolve role_keys + permissions on each refresh so a role-change
+    // (admin patches a role's permissions, or grants/revokes a role to
+    // the user) takes effect within one access-token lifetime — without
+    // forcing the user to log in again.
+    const ctx = await resolveAuthContext(row.user_id, user.role);
     const tokens = await issueTokenPair({
         user_id: row.user_id,
         role: user.role,
+        role_keys: ctx.role_keys,
+        permissions: ctx.permissions,
         device_info: input.device_info ?? row.device_info,
         ip_address: input.ip_address ?? row.ip_address,
         replaces_token_id: row._id,
@@ -379,6 +523,12 @@ export const getMe = async (user_id: Types.ObjectId): Promise<Record<string, unk
     const settings = await getOrInitSettings();
     const photoTtl = resolveProfilePhotoTtlMinutes(settings.uploads.sas_token_ttl_minutes);
 
+    // Step 47: surface the FE's source-of-truth for what UI to render.
+    // The JWT carries the same set, but the FE re-fetches /auth/me
+    // whenever it refreshes the access token, so this is the canonical
+    // post-login read.
+    const authCtx = await resolveAuthContext(user._id, user.role);
+
     // `session_count` is best-effort. Step 27 added a Mongo round-trip
     // to the hot `/auth/me` path; a transient `RefreshToken`
     // failure would otherwise 500 the entire endpoint and break the FE
@@ -407,7 +557,8 @@ export const getMe = async (user_id: Types.ObjectId): Promise<Record<string, unk
         mfa_enabled: user.mfa_enabled,
         profile_photo_url: signProfilePhotoUrl(user.profile_photo_blob_key, photoTtl),
         session_count: sessionCount,
-        permissions: [], // TODO (RBAC slice): derive from role.
+        role_keys: authCtx.role_keys,
+        permissions: authCtx.permissions,
     };
 };
 

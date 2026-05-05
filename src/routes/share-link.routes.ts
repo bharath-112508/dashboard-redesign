@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/share-link.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { SHARE_LINK_CREATE_ROLES, SHARE_LINK_READ_ROLES, SHARE_LINK_REVOKE_ROLES } from '../constants/share-link.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     createShareLinkBodySchema,
     listShareLinksQuerySchema,
@@ -40,14 +40,14 @@ export const projectShareLinksNestedRouter = (): Router => {
 
     router.get(
         '/:project_id/share-links',
-        authorize(...SHARE_LINK_READ_ROLES),
+        requirePermission(PERMISSIONS.SHARE_LINK_WRITE),
         validate({ params: projectIdPathSchema, query: listShareLinksQuerySchema }),
         asyncHandler(ctrl.getList)
     );
 
     router.post(
         '/:project_id/share-links',
-        authorize(...SHARE_LINK_CREATE_ROLES),
+        requirePermission(PERMISSIONS.SHARE_LINK_WRITE),
         validate({ params: projectIdPathSchema, body: createShareLinkBodySchema }),
         asyncHandler(ctrl.postCreate)
     );
@@ -63,7 +63,7 @@ export const shareLinksRouter = (): Router => {
 
     router.post(
         '/:id/revoke',
-        authorize(...SHARE_LINK_REVOKE_ROLES),
+        requirePermission(PERMISSIONS.SHARE_LINK_WRITE),
         validate({ params: shareLinkIdPathSchema }),
         asyncHandler(ctrl.postRevoke)
     );

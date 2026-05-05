@@ -2,7 +2,7 @@ import { Schema, Types, model, type Document, type Model } from 'mongoose';
 
 import { BASE_SCHEMA_OPTIONS } from './_base.js';
 import { COLLECTIONS } from '../constants/collections.js';
-import { LEAVE_CODE_VALUES, PRO_RATA_STRATEGIES, type LeaveCode, type ProRataStrategy } from '../constants/leave.js';
+import { PRO_RATA_STRATEGIES, type LeaveCode, type ProRataStrategy } from '../constants/leave.js';
 
 /**
  * `leave_types` — Data_Model.md §3.1.
@@ -82,5 +82,3 @@ const leaveTypeSchema = new Schema<LeaveTypeDocument>(
 leaveTypeSchema.index({ is_active: 1 });
 
 export const LeaveType: Model<LeaveTypeDocument> = model<LeaveTypeDocument>(COLLECTIONS.LEAVE_TYPES, leaveTypeSchema);
-
-export const LEAVE_TYPE_VALID_CODES = LEAVE_CODE_VALUES;

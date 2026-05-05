@@ -3,6 +3,8 @@ import { Types } from 'mongoose';
 import { Holiday, type HolidayDocument } from '../models/holiday.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
 import type {
     BulkCreateHolidaysBody,
     CreateHolidayBody,
@@ -38,7 +40,8 @@ const isE11000 = (err: unknown): err is { code: 11000; keyValue?: { date?: strin
 
 export const createHoliday = async (
     input: CreateHolidayBody,
-    created_by: Types.ObjectId
+    created_by: Types.ObjectId,
+    audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     try {
         const doc = await Holiday.create({
@@ -47,6 +50,13 @@ export const createHoliday = async (
             is_optional: input.is_optional ?? false,
             created_by,
         });
+        if (audit) {
+            await recordAudit(audit, {
+                action: AUDIT_ACTIONS.HOLIDAY_CREATE,
+                target: { kind: AUDIT_TARGET_KINDS.HOLIDAY, id: doc._id },
+                after: toPublic(doc),
+            });
+        }
         return toPublic(doc);
     } catch (err: unknown) {
         if (isE11000(err)) {
@@ -62,7 +72,8 @@ export const createHoliday = async (
 
 export const bulkCreateHolidays = async (
     input: BulkCreateHolidaysBody,
-    created_by: Types.ObjectId
+    created_by: Types.ObjectId,
+    audit?: AuditContext
 ): Promise<{ inserted: Record<string, unknown>[]; skipped: { date: string; reason: string }[] }> => {
     // Precheck: any of these dates already on the calendar? Stripping them up
     // front lets us return the cleanest possible "skipped" report.
@@ -113,6 +124,25 @@ export const bulkCreateHolidays = async (
         if (!bulkErr.insertedDocs && !bulkErr.writeErrors) throw err;
     }
 
+    if (audit && inserted.length > 0) {
+        // I1 — bulk-import emits ONE audit row carrying the full inserted
+        // payload + summary counts, rather than one row per holiday. A 50-
+        // row import would otherwise flood the audit log; the inserted
+        // dates are still recoverable from `after.items` for forensics.
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.HOLIDAY_BULK_CREATE,
+            // No single target id — the bulk row spans many holidays.
+            // Audit-log model accepts `id: null` for collection-level events.
+            target: { kind: AUDIT_TARGET_KINDS.HOLIDAY, id: null },
+            after: { items: toPublicMany(inserted) },
+            metadata: {
+                inserted_count: inserted.length,
+                skipped_count: skipped.length,
+                requested_count: input.items.length,
+            },
+        });
+    }
+
     return { inserted: toPublicMany(inserted), skipped };
 };
 
@@ -153,11 +183,17 @@ export const listHolidays = async (
 
 // ─── PATCH /holidays/:id ──────────────────────────────────────────────────
 
-export const updateHoliday = async (id: Types.ObjectId, patch: PatchHolidayBody): Promise<Record<string, unknown>> => {
+export const updateHoliday = async (
+    id: Types.ObjectId,
+    patch: PatchHolidayBody,
+    audit?: AuditContext
+): Promise<Record<string, unknown>> => {
     const doc = await Holiday.findById(id);
     if (!doc) {
         throw AppError.notFound('Holiday not found', ERROR_CODES.RESOURCE_NOT_FOUND);
     }
+
+    const before = toPublic(doc);
 
     if (patch.date !== undefined) doc.date = patch.date;
     if (patch.name !== undefined) doc.name = patch.name;
@@ -176,14 +212,30 @@ export const updateHoliday = async (id: Types.ObjectId, patch: PatchHolidayBody)
         throw err;
     }
 
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.HOLIDAY_UPDATE,
+            target: { kind: AUDIT_TARGET_KINDS.HOLIDAY, id: doc._id },
+            before,
+            after: toPublic(doc),
+        });
+    }
+
     return toPublic(doc);
 };
 
 // ─── DELETE /holidays/:id ─────────────────────────────────────────────────
 
-export const deleteHoliday = async (id: Types.ObjectId): Promise<void> => {
+export const deleteHoliday = async (id: Types.ObjectId, audit?: AuditContext): Promise<void> => {
     const result = await Holiday.findByIdAndDelete(id);
     if (!result) {
         throw AppError.notFound('Holiday not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+    }
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.HOLIDAY_DELETE,
+            target: { kind: AUDIT_TARGET_KINDS.HOLIDAY, id: result._id },
+            before: toPublic(result),
+        });
     }
 };

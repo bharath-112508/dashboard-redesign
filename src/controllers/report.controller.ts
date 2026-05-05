@@ -14,9 +14,10 @@ import type {
  * Report controllers (Step 29; API_Contract §10).
  *
  * Each handler is a thin pass-through: validation has already coerced
- * the query to its typed shape and `authorize(...REPORT_READ_ROLES)` has
- * already gated to manager + admin. We still assert a caller is present
- * so a misconfigured route (auth middleware skipped by accident) fails
+ * the query to its typed shape and `requirePermission(report.read)` has
+ * already gated to callers who hold the report-read permission (manager
+ * + admin by default). We still assert a caller is present so a
+ * misconfigured route (auth middleware skipped by accident) fails
  * loudly with `401` rather than crashing inside the service layer.
  */
 

@@ -3,23 +3,29 @@ import { ROLES, type RoleType } from './roles.js';
 /**
  * Attendance constants — Step 8 (Data_Model.md §4, API_Contract.md §6).
  *
- * RBAC summary:
- *  - Employee-facing endpoints (check-in/out, /me, /me/today, qr-verify,
- *    submit correction request) are open to any authenticated internal role
- *    (employee, manager, admin). Clients cannot have attendance records.
- *  - Manager/admin-only endpoints: list-all (`GET /attendance`), direct
- *    correction (`PATCH /attendance/:id`), correction request approve/reject.
- *  - Listing correction requests: managers/admins see everything; employees
- *    see only their own (auto-filtered by user_id, mirroring `/users`).
+ * RBAC summary (Step 47):
+ *  - Route gates: `attendance.check_in_out` (router-level — clients
+ *    don't hold this permission, so they're blocked at the door) →
+ *    individual endpoints further narrow to `attendance.read_team`
+ *    (list / view others) or `attendance.correction_approve` (approve
+ *    / reject correction requests, direct correction).
+ *  - The service layer still uses `ATTENDANCE_REVIEW_ROLES` (below)
+ *    for "is the caller-as-role allowed to review" semantics — this
+ *    is role-string-based, not permission-based, and lives next to
+ *    other reporting-chain logic.
  *
  * `local_date` is computed in the system's `default_timezone`
  * (`Asia/Kolkata` per Data_Model §1). Per-user timezone overrides are a
  * future v1.5 concern — Plan §3.4 notes "IST default (per-user configurable)".
  */
 
-export const ATTENDANCE_INTERNAL_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE];
-
-export const ATTENDANCE_REVIEW_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
+/**
+ * Step 47: Team Lead is a first-line approver for own-reports —
+ * `attendance.correction_approve` is in their permission bundle.
+ * Service-layer scoping (caller-is-reporting-manager check) still
+ * narrows them to actual reports.
+ */
+export const ATTENDANCE_REVIEW_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD];
 
 // ─── Enums ────────────────────────────────────────────────────────────────
 

@@ -4,10 +4,12 @@ import { CompOffLedger, type CompOffLedgerDocument } from '../models/comp-off-le
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { COMP_OFF_SOURCES, COMP_OFF_TYPES, type CompOffType } from '../constants/leave.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { AdjustCompOffBody, ListCompOffQuery, MyCompOffQuery } from '../validators/comp-off.validator.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
 
 /**
  * Comp-off ledger service (API_Contract.md §5.9, Data_Model.md §3.4).
@@ -100,7 +102,8 @@ export const listCompOff = async (
 
 export const adjustCompOff = async (
     body: AdjustCompOffBody,
-    actor: { id: Types.ObjectId; role: RoleType }
+    actor: { id: Types.ObjectId; role: RoleType },
+    audit?: AuditContext
 ): Promise<{ ledger: Record<string, unknown>; balance: number }> => {
     if (!isReviewer(actor.role)) throw AppError.forbidden();
 
@@ -111,11 +114,14 @@ export const adjustCompOff = async (
     }
 
     // Guard against driving balance negative on a `consume` adjustment.
+    // Capture the pre-adjust balance for the audit before/after diff so
+    // the audit row reflects the actual transition rather than recomputing
+    // again post-write.
+    const balanceBefore = await recomputeBalance(targetUserId);
     if (body.type === COMP_OFF_TYPES.CONSUMED) {
-        const balance = await recomputeBalance(targetUserId);
-        if (balance < body.days) {
+        if (balanceBefore < body.days) {
             throw AppError.conflict('Insufficient comp-off balance', ERROR_CODES.INSUFFICIENT_LEAVE_BALANCE, {
-                available: balance,
+                available: balanceBefore,
                 requested: body.days,
             });
         }
@@ -131,6 +137,29 @@ export const adjustCompOff = async (
         created_by: actor.id,
     });
 
-    const balance = await recomputeBalance(targetUserId);
-    return { ledger: toPublic(ledger), balance };
+    const balanceAfter = await recomputeBalance(targetUserId);
+
+    if (audit) {
+        // I1 — sensitive admin write: signed delta + operator-supplied
+        // remarks land in the audit row so a future dispute resolution
+        // can trace who granted/consumed comp-off and why. Pre-I1 the
+        // adjust ran with no audit trail — the only durable record was
+        // the ledger row itself, which doesn't carry actor context
+        // beyond `created_by`.
+        const signedDelta = body.type === COMP_OFF_TYPES.EARNED ? body.days : -body.days;
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.COMP_OFF_ADJUST,
+            target: { kind: AUDIT_TARGET_KINDS.COMP_OFF_LEDGER, id: ledger._id },
+            before: { balance: balanceBefore },
+            after: { balance: balanceAfter },
+            metadata: {
+                user_id: targetUserId.toString(),
+                type: body.type,
+                delta: signedDelta,
+                remarks: body.remarks ?? null,
+            },
+        });
+    }
+
+    return { ledger: toPublic(ledger), balance: balanceAfter };
 };

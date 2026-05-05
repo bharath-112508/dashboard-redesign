@@ -318,3 +318,86 @@ describe('search (limit)', () => {
         expect(limitCalls).toHaveLength(4);
     });
 });
+
+// ─── $text vs regex hybrid (Phase 4 cutover) ───────────────────────────
+
+describe('search (q < 3 chars → regex path)', () => {
+    it('projects bucket uses regex $or on name + code (typeahead path)', async () => {
+        // Short queries can't usefully tokenise into $text; preserve
+        // typeahead by routing through the legacy single-field regex.
+        await svc.search(baseQuery({ q: 'lo' }) as never, adminCaller());
+        const filter = projectFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter.$text).toBeUndefined();
+        expect(Array.isArray(filter.$or)).toBe(true);
+        const orClauses = filter.$or as Record<string, unknown>[];
+        expect(orClauses).toHaveLength(2);
+        expect(orClauses[0].name).toBeInstanceOf(RegExp);
+        expect(orClauses[1].code).toBeInstanceOf(RegExp);
+    });
+
+    it('sprints bucket uses regex on `name` only', async () => {
+        await svc.search(baseQuery({ q: 'lo' }) as never, adminCaller());
+        const filter = sprintFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter.$text).toBeUndefined();
+        expect(filter.name).toBeInstanceOf(RegExp);
+    });
+
+    it('tasks bucket uses regex on `title` only', async () => {
+        await svc.search(baseQuery({ q: 'lo' }) as never, adminCaller());
+        const filter = taskFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter.$text).toBeUndefined();
+        expect(filter.title).toBeInstanceOf(RegExp);
+    });
+});
+
+describe('search (q ≥ 3 chars → $text path)', () => {
+    it('projects bucket switches to $text:$search; no regex $or', async () => {
+        // ≥ 3 chars routes through the per-collection text index. The
+        // text index covers `name + code + description`; widening from
+        // legacy regex (`name + code` only) is the documented contract
+        // change. Pin the shape so a regression doesn't accidentally
+        // walk back to the old path.
+        await svc.search(baseQuery({ q: 'login' }) as never, adminCaller());
+        const filter = projectFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter.$or).toBeUndefined();
+        expect(filter.$text).toEqual({ $search: 'login' });
+    });
+
+    it('sprints bucket switches to $text', async () => {
+        await svc.search(baseQuery({ q: 'login' }) as never, adminCaller());
+        const filter = sprintFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter.name).toBeUndefined();
+        expect(filter.$text).toEqual({ $search: 'login' });
+    });
+
+    it('tasks bucket switches to $text', async () => {
+        await svc.search(baseQuery({ q: 'login' }) as never, adminCaller());
+        const filter = taskFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter.title).toBeUndefined();
+        expect(filter.$text).toEqual({ $search: 'login' });
+    });
+
+    it('users bucket STAYS on regex even at ≥ 3 chars (PII contract)', async () => {
+        // The user text index spans `email + employee_id + job_title`
+        // alongside `full_name`; switching to $text would silently
+        // expose email matching to non-admin queries. Lock the regex
+        // path in for users at every length.
+        await svc.search(baseQuery({ q: 'login' }) as never, adminCaller());
+        const filter = userFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter.$text).toBeUndefined();
+        expect(filter.full_name).toBeInstanceOf(RegExp);
+        expect(filter.email).toBeUndefined();
+    });
+
+    it('preserves visibility filters alongside $text ($and merge into single doc)', async () => {
+        // Mongo only allows one $text per query. Visibility filters
+        // (`is_archived`, `member_ids`, etc.) must compose into the
+        // same top-level filter rather than nested under $or. Pin
+        // that the project filter has BOTH $text AND is_archived in
+        // the same envelope.
+        await svc.search(baseQuery({ q: 'login' }) as never, adminCaller());
+        const filter = projectFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter.$text).toBeDefined();
+        expect(filter.is_archived).toBe(false);
+    });
+});

@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as users from '../controllers/user.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { ROLES } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     assignableQuerySchema,
     changeRoleBodySchema,
@@ -30,19 +30,25 @@ router.get('/assignable', validate({ query: assignableQuerySchema }), asyncHandl
 
 router.get(
     '/',
-    authorize(ROLES.ADMIN, ROLES.MANAGER),
+    requirePermission(PERMISSIONS.USER_READ),
     validate({ query: listUsersQuerySchema }),
     asyncHandler(users.getListUsers)
 );
 
-router.post('/', authorize(ROLES.ADMIN), validate({ body: createUserBodySchema }), asyncHandler(users.postCreateUser));
+router.post(
+    '/',
+    requirePermission(PERMISSIONS.USER_WRITE),
+    validate({ body: createUserBodySchema }),
+    asyncHandler(users.postCreateUser)
+);
 
 // ─── Profile photo (Step 22) ──────────────────────────────────────────────
 //
-// `/me` endpoints — caller is always the subject. No authorize() needed
-// beyond `authenticate` (set at the router root above): every active user
-// can manage their own avatar. Spec keeps this path as POST (mint via
-// POST /upload-url, finalize via POST), aligning with task-attachments.
+// `/me` endpoints — caller is always the subject. No `requirePermission`
+// needed beyond `authenticate` (set at the router root above): every
+// active user can manage their own avatar. Spec keeps this path as POST
+// (mint via POST /upload-url, finalize via POST), aligning with
+// task-attachments.
 
 router.post(
     '/me/profile-photo-upload-url',
@@ -70,26 +76,49 @@ router.patch(
 
 router.post(
     '/:id/deactivate',
-    authorize(ROLES.ADMIN),
+    requirePermission(PERMISSIONS.USER_DEACTIVATE),
     validate({ params: userIdParamSchema, body: deactivateUserBodySchema }),
     asyncHandler(users.postDeactivateUser)
 );
 
 router.post(
     '/:id/reactivate',
-    authorize(ROLES.ADMIN),
+    requirePermission(PERMISSIONS.USER_DEACTIVATE),
     validate({ params: userIdParamSchema }),
     asyncHandler(users.postReactivateUser)
 );
 
 router.post(
     '/:id/change-role',
-    authorize(ROLES.ADMIN),
+    requirePermission(PERMISSIONS.USER_ROLE_CHANGE),
     validate({ params: userIdParamSchema, body: changeRoleBodySchema }),
     asyncHandler(users.postChangeUserRole)
 );
 
 // Deferred admin-triggered password reset (needs email service).
-router.post('/:id/reset-password', authorize(ROLES.ADMIN), asyncHandler(users.notImplemented));
+router.post(
+    '/:id/reset-password',
+    requirePermission(PERMISSIONS.USER_WRITE),
+    validate({ params: userIdParamSchema }),
+    asyncHandler(users.postAdminResetPassword)
+);
+
+// ─── GDPR DSAR + erasure (BACKEND_AUDIT.md P1-8) ───────────────────────────
+// Admin-only. Two distinct permissions so an org can grant export
+// access to legal/HR without granting the destructive erasure flow.
+
+router.get(
+    '/:id/data-export',
+    requirePermission(PERMISSIONS.USER_DATA_EXPORT),
+    validate({ params: userIdParamSchema }),
+    asyncHandler(users.getUserDataExport)
+);
+
+router.post(
+    '/:id/data-erasure',
+    requirePermission(PERMISSIONS.USER_DATA_ERASURE),
+    validate({ params: userIdParamSchema }),
+    asyncHandler(users.postUserDataErasure)
+);
 
 export default router;

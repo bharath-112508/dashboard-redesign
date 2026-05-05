@@ -4,6 +4,7 @@ import { BASE_SCHEMA_OPTIONS, sensitiveToJSON } from './_base.js';
 import { COLLECTIONS } from '../constants/collections.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES, type UserStatus } from '../constants/user-statuses.js';
+import { PERMISSION_VALUES } from '../constants/permissions.js';
 import { DEFAULT_TIMEZONE } from '../utils/date.js';
 
 /**
@@ -55,6 +56,25 @@ export interface UserDocument extends Document {
     phone?: string;
     profile_photo_blob_key: string | null;
     role: RoleType;
+    /**
+     * Phase-4 Step 47 (RBAC). Array of `roles._id` references; effective
+     * permissions are the union of every assigned role's `permissions[]`.
+     * The legacy `role` field above is kept as a denormalised cache of
+     * the FIRST system-role key in this array — service code that branches
+     * on `caller.role === 'admin'` continues to work during the Phase-B
+     * migration window. Phase B replaces those checks with permission
+     * lookups; Phase C drops the `role` field entirely.
+     */
+    role_ids: Types.ObjectId[];
+    /**
+     * Phase-4 Step 47 — per-user "Pattern B" extra grants. Effective
+     * permissions are `union(role_ids[].permissions, extra_permissions)`.
+     * Used for one-off admin overrides without spinning up a custom
+     * role (e.g. "Bob also gets `report.read` for Q3"). The
+     * `system.admin` wildcard is rejected at the service layer the
+     * same way custom roles are.
+     */
+    extra_permissions: string[];
     status: UserStatus;
     timezone: string;
     slack_user_id: string | null;
@@ -142,11 +162,39 @@ const userSchema = new Schema<UserDocument>(
             trim: true,
             index: true,
         },
-        password_hash: { type: String, required: true },
+        // T8 — `select: false` keeps the bcrypt hash out of any
+        // `find` / `findOne` / `findById` projection by default. The
+        // existing readers all use the `+password_hash` opt-in syntax
+        // which still works; this guards against a future
+        // `.lean<UserDocument>()` accidentally loading hashes into a
+        // response payload or log line.
+        password_hash: { type: String, required: true, select: false },
         full_name: { type: String, required: true, trim: true },
         phone: { type: String, trim: true },
         profile_photo_blob_key: { type: String, default: null },
         role: { type: String, enum: Object.values(ROLES), required: true },
+        // Step 47 — array of role-document references. Validated at the
+        // service layer (must be non-empty + every id must reference a
+        // real role row). Defaulted to empty so the schema accepts
+        // pre-Step-47 fixture data; the bootstrap migration backfills
+        // `role_ids` from the legacy `role` field on next start.
+        role_ids: { type: [Schema.Types.ObjectId], ref: COLLECTIONS.ROLES, default: [] },
+        // Step 47 Pattern B — per-user extra permission grants. Each
+        // entry must be drawn from the catalog (`PERMISSION_VALUES`);
+        // the service-layer rejects the `system.admin` wildcard the
+        // same way it does on custom roles.
+        extra_permissions: {
+            type: [String],
+            required: true,
+            default: [],
+            validate: {
+                validator: (v: string[]) => {
+                    const allowed = new Set<string>(PERMISSION_VALUES);
+                    return v.every((p) => allowed.has(p));
+                },
+                message: 'extra_permissions must be drawn from PERMISSION_VALUES',
+            },
+        },
         status: {
             type: String,
             enum: Object.values(USER_STATUSES),
@@ -162,12 +210,18 @@ const userSchema = new Schema<UserDocument>(
         client_profile: { type: clientProfileSchema, required: false },
 
         mfa_enabled: { type: Boolean, default: false },
-        mfa_secret_encrypted: { type: String, default: null },
-        mfa_backup_codes_hashed: { type: [String], default: [] },
+        // T8 — `select: false` on the encrypted TOTP secret + the
+        // hashed backup codes. Same rationale as `password_hash`:
+        // `.lean<UserDocument>()` callers must explicitly opt in via
+        // `+mfa_secret_encrypted` / `+mfa_backup_codes_hashed`.
+        mfa_secret_encrypted: { type: String, default: null, select: false },
+        mfa_backup_codes_hashed: { type: [String], default: [], select: false },
 
-        failed_login_attempts: { type: Number, default: 0, min: 0 },
-        last_failed_login_at: { type: Date, default: null },
-        locked_until: { type: Date, default: null },
+        // Brute-force counters. `select: false` here too — they're
+        // enforcement state, not part of any user-facing response.
+        failed_login_attempts: { type: Number, default: 0, min: 0, select: false },
+        last_failed_login_at: { type: Date, default: null, select: false },
+        locked_until: { type: Date, default: null, select: false },
 
         last_login_at: { type: Date, default: null },
         last_password_changed_at: { type: Date, default: null },
@@ -185,6 +239,34 @@ const userSchema = new Schema<UserDocument>(
 userSchema.index({ role: 1, status: 1 });
 userSchema.index({ 'internal_profile.reporting_manager_id': 1 });
 userSchema.index({ 'internal_profile.employee_id': 1 }, { unique: true, sparse: true });
+
+/**
+ * R6 — single-active-admin invariant backstop.
+ *
+ * The single-tenancy contract is "exactly one active admin user per
+ * deployment". `assertSingleAdmin` checks for an existing admin before
+ * `User.create` / `reactivateUser` / `changeUserRole` set role=admin,
+ * but two concurrent calls can both observe no existing admin and
+ * both insert — a TOCTOU race the friendly check can't close on its
+ * own.
+ *
+ * This partial unique index makes the database the source of truth.
+ * Two concurrent inserts/updates with `(role: 'admin', status: 'active')`
+ * collide on E11000; the second one is caught and re-thrown as
+ * `ADMIN_ALREADY_EXISTS` by the service layer.
+ *
+ * Partial filter: only the (admin, active) tuple is unique. A
+ * `deactivated` admin doesn't block a fresh admin promotion;
+ * non-admin users have no constraint here.
+ */
+userSchema.index(
+    { role: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { role: 'admin', status: 'active' },
+        name: 'one_active_admin',
+    }
+);
 
 /**
  * Text index for global search (Data_Model.md §Text Indexes line 1120;

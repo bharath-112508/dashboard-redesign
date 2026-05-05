@@ -140,7 +140,8 @@ export const listProjectsQuerySchema = z.object({
         .optional(),
     member_id: objectIdSchema.optional(),
     client_id: objectIdSchema.optional(),
-    q: z.string().trim().min(1).max(100).optional(),
+    // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
+    q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
 });
 
 export type ListProjectsQuery = z.infer<typeof listProjectsQuerySchema>;

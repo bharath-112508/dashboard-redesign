@@ -21,6 +21,9 @@ const callerOf = (req: Request): service.ProjectCaller => {
     return {
         id: new Types.ObjectId(req.user.user_id),
         role: req.user.role as RoleType,
+        // R4 — Step-47 RBAC signal so a multi-role admin is recognised
+        // by `isAdminLike` in the service layer.
+        role_keys: req.user.role_keys,
         audit: buildAuditContext(req),
     };
 };

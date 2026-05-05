@@ -177,4 +177,86 @@ describe('runJob', () => {
             'mongo down'
         );
     });
+
+    // ─── In-tick retry (BACKEND_AUDIT.md P1-6) ──────────────────────────
+
+    it('retries the handler up to maxAttempts before recording failure', async () => {
+        createMock.mockResolvedValueOnce({});
+        const handler = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('blip 1'))
+            .mockRejectedValueOnce(new Error('blip 2'))
+            .mockResolvedValueOnce({ recovered: true });
+
+        // Fake timers so the exponential backoff doesn't actually sleep.
+        vi.useFakeTimers();
+        const promise = runJob(JOB_NAMES.SL_MONTHLY_FORFEITURE, '2026-04', handler, { maxAttempts: 3 });
+        // Drain the two backoff sleeps (1s, 2s).
+        await vi.runAllTimersAsync();
+        const result = await promise;
+        vi.useRealTimers();
+
+        expect(handler).toHaveBeenCalledTimes(3);
+        expect(result.status).toBe('success');
+        expect(result.summary).toEqual({ recovered: true });
+    });
+
+    it('records failure if every retry attempt fails', async () => {
+        createMock.mockResolvedValueOnce({});
+        const handler = vi.fn().mockRejectedValue(new Error('persistent'));
+
+        vi.useFakeTimers();
+        const promise = runJob(JOB_NAMES.LEAVE_YEAR_ROLLOVER, '2026', handler, { maxAttempts: 2 });
+        await vi.runAllTimersAsync();
+        const result = await promise;
+        vi.useRealTimers();
+
+        expect(handler).toHaveBeenCalledTimes(2);
+        expect(result.status).toBe('failed');
+        expect(result.error).toBe('persistent');
+    });
+
+    it('does NOT retry by default (maxAttempts defaults to 1)', async () => {
+        createMock.mockResolvedValueOnce({});
+        const handler = vi.fn().mockRejectedValue(new Error('one shot'));
+
+        const result = await runJob(JOB_NAMES.TOKEN_CLEANUP, '2026-W17', handler);
+
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(result.status).toBe('failed');
+    });
+
+    // ─── F5 — in-flight registry ────────────────────────────────────────
+
+    it('F5 — registers running runJob promises in the in-flight set, removes on settle', async () => {
+        const { getInFlightRunJobs } = await import('./runner.js');
+        createMock.mockResolvedValueOnce({});
+
+        let release: () => void = () => {};
+        const handler = vi.fn().mockReturnValue(
+            new Promise<Record<string, unknown>>((resolve) => {
+                release = () => resolve({ ok: true });
+            })
+        );
+
+        const promise = runJob(JOB_NAMES.TOKEN_CLEANUP, '2026-W17', handler);
+        // Mid-handler: the promise is in flight.
+        expect(getInFlightRunJobs()).toHaveLength(1);
+
+        release();
+        await promise;
+        // After settle: registry empty again.
+        expect(getInFlightRunJobs()).toHaveLength(0);
+    });
+
+    it('F5 — even a failing runJob is removed from the in-flight set', async () => {
+        const { getInFlightRunJobs } = await import('./runner.js');
+        createMock.mockResolvedValueOnce({});
+        const handler = vi.fn().mockRejectedValue(new Error('boom'));
+
+        const promise = runJob(JOB_NAMES.TOKEN_CLEANUP, '2026-W17', handler);
+        await promise;
+
+        expect(getInFlightRunJobs()).toHaveLength(0);
+    });
 });

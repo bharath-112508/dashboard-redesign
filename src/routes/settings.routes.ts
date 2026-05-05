@@ -3,9 +3,9 @@ import { Router } from 'express';
 import * as settings from '../controllers/settings.controller.js';
 import * as slackSettings from '../controllers/slack-settings.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { ROLES } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { patchSettingsBodySchema } from '../validators/settings.validator.js';
 import { patchSlackSettingsBodySchema, testMessageBodySchema } from '../validators/slack-settings.validator.js';
 
@@ -24,7 +24,7 @@ router.get('/', authenticate, asyncHandler(settings.getSettings));
 router.patch(
     '/',
     authenticate,
-    authorize(ROLES.ADMIN),
+    requirePermission(PERMISSIONS.SETTINGS_WRITE),
     validate({ body: patchSettingsBodySchema }),
     asyncHandler(settings.patchSettings)
 );
@@ -36,12 +36,17 @@ router.patch(
 // endpoint surfaces synchronous delivery success/failure (the dispatcher
 // elsewhere swallows failures per `SLACK_DISPATCH_FAILED` policy).
 
-router.get('/slack', authenticate, authorize(ROLES.ADMIN), asyncHandler(slackSettings.getSlack));
+router.get(
+    '/slack',
+    authenticate,
+    requirePermission(PERMISSIONS.SETTINGS_SLACK_WRITE),
+    asyncHandler(slackSettings.getSlack)
+);
 
 router.patch(
     '/slack',
     authenticate,
-    authorize(ROLES.ADMIN),
+    requirePermission(PERMISSIONS.SETTINGS_SLACK_WRITE),
     validate({ body: patchSlackSettingsBodySchema }),
     asyncHandler(slackSettings.patchSlack)
 );
@@ -49,7 +54,7 @@ router.patch(
 router.post(
     '/slack/test-message',
     authenticate,
-    authorize(ROLES.ADMIN),
+    requirePermission(PERMISSIONS.SETTINGS_SLACK_WRITE),
     validate({ body: testMessageBodySchema }),
     asyncHandler(slackSettings.postTestMessage)
 );

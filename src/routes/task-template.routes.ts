@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/task-template.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { TASK_TEMPLATE_READ_ROLES, TASK_TEMPLATE_WRITE_ROLES } from '../constants/task-template.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     createTaskTemplateBodySchema,
     instantiateTaskTemplateBodySchema,
@@ -33,14 +33,14 @@ export const projectNestedRouter = (): Router => {
 
     router.get(
         '/',
-        authorize(...TASK_TEMPLATE_READ_ROLES),
+        requirePermission(PERMISSIONS.TASK_TEMPLATE_READ),
         validate({ params: projectIdParamSchema, query: listTaskTemplatesQuerySchema }),
         asyncHandler(ctrl.getList)
     );
 
     router.post(
         '/',
-        authorize(...TASK_TEMPLATE_WRITE_ROLES),
+        requirePermission(PERMISSIONS.TASK_TEMPLATE_WRITE),
         validate({ params: projectIdParamSchema, body: createTaskTemplateBodySchema }),
         asyncHandler(ctrl.postCreate)
     );
@@ -55,28 +55,28 @@ router.use(authenticate);
 
 router.get(
     '/:id',
-    authorize(...TASK_TEMPLATE_READ_ROLES),
+    requirePermission(PERMISSIONS.TASK_TEMPLATE_READ),
     validate({ params: taskTemplateIdParamSchema }),
     asyncHandler(ctrl.getOne)
 );
 
 router.patch(
     '/:id',
-    authorize(...TASK_TEMPLATE_WRITE_ROLES),
+    requirePermission(PERMISSIONS.TASK_TEMPLATE_WRITE),
     validate({ params: taskTemplateIdParamSchema, body: patchTaskTemplateBodySchema }),
     asyncHandler(ctrl.patchOne)
 );
 
 router.delete(
     '/:id',
-    authorize(...TASK_TEMPLATE_WRITE_ROLES),
+    requirePermission(PERMISSIONS.TASK_TEMPLATE_WRITE),
     validate({ params: taskTemplateIdParamSchema }),
     asyncHandler(ctrl.deleteOne)
 );
 
 router.post(
     '/:id/instantiate',
-    authorize(...TASK_TEMPLATE_WRITE_ROLES),
+    requirePermission(PERMISSIONS.TASK_TEMPLATE_WRITE),
     validate({ params: taskTemplateIdParamSchema, body: instantiateTaskTemplateBodySchema }),
     asyncHandler(ctrl.postInstantiate)
 );

@@ -22,8 +22,6 @@
  *     fan-out.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
 // ─── Field caps ──────────────────────────────────────────────────────────
 
 export const COMMENT_BODY_MAX = 5_000;
@@ -34,13 +32,8 @@ export const COMMENT_MENTIONS_MAX = 25;
 export const COMMENT_LIST_DEFAULT_LIMIT = 20;
 export const COMMENT_LIST_MAX_LIMIT = 100;
 
-// ─── RBAC role sets ──────────────────────────────────────────────────────
-//
-// `READ_ROLES` covers the route-level gate; project visibility is
-// enforced inside the service via `loadProjectForCaller`.
-//
-// Edit/delete authorisation is per-row (author or admin/manager), so the
-// service computes it dynamically — no role list is needed at the route.
-
-export const COMMENT_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT];
-export const COMMENT_WRITE_ROLES: readonly RoleType[] = COMMENT_READ_ROLES;
+// Step 47: route gates use `requirePermission(task.read)` for list and
+// `requirePermission(task_comment.write)` for create/patch/delete.
+// Project visibility is enforced inside the service via
+// `loadProjectForCaller`. Edit/delete authorisation is per-row (author
+// or admin/manager/team-lead) — see `task-comment.service.ts`.

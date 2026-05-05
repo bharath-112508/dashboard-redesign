@@ -63,13 +63,19 @@ export const globalErrorHandler = (err: Error, _req: Request, res: Response, _ne
             .json(buildErrorBody(ERROR_CODES.VALIDATION_ERROR, 'Validation failed', details));
     }
 
-    // Duplicate key (E11000)
+    // Duplicate key (E11000). R14 — echo only field NAMES, never the
+    // conflicting values. The `keyValue` payload includes the actual
+    // collided values (e.g. raw token strings, email addresses); the
+    // caller already supplied the value, so echoing it adds nothing
+    // and would leak server-side tokens / synthetic GDPR emails / etc.
+    // back over the wire.
     if (err && typeof err === 'object' && 'code' in err && (err as { code: number }).code === 11000) {
-        const dupErr = err as { keyValue?: Record<string, unknown> };
+        const dupErr = err as { keyValue?: Record<string, unknown>; keyPattern?: Record<string, unknown> };
         logger.warn({ err: dupErr }, 'Duplicate key');
+        const fieldNames = Object.keys(dupErr.keyValue ?? dupErr.keyPattern ?? {});
         return res.status(StatusCodes.CONFLICT).json(
             buildErrorBody(ERROR_CODES.DUPLICATE_RESOURCE, 'Resource already exists', {
-                fields: dupErr.keyValue,
+                fields: fieldNames,
             })
         );
     }

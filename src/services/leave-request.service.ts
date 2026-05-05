@@ -70,7 +70,16 @@ const ACTIVE_LEAVE_STATUSES: LeaveRequestStatus[] = [LEAVE_REQUEST_STATUSES.PEND
 
 // ─── Authorisation helpers ────────────────────────────────────────────────
 
-const isReviewer = (role: RoleType): boolean => role === ROLES.ADMIN || role === ROLES.MANAGER;
+/**
+ * Step 47: Team Lead is a first-line approver — `leave_request.approve`
+ * is in their permission bundle. The legacy approval path was admin /
+ * manager only; team_lead now joins them. Reporting-chain narrowing
+ * (only own reports' requests) is a future enhancement; for now, all
+ * three roles are eligible to approve any pending leave they can see
+ * — same posture as the legacy manager+ design.
+ */
+const isReviewer = (role: RoleType): boolean =>
+    role === ROLES.ADMIN || role === ROLES.MANAGER || role === ROLES.TEAM_LEAD;
 
 const ensureCanReadRequest = (req: LeaveRequestDocument, caller: { id: Types.ObjectId; role: RoleType }) => {
     if (caller.id.equals(req.user_id)) return;

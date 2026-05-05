@@ -15,6 +15,7 @@ import {
 } from '../constants/export.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { EXPORT_WORKER_INLINE } from '../config/server.config.js';
 import { AppError } from '../utils/app-error.js';
 import { deleteBlob, isAzureConfigured, mintDownloadSas, putBlob } from '../utils/azure-blob.js';
 import logger from '../utils/logger.js';
@@ -127,7 +128,7 @@ export const enqueueExport = async (
 };
 
 const scheduleWorker = async (id: Types.ObjectId): Promise<void> => {
-    const inline = (process.env.EXPORT_WORKER_INLINE ?? 'false').toLowerCase() === 'true';
+    const inline = EXPORT_WORKER_INLINE;
     // `runExport` is no-throw (it catches everything internally and writes
     // the failure to the row). The `.catch` here is belt-and-suspenders
     // for an unexpected throw from the wrapper itself — never expected in

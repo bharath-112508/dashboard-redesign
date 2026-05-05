@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/story.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { STORY_READ_ROLES, STORY_WRITE_ROLES } from '../constants/story.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     listStoryTasksQuerySchema,
     patchStoryBodySchema,
@@ -26,32 +26,37 @@ router.use(authenticate);
 
 // ─── /stories/:id ────────────────────────────────────────────────────────
 
-router.get('/:id', authorize(...STORY_READ_ROLES), validate({ params: storyIdParamSchema }), asyncHandler(ctrl.getOne));
+router.get(
+    '/:id',
+    requirePermission(PERMISSIONS.PROJECT_READ),
+    validate({ params: storyIdParamSchema }),
+    asyncHandler(ctrl.getOne)
+);
 
 router.patch(
     '/:id',
-    authorize(...STORY_WRITE_ROLES),
+    requirePermission(PERMISSIONS.STORY_WRITE),
     validate({ params: storyIdParamSchema, body: patchStoryBodySchema }),
     asyncHandler(ctrl.patchOne)
 );
 
 router.delete(
     '/:id',
-    authorize(...STORY_WRITE_ROLES),
+    requirePermission(PERMISSIONS.STORY_WRITE),
     validate({ params: storyIdParamSchema }),
     asyncHandler(ctrl.deleteOne)
 );
 
 router.post(
     '/:id/reorder',
-    authorize(...STORY_WRITE_ROLES),
+    requirePermission(PERMISSIONS.STORY_WRITE),
     validate({ params: storyIdParamSchema, body: reorderStoryBodySchema }),
     asyncHandler(ctrl.postReorder)
 );
 
 router.get(
     '/:id/tasks',
-    authorize(...STORY_READ_ROLES),
+    requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ params: storyIdParamSchema, query: listStoryTasksQuerySchema }),
     asyncHandler(ctrl.getTasks)
 );

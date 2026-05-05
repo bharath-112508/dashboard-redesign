@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { Types } from 'mongoose';
 
 import { User } from '../models/user.model.js';
 import { PasswordResetToken } from '../models/password-reset-token.model.js';
@@ -36,7 +37,11 @@ const base64Url = (buf: Buffer): string =>
 // ─── Forgot ────────────────────────────────────────────────────────────────
 
 export const requestPasswordReset = async (email: string): Promise<void> => {
-    const user = await User.findOne({ email });
+    // R7 — defence-in-depth: normalise at the service boundary so a
+    // direct caller (admin tool / cron) that skips the Zod validator
+    // still hits the lowercased email index.
+    const normalisedEmail = email.trim().toLowerCase();
+    const user = await User.findOne({ email: normalisedEmail });
 
     // Enumeration guard — behave identically for missing / deactivated accounts.
     // Still incur a bit of work so timing is roughly comparable.
@@ -151,4 +156,70 @@ export const resetPassword = async (input: ResetInput): Promise<void> => {
             }
         );
     }
+};
+
+// ─── Admin-triggered reset ────────────────────────────────────────────────
+
+/**
+ * Admin-triggered password reset (`POST /users/:id/reset-password`).
+ *
+ * Mints a one-time reset token for the target user and emails them a
+ * link — same flow the user-initiated `requestPasswordReset` runs, but
+ * with three differences:
+ *
+ *   1. **No enumeration silence.** The admin already knows the
+ *      target's user_id (it's in the URL); a 404 here is fine and
+ *      tells the operator their input was wrong. We surface
+ *      `USER_NOT_FOUND` rather than the generic 200.
+ *   2. **Deactivated → 403, not silent.** A reset link for a
+ *      deactivated account is operator error — they should reactivate
+ *      first. We surface `ACCOUNT_DEACTIVATED` so the admin sees the
+ *      issue instead of wondering why the email never arrived.
+ *   3. **Audit row tags the admin as actor.** `AUTH_ADMIN_PASSWORD_RESET`
+ *      records WHICH admin requested the reset. The downstream
+ *      `AUTH_PASSWORD_RESET` row (when the user consumes the link)
+ *      records the user as actor — the two rows together tell the
+ *      "admin asked, user consumed" story.
+ *
+ * Returns nothing — the controller maps to 204. The link is
+ * intentionally NOT in the response (it would let an admin reset their
+ * peer's password without the peer ever seeing the email — that's a
+ * different design with different audit / abuse implications).
+ */
+export const adminInitiatePasswordReset = async (targetUserId: Types.ObjectId, audit: AuditContext): Promise<void> => {
+    const user = await User.findById(targetUserId);
+    if (!user) {
+        throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
+    }
+    if (user.status !== USER_STATUSES.ACTIVE) {
+        throw AppError.forbidden('Cannot reset password for a deactivated user', ERROR_CODES.ACCOUNT_DEACTIVATED);
+    }
+
+    // Same token-mint flow as the user-initiated path — invalidate any
+    // older unused tokens so only the most recent link works.
+    await PasswordResetToken.updateMany({ user_id: user._id, used_at: null }, { $set: { used_at: new Date() } });
+
+    const rawToken = base64Url(randomBytes(RESET_TOKEN_BYTES));
+    const ttlMinutes = await resolvePasswordResetTtlMinutes();
+    const ttlMs = ttlMinutes !== null ? ttlMinutes * 60_000 : RESET_TOKEN_TTL_MS;
+    await PasswordResetToken.create({
+        user_id: user._id,
+        token_hash: sha256Hex(rawToken),
+        expires_at: new Date(Date.now() + ttlMs),
+    });
+
+    await sendPasswordResetEmail({
+        to: user.email,
+        full_name: user.full_name,
+        token: rawToken,
+    });
+
+    // Audit with the admin as actor. The downstream user-consumption
+    // row (when they click the link) will record them as the actor on
+    // `AUTH_PASSWORD_RESET`.
+    await recordAudit(audit, {
+        action: AUDIT_ACTIONS.AUTH_ADMIN_PASSWORD_RESET,
+        target: { kind: AUDIT_TARGET_KINDS.USER, id: user._id },
+        metadata: { target_email: user.email },
+    });
 };

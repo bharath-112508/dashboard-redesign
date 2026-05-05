@@ -135,8 +135,11 @@ const leaveRequestSchema = new Schema<LeaveRequestDocument>(
 );
 
 leaveRequestSchema.index({ user_id: 1, start_date: -1 });
-leaveRequestSchema.index({ status: 1 });
 leaveRequestSchema.index({ approver_id: 1, status: 1 });
+// `{status: 1}` was previously declared standalone but is fully covered
+// by the leftmost prefix of the compound below — Mongo serves status-only
+// queries from this index. The standalone was a Step-33 redundancy
+// candidate; dropped here as part of the Phase-4 indexes-cleanup pass.
 leaveRequestSchema.index({ status: 1, requires_additional_approval: 1 });
 leaveRequestSchema.index({ start_date: 1, end_date: 1 });
 leaveRequestSchema.index({ 'leave_segments.leave_type_id': 1, 'leave_segments.year': 1 });

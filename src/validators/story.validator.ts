@@ -57,7 +57,8 @@ export const listStoriesQuerySchema = z.object({
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(STORY_LIST_MAX_LIMIT).default(STORY_LIST_DEFAULT_LIMIT),
     status: z.enum(STORY_DERIVED_STATUS_VALUES as unknown as [string, ...string[]]).optional(),
-    q: z.string().trim().min(1).max(100).optional(),
+    // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
+    q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
 });
 export type ListStoriesQuery = z.infer<typeof listStoriesQuerySchema>;
 

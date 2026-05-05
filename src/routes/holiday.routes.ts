@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/holiday.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { HOLIDAY_READ_ROLES, HOLIDAY_WRITE_ROLES } from '../constants/holiday.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     bulkCreateHolidaysBodySchema,
     createHolidayBodySchema,
@@ -21,14 +21,14 @@ router.use(authenticate);
 
 router.get(
     '/',
-    authorize(...HOLIDAY_READ_ROLES),
+    requirePermission(PERMISSIONS.HOLIDAY_READ),
     validate({ query: listHolidaysQuerySchema }),
     asyncHandler(ctrl.getList)
 );
 
 router.post(
     '/',
-    authorize(...HOLIDAY_WRITE_ROLES),
+    requirePermission(PERMISSIONS.HOLIDAY_WRITE),
     validate({ body: createHolidayBodySchema }),
     asyncHandler(ctrl.postCreate)
 );
@@ -37,7 +37,7 @@ router.post(
 // to parse the literal string "bulk" as an ObjectId.
 router.post(
     '/bulk',
-    authorize(...HOLIDAY_WRITE_ROLES),
+    requirePermission(PERMISSIONS.HOLIDAY_WRITE),
     validate({ body: bulkCreateHolidaysBodySchema }),
     asyncHandler(ctrl.postBulk)
 );
@@ -46,14 +46,14 @@ router.post(
 
 router.patch(
     '/:id',
-    authorize(...HOLIDAY_WRITE_ROLES),
+    requirePermission(PERMISSIONS.HOLIDAY_WRITE),
     validate({ params: holidayIdParamSchema, body: patchHolidayBodySchema }),
     asyncHandler(ctrl.patchOne)
 );
 
 router.delete(
     '/:id',
-    authorize(...HOLIDAY_WRITE_ROLES),
+    requirePermission(PERMISSIONS.HOLIDAY_WRITE),
     validate({ params: holidayIdParamSchema }),
     asyncHandler(ctrl.deleteOne)
 );

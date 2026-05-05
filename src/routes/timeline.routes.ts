@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/timeline.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { TIMELINE_READ_ROLES } from '../constants/timeline.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { projectIdParamSchema, timelineQuerySchema } from '../validators/timeline.validator.js';
 
 /**
@@ -23,7 +23,7 @@ export const projectTimelineNestedRouter = (): Router => {
 
     router.get(
         '/',
-        authorize(...TIMELINE_READ_ROLES),
+        requirePermission(PERMISSIONS.PROJECT_READ),
         validate({ params: projectIdParamSchema, query: timelineQuerySchema }),
         asyncHandler(ctrl.getTimeline)
     );

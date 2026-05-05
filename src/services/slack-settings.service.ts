@@ -1,12 +1,14 @@
 import { Types } from 'mongoose';
 
-import type { SlackSettings } from '../models/system-settings.model.js';
+import { SystemSettings, type SlackSettings } from '../models/system-settings.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import { encryptSecret } from '../utils/crypto-aes.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { getOrInitSettings } from './settings.service.js';
-import { isSlackConfigured, postSlackMessage, slackContextFrom } from '../utils/slack.js';
+import { isSlackConfigured, looksEncrypted, postSlackMessage, slackContextFrom } from '../utils/slack.js';
+import logger from '../utils/logger.js';
 import type { PatchSlackSettingsBody, TestMessageBody } from '../validators/slack-settings.validator.js';
 
 /**
@@ -86,8 +88,17 @@ export const patchSlackSettings = async (
     if (patch.enabled !== undefined) settings.slack.enabled = patch.enabled;
 
     if (patch.bot_token !== undefined) {
-        // Empty string + null both clear. Otherwise store verbatim.
-        settings.slack.bot_token = patch.bot_token && patch.bot_token.length > 0 ? patch.bot_token : null;
+        // J1 — encrypt bot_token at rest. Pre-J1 it was stored as raw
+        // plaintext, the inconsistent outlier alongside MFA secrets
+        // (encrypted) and refresh tokens (hashed). The same AES-GCM
+        // helper now serves both surfaces. Empty string + null both
+        // clear; the cleared sentinel stays plaintext null because
+        // there's nothing to protect.
+        if (patch.bot_token && patch.bot_token.length > 0) {
+            settings.slack.bot_token = encryptSecret(patch.bot_token);
+        } else {
+            settings.slack.bot_token = null;
+        }
     }
 
     if (patch.channels) {
@@ -176,4 +187,52 @@ export const sendTestMessage = async (
     }
 
     return { delivered: true, channel: input.channel };
+};
+
+// ─── Boot-time migration (J1) ─────────────────────────────────────────────
+
+/**
+ * One-shot startup migration: if the singleton settings doc carries a
+ * legacy plaintext `slack.bot_token`, encrypt it in place. Idempotent —
+ * a value that already looks like an AES envelope is left alone.
+ *
+ * Safe under concurrent boot replicas because the `findOneAndUpdate`
+ * predicate matches the legacy plaintext token; the loser of the race
+ * has nothing to update on its second pass.
+ *
+ * Why a separate boot step rather than lazy migration on read:
+ *   - Eager migration means the DB is consistent immediately after
+ *     deploy; operators don't need to remember to "PATCH the slack
+ *     settings to migrate".
+ *   - Read-path code stays simple: `slackContextFrom` only needs the
+ *     legacy plaintext fallback for the in-flight migration window.
+ *   - Failures here log a warn and proceed — boot must not block on
+ *     a legacy token that fails to encrypt for any reason.
+ */
+export const migratePlaintextSlackBotToken = async (): Promise<{ migrated: boolean }> => {
+    try {
+        const doc = await SystemSettings.findOne().select('slack.bot_token');
+        if (!doc) return { migrated: false };
+        const stored = doc.slack?.bot_token;
+        if (!stored || stored.length === 0) return { migrated: false };
+        if (looksEncrypted(stored)) return { migrated: false };
+
+        const encrypted = encryptSecret(stored);
+        // Predicate-guarded swap — if a concurrent boot replica already
+        // encrypted the value, our update finds nothing and is a no-op.
+        const result = await SystemSettings.updateOne(
+            { _id: doc._id, 'slack.bot_token': stored },
+            { $set: { 'slack.bot_token': encrypted } }
+        );
+        const migrated = (result.modifiedCount ?? 0) > 0;
+        if (migrated) {
+            logger.info('Migrated legacy plaintext Slack bot_token to encrypted-at-rest storage');
+        }
+        return { migrated };
+    } catch (err) {
+        // Never block boot on a migration step — log and continue. The
+        // read path's plaintext fallback will keep the bot working.
+        logger.warn({ err }, 'Slack bot_token plaintext migration failed; continuing boot');
+        return { migrated: false };
+    }
 };

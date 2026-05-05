@@ -5,9 +5,10 @@
  * Custom task statuses (Data_Model §5.1 `custom_task_statuses`) are stored
  * **embedded** on the project document. The four DEFAULT_TASK_STATUSES below
  * are implicit — they are always available on every project and MUST NOT
- * collide with a custom status `key`. Tasks ship in Step 18; Step 16 only
- * needs to know what default keys exist so we can reject collisions when an
- * admin tries to add `{ key: "to_do" }` as a custom status.
+ * collide with a custom status `key`. Listing them here lets the project
+ * service reject collisions when an admin tries to add `{ key: "to_do" }`
+ * as a custom status, and lets the task service validate that any chosen
+ * status is either a default OR a configured custom one.
  *
  * RBAC role sets:
  *   - Reads (list/get/sub-resource gets) are role-checked here as
@@ -52,7 +53,6 @@ export const SPRINT_STATUS_VALUES: readonly SprintStatus[] = Object.values(SPRIN
 // dropdown without server roundtrips.
 
 export const DEFAULT_TASK_STATUS_KEYS = ['to_do', 'in_progress', 'review', 'done'] as const;
-export type DefaultTaskStatusKey = (typeof DEFAULT_TASK_STATUS_KEYS)[number];
 
 // ─── Custom-task-status caps ─────────────────────────────────────────────
 
@@ -89,22 +89,22 @@ export const PROJECT_LIST_MAX_LIMIT = 100;
 export const SPRINT_LIST_DEFAULT_LIMIT = 50;
 export const SPRINT_LIST_MAX_LIMIT = 200;
 
-// ─── RBAC role sets ──────────────────────────────────────────────────────
-
-/** Roles allowed to write to projects/sprints/members/clients/custom-statuses. */
-export const PROJECT_WRITE_ROLES = [ROLES.ADMIN, ROLES.MANAGER] as const;
-
-/** Roles allowed to archive a project (Data_Model §5.1 `is_archived`). */
-export const PROJECT_ARCHIVE_ROLES = [ROLES.ADMIN] as const;
+// ─── Visibility scoping ──────────────────────────────────────────────────
+//
+// Step 47: route-level gates use `requirePermission(project.read|write|
+// archive|members_write|clients_write)`; the route allowlist constants
+// are gone. The two SCOPED_ROLES exports below remain because they
+// drive per-row visibility filtering at the service layer (Team Lead +
+// Employee see only projects they're members of; Client sees only
+// projects they're clients on). That logic is role-string-based, not
+// permission-based, and lives in `project.service.ts`.
 
 /**
- * All authenticated roles are *route-allowed* to read; the service then
- * narrows further by membership/client-of (admins + managers see everything).
+ * Roles whose project access is restricted to `member_ids` containment.
+ * Step 47: Team Lead joins Employee here — they see + author projects
+ * they're members of, just with broader permissions on those projects.
  */
-export const PROJECT_READ_ROLES = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT] as const;
-
-/** Roles whose project access is restricted to `member_ids` containment. */
-export const PROJECT_MEMBER_SCOPED_ROLES: readonly string[] = [ROLES.EMPLOYEE];
+export const PROJECT_MEMBER_SCOPED_ROLES: readonly string[] = [ROLES.TEAM_LEAD, ROLES.EMPLOYEE];
 
 /** Roles whose project access is restricted to `client_ids` containment. */
 export const PROJECT_CLIENT_SCOPED_ROLES: readonly string[] = [ROLES.CLIENT];

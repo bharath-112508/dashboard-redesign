@@ -41,7 +41,13 @@ import type { CreateCommentBody, ListCommentsQuery, PatchCommentBody } from '../
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-const isManagerOrAdmin = (role: string): boolean => role === ROLES.ADMIN || role === ROLES.MANAGER;
+/**
+ * Step 47: Team Lead is a project author within their projects, so they
+ * can moderate comments (edit / delete others' comments) on tasks inside
+ * those projects — same authority a Manager has across the org.
+ */
+const isManagerOrAdmin = (role: string): boolean =>
+    role === ROLES.ADMIN || role === ROLES.MANAGER || role === ROLES.TEAM_LEAD;
 
 const toPublic = (doc: TaskCommentDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
 

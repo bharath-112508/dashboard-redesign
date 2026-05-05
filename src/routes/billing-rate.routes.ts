@@ -2,9 +2,9 @@ import { Router } from 'express';
 
 import * as ctrl from '../controllers/billing-rate.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, authorize } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import { BILLING_RATE_READ_ROLES, BILLING_RATE_WRITE_ROLES } from '../constants/timesheet.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import {
     billingRateIdPathSchema,
     createBillingRateBodySchema,
@@ -15,9 +15,10 @@ import {
 /**
  * Billing-rate routes (Step 23; API_Contract.md §9.5).
  *
- * Read = manager + admin. Write = admin only. Per-row authorisation is
- * route-level (no per-row override), so the standard `authorize()`
- * middleware is sufficient.
+ * Read gated on `billing_rate.read` (manager + admin); write gated on
+ * `billing_rate.write` (admin only). Per-row authorisation is purely
+ * route-level (no per-row override), so the `requirePermission(...)`
+ * gate is sufficient.
  */
 const router = Router();
 
@@ -25,35 +26,35 @@ router.use(authenticate);
 
 router.get(
     '/',
-    authorize(...BILLING_RATE_READ_ROLES),
+    requirePermission(PERMISSIONS.BILLING_RATE_READ),
     validate({ query: listBillingRatesQuerySchema }),
     asyncHandler(ctrl.getList)
 );
 
 router.post(
     '/',
-    authorize(...BILLING_RATE_WRITE_ROLES),
+    requirePermission(PERMISSIONS.BILLING_RATE_WRITE),
     validate({ body: createBillingRateBodySchema }),
     asyncHandler(ctrl.postCreate)
 );
 
 router.patch(
     '/:id',
-    authorize(...BILLING_RATE_WRITE_ROLES),
+    requirePermission(PERMISSIONS.BILLING_RATE_WRITE),
     validate({ params: billingRateIdPathSchema, body: patchBillingRateBodySchema }),
     asyncHandler(ctrl.patchOne)
 );
 
 router.post(
     '/:id/end',
-    authorize(...BILLING_RATE_WRITE_ROLES),
+    requirePermission(PERMISSIONS.BILLING_RATE_WRITE),
     validate({ params: billingRateIdPathSchema }),
     asyncHandler(ctrl.postEnd)
 );
 
 router.delete(
     '/:id',
-    authorize(...BILLING_RATE_WRITE_ROLES),
+    requirePermission(PERMISSIONS.BILLING_RATE_WRITE),
     validate({ params: billingRateIdPathSchema }),
     asyncHandler(ctrl.deleteOne)
 );

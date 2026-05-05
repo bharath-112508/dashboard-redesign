@@ -5,9 +5,8 @@
  * A subscription is a saved report query plus a weekly schedule.
  * The cron picks up active subscriptions whose `day_of_week` matches
  * today (IST) and sends the rendered report inline (HTML body — no
- * attachments in v1; the existing mailer is a stub that needs ACS
- * wiring per Build_Decisions §D1, and adding attachment support has
- * its own blast radius).
+ * attachments in v1; adding attachment support to the mailer
+ * abstraction is a follow-up with its own blast radius).
  *
  * Owner-scoped: each subscription belongs to one user; nobody else
  * sees it (not even admins reading another admin's subscriptions —
@@ -15,15 +14,9 @@
  * presets).
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
-// ─── RBAC ───────────────────────────────────────────────────────────────
-//
-// Mirrors Step-29 + Step-42 — admin + manager only. A subscription's
-// value is gated by the report's role: an employee can't run the
-// billing report, so they have nothing to subscribe to.
-
-export const REPORT_SUBSCRIPTION_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
+// Step 47: route gate is `requirePermission(report.read)` — same
+// permission that gates `/reports/*` reads, so a user can never
+// subscribe to a report they can't run.
 
 // ─── Field caps ────────────────────────────────────────────────────────
 

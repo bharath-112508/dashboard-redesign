@@ -23,8 +23,6 @@
  * `effective_to` to the day before the new row's `effective_from`.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
 // ─── Field caps & shape ──────────────────────────────────────────────────
 
 export const TIMESHEET_DESCRIPTION_MAX = 2_000;
@@ -46,14 +44,6 @@ export type TimesheetEntryType = (typeof TIMESHEET_ENTRY_TYPES)[keyof typeof TIM
 export const TIMESHEET_ENTRY_TYPE_VALUES: readonly TimesheetEntryType[] = Object.values(TIMESHEET_ENTRY_TYPES);
 
 /**
- * Suggested categories for `entry_type=general`. Free-form so admins can
- * extend without a deploy — the validator accepts any non-empty string
- * within the cap. The values below are surfaced by the FE as a select
- * dropdown for consistency.
- */
-export const TIMESHEET_GENERAL_CATEGORIES = ['meeting', 'training', 'admin', 'other'] as const;
-
-/**
  * Group-by keys for the summary endpoint. Anything outside this set is
  * a 400 from the validator.
  */
@@ -68,21 +58,10 @@ export const TIMESHEET_LIST_MAX_LIMIT = 200;
 export const BILLING_RATE_LIST_DEFAULT_LIMIT = 20;
 export const BILLING_RATE_LIST_MAX_LIMIT = 100;
 
-// ─── RBAC role sets ──────────────────────────────────────────────────────
-//
-// The route-level gate is intentionally generous; per-row authorisation
-// (write window, "owner-or-manager-or-admin") is enforced inside the
-// service layer. This mirrors how comments/attachments do it.
-
-/** Anyone authenticated can create + read their own timesheet entries. */
-export const TIMESHEET_SELF_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE];
-
-/** Manager + admin can list across users and run summary aggregates. */
-export const TIMESHEET_MANAGER_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
-
-/** Billing-rate read is manager+; write is admin-only per API_Contract §9.5. */
-export const BILLING_RATE_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
-export const BILLING_RATE_WRITE_ROLES: readonly RoleType[] = [ROLES.ADMIN];
+// Step 47: route gates use `requirePermission(timesheet.read/write,
+// billing_rate.read/write, timesheet.edit_out_of_window)`. The
+// service layer's `isManagerOrAdmin` helper still gates per-row
+// "manager moderates anyone" semantics (see `timesheet.service.ts`).
 
 // ─── Defaults the service falls back to when settings are missing ────────
 //

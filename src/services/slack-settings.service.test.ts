@@ -38,6 +38,22 @@ interface MockSettings {
     save: ReturnType<typeof vi.fn>;
 }
 
+const { systemSettingsFindOneMock, systemSettingsUpdateOneMock } = vi.hoisted(() => ({
+    systemSettingsFindOneMock: vi.fn(),
+    systemSettingsUpdateOneMock: vi.fn(),
+}));
+
+vi.mock('../models/system-settings.model.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../models/system-settings.model.js')>();
+    return {
+        ...actual,
+        SystemSettings: {
+            findOne: systemSettingsFindOneMock,
+            updateOne: systemSettingsUpdateOneMock,
+        },
+    };
+});
+
 const { settingsMock, recordAuditMock, postSlackMessageMock } = vi.hoisted(() => {
     const mock: {
         slack: {
@@ -100,6 +116,8 @@ vi.mock('../utils/slack.js', async (importOriginal) => {
 
 const svc = await import('./slack-settings.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { decryptSecret } from '../utils/crypto-aes.js';
+import { looksEncrypted } from '../utils/slack.js';
 
 const makeCaller = () => ({ id: new Types.ObjectId(), audit: undefined });
 
@@ -157,9 +175,20 @@ describe('patchSlackSettings', () => {
         expect(settingsMock.slack.bot_token).toBeNull();
     });
 
-    it('stores a non-empty bot_token verbatim', async () => {
+    it('J1 — encrypts the bot_token before storing, never landing the plaintext at rest', async () => {
+        // Pre-J1 the stored value was verbatim plaintext. Post-J1 the stored
+        // value is an AES-GCM envelope; the plaintext only exists in memory
+        // long enough to be encrypted. We verify both halves of the contract:
+        //   1. The stored value is NOT the plaintext input.
+        //   2. The stored value round-trips back to the input under decrypt.
         await svc.patchSlackSettings({ bot_token: 'xoxb-new' }, makeCaller());
-        expect(settingsMock.slack.bot_token).toBe('xoxb-new');
+        const stored = settingsMock.slack.bot_token;
+        expect(stored).not.toBeNull();
+        expect(stored).not.toBe('xoxb-new');
+        // Envelope shape — three base64url segments, optionally with a `kid:` prefix.
+        expect(looksEncrypted(stored as string)).toBe(true);
+        // Round-trip: decrypt the stored blob and confirm we get back the input.
+        expect(decryptSecret(stored as string)).toBe('xoxb-new');
     });
 
     it('merges a partial channels update without clobbering siblings', async () => {
@@ -270,5 +299,69 @@ describe('sendTestMessage', () => {
         await svc.sendTestMessage({ channel: '#x' }, makeCaller());
         const call = postSlackMessageMock.mock.calls[1][1] as { text: string };
         expect(call.text).toContain('Viljetech Slack integration test');
+    });
+});
+
+// ─── migratePlaintextSlackBotToken (J1) ─────────────────────────────────
+
+describe('migratePlaintextSlackBotToken', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('encrypts a legacy plaintext token in place', async () => {
+        const docId = new Types.ObjectId();
+        systemSettingsFindOneMock.mockReturnValueOnce({
+            select: () => Promise.resolve({ _id: docId, slack: { bot_token: 'xoxb-legacy-plaintext' } }),
+        });
+        systemSettingsUpdateOneMock.mockResolvedValueOnce({ acknowledged: true, modifiedCount: 1 });
+
+        const result = await svc.migratePlaintextSlackBotToken();
+        expect(result.migrated).toBe(true);
+
+        // The update is predicate-guarded on the LEGACY plaintext value so a
+        // racing replica doesn't double-encrypt; the new value is the AES blob.
+        expect(systemSettingsUpdateOneMock).toHaveBeenCalledWith(
+            { _id: docId, 'slack.bot_token': 'xoxb-legacy-plaintext' },
+            expect.objectContaining({ $set: expect.objectContaining({ 'slack.bot_token': expect.any(String) }) })
+        );
+        const call = systemSettingsUpdateOneMock.mock.calls[0]![1] as { $set: { 'slack.bot_token': string } };
+        const newValue = call.$set['slack.bot_token'];
+        expect(newValue).not.toBe('xoxb-legacy-plaintext');
+        expect(looksEncrypted(newValue)).toBe(true);
+        expect(decryptSecret(newValue)).toBe('xoxb-legacy-plaintext');
+    });
+
+    it('is a no-op when the stored token already looks encrypted (idempotent)', async () => {
+        // Construct a real encrypted blob so `looksEncrypted` returns true.
+        const { encryptSecret } = await import('../utils/crypto-aes.js');
+        const alreadyEncrypted = encryptSecret('xoxb-already-migrated');
+        systemSettingsFindOneMock.mockReturnValueOnce({
+            select: () => Promise.resolve({ _id: new Types.ObjectId(), slack: { bot_token: alreadyEncrypted } }),
+        });
+
+        const result = await svc.migratePlaintextSlackBotToken();
+        expect(result.migrated).toBe(false);
+        expect(systemSettingsUpdateOneMock).not.toHaveBeenCalled();
+    });
+
+    it('is a no-op when bot_token is null (nothing to migrate)', async () => {
+        systemSettingsFindOneMock.mockReturnValueOnce({
+            select: () => Promise.resolve({ _id: new Types.ObjectId(), slack: { bot_token: null } }),
+        });
+
+        const result = await svc.migratePlaintextSlackBotToken();
+        expect(result.migrated).toBe(false);
+        expect(systemSettingsUpdateOneMock).not.toHaveBeenCalled();
+    });
+
+    it('does not block boot when the migration write fails (logs, continues)', async () => {
+        systemSettingsFindOneMock.mockReturnValueOnce({
+            select: () => Promise.resolve({ _id: new Types.ObjectId(), slack: { bot_token: 'xoxb-legacy' } }),
+        });
+        systemSettingsUpdateOneMock.mockRejectedValueOnce(new Error('mongo down'));
+
+        // Must NOT throw — boot has to keep moving.
+        await expect(svc.migratePlaintextSlackBotToken()).resolves.toEqual({ migrated: false });
     });
 });

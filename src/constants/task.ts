@@ -13,8 +13,6 @@
  * + UI simple and matches BUILD_PROGRESS Step 18's explicit constraint.
  */
 
-import { ROLES } from './roles.js';
-
 // ─── Statuses ────────────────────────────────────────────────────────────
 //
 // These are the IMPLICIT defaults baked into every project. A project's
@@ -28,8 +26,6 @@ export const DEFAULT_TASK_STATUSES = {
     REVIEW: 'review',
     DONE: 'done',
 } as const;
-
-export type DefaultTaskStatus = (typeof DEFAULT_TASK_STATUSES)[keyof typeof DEFAULT_TASK_STATUSES];
 
 export const DEFAULT_TASK_STATUS_VALUES: readonly string[] = Object.values(DEFAULT_TASK_STATUSES);
 
@@ -73,27 +69,10 @@ export const TASK_LIST_MAX_LIMIT = 200;
 
 // ─── RBAC role sets ──────────────────────────────────────────────────────
 
-/**
- * All authenticated roles can read; the service narrows further by
- * project visibility (admin/manager → all; employee → member of;
- * client → client of).
- */
-export const TASK_READ_ROLES = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT] as const;
-
-/**
- * Default writers — admin + manager can do everything (create, delete,
- * reassign, move sprint, etc.). PATCH has an additional "EMP own" carve-
- * out implemented at the service layer (assignee or creator can update
- * the few fields they're allowed to touch).
- */
-export const TASK_WRITE_ROLES = [ROLES.ADMIN, ROLES.MANAGER] as const;
-
-/**
- * PATCH-allowed roles — the route gate accepts employees too, then the
- * service layer further restricts which FIELDS an employee can touch on
- * a task they own (status, description, estimated_hours).
- */
-export const TASK_PATCH_ROLES = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE] as const;
+// Step 47: route gates use `requirePermission(task.read | task.write)`.
+// PATCH semantics (employees patch only own tasks within an allowed
+// field allowlist) live in `task.service.ts` (`assertEmployeePatchScope`
+// + `TASK_EMPLOYEE_PATCH_FIELDS` below).
 
 /**
  * Fields an employee may update on a task they own (assignee or creator).

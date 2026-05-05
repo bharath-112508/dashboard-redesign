@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import dayjs from 'dayjs';
+// Use the platform-configured dayjs singleton so the `customParseFormat`
+// plugin is loaded — required for the strict-parse third-arg to actually
+// be strict (otherwise `dayjs('2026-13-01', 'YYYY-MM-DD', true)` lenient-
+// parses to a rolled-over valid date and the .refine below becomes a no-op).
+import dayjs from '../utils/date.js';
 
 import {
     APPROVER_REMARKS_MAX,

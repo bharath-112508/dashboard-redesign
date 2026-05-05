@@ -1,25 +1,25 @@
-import logger from './logger.js';
-import { APP_BASE_URL, NODE_ENV, PASSWORD_RESET_URL_PATH } from '../config/server.config.js';
+import { APP_BASE_URL, PASSWORD_RESET_URL_PATH } from '../config/server.config.js';
+import { getEmailTransport } from './email-transports/index.js';
 
 /**
- * Mailer abstraction.
+ * Mailer abstraction (BACKEND_AUDIT.md P0-1).
  *
- * The real driver (Azure Communication Services per Company_Management_Plan
- * §6.7) is deferred; this dev-stub logs every send at INFO and in
- * non-production also includes the rendered subject/body so the developer can
- * eyeball the templates from the console without needing a real inbox.
+ * Public surface (unchanged from the legacy stub):
+ *   - `sendEmail(...)`         — generic transport-shaped send.
+ *   - `sendPasswordResetEmail` — convenience wrapper.
+ *   - `escapeHtml`             — HTML-escape helper (also used by
+ *                                report-export PDF templates).
  *
- * Public surface:
- *   - `sendEmail(...)`        — generic transport-shaped send. Use this from
- *                               the notification dispatcher and from any new
- *                               feature that needs to email a user.
- *   - `sendPasswordResetEmail` — kept as a thin convenience wrapper around
- *                               `sendEmail` so the existing call-sites in
- *                               `password-reset.service.ts` keep working
- *                               unchanged.
+ * Implementation now delegates to the pluggable transport in
+ * `email-transports/`. `EMAIL_TRANSPORT` selects between:
+ *   - `stub`    (default, dev/test) — logs only, no outbound delivery.
+ *   - `acs`     — Azure Communication Services Email.
+ *   - `mailjet` — Mailjet Send API.
  *
- * To swap in ACS later, replace the body of `sendEmail`. Nothing else in the
- * app touches transport details.
+ * Keeping `sendEmail` as the only public surface means call-sites
+ * (`notification-dispatcher.service`, `password-reset.service`, etc.)
+ * are oblivious to transport. Adding a new provider is a single new
+ * file + one switch arm in the factory.
  */
 
 export interface SendEmailInput {
@@ -36,24 +36,14 @@ export interface SendEmailInput {
 }
 
 export const sendEmail = async (input: SendEmailInput): Promise<void> => {
-    if (NODE_ENV === 'production') {
-        logger.info(
-            { to_masked: maskEmail(input.to), subject: input.subject, context: input.context ?? null },
-            'Email dispatched'
-        );
-        return;
-    }
-
-    logger.info(
-        {
-            to: input.to,
-            subject: input.subject,
-            context: input.context ?? null,
-            text_preview: input.text.slice(0, 280),
-            hint: 'Azure Communication Services is deferred — using console stub',
-        },
-        'DEV: email'
-    );
+    const transport = getEmailTransport();
+    await transport({
+        to: input.to,
+        subject: input.subject,
+        html: input.html,
+        text: input.text,
+        context: input.context,
+    });
 };
 
 // ─── Password-reset wrapper (legacy call-site preserved) ──────────────────
@@ -88,18 +78,11 @@ export const sendPasswordResetEmail = async (input: SendPasswordResetEmailInput)
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-const maskEmail = (email: string): string => {
-    const [local, domain] = email.split('@');
-    if (!domain) return '***';
-    const maskedLocal = local.length <= 2 ? '*'.repeat(local.length) : `${local[0]}***${local.slice(-1)}`;
-    return `${maskedLocal}@${domain}`;
-};
-
 /**
  * Tiny HTML escape — enough to protect against the email values we control
  * (full_name, leave reason, etc.) being interpreted as HTML in the rendered
- * message. We deliberately keep this dependency-free so swapping in ACS or
- * SendGrid later doesn't drag handlebars / mjml along.
+ * message. Re-exported because `email-templates.ts` and the puppeteer PDF
+ * generator's HTML-builder both depend on it.
  */
 export const escapeHtml = (input: string): string =>
     input

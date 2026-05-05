@@ -67,8 +67,11 @@ router.get('/me', authenticate, asyncHandler(auth.getAuthMe));
 // Both endpoints are caller-only — `authenticate` plus the service-layer
 // `user_id` filter prevent cross-account access. The list takes no params
 // (no pagination — typical user has < 10 active devices); the revoke
-// endpoint accepts a single ObjectId path param. A per-user-id GET is
-// deferred to a Phase-3 admin tool (Step 31 audit-viewer territory).
+// endpoint accepts a single ObjectId path param. A per-user-id GET
+// (admin lists another user's sessions) is intentionally not exposed
+// — that surface is the audit-log viewer at `GET /audit-logs` filtered
+// on `auth.session_*` actions; the audit row carries the full session
+// context an investigator needs without granting broader access here.
 
 router.get('/sessions', authenticate, asyncHandler(auth.getAuthSessions));
 

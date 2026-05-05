@@ -21,6 +21,7 @@ const {
     sprintFindByIdMock,
     sprintFindMock,
     sprintCountDocumentsMock,
+    taskCountDocumentsMock,
     loadProjectForCallerMock,
     recordAuditMock,
 } = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ const {
     sprintFindByIdMock: vi.fn(),
     sprintFindMock: vi.fn(),
     sprintCountDocumentsMock: vi.fn(),
+    taskCountDocumentsMock: vi.fn(),
     loadProjectForCallerMock: vi.fn(),
     recordAuditMock: vi.fn(),
 }));
@@ -43,6 +45,12 @@ vi.mock('../models/sprint.model.js', () => ({
 
 vi.mock('../models/project.model.js', () => ({
     Project: { findById: vi.fn(), findOne: vi.fn(), find: vi.fn(), countDocuments: vi.fn(), create: vi.fn() },
+}));
+
+vi.mock('../models/task.model.js', () => ({
+    Task: {
+        countDocuments: taskCountDocumentsMock,
+    },
 }));
 
 vi.mock('./project.service.js', async (importOriginal) => {
@@ -90,6 +98,7 @@ const makeSprint = (overrides: Record<string, unknown> = {}) => {
         start_date: '2026-02-01',
         end_date: '2026-02-14',
         status: 'planned',
+        is_archived: false,
         created_by: new Types.ObjectId(),
         save: vi.fn(),
         deleteOne: vi.fn(),
@@ -102,6 +111,7 @@ const makeSprint = (overrides: Record<string, unknown> = {}) => {
                 start_date: this.start_date,
                 end_date: this.end_date,
                 status: this.status,
+                is_archived: this.is_archived,
             };
         },
         ...overrides,
@@ -112,6 +122,11 @@ const makeSprint = (overrides: Record<string, unknown> = {}) => {
 
 beforeEach(() => {
     vi.resetAllMocks();
+    // R3 — `deleteSprint` checks `Task.countDocuments({ sprint_id })`
+    // before allowing the delete. Default to "no dependants" so the
+    // legacy happy-path test continues to pass; tests exercising the
+    // dependant-refusal branch override per-call.
+    taskCountDocumentsMock.mockResolvedValue(0);
 });
 
 // ─── createSprint — window enforcement ───────────────────────────────────
@@ -249,22 +264,145 @@ describe('deleteSprint', () => {
             code: ERROR_CODES.SPRINT_NOT_FOUND,
         });
     });
+
+    it('refuses with RESOURCE_HAS_DEPENDENTS when tasks reference this sprint (R3)', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        taskCountDocumentsMock.mockResolvedValueOnce(3);
+
+        await expect(svc.deleteSprint(sprint._id, adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.RESOURCE_HAS_DEPENDENTS,
+            details: { tasks: 3 },
+        });
+        // Sprint must NOT have been deleted.
+        expect(sprint.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('T11 — an ARCHIVED sprint with lingering tasks IS deletable (escape hatch)', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, is_archived: true });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        // Even with tasks present, the archive flag bypasses the check —
+        // the dependant-count query should NOT run.
+
+        await svc.deleteSprint(sprint._id, adminCaller());
+
+        expect(sprint.deleteOne).toHaveBeenCalled();
+        // Pin the bypass: `Task.countDocuments` is never called when archived.
+        expect(taskCountDocumentsMock).not.toHaveBeenCalled();
+    });
+});
+
+// ─── archiveSprint / unarchiveSprint (T11) ───────────────────────────────
+
+describe('archiveSprint / unarchiveSprint', () => {
+    it('archiveSprint: flips is_archived true and audits', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, is_archived: false });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        const out = await svc.archiveSprint(sprint._id, adminCaller());
+
+        expect(sprint.is_archived).toBe(true);
+        expect(sprint.save).toHaveBeenCalled();
+        expect(out.is_archived).toBe(true);
+    });
+
+    it('archiveSprint: idempotent — re-archiving is a no-op success without save()', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, is_archived: true });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await svc.archiveSprint(sprint._id, adminCaller());
+
+        expect(sprint.save).not.toHaveBeenCalled();
+    });
+
+    it('archiveSprint: non-manager is forbidden', async () => {
+        await expect(svc.archiveSprint(new Types.ObjectId(), employeeCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+
+    it('unarchiveSprint: flips is_archived back to false', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, is_archived: true });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await svc.unarchiveSprint(sprint._id, adminCaller());
+
+        expect(sprint.is_archived).toBe(false);
+        expect(sprint.save).toHaveBeenCalled();
+    });
+
+    it('unarchiveSprint: idempotent on a non-archived sprint', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, is_archived: false });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await svc.unarchiveSprint(sprint._id, adminCaller());
+
+        expect(sprint.save).not.toHaveBeenCalled();
+    });
 });
 
 // ─── listSprints ─────────────────────────────────────────────────────────
 
 describe('listSprints', () => {
-    it('filters by project_id (and optional status) and paginates', async () => {
-        const proj = makeProject();
-        loadProjectForCallerMock.mockResolvedValueOnce(proj);
-
+    const stubChain = () =>
         sprintFindMock.mockReturnValueOnce({
             sort: () => ({ skip: () => ({ limit: () => Promise.resolve([]) }) }),
         });
+
+    it('filters by project_id (and optional status) and defaults is_archived=false', async () => {
+        const proj = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        stubChain();
         sprintCountDocumentsMock.mockResolvedValueOnce(0);
 
         await svc.listSprints(proj._id, { page: 1, limit: 50, status: 'active' }, adminCaller());
 
-        expect(sprintFindMock).toHaveBeenCalledWith({ project_id: proj._id, status: 'active' });
+        // F1 — `is_archived: false` is added implicitly so the default
+        // list view shows only active sprints. Mirrors the project pattern.
+        expect(sprintFindMock).toHaveBeenCalledWith({
+            project_id: proj._id,
+            status: 'active',
+            is_archived: false,
+        });
+    });
+
+    it('F1 — explicit is_archived=true returns ONLY archived sprints', async () => {
+        const proj = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        stubChain();
+        sprintCountDocumentsMock.mockResolvedValueOnce(0);
+
+        await svc.listSprints(proj._id, { page: 1, limit: 50, is_archived: true }, adminCaller());
+
+        expect(sprintFindMock).toHaveBeenCalledWith({
+            project_id: proj._id,
+            is_archived: true,
+        });
+    });
+
+    it('F1 — explicit is_archived=false is the same as omitting it (default behaviour)', async () => {
+        const proj = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        stubChain();
+        sprintCountDocumentsMock.mockResolvedValueOnce(0);
+
+        await svc.listSprints(proj._id, { page: 1, limit: 50, is_archived: false }, adminCaller());
+
+        expect(sprintFindMock).toHaveBeenCalledWith({
+            project_id: proj._id,
+            is_archived: false,
+        });
     });
 });

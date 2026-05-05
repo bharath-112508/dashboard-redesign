@@ -122,6 +122,7 @@ const queryStub = (rows: unknown[]) => {
         sort: () => stub,
         skip: () => stub,
         limit: () => stub,
+        lean: () => Promise.resolve(rows),
         then: (r: (v: unknown) => void) => Promise.resolve(rows).then(r),
     };
     return stub;

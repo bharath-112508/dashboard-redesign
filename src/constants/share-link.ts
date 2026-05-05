@@ -14,8 +14,6 @@
  *    handling is just for completeness, not a real expectation.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
 // ─── Token generation ───────────────────────────────────────────────────
 
 export const SHARE_LINK_TOKEN_BYTES = 32;
@@ -39,12 +37,6 @@ export type ShareLinkRevokeReason = (typeof SHARE_LINK_REVOKE_REASONS)[keyof typ
 export const SHARE_LINK_LIST_DEFAULT_LIMIT = 20;
 export const SHARE_LINK_LIST_MAX_LIMIT = 100;
 
-// ─── RBAC role sets ─────────────────────────────────────────────────────
-//
-// Per API_Contract §7.5: list + create = manager + admin; revoke =
-// admin only. The resolve endpoint is **public** (no `authenticate`
-// middleware) — the token IS the auth.
-
-export const SHARE_LINK_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
-export const SHARE_LINK_CREATE_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
-export const SHARE_LINK_REVOKE_ROLES: readonly RoleType[] = [ROLES.ADMIN];
+// Step 47: route gate is `requirePermission(share_link.write)` for
+// list / create / revoke. The resolve endpoint is **public** (no
+// `authenticate` middleware) — the token IS the auth.

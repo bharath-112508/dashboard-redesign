@@ -328,7 +328,25 @@ export const runArchivalSweep = async (now: Date = new Date()): Promise<SweepSum
 
 // ─── Read endpoints ────────────────────────────────────────────────────
 
-const toSnapshot = (doc: AuditArchiveDocument): AuditArchiveSnapshot => {
+// `toSnapshot` reads scalar fields only — no Document methods — so it
+// works with either a hydrated Mongoose document or a plain `.lean()`
+// POJO. We feed it lean rows below to skip Document hydration on the
+// list path. See `BACKEND_AUDIT.md` P3-20 for the convention.
+type AuditArchiveLean = Pick<
+    AuditArchiveDocument,
+    | '_id'
+    | 'archive_date'
+    | 'row_count'
+    | 'file_size_bytes'
+    | 'sha256_hash'
+    | 'previous_archive_id'
+    | 'previous_archive_hash'
+    | 'created_at'
+    | 'blob_container'
+    | 'blob_key'
+>;
+
+const toSnapshot = (doc: AuditArchiveLean): AuditArchiveSnapshot => {
     let downloadUrl: string | null = null;
     let downloadExpires: string | null = null;
     let fileName: string | null = null;
@@ -371,7 +389,7 @@ export const listArchives = async (
 
     const skip = (query.page - 1) * query.limit;
     const [rows, total] = await Promise.all([
-        AuditArchive.find(filter).sort({ archive_date: -1 }).skip(skip).limit(query.limit),
+        AuditArchive.find(filter).sort({ archive_date: -1 }).skip(skip).limit(query.limit).lean<AuditArchiveLean[]>(),
         AuditArchive.countDocuments(filter),
     ]);
 
@@ -387,6 +405,9 @@ export const listArchives = async (
 };
 
 export const getArchive = async (id: Types.ObjectId): Promise<AuditArchiveSnapshot> => {
+    // Single-doc fetch — Document hydration cost is trivial here, and
+    // the existing test mock pattern (`findById` returns the resolved
+    // value directly) is left intact. List path is the lean win.
     const doc = await AuditArchive.findById(id);
     if (!doc) throw AppError.notFound('Audit archive not found', ERROR_CODES.AUDIT_ARCHIVE_NOT_FOUND);
     return toSnapshot(doc);

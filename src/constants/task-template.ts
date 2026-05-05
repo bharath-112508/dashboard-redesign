@@ -16,21 +16,10 @@
  * template that names them as a collaborator.
  */
 
-import { ROLES, type RoleType } from './roles.js';
-
-// ─── RBAC ───────────────────────────────────────────────────────────────
-//
-// Write = admin + manager (same as project task writes).
-// Read  = admin + manager + employee. **Clients are deliberately
-// excluded** — templates capture internal team process (e.g.
-// "Internal QA review checklist", "Sprint retrospective doc") and
-// surfacing them to externals leaks workflow patterns. Clients still
-// see the resulting INSTANTIATED tasks via the regular task list
-// (that's the point — they see work in progress for their projects),
-// but they don't see the team's process patterns.
-
-export const TASK_TEMPLATE_WRITE_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER];
-export const TASK_TEMPLATE_READ_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE];
+// Step 47: route gates use `requirePermission(task_template.read|write)`.
+// Clients deliberately don't hold either permission — templates capture
+// internal team process; clients still see INSTANTIATED tasks via the
+// regular task surface.
 
 // ─── Field caps ─────────────────────────────────────────────────────────
 

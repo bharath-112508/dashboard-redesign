@@ -1,39 +1,46 @@
+import { getPdfGenerator, resolvePdfEngine } from './pdf-generators/index.js';
 import type { TabularReport } from './tabular.js';
 
 /**
- * PDF generator (Step 30 — DEFERRED).
+ * PDF entrypoint — public surface used by the report-export worker.
  *
- * Build_Decisions §D2/§D3: Puppeteer (headless Chrome) is the recommended
- * PDF library, but it needs an always-on Container Apps deployment to
- * avoid 30s+ cold-start cost on Functions. That infra is **not yet
- * provisioned**, so this generator throws a known error string the
- * worker maps to `EXPORT_PDF_NOT_AVAILABLE` + a friendly message.
+ * Implementation now ships (Phase-4 cleanup pass): we delegate to the
+ * pluggable generator factory in `pdf-generators/`. Three engines are
+ * available out of the box; selection happens via the `PDF_ENGINE` env
+ * var with `pdfkit` as the default. See `pdf-generators/types.ts` for
+ * trade-offs.
  *
- * When Container Apps lands:
- *  1. Install `puppeteer` (heavy — pulls a Chromium build)
- *  2. Replace this body with the HTML→PDF render
- *  3. Drop the EXPORT_PDF_NOT_AVAILABLE branch in the worker
- *
- * The validator deliberately accepts `pdf` so the FE can pre-build the
- * UI and the contract is forward-compatible — the failure surfaces as
- * a `failed` row, not a 400.
+ * The legacy `PdfNotAvailableError` class is retained so the worker /
+ * tests can still surface a clean `EXPORT_PDF_NOT_AVAILABLE` if a
+ * future config selects an engine whose backing package is missing
+ * (currently only puppeteer, which is opt-in to keep the install
+ * lean). The constructor signature was widened so the puppeteer
+ * loader's "install puppeteer to enable" hint can ride through to
+ * the FE-visible error message.
  */
 
 export class PdfNotAvailableError extends Error {
     code = 'EXPORT_PDF_NOT_AVAILABLE';
-    constructor() {
-        super(
-            'PDF export is not yet available in this build. The required Puppeteer + ' +
-                'Container Apps deployment is on the Phase-3 roadmap; ' +
-                'CSV and XLSX are supported today.'
-        );
+    constructor(message?: string) {
+        super(message ?? 'PDF export is not yet available in this build. ' + 'CSV and XLSX are supported today.');
         this.name = 'PdfNotAvailableError';
     }
 }
 
-// `_table` is intentionally unused — the stub never produces output. The
-// signature mirrors the other generators so the worker dispatch table
-// stays homogeneous when the real generator lands.
-export const generatePdf = async (_table: TabularReport): Promise<Buffer> => {
-    throw new PdfNotAvailableError();
+export const generatePdf = async (table: TabularReport): Promise<Buffer> => {
+    const generator = getPdfGenerator();
+    try {
+        return await generator(table);
+    } catch (err) {
+        // The puppeteer engine throws a structured "package not
+        // installed" error when selected without `puppeteer` on disk.
+        // Surface it as `EXPORT_PDF_NOT_AVAILABLE` so the worker
+        // writes the same friendly failed-export row the legacy stub
+        // did. We also include the engine name so the operator sees
+        // which selection caused it.
+        if (err instanceof Error && /puppeteer/i.test(err.message)) {
+            throw new PdfNotAvailableError(`PDF engine "${resolvePdfEngine()}" is unavailable: ${err.message}`);
+        }
+        throw err;
+    }
 };

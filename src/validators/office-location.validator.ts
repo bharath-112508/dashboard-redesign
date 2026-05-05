@@ -51,7 +51,8 @@ export const listOfficeLocationsQuerySchema = z.object({
         .union([z.literal('true'), z.literal('false'), z.boolean()])
         .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
         .optional(),
-    q: z.string().trim().min(1).max(100).optional(),
+    // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
+    q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
 });
 
 export type ListOfficeLocationsQuery = z.infer<typeof listOfficeLocationsQuerySchema>;

@@ -1,24 +1,17 @@
-import mongoose, { Types } from 'mongoose';
+import { Types } from 'mongoose';
 
-import { COLLECTIONS } from '../constants/collections.js';
+import { Task } from '../models/task.model.js';
 
 /**
- * Raw-collection accessors for the `tasks` collection.
+ * Story-side accessors over the `tasks` collection.
  *
- * Why raw collection (and not a Mongoose model)?
- *  - The full `tasks` schema lands in **Step 18**. Step 17 (stories) only
- *    needs to *read* a handful of fields (`story_id`, `sprint_id`, `status`)
- *    plus `updateMany({ story_id }, { $set: { story_id: null } })` when a
- *    story is deleted. Defining a partial model here would force us to
- *    rewrite it in Step 18 and risk schema drift.
- *  - The `mongoose.connection.collection()` accessor returns a node-mongo
- *    `Collection` that's safe to call before the collection physically
- *    exists — empty pipelines just return `[]`.
- *
- * Centralising this lookup behind a tiny module also lets unit tests stub
- * everything via `vi.mock('./tasks-collection.js')` without having to mock
- * mongoose itself (which is fragile when other code in the same test file
- * imports `Types`).
+ * Originally written with `mongoose.connection.collection(...)` because
+ * the Task model didn't exist when stories shipped (Step 17 vs Step 18).
+ * Now backed by the proper `Task` model, but the surface stays here so:
+ *   - The narrow projections + the aggregation pipeline live in one
+ *     place rather than scattered across `story.service`.
+ *   - Tests can `vi.mock('./tasks-collection.js')` to stub the three
+ *     story-shaped reads/writes without faking the full Task model.
  */
 
 // ─── Shared shape for the read-only fields the story service touches ─────
@@ -46,11 +39,6 @@ export interface StoryTaskRow {
     primary_assignee_id?: Types.ObjectId | null;
 }
 
-// ─── Collection accessor (single, mockable) ──────────────────────────────
-
-const tasksCollection = (): ReturnType<typeof mongoose.connection.collection> =>
-    mongoose.connection.collection(COLLECTIONS.TASKS);
-
 // ─── Aggregations exposed to the story service ───────────────────────────
 
 /**
@@ -70,62 +58,49 @@ export const aggregateStoryDerivedRows = async (
 ): Promise<TaskDerivedRow[]> => {
     if (storyIds.length === 0) return [];
     const terminalArr = terminalStatusKeys.length > 0 ? terminalStatusKeys : ['__none__'];
-    const rows = await tasksCollection()
-        .aggregate<TaskDerivedRow>([
-            { $match: { project_id: projectId, story_id: { $in: storyIds } } },
-            {
-                $group: {
-                    _id: '$story_id',
-                    task_count: { $sum: 1 },
-                    sprint_ids: { $addToSet: '$sprint_id' },
-                    statuses: { $addToSet: '$status' },
-                    done_count: {
-                        $sum: { $cond: [{ $in: ['$status', terminalArr] }, 1, 0] },
+    const rows = await Task.aggregate<TaskDerivedRow>([
+        { $match: { project_id: projectId, story_id: { $in: storyIds } } },
+        {
+            $group: {
+                _id: '$story_id',
+                task_count: { $sum: 1 },
+                sprint_ids: { $addToSet: '$sprint_id' },
+                statuses: { $addToSet: '$status' },
+                done_count: {
+                    $sum: { $cond: [{ $in: ['$status', terminalArr] }, 1, 0] },
+                },
+            },
+        },
+        // Strip nulls from `sprint_ids` so backlog tasks (sprint_id=null)
+        // don't surface as a phantom sprint id on the Story board.
+        {
+            $project: {
+                task_count: 1,
+                statuses: 1,
+                done_count: 1,
+                sprint_ids: {
+                    $filter: {
+                        input: '$sprint_ids',
+                        as: 'sid',
+                        cond: { $ne: ['$$sid', null] },
                     },
                 },
             },
-            // Strip nulls from `sprint_ids` so backlog tasks (sprint_id=null)
-            // don't surface as a phantom sprint id on the Story board.
-            {
-                $project: {
-                    task_count: 1,
-                    statuses: 1,
-                    done_count: 1,
-                    sprint_ids: {
-                        $filter: {
-                            input: '$sprint_ids',
-                            as: 'sid',
-                            cond: { $ne: ['$$sid', null] },
-                        },
-                    },
-                },
-            },
-        ])
-        .toArray();
+        },
+    ]);
     return rows;
 };
 
 /**
  * Tasks belonging to a story, projected to the small shape the
  * `GET /stories/:id` and `GET /stories/:id/tasks` endpoints render.
- * Step 18 will replace this with a richer Task service call; until then
- * we keep the projection narrow to keep the contract honest.
+ * The narrow projection is deliberate — these endpoints intentionally
+ * surface only the fields the story-board UI renders.
  */
 export const findTasksByStoryId = async (storyId: Types.ObjectId): Promise<StoryTaskRow[]> => {
-    const rows = await tasksCollection()
-        .find<StoryTaskRow>(
-            { story_id: storyId },
-            {
-                projection: {
-                    _id: 1,
-                    title: 1,
-                    status: 1,
-                    sprint_id: 1,
-                    primary_assignee_id: 1,
-                },
-            }
-        )
-        .toArray();
+    const rows = await Task.find({ story_id: storyId })
+        .select({ _id: 1, title: 1, status: 1, sprint_id: 1, primary_assignee_id: 1 })
+        .lean<StoryTaskRow[]>();
     return rows;
 };
 
@@ -139,11 +114,9 @@ export const findTasksByStoryId = async (storyId: Types.ObjectId): Promise<Story
 export const detachStoryFromTasks = async (
     storyId: Types.ObjectId
 ): Promise<{ task_ids: Types.ObjectId[]; modified_count: number }> => {
-    const docs = await tasksCollection()
-        .find<{ _id: Types.ObjectId }>({ story_id: storyId }, { projection: { _id: 1 } })
-        .toArray();
+    const docs = await Task.find({ story_id: storyId }).select({ _id: 1 }).lean<{ _id: Types.ObjectId }[]>();
     if (docs.length === 0) return { task_ids: [], modified_count: 0 };
-    const result = await tasksCollection().updateMany({ story_id: storyId }, { $set: { story_id: null } });
+    const result = await Task.updateMany({ story_id: storyId }, { $set: { story_id: null } });
     return {
         task_ids: docs.map((d) => d._id),
         modified_count: typeof result.modifiedCount === 'number' ? result.modifiedCount : 0,

@@ -4,11 +4,13 @@ import { Types } from 'mongoose';
 // good enough for our needs (shape-only type-check on the caller side).
 type Filter = Record<string, unknown>;
 
+import { Project } from '../models/project.model.js';
 import { User, type UserDocument } from '../models/user.model.js';
 import { RefreshToken } from '../models/refresh-token.model.js';
 import { AppError } from '../utils/app-error.js';
 import { hashPassword } from '../utils/password.js';
 import { assertPasswordPolicy } from '../utils/password-policy.js';
+import { isAdminLike } from '../utils/role-check.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
@@ -17,7 +19,9 @@ import type { AssignableQuery, CreateUserBody, ListUsersQuery, UpdateUserBody } 
 import { initializeBalancesForUserYear } from './leave-balance.service.js';
 import { notifyUserInvited } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
+import { getSystemRoleByKey } from './role.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import logger from '../utils/logger.js';
 import { resolveProfilePhotoTtlMinutes, signProfilePhotoUrl } from './profile-photo.service.js';
 import { getOrInitSettings } from './settings.service.js';
@@ -29,9 +33,11 @@ import { revokeLinksForDeactivatedClient } from './share-link.service.js';
  *  - Single-admin rule enforced at create + change-role.
  *  - Unique email enforced at the DB layer → surfaced as `409 EMAIL_ALREADY_EXISTS`.
  *  - Deactivation / role-change revoke every active refresh token for the user.
- *  - Profile-photo + admin-triggered reset-password deferred (need Azure Blob /
- *    Azure Communication Services). Call-sites will return `501 NOT_IMPLEMENTED`
- *    when those are added later.
+ *  - Profile-photo CRUD lives in `profile-photo.service.ts` (Azure Blob via
+ *    `utils/azure-blob.ts`).
+ *  - Admin-triggered reset-password (`POST /users/:id/reset-password`) lives
+ *    in `password-reset.service.adminInitiatePasswordReset` — same flow as
+ *    the user-initiated forgot/reset, with the admin as the audit actor.
  */
 
 // ─── Fields that a non-admin caller is allowed to update on their own record.
@@ -93,6 +99,21 @@ const assertSingleAdmin = async (excludeUserId?: Types.ObjectId): Promise<void> 
     }
 };
 
+/**
+ * R6 backstop — translate the `one_active_admin` partial-unique-index
+ * E11000 into the same `ADMIN_ALREADY_EXISTS` error the friendly
+ * `assertSingleAdmin` raises. The index closes the TOCTOU race that
+ * the in-application check cannot.
+ */
+const isOneActiveAdminViolation = (err: unknown): boolean => {
+    if (!err || typeof err !== 'object') return false;
+    const e = err as { code?: number; keyPattern?: Record<string, unknown>; keyValue?: Record<string, unknown> };
+    if (e.code !== 11000) return false;
+    // The partial-unique index's keyPattern is `{ role: 1 }`. Other
+    // E11000s on `users` (email, employee_id) have different shapes.
+    return !!e.keyPattern && 'role' in e.keyPattern && Object.keys(e.keyPattern).length === 1;
+};
+
 const revokeAllRefreshTokens = async (user_id: Types.ObjectId): Promise<void> => {
     await RefreshToken.updateMany({ user_id, revoked_at: null }, { $set: { revoked_at: new Date() } });
 };
@@ -141,7 +162,16 @@ export const createUser = async (
         };
     }
 
-    const created = await User.create(doc);
+    let created;
+    try {
+        created = await User.create(doc);
+    } catch (err) {
+        if (isOneActiveAdminViolation(err)) {
+            // R6 — concurrent admin-create slipped past assertSingleAdmin.
+            throw AppError.conflict('An active admin already exists', ERROR_CODES.ADMIN_ALREADY_EXISTS);
+        }
+        throw err;
+    }
 
     // Internal users get their leave-balance rows seeded for the current year
     // (and the joining year if different). Failure here must not block the
@@ -152,7 +182,11 @@ export const createUser = async (
             const [yStr, mStr] = joining.split('-');
             const joiningYear = Number.parseInt(yStr, 10);
             const joiningMonth = Number.parseInt(mStr, 10);
-            const thisYear = new Date().getUTCFullYear();
+            // H1 — derive "this year" from the IST business calendar. Pre-H1
+            // used `getUTCFullYear()`, which on Jan 1 IST returns last year
+            // until UTC catches up 5h30m later — so a Jan-1 IST joiner could
+            // be seeded into the wrong year's balance rows.
+            const thisYear = dayjs().tz(DEFAULT_TIMEZONE).year();
             const yearsToInit = new Set<number>([joiningYear, thisYear]);
             for (const year of yearsToInit) {
                 await initializeBalancesForUserYear({
@@ -244,12 +278,18 @@ export const getUser = async (id: Types.ObjectId): Promise<Record<string, unknow
  *   - Admin caller → may patch any field for any user.
  *   - Self caller  → may only patch fields in SELF_EDITABLE_FIELDS, and within
  *     `internal_profile` only `emergency_contact`.
- *   - Any other caller → already rejected at the route layer via `authorize`.
+ *   - Any other caller → already rejected at the route layer via `requirePermission`.
  */
 export const updateUser = async (input: {
     target_id: Types.ObjectId;
     caller_id: Types.ObjectId;
     caller_role: RoleType;
+    /**
+     * Step-47 RBAC signal — controllers pass `req.user.role_keys`. R4
+     * fix: a multi-role admin whose legacy `role` cache is `'manager'`
+     * is still recognised as admin via `role_keys.includes('admin')`.
+     */
+    caller_role_keys?: readonly string[];
     patch: UpdateUserBody;
 }): Promise<Record<string, unknown>> => {
     const target = await User.findById(input.target_id);
@@ -257,7 +297,7 @@ export const updateUser = async (input: {
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
     }
 
-    const isAdmin = input.caller_role === ROLES.ADMIN;
+    const isAdmin = isAdminLike({ role: input.caller_role, role_keys: input.caller_role_keys });
     const isSelf = input.caller_id.equals(target._id);
 
     if (!isAdmin && !isSelf) {
@@ -412,7 +452,15 @@ export const reactivateUser = async (
 
     target.status = USER_STATUSES.ACTIVE;
     target.deactivated_at = null;
-    await target.save();
+    try {
+        await target.save();
+    } catch (err) {
+        if (isOneActiveAdminViolation(err)) {
+            // R6 — concurrent reactivation racing into the admin slot.
+            throw AppError.conflict('An active admin already exists', ERROR_CODES.ADMIN_ALREADY_EXISTS);
+        }
+        throw err;
+    }
 
     if (audit) {
         await recordAudit(audit, {
@@ -463,8 +511,32 @@ export const changeUserRole = async (input: {
     }
 
     const previousRole = target.role;
+    const previousRoleIds = target.role_ids.map((id) => id.toString());
     target.role = input.new_role;
-    await target.save();
+
+    // Step 47: keep `role_ids` in lockstep with the legacy `role`
+    // string. Without this, the legacy endpoint leaves a user with
+    // `role = 'manager'` but `role_ids = [employee_role_id]` —
+    // requirePermission then 403s every privileged route because the
+    // resolved permission union is the OLD role's set. Resetting to a
+    // single-element array containing the new role's system doc keeps
+    // both paths consistent. A user assigned multiple custom roles
+    // should be updated via `PATCH /users/:user_id/roles` instead;
+    // this legacy endpoint is single-role-only.
+    const newSystemRole = await getSystemRoleByKey(input.new_role);
+    if (newSystemRole) {
+        target.role_ids = [newSystemRole._id];
+    }
+
+    try {
+        await target.save();
+    } catch (err) {
+        if (isOneActiveAdminViolation(err)) {
+            // R6 — concurrent role-change racing into the admin slot.
+            throw AppError.conflict('An active admin already exists', ERROR_CODES.ADMIN_ALREADY_EXISTS);
+        }
+        throw err;
+    }
 
     await revokeAllRefreshTokens(target._id);
 
@@ -472,8 +544,11 @@ export const changeUserRole = async (input: {
         await recordAudit(input.audit, {
             action: AUDIT_ACTIONS.USER_ROLE_CHANGE,
             target: { kind: AUDIT_TARGET_KINDS.USER, id: target._id },
-            before: { role: previousRole },
-            after: { role: target.role },
+            before: { role: previousRole, role_ids: previousRoleIds },
+            after: {
+                role: target.role,
+                role_ids: target.role_ids.map((id) => id.toString()),
+            },
         });
     }
 
@@ -493,9 +568,19 @@ export const listAssignable = async (
         filter.role = { $ne: ROLES.CLIENT };
     }
 
-    // TODO (projects slice): when `project_id` is provided, restrict to members
-    // of that project. Ignored until the Projects collection ships.
-    void query.project_id;
+    // Project scoping: when `project_id` is supplied, narrow to that
+    // project's `member_ids[]` so the assignee dropdown only surfaces
+    // people who can actually own work in that project. Unknown
+    // project_id → empty result (consistent with "no one is assignable
+    // to a project that doesn't exist") rather than a 404, since this
+    // is a picker endpoint, not a resource fetch.
+    if (query.project_id) {
+        const project = await Project.findById(query.project_id).select('member_ids').lean<{
+            member_ids: Types.ObjectId[];
+        } | null>();
+        if (!project) return [];
+        filter._id = { $in: project.member_ids };
+    }
 
     const rows = await User.find(filter)
         .select('_id full_name role internal_profile.job_title')

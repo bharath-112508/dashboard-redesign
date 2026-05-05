@@ -9,6 +9,7 @@ import { Holiday } from '../models/holiday.model.js';
 import { Notification } from '../models/notification.model.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
+import { isAdminLike } from '../utils/role-check.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
@@ -44,7 +45,9 @@ import { initializeBalancesForUserYear } from './leave-balance.service.js';
 
 const todayLocalDate = (): string => dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
 
-const currentYear = (): number => new Date().getUTCFullYear();
+// H1 — IST business calendar drives "current year" so the year-end window
+// between IST midnight and UTC midnight doesn't read last year's balances.
+const currentYear = (): number => dayjs().tz(DEFAULT_TIMEZONE).year();
 
 const monthRange = (): { start: string; end: string } => {
     const now = dayjs().tz(DEFAULT_TIMEZONE);
@@ -88,6 +91,7 @@ const computeHeadcount = async (): Promise<AdminHeadcount> => {
     const by_role: Record<RoleType, number> = {
         [ROLES.ADMIN]: 0,
         [ROLES.MANAGER]: 0,
+        [ROLES.TEAM_LEAD]: 0,
         [ROLES.EMPLOYEE]: 0,
         [ROLES.CLIENT]: 0,
     };
@@ -193,6 +197,7 @@ export const buildAdminDashboard = async (): Promise<AdminDashboardPayload> => {
             by_role: {
                 [ROLES.ADMIN]: 0,
                 [ROLES.MANAGER]: 0,
+                [ROLES.TEAM_LEAD]: 0,
                 [ROLES.EMPLOYEE]: 0,
                 [ROLES.CLIENT]: 0,
             },
@@ -249,8 +254,10 @@ const resolveDirectReportIds = async (manager_id: Types.ObjectId): Promise<Types
 export const buildManagerDashboard = async (caller: {
     id: Types.ObjectId;
     role: RoleType;
+    /** Step-47 RBAC signal (BACKEND_AUDIT.md R4). */
+    role_keys?: readonly string[];
 }): Promise<ManagerDashboardPayload> => {
-    if (caller.role === ROLES.ADMIN) {
+    if (isAdminLike(caller)) {
         const pending = await safeCard('manager.pending_leaves', () => computePendingLeaves({}), {
             count: 0,
             requires_additional_approval: 0,
