@@ -51,6 +51,10 @@ export const COLLECTIONS = {
     AUDIT_LOGS: 'audit_logs',
     JOB_RUNS: 'job_runs',
     REPORT_EXPORTS: 'report_exports',
+    AUDIT_ARCHIVES: 'audit_archives',
+    TASK_TEMPLATES: 'task_templates',
+    REPORT_PRESETS: 'report_presets',
+    REPORT_SUBSCRIPTIONS: 'report_subscriptions',
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

@@ -303,6 +303,38 @@ export const headBlob = async (container: string, blobKey: string): Promise<Blob
 };
 
 /**
+ * Server-side download of a blob's bytes (Step 39 — audit-archive
+ * integrity verification). The verify path needs to recompute the
+ * SHA-256 of the actual stored bytes, so we read them through the
+ * server's shared-key credential rather than a SAS round-trip.
+ *
+ * Throws `BlobNotFoundError` (mapped 404) when the blob is missing
+ * — the audit-archive row exists but its file is gone, which is a
+ * tamper signal in itself.
+ */
+export const downloadBlob = async (container: string, blobKey: string): Promise<Buffer> => {
+    const { serviceClient } = getContext();
+    const blob = serviceClient.getContainerClient(container).getBlobClient(blobKey);
+    try {
+        const download = await blob.downloadToBuffer();
+        return download;
+    } catch (err: unknown) {
+        const status = (err as { statusCode?: number })?.statusCode;
+        if (status === 404) throw new BlobNotFoundError(`Blob not found: ${container}/${blobKey}`);
+        throw err;
+    }
+};
+
+class BlobNotFoundError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'BlobNotFoundError';
+    }
+}
+
+export { BlobNotFoundError };
+
+/**
  * Best-effort delete. Soft-deleted attachment rows hold the blob_key for
  * audit purposes, but the blob itself can be removed eagerly to free the
  * storage account. Errors are logged at warn — the row's `deleted_at` has

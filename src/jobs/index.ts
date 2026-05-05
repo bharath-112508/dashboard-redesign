@@ -8,6 +8,9 @@ import { runLeaveYearRollover } from './leave-year-rollover.job.js';
 import { runTokenCleanup } from './token-cleanup.job.js';
 import { runTimesheetReminder } from './timesheet-reminder.job.js';
 import { runReportExportCleanup } from './report-export-cleanup.job.js';
+import { runAuditArchive } from './audit-archive.job.js';
+import { runRecurringTaskSweepJob } from './recurring-task.job.js';
+import { runReportSubscriptionSweepJob } from './report-subscription.job.js';
 
 /**
  * Job scheduler — wires every Phase-1 cron job to its `node-cron` trigger.
@@ -40,6 +43,9 @@ const REGISTRY: Record<JobName, JobRunner> = {
     [JOB_NAMES.TOKEN_CLEANUP]: () => runTokenCleanup(),
     [JOB_NAMES.TIMESHEET_REMINDER]: () => runTimesheetReminder(),
     [JOB_NAMES.REPORT_EXPORT_CLEANUP]: () => runReportExportCleanup(),
+    [JOB_NAMES.AUDIT_ARCHIVE]: () => runAuditArchive(),
+    [JOB_NAMES.RECURRING_TASK_SWEEP]: () => runRecurringTaskSweepJob(),
+    [JOB_NAMES.REPORT_SUBSCRIPTION_SWEEP]: () => runReportSubscriptionSweepJob(),
 };
 
 const isJobsDisabled = (): boolean => {

@@ -171,6 +171,27 @@ export const AUDIT_ACTIONS = {
     REPORT_EXPORT_CREATE: 'report_export.create',
     REPORT_EXPORT_COMPLETE: 'report_export.complete',
     REPORT_EXPORT_FAIL: 'report_export.fail',
+
+    // Task templates + recurring tasks (Phase 4 Step 40). Template
+    // CRUD + each manual instantiation are caller-audited.
+    // System-audited variant (`task_template.recurrence_run`) fires
+    // from the daily cron when a recurring template auto-creates a
+    // task — `actor_role: 'system'` so the future Step-31 viewer can
+    // distinguish operator-driven from cron-driven instantiations.
+    TASK_TEMPLATE_CREATE: 'task_template.create',
+    TASK_TEMPLATE_UPDATE: 'task_template.update',
+    TASK_TEMPLATE_DELETE: 'task_template.delete',
+    TASK_TEMPLATE_INSTANTIATE: 'task_template.instantiate',
+    TASK_TEMPLATE_RECURRENCE_RUN: 'task_template.recurrence_run',
+
+    // Report subscriptions (Phase 4 Step 43). CRUD verbs are caller-
+    // audited; `report_subscription.send` is system-audited from the
+    // weekly cron. Operators grep `report_subscription.send` rows
+    // with `metadata.delivery: 'failed'` to find delivery problems.
+    REPORT_SUBSCRIPTION_CREATE: 'report_subscription.create',
+    REPORT_SUBSCRIPTION_UPDATE: 'report_subscription.update',
+    REPORT_SUBSCRIPTION_DELETE: 'report_subscription.delete',
+    REPORT_SUBSCRIPTION_SEND: 'report_subscription.send',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
@@ -198,6 +219,8 @@ export const AUDIT_TARGET_KINDS = {
     SHARE_LINK: 'project_share_link',
     SESSION: 'session',
     REPORT_EXPORT: 'report_export',
+    TASK_TEMPLATE: 'task_template',
+    REPORT_SUBSCRIPTION: 'report_subscription',
 } as const;
 
 export type AuditTargetKind = (typeof AUDIT_TARGET_KINDS)[keyof typeof AUDIT_TARGET_KINDS];

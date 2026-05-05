@@ -55,6 +55,9 @@ export const JOB_NAMES = {
     TOKEN_CLEANUP: 'token_cleanup',
     TIMESHEET_REMINDER: 'timesheet_reminder',
     REPORT_EXPORT_CLEANUP: 'report_export_cleanup',
+    AUDIT_ARCHIVE: 'audit_archive',
+    RECURRING_TASK_SWEEP: 'recurring_task_sweep',
+    REPORT_SUBSCRIPTION_SWEEP: 'report_subscription_sweep',
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -88,6 +91,24 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // a longer-than-expected delete loop on a busy storage account
     // doesn't compete with morning HTTP traffic.
     [JOB_NAMES.REPORT_EXPORT_CLEANUP]: '0 3 * * *',
+
+    // Daily 04:00 IST — archives audit_logs rows past
+    // `AUDIT_ARCHIVE_AFTER_DAYS` to immutable Blob storage. Off-peak.
+    // Runs after the export cleanup so the two cron sweeps don't
+    // contend on the same storage account in the same minute.
+    [JOB_NAMES.AUDIT_ARCHIVE]: '0 4 * * *',
+
+    // Daily 06:00 IST — instantiates recurring task templates whose
+    // schedule fires today. Runs before normal work hours so users
+    // see today's recurring tasks already on their kanban when they
+    // log in.
+    [JOB_NAMES.RECURRING_TASK_SWEEP]: '0 6 * * *',
+
+    // Daily 07:00 IST — sends scheduled report-subscription emails
+    // for subscriptions whose `day_of_week` matches today. Runs at
+    // start-of-business so weekly digests land in inboxes around
+    // when users start work.
+    [JOB_NAMES.REPORT_SUBSCRIPTION_SWEEP]: '0 7 * * *',
 };
 
 // ─── Per-run idempotency key derivation ──────────────────────────────────
@@ -132,6 +153,33 @@ export const timesheetReminderRunKey = (now: Date = new Date()): string => {
  * finds the rows already deleted by the first).
  */
 export const reportExportCleanupRunKey = (now: Date = new Date()): string => {
+    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
+};
+
+/**
+ * Audit archive sweep keys off **today** (IST). The sweep itself is
+ * idempotent (date-of-content is the dedup key on `audit_archives`)
+ * so an ops re-run within the same day is a no-op for already-
+ * archived dates.
+ */
+export const auditArchiveRunKey = (now: Date = new Date()): string => {
+    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
+};
+
+/**
+ * Recurring task sweep keys off **today** (IST). Same-day re-runs
+ * are no-ops via the per-template `recurrence.last_generated_at`
+ * idempotency stamp, plus the outer `job_runs` unique index.
+ */
+export const recurringTaskSweepRunKey = (now: Date = new Date()): string => {
+    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
+};
+
+/**
+ * Report-subscription sweep keys off **today** (IST). Same-day re-
+ * runs are no-ops via the per-subscription `last_sent_at` stamp.
+ */
+export const reportSubscriptionSweepRunKey = (now: Date = new Date()): string => {
     return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
 };
 

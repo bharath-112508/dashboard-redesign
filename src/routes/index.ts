@@ -23,7 +23,12 @@ import timesheetRoutes from './timesheet.routes.js';
 import billingRateRoutes from './billing-rate.routes.js';
 import reportRoutes from './report.routes.js';
 import auditLogRoutes from './audit-log.routes.js';
+import auditArchiveRoutes from './audit-archive.routes.js';
 import searchRoutes from './search.routes.js';
+import taskTemplateRoutes, { projectNestedRouter as taskTemplateNestedRouter } from './task-template.routes.js';
+import { projectTimelineNestedRouter } from './timeline.routes.js';
+import reportPresetRoutes from './report-preset.routes.js';
+import reportSubscriptionRoutes from './report-subscription.routes.js';
 import { projectShareLinksNestedRouter, publicShareLinksRouter, shareLinksRouter } from './share-link.routes.js';
 
 const appRoutes = Router();
@@ -53,7 +58,13 @@ appRoutes.use('/timesheets', timesheetRoutes);
 appRoutes.use('/billing-rates', billingRateRoutes);
 appRoutes.use('/reports', reportRoutes);
 appRoutes.use('/audit-logs', auditLogRoutes);
+appRoutes.use('/audit-archives', auditArchiveRoutes);
 appRoutes.use('/search', searchRoutes);
+appRoutes.use('/projects/:project_id/task-templates', taskTemplateNestedRouter());
+appRoutes.use('/task-templates', taskTemplateRoutes);
+appRoutes.use('/projects/:project_id/timeline', projectTimelineNestedRouter());
+appRoutes.use('/report-presets', reportPresetRoutes);
+appRoutes.use('/report-subscriptions', reportSubscriptionRoutes);
 appRoutes.use('/projects', projectShareLinksNestedRouter());
 appRoutes.use('/share-links', shareLinksRouter());
 // Public router mounted last on the same prefix. The auth-required
