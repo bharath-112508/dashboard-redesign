@@ -1,10 +1,15 @@
-// node-mailjet v6 publishes types with `export default Mailjet` AND
-// `export { Client }` from the same file — both refer to the same
-// class. TS in our `moduleResolution=NodeNext` setup picks up the
-// namespace import shape, so we grab the `Client` named export
-// directly. Functionally identical to `import Mailjet from
-// 'node-mailjet'; new Mailjet(...)`, just type-stable.
-import { Client as MailjetClientCtor } from 'node-mailjet';
+// node-mailjet v6 ships a hybrid CJS/ESM module: at runtime it only
+// exposes `default` (and an internal `mailjet`) — the named `Client`
+// export the `.d.ts` advertises does not actually exist on the runtime
+// object. On top of that, the published `.d.ts` mixes `export *` with
+// `export default`, which causes `import Mailjet from 'node-mailjet'`
+// under NodeNext + esModuleInterop to resolve to the *namespace* (not
+// the class). So we namespace-import and reach into `.default`
+// explicitly — the runtime shape is what matters.
+import * as MailjetMod from 'node-mailjet';
+
+type MailjetCtor = new (config: { apiKey: string; apiSecret: string }) => unknown;
+const MailjetClientCtor = (MailjetMod as unknown as { default: MailjetCtor }).default;
 
 import logger from '../logger.js';
 import { emailRateLimitedTotal } from '../metrics.js';
@@ -62,10 +67,9 @@ let cachedClient: MailjetClient | null = null;
 
 const getClient = (apiKey: string, apiSecret: string): MailjetClient => {
     if (cachedClient) return cachedClient;
-    // node-mailjet v6 exports the Client class as default. The
-    // type-cast hop is so we can keep our `MailjetClient` interface
-    // narrow + dependency-light without dragging the SDK's full
-    // type tree into every consumer.
+    // The type-cast hop keeps our `MailjetClient` interface narrow +
+    // dependency-light without dragging the SDK's full type tree into
+    // every consumer.
     cachedClient = new MailjetClientCtor({ apiKey, apiSecret }) as unknown as MailjetClient;
     return cachedClient;
 };

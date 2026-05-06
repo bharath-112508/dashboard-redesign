@@ -1,3 +1,10 @@
+import { createRequire } from 'node:module';
+
+// pdfmake (and its bundled vfs_fonts) are CJS-only and ship no TS types,
+// so a regular ESM `import` either resolves to the namespace or fails the
+// `tsx` ESM runtime. Re-introduce `require` via `createRequire` — same
+// runtime semantics as Node's classic loader, scoped to this module.
+const require = createRequire(import.meta.url);
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfmake = require('pdfmake');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
