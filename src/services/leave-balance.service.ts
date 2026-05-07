@@ -1,4 +1,4 @@
-import { Types } from 'mongoose';
+import { Types, type ClientSession } from 'mongoose';
 
 import { LeaveBalance, type LeaveBalanceDocument, recomputeAvailable } from '../models/leave-balance.model.js';
 import { LeaveType, type LeaveTypeDocument } from '../models/leave-type.model.js';
@@ -108,12 +108,25 @@ export const initializeBalancesForUserYear = async (params: {
     /** Optional pre-fetched user (saves a roundtrip when called from createUser). */
     joining_year?: number;
     joining_month?: number;
+    /** When provided, every read + write enrolls in the caller's
+     *  transaction. Used by `createUser` to make user + balance
+     *  rows atomic (H1). Standalone callers (cron, self-heal,
+     *  manual init endpoint) leave it undefined. */
+    session?: ClientSession;
 }): Promise<number> => {
     let joining_year = params.joining_year;
     let joining_month = params.joining_month;
 
+    // Chain `.session()` only when one is provided. Tests mock the
+    // Mongoose models with bare stubs that don't expose `.session()`,
+    // so an unconditional chain breaks them; the production code path
+    // (where Mongoose returns real Query objects) supports both forms.
     if (joining_year === undefined || joining_month === undefined) {
-        const u = await User.findById(params.user_id).select('role status internal_profile.date_of_joining');
+        const userQuery = User.findById(params.user_id).select(
+            'role status internal_profile.date_of_joining'
+        );
+        if (params.session) userQuery.session(params.session);
+        const u = await userQuery;
         if (!u) return 0;
         // Clients don't apply for leave.
         if (u.role === ROLES.CLIENT) return 0;
@@ -130,7 +143,9 @@ export const initializeBalancesForUserYear = async (params: {
         joining_month = parsed.month;
     }
 
-    const types = await LeaveType.find({ is_active: true });
+    const typeQuery = LeaveType.find({ is_active: true });
+    if (params.session) typeQuery.session(params.session);
+    const types = await typeQuery;
     let inserted = 0;
 
     for (const lt of types) {
@@ -157,7 +172,7 @@ export const initializeBalancesForUserYear = async (params: {
         const result = await LeaveBalance.updateOne(
             { user_id: params.user_id, leave_type_id: lt._id, year: params.year },
             { $setOnInsert: seedDoc },
-            { upsert: true }
+            { upsert: true, session: params.session }
         );
         if (result.upsertedCount && result.upsertedCount > 0) inserted += 1;
     }

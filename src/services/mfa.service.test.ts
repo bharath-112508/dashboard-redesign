@@ -161,10 +161,17 @@ describe('setupInit', () => {
 // ─── setupConfirm ──────────────────────────────────────────────────────
 
 describe('setupConfirm', () => {
-    it('rejects when no enrollment is in progress (mfa_secret_encrypted absent)', async () => {
+    it('rejects with MFA_ENROLLMENT_NOT_FOUND when no enrollment is in progress (M7)', async () => {
+        // Pre-M7 this threw `AppError.badRequest('No MFA enrollment in
+        // progress...')` with no specific code. The FE couldn't switch
+        // on it without string-matching the message. Post-M7 the code
+        // is the dedicated `MFA_ENROLLMENT_NOT_FOUND` so the FE can
+        // render the right "set up MFA first" UX.
         userFindByIdMock.mockReturnValueOnce(selectStub(sampleUser({ mfa_secret_encrypted: null })));
 
-        await expect(svc.setupConfirm(new Types.ObjectId(), '123456')).rejects.toThrow();
+        await expect(svc.setupConfirm(new Types.ObjectId(), '123456')).rejects.toMatchObject({
+            code: ERROR_CODES.MFA_ENROLLMENT_NOT_FOUND,
+        });
     });
 
     it('rejects with DUPLICATE_RESOURCE when MFA is already enabled', async () => {
@@ -351,5 +358,62 @@ describe('verify (login MFA challenge)', () => {
         const updateArg = userUpdateOneMock.mock.calls[0][1] as { $set: Record<string, unknown> };
         expect(updateArg.$set.mfa_backup_codes_hashed).toEqual(['h0', 'h2']);
         expect(consumeMfaSessionJtiMock).toHaveBeenCalled();
+    });
+});
+
+// ─── disable ───────────────────────────────────────────────────────────
+//
+// Pre-M7 the not-enabled guard threw `AppError.badRequest('MFA is not
+// enabled')` with no specific code. The FE couldn't switch on it
+// without string-matching. Post-M7 the dedicated `MFA_NOT_ENABLED`
+// code lets the FE render "MFA isn't on for your account" in place
+// of the generic 400 banner.
+
+describe('disable — MFA_NOT_ENABLED guard (M7)', () => {
+    it('throws MFA_NOT_ENABLED when the user has not enrolled', async () => {
+        userFindByIdMock.mockReturnValueOnce(
+            selectStub(sampleUser({ mfa_enabled: false, mfa_secret_encrypted: null }))
+        );
+
+        await expect(
+            svc.disable({
+                user_id: new Types.ObjectId(),
+                password: 'pw',
+                code: '123456',
+            })
+        ).rejects.toMatchObject({ code: ERROR_CODES.MFA_NOT_ENABLED });
+    });
+
+    it('throws MFA_NOT_ENABLED when mfa_enabled flag is true but the secret is gone', async () => {
+        // Defensive branch: a partial earlier disable that wiped the
+        // secret but left the flag set. Treat as not-enabled.
+        userFindByIdMock.mockReturnValueOnce(
+            selectStub(sampleUser({ mfa_enabled: true, mfa_secret_encrypted: null }))
+        );
+
+        await expect(
+            svc.disable({
+                user_id: new Types.ObjectId(),
+                password: 'pw',
+                code: '123456',
+            })
+        ).rejects.toMatchObject({ code: ERROR_CODES.MFA_NOT_ENABLED });
+    });
+});
+
+// ─── regenerateBackupCodes ─────────────────────────────────────────────
+
+describe('regenerateBackupCodes — MFA_NOT_ENABLED guard (M7)', () => {
+    it('throws MFA_NOT_ENABLED when the user has not enrolled', async () => {
+        userFindByIdMock.mockReturnValueOnce(
+            selectStub(sampleUser({ mfa_enabled: false, mfa_secret_encrypted: null }))
+        );
+
+        await expect(
+            svc.regenerateBackupCodes({
+                user_id: new Types.ObjectId(),
+                code: '123456',
+            })
+        ).rejects.toMatchObject({ code: ERROR_CODES.MFA_NOT_ENABLED });
     });
 });

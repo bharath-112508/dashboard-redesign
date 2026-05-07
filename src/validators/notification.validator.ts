@@ -5,6 +5,7 @@ import {
     NOTIFICATION_LIST_MAX_LIMIT,
     NOTIFICATION_TYPE_VALUES,
 } from '../constants/notification.js';
+import { booleanish } from './_shared.js';
 
 /**
  * Zod validators for the notifications API (API_Contract §11).
@@ -22,10 +23,6 @@ import {
  */
 
 const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId');
-
-const booleanish = z
-    .union([z.literal('true'), z.literal('false'), z.boolean()])
-    .transform((v) => (typeof v === 'boolean' ? v : v === 'true'));
 
 // ─── GET /notifications ────────────────────────────────────────────────────
 

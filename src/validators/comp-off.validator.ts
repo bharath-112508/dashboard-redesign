@@ -30,7 +30,7 @@ export const listCompOffQuerySchema = z.object({
     type: z.enum(Object.values(COMP_OFF_TYPES) as [string, ...string[]]).optional(),
     page: z.coerce.number().int().positive().optional().default(1),
     limit: z.coerce.number().int().positive().max(200).optional().default(50),
-});
+}).strict();
 
 export type ListCompOffQuery = z.infer<typeof listCompOffQuerySchema>;
 

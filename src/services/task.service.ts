@@ -547,6 +547,16 @@ export const updateTask = async (
     task.updated_by = caller.id;
     await task.save();
 
+    // M3 — task.save() runs WITHOUT a transaction by design. Audit +
+    // activity-feed writes that follow are *both* explicitly
+    // best-effort: `recordAudit` and `recordActivity` each wrap their
+    // Mongo write in try/catch + log on failure (see
+    // [audit.service.ts](recordAudit) + [task-activity.service.ts]).
+    // Wrapping this whole flow in `withTransaction` would change
+    // "task always saves; trail eventually consistent" to "task
+    // fails if the activity collection hiccups" — wrong trade-off
+    // for UX-fluff feeds. The audit log is the durable record;
+    // activity rows are the bell/feed renderer's source.
     if (caller.audit) {
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.TASK_UPDATE,

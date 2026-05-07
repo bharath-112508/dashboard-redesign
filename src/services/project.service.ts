@@ -16,6 +16,7 @@ import {
     type ProjectStatus,
 } from '../constants/project.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import { withTransaction } from '../utils/with-transaction.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
@@ -362,17 +363,28 @@ export const updateProjectMembers = async (
 
     const before = doc.member_ids.map((u) => u.toString());
 
-    // F4 — two atomic updates instead of read-modify-save.
-    if (removeIds.length > 0) {
-        await Project.updateOne({ _id: id }, { $pull: { member_ids: { $in: removeIds } } });
-    }
-    if (addIds.length > 0) {
-        await Project.updateOne({ _id: id }, { $addToSet: { member_ids: { $each: addIds } } });
-    }
-
-    // Re-load the post-update state for the audit + the response shape.
-    const updated = await Project.findById(id);
-    if (!updated) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    // F4 — two atomic updates instead of read-modify-save. Wrapped in a
+    // transaction so a failure on the second write doesn't leave a project
+    // with the remove applied but the add missing (member loss).
+    const updated = await withTransaction(async (session) => {
+        if (removeIds.length > 0) {
+            await Project.updateOne(
+                { _id: id },
+                { $pull: { member_ids: { $in: removeIds } } },
+                { session }
+            );
+        }
+        if (addIds.length > 0) {
+            await Project.updateOne(
+                { _id: id },
+                { $addToSet: { member_ids: { $each: addIds } } },
+                { session }
+            );
+        }
+        const next = await Project.findById(id, null, { session });
+        if (!next) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+        return next;
+    });
     const after = updated.member_ids.map((u) => u.toString());
 
     if (caller.audit) {
@@ -464,15 +476,25 @@ export const updateProjectClients = async (
     const before = doc.client_ids.map((u) => u.toString());
 
     // F4 — atomic list mutation; see `updateProjectMembers` for rationale.
-    if (removeIds.length > 0) {
-        await Project.updateOne({ _id: id }, { $pull: { client_ids: { $in: removeIds } } });
-    }
-    if (addIds.length > 0) {
-        await Project.updateOne({ _id: id }, { $addToSet: { client_ids: { $each: addIds } } });
-    }
-
-    const updated = await Project.findById(id);
-    if (!updated) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    const updated = await withTransaction(async (session) => {
+        if (removeIds.length > 0) {
+            await Project.updateOne(
+                { _id: id },
+                { $pull: { client_ids: { $in: removeIds } } },
+                { session }
+            );
+        }
+        if (addIds.length > 0) {
+            await Project.updateOne(
+                { _id: id },
+                { $addToSet: { client_ids: { $each: addIds } } },
+                { session }
+            );
+        }
+        const next = await Project.findById(id, null, { session });
+        if (!next) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+        return next;
+    });
     const after = updated.client_ids.map((u) => u.toString());
 
     if (caller.audit) {

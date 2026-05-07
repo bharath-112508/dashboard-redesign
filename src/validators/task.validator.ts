@@ -135,7 +135,7 @@ export const listTasksQuerySchema = z.object({
     parent_task_id: z.union([objectIdSchema, z.literal('null')]).optional(),
     // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
     q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
-});
+}).strict();
 export type ListTasksQuery = z.infer<typeof listTasksQuerySchema>;
 
 // ─── Path params ──────────────────────────────────────────────────────────

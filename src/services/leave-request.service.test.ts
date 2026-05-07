@@ -236,6 +236,62 @@ describe('approveLeave', () => {
             code: ERROR_CODES.FORBIDDEN,
         });
     });
+
+    // ─── H2: status flip + balance moves are atomic ────────────────────
+    //
+    // Pre-H2 the PENDING→APPROVED `findOneAndUpdate` and the per-segment
+    // `pending → used` balance updates were two separate writes. A
+    // network partition between them left the request approved while
+    // the balance was still `pending` — silent +N inflation of
+    // available balance until someone noticed.
+    //
+    // Post-H2 both run inside a single `withTransaction`. In production
+    // (replica set), a balance-update failure rolls back the status
+    // flip too. In the test environment, `withTransaction` falls back
+    // to running the callback without a session, so we can verify the
+    // error path but not the transactional rollback itself — the
+    // Mongo-side rollback belongs in an integration test against a
+    // real replica set.
+    it('H2: balance-update failure aborts approve and propagates the error', async () => {
+        const r = baseRequest({
+            leave_segments: [
+                { leave_type_id: new Types.ObjectId(), year: 2026, days: 2 },
+                { leave_type_id: new Types.ObjectId(), year: 2026, days: 3 },
+            ],
+            total_days: 5,
+        });
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        leaveRequestFindOneAndUpdateMock.mockResolvedValueOnce({
+            ...r,
+            status: LEAVE_REQUEST_STATUSES.APPROVED,
+            toJSON: () => ({ id: r._id.toString(), status: 'approved' }),
+        });
+
+        // First balance update succeeds; second throws — simulates a
+        // mid-loop network partition or constraint violation.
+        const balanceErr = new Error('balance write failed');
+        leaveBalanceUpdateOneMock
+            .mockResolvedValueOnce({ acknowledged: true })
+            .mockRejectedValueOnce(balanceErr);
+
+        await expect(
+            svc.approveLeave(
+                r._id,
+                { approver_remarks: 'lgtm' },
+                { ...reviewer, audit: { actor: { id: reviewer.id, role: reviewer.role } } as never }
+            )
+        ).rejects.toBe(balanceErr);
+
+        // The status flip ran (it's the first write inside the tx
+        // callback). The first segment's balance update ran. The
+        // second segment's balance update threw. Audit + notification
+        // live OUTSIDE the tx so they should NOT have fired since we
+        // aborted before reaching them.
+        expect(leaveRequestFindOneAndUpdateMock).toHaveBeenCalledTimes(1);
+        expect(leaveBalanceUpdateOneMock).toHaveBeenCalledTimes(2);
+        expect(recordAuditMock).not.toHaveBeenCalled();
+        expect(notifyDecidedMock).not.toHaveBeenCalled();
+    });
 });
 
 // ─── Reject ───────────────────────────────────────────────────────────────

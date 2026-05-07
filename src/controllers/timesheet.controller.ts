@@ -42,7 +42,12 @@ export const getMyList = async (req: Request, res: Response): Promise<Response> 
 };
 
 // ─── GET /timesheets/me/day/:date ────────────────────────────────────────
-
+//
+// Non-paginated day breakdown with sidecar metadata
+// `{ local_date, total_minutes }` — the FE renders the day's total as a
+// summary chip beside the list of entries. NOT a paginated response, so
+// we use `ok(res, data, meta)` rather than `paginated()`. The api.ts
+// envelope-preserve rule keeps `{data, meta}` intact for the consumer.
 export const getMyDay = async (req: Request, res: Response): Promise<Response> => {
     const { date } = req.params as unknown as DayDatePath;
     const { data, meta } = await service.listMyDay(date, callerOf(req));

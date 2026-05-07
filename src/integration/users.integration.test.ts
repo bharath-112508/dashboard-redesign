@@ -276,23 +276,30 @@ describe('integration: POST /api/v1/users (admin-only create)', () => {
     it('201 with the public user projection on successful creation', async () => {
         userExistsMock.mockResolvedValueOnce(false); // email check — no collision
         const newUserId = new Types.ObjectId();
-        userCreateMock.mockResolvedValueOnce({
-            _id: newUserId,
-            email: 'newhire@example.com',
-            full_name: 'New Hire',
-            role: 'employee',
-            status: 'active',
-            internal_profile: validInternalProfile,
-            toJSON() {
-                return {
-                    id: this._id.toString(),
-                    email: this.email,
-                    full_name: this.full_name,
-                    role: this.role,
-                    status: this.status,
-                };
+        // H1: createUser uses Mongoose's array-form `User.create([doc],
+        // { session })` because that's the only call shape that
+        // enrols a single-document insert in a transaction. The mock
+        // must return an array to match — destructuring `[user]` from
+        // a non-array yields `undefined` and the service throws.
+        userCreateMock.mockResolvedValueOnce([
+            {
+                _id: newUserId,
+                email: 'newhire@example.com',
+                full_name: 'New Hire',
+                role: 'employee',
+                status: 'active',
+                internal_profile: validInternalProfile,
+                toJSON() {
+                    return {
+                        id: this._id.toString(),
+                        email: this.email,
+                        full_name: this.full_name,
+                        role: this.role,
+                        status: this.status,
+                    };
+                },
             },
-        });
+        ]);
 
         const res = await request(app)
             .post('/api/v1/users')
@@ -315,17 +322,19 @@ describe('integration: POST /api/v1/users (admin-only create)', () => {
         // user lookup at /auth/login (which also lowercases) hits the
         // same row.
         userExistsMock.mockResolvedValueOnce(false); // email check returns false
-        userCreateMock.mockResolvedValueOnce({
-            _id: new Types.ObjectId(),
-            email: 'newhire@example.com',
-            full_name: 'New Hire',
-            role: 'employee',
-            status: 'active',
-            internal_profile: validInternalProfile,
-            toJSON() {
-                return { email: this.email };
+        userCreateMock.mockResolvedValueOnce([
+            {
+                _id: new Types.ObjectId(),
+                email: 'newhire@example.com',
+                full_name: 'New Hire',
+                role: 'employee',
+                status: 'active',
+                internal_profile: validInternalProfile,
+                toJSON() {
+                    return { email: this.email };
+                },
             },
-        });
+        ]);
 
         await request(app)
             .post('/api/v1/users')

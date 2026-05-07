@@ -43,7 +43,15 @@ export const postBulk = async (req: Request, res: Response): Promise<Response> =
 };
 
 // ─── GET /holidays ─────────────────────────────────────────────────────────
-
+//
+// Non-paginated list with sidecar metadata `{ total, from_date?, to_date? }` —
+// echoes back the resolved query window so the FE doesn't have to recompute
+// it. NOT a paginated response (no `page`/`limit`/`total_pages`), so we use
+// `ok(res, data, meta)` rather than `paginated()`. The api.ts FE envelope-
+// preserve rule keeps the envelope intact for any `meta` sibling, so consumers
+// type the hook as `EnvelopedList<HolidayRecord>` and unwrap via TanStack
+// `select` (see [holiday-mutations.ts](FE) — that pattern was the M1 fix
+// after the `.slice is not a function` crash).
 export const getList = async (req: Request, res: Response): Promise<Response> => {
     const { data, meta } = await service.listHolidays(req.query as unknown as ListHolidaysQuery);
     return ok(res, data, meta);

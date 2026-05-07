@@ -24,7 +24,7 @@ export const listActivitiesQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(ACTIVITY_LIST_MAX_LIMIT).default(ACTIVITY_LIST_DEFAULT_LIMIT),
     activity_type: z.enum(TASK_ACTIVITY_TYPE_VALUES as unknown as [string, ...string[]]).optional(),
     actor_id: objectIdSchema.optional(),
-});
+}).strict();
 export type ListActivitiesQuery = z.infer<typeof listActivitiesQuerySchema>;
 
 export const taskActivityPathSchema = z.object({ task_id: objectIdSchema });

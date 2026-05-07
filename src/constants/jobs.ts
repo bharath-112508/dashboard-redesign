@@ -46,6 +46,29 @@ export const JOB_LOCK_STALE_MS = 30 * 60 * 1000; // 30 minutes
  */
 export const JOB_USER_BATCH_SIZE = 200;
 
+/**
+ * Graceful-shutdown drain window (L3). On SIGTERM the scheduler waits up
+ * to this long for in-flight job callbacks to finish before forcibly
+ * resolving and letting the process exit. Pinned at 25s so it falls
+ * comfortably inside the typical container 30s SIGTERM→SIGKILL grace
+ * window — leaving 5s for the rest of the shutdown sequence (Mongo
+ * connection close, HTTP server graceful close, etc.). Bump only if a
+ * specific job legitimately needs longer; otherwise an in-flight job
+ * past 25s is almost always a stuck job and the stuck-job sweeper will
+ * mark it failed on the next process boot.
+ */
+export const JOB_SCHEDULER_DRAIN_TIMEOUT_MS = 25_000;
+
+/**
+ * Consecutive-failure threshold for the cron observability hook (L4).
+ * After a job fails this many times in a row, the runner emits a
+ * `CRITICAL` log entry distinct from the per-failure `WARN`, so the
+ * operator gets a single high-signal pager line for "this job has been
+ * down for ~N hours" instead of sifting through N×repeat warns. The
+ * counter resets on the first success.
+ */
+export const JOB_CONSECUTIVE_FAILURE_THRESHOLD = 3;
+
 // ─── Job names (audit + log + db key) ─────────────────────────────────────
 
 export const JOB_NAMES = {

@@ -19,6 +19,7 @@ import type { AssignableQuery, CreateUserBody, ListUsersQuery, UpdateUserBody } 
 import { initializeBalancesForUserYear } from './leave-balance.service.js';
 import { notifyUserInvited } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
+import { withTransaction } from '../utils/with-transaction.js';
 import { getSystemRoleByKey } from './role.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
@@ -162,46 +163,58 @@ export const createUser = async (
         };
     }
 
-    let created;
+    // H1 — user create + leave-balance init are atomic: a balance-init
+    // failure rolls back the user too, so we never leave a half-created
+    // user that can't apply for leave. Pre-H1 the balance init was
+    // best-effort with a warn log, which silently locked new joiners
+    // out until an admin re-ran init. Email + audit happen AFTER the
+    // tx commits — they're external/logging side effects that
+    // shouldn't dictate atomicity.
+    let created: UserDocument;
     try {
-        created = await User.create(doc);
+        created = await withTransaction(async (session) => {
+            // Mongoose's array-form `create([doc], { session })` is
+            // the only way to enrol a single-document insert in a
+            // transaction (single-doc form ignores the session
+            // option). Returns an array; we destructure the one
+            // element we asked for.
+            //
+            // `session` may be null when the topology doesn't support
+            // transactions (e.g. local-dev standalone Mongo or test
+            // mocks); Mongoose accepts that — it just won't enrol.
+            const createOpts = session ? { session } : {};
+            const [user] = await User.create([doc], createOpts);
+            if (!user) throw new Error('User.create returned no document');
+
+            if (user.role !== ROLES.CLIENT && user.internal_profile?.date_of_joining) {
+                const joining = user.internal_profile.date_of_joining;
+                const [yStr, mStr] = joining.split('-');
+                const joiningYear = Number.parseInt(yStr, 10);
+                const joiningMonth = Number.parseInt(mStr, 10);
+                // Derive "this year" from the IST business calendar.
+                // `getUTCFullYear()` on Jan 1 IST returns last year
+                // until UTC catches up 5h30m later — a Jan-1 IST
+                // joiner would otherwise be seeded into the wrong year.
+                const thisYear = dayjs().tz(DEFAULT_TIMEZONE).year();
+                const yearsToInit = new Set<number>([joiningYear, thisYear]);
+                for (const year of yearsToInit) {
+                    await initializeBalancesForUserYear({
+                        user_id: user._id,
+                        year,
+                        joining_year: joiningYear,
+                        joining_month: joiningMonth,
+                        session: session ?? undefined,
+                    });
+                }
+            }
+            return user;
+        });
     } catch (err) {
         if (isOneActiveAdminViolation(err)) {
             // R6 — concurrent admin-create slipped past assertSingleAdmin.
             throw AppError.conflict('An active admin already exists', ERROR_CODES.ADMIN_ALREADY_EXISTS);
         }
         throw err;
-    }
-
-    // Internal users get their leave-balance rows seeded for the current year
-    // (and the joining year if different). Failure here must not block the
-    // user create — surface as a warning so admin can re-run init manually.
-    if (created.role !== ROLES.CLIENT && created.internal_profile?.date_of_joining) {
-        try {
-            const joining = created.internal_profile.date_of_joining;
-            const [yStr, mStr] = joining.split('-');
-            const joiningYear = Number.parseInt(yStr, 10);
-            const joiningMonth = Number.parseInt(mStr, 10);
-            // H1 — derive "this year" from the IST business calendar. Pre-H1
-            // used `getUTCFullYear()`, which on Jan 1 IST returns last year
-            // until UTC catches up 5h30m later — so a Jan-1 IST joiner could
-            // be seeded into the wrong year's balance rows.
-            const thisYear = dayjs().tz(DEFAULT_TIMEZONE).year();
-            const yearsToInit = new Set<number>([joiningYear, thisYear]);
-            for (const year of yearsToInit) {
-                await initializeBalancesForUserYear({
-                    user_id: created._id,
-                    year,
-                    joining_year: joiningYear,
-                    joining_month: joiningMonth,
-                });
-            }
-        } catch (err) {
-            logger.warn(
-                { err, user_id: created._id.toString() },
-                'Leave-balance initialization failed for new user — will self-heal on first /leave-balances/me read'
-            );
-        }
     }
 
     // Welcome / invite email — best effort, never blocks the create. Logs

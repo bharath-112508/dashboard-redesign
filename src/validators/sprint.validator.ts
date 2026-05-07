@@ -77,7 +77,7 @@ export const listSprintsQuerySchema = z.object({
         .union([z.literal('true'), z.literal('false'), z.boolean()])
         .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
         .optional(),
-});
+}).strict();
 
 export type ListSprintsQuery = z.infer<typeof listSprintsQuerySchema>;
 

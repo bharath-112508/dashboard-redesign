@@ -6,6 +6,7 @@ import {
     ATTACHMENT_LIST_MAX_LIMIT,
     ATTACHMENT_MIME_TYPE_MAX,
 } from '../constants/attachment.js';
+import { booleanish } from './_shared.js';
 
 /**
  * Zod schemas for `/tasks/:task_id/attachments` + `/attachments/:id`
@@ -60,9 +61,12 @@ export const listAttachmentsQuerySchema = z.object({
      * Mirrors the comments endpoint — admin/manager can opt into seeing
      * soft-deleted rows for moderation tooling. Default off; service
      * silently ignores for non-admin/manager.
+     *
+     * H4: was `z.coerce.boolean()` which coerces "false" → true.
+     * `booleanish` is fail-loud on non-canonical values.
      */
-    include_deleted: z.coerce.boolean().optional().default(false),
-});
+    include_deleted: booleanish.optional().default(false),
+}).strict();
 export type ListAttachmentsQuery = z.infer<typeof listAttachmentsQuerySchema>;
 
 // ─── Path params ─────────────────────────────────────────────────────────

@@ -62,7 +62,7 @@ export const listBillingRatesQuerySchema = z.object({
     active_on: isoDateSchema.optional(),
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(BILLING_RATE_LIST_MAX_LIMIT).default(BILLING_RATE_LIST_DEFAULT_LIMIT),
-});
+}).strict();
 export type ListBillingRatesQuery = z.infer<typeof listBillingRatesQuerySchema>;
 
 // ─── Path params ─────────────────────────────────────────────────────────

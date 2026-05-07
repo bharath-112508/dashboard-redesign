@@ -76,7 +76,7 @@ export const listLeaveTypesQuerySchema = z.object({
         .union([z.literal('true'), z.literal('false'), z.boolean()])
         .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
         .optional(),
-});
+}).strict();
 
 export type ListLeaveTypesQuery = z.infer<typeof listLeaveTypesQuerySchema>;
 

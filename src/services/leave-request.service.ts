@@ -25,6 +25,7 @@ import { generateSegments, type ComputedSegment, type SegmentEngineResult } from
 import { notifyLeaveDecided, notifyLeaveSubmitted } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import { withTransaction } from '../utils/with-transaction.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     ApplyLeaveBody,
@@ -648,38 +649,59 @@ export const approveLeave = async (
         );
     }
 
-    // Atomic state transition guard — protects against double-approval races.
-    const updated = await LeaveRequest.findOneAndUpdate(
-        { _id: existing._id, status: LEAVE_REQUEST_STATUSES.PENDING },
-        {
-            $set: {
-                status: LEAVE_REQUEST_STATUSES.APPROVED,
-                approver_id: caller.id,
-                approver_remarks: body.approver_remarks ?? '',
-                additional_approval_reason: existing.requires_additional_approval
-                    ? (body.additional_approval_reason ?? null)
-                    : null,
-                acted_at: new Date(),
-            },
-        },
-        { new: true }
-    );
+    // H2 — status transition + balance moves are atomic. Pre-H2 the
+    // PENDING→APPROVED swap and the per-segment `pending → used`
+    // updates were separate writes; a network partition between them
+    // left the request approved but balance still in `pending`,
+    // silently inflating available balance by the leave amount until
+    // someone noticed. The atomic state-transition guard remains
+    // (the `status: PENDING` predicate inside the transaction
+    // double-protects against double-approval).
+    const updated = await withTransaction(async (session) => {
+        const findOpts = session ? { new: true, session } : { new: true };
 
-    if (!updated) {
-        throw AppError.conflict('Leave request is no longer pending', ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING);
-    }
-
-    // Move pending → used on each segment.
-    for (const seg of updated.leave_segments) {
-        await LeaveBalance.updateOne(
+        const u = await LeaveRequest.findOneAndUpdate(
+            { _id: existing._id, status: LEAVE_REQUEST_STATUSES.PENDING },
             {
-                user_id: updated.user_id,
+                $set: {
+                    status: LEAVE_REQUEST_STATUSES.APPROVED,
+                    approver_id: caller.id,
+                    approver_remarks: body.approver_remarks ?? '',
+                    additional_approval_reason: existing.requires_additional_approval
+                        ? (body.additional_approval_reason ?? null)
+                        : null,
+                    acted_at: new Date(),
+                },
+            },
+            findOpts
+        );
+        if (!u) {
+            throw AppError.conflict(
+                'Leave request is no longer pending',
+                ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING
+            );
+        }
+
+        // Move pending → used on each segment. Same session as the
+        // status flip — either everything commits or nothing does.
+        // Omit the third argument entirely when no session, matching
+        // pre-H2 call shape so tests that strict-match call args
+        // (`toHaveBeenNthCalledWith(1, filter, update)`) still work.
+        for (const seg of u.leave_segments) {
+            const filter = {
+                user_id: u.user_id,
                 leave_type_id: seg.leave_type_id,
                 year: seg.year,
-            },
-            { $inc: { pending: -seg.days, used: seg.days } }
-        );
-    }
+            };
+            const update = { $inc: { pending: -seg.days, used: seg.days } };
+            if (session) {
+                await LeaveBalance.updateOne(filter, update, { session });
+            } else {
+                await LeaveBalance.updateOne(filter, update);
+            }
+        }
+        return u;
+    });
 
     if (caller.audit) {
         await recordAudit(caller.audit, {

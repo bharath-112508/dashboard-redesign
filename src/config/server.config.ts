@@ -274,7 +274,7 @@ export const EXPORT_WORKER_INLINE = parseBool(process.env.EXPORT_WORKER_INLINE, 
 // downgrades to a `warn` log line under `NODE_ENV=production` so the
 // misconfiguration is at least observable.
 
-export const EMAIL_TRANSPORT = process.env.EMAIL_TRANSPORT ?? (NODE_ENV === 'production' ? 'stub' : 'stub');
+export const EMAIL_TRANSPORT = process.env.EMAIL_TRANSPORT ?? 'stub';
 
 export const ACS_CONNECTION_STRING = process.env.ACS_CONNECTION_STRING ?? null;
 export const ACS_FROM_ADDRESS = process.env.ACS_FROM_ADDRESS ?? null;

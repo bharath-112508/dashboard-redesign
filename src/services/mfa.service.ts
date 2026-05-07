@@ -86,7 +86,10 @@ export const setupConfirm = async (
         throw AppError.conflict('MFA is already enabled', ERROR_CODES.DUPLICATE_RESOURCE);
     }
     if (!user.mfa_secret_encrypted) {
-        throw AppError.badRequest('No MFA enrollment in progress. Call /auth/mfa/setup/init first.');
+        throw AppError.badRequest(
+            'No MFA enrollment in progress. Call /auth/mfa/setup/init first.',
+            ERROR_CODES.MFA_ENROLLMENT_NOT_FOUND
+        );
     }
 
     const secret = decryptSecret(user.mfa_secret_encrypted);
@@ -217,7 +220,7 @@ export const disable = async (input: DisableInput): Promise<void> => {
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
     }
     if (!user.mfa_enabled || !user.mfa_secret_encrypted) {
-        throw AppError.badRequest('MFA is not enabled');
+        throw AppError.badRequest('MFA is not enabled', ERROR_CODES.MFA_NOT_ENABLED);
     }
 
     const passwordOk = await verifyPassword(input.password, user.password_hash);
@@ -268,7 +271,7 @@ export const regenerateBackupCodes = async (input: RegenerateInput): Promise<Reg
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
     }
     if (!user.mfa_enabled || !user.mfa_secret_encrypted) {
-        throw AppError.badRequest('MFA is not enabled');
+        throw AppError.badRequest('MFA is not enabled', ERROR_CODES.MFA_NOT_ENABLED);
     }
 
     if (!verifyTotp(input.code, decryptSecret(user.mfa_secret_encrypted))) {

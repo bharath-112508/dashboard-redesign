@@ -28,7 +28,7 @@ export type MyBalancesQuery = z.infer<typeof myBalancesQuerySchema>;
 export const listLeaveBalancesQuerySchema = z.object({
     user_id: objectIdSchema.optional(),
     year: yearSchema.optional(),
-});
+}).strict();
 
 export type ListLeaveBalancesQuery = z.infer<typeof listLeaveBalancesQuerySchema>;
 

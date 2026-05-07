@@ -108,3 +108,18 @@ export const searchRateLimiter = buildUserRateLimiter({
     limit: 60,
     messageKey: 'Too many search requests. Please slow down.',
 });
+
+/**
+ * Command-palette limiter — applied on `/command-palette` (H3).
+ * The endpoint reuses the search service's regex `$or` queries when
+ * `q.length >= 2`, so it shares the same per-call cost as `/search`.
+ * Budget mirrors the search limiter (60/min/user) but is a SEPARATE
+ * instance so a user using both surfaces gets the full budget on
+ * each — the FE's Cmd-K palette and any future search page don't
+ * compete for the same bucket.
+ */
+export const commandPaletteRateLimiter = buildUserRateLimiter({
+    windowMs: 60 * 1000,
+    limit: 60,
+    messageKey: 'Too many palette requests. Please slow down.',
+});

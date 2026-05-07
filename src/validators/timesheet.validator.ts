@@ -106,7 +106,7 @@ export const listTimesheetsQuerySchema = z.object({
     to_date: isoDateSchema.optional(),
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(TIMESHEET_LIST_MAX_LIMIT).default(TIMESHEET_LIST_DEFAULT_LIMIT),
-});
+}).strict();
 export type ListTimesheetsQuery = z.infer<typeof listTimesheetsQuerySchema>;
 
 // ─── GET /timesheets/summary ─────────────────────────────────────────────

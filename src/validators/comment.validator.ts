@@ -6,6 +6,7 @@ import {
     COMMENT_LIST_MAX_LIMIT,
     COMMENT_MENTIONS_MAX,
 } from '../constants/comment.js';
+import { booleanish } from './_shared.js';
 
 /**
  * Zod schemas for `/tasks/:task_id/comments` + `/comments/:id`
@@ -57,9 +58,12 @@ export const listCommentsQuerySchema = z.object({
      * `include_deleted` is admin/manager-only; the service silently
      * ignores it for any other role. Default off so the bell + UI never
      * accidentally render tombstones.
+     *
+     * H4: was `z.coerce.boolean()` which coerces "false" → true.
+     * `booleanish` is fail-loud on non-canonical values.
      */
-    include_deleted: z.coerce.boolean().optional().default(false),
-});
+    include_deleted: booleanish.optional().default(false),
+}).strict();
 export type ListCommentsQuery = z.infer<typeof listCommentsQuerySchema>;
 
 // ─── Path params ──────────────────────────────────────────────────────────

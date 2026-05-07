@@ -127,7 +127,7 @@ export const listUsersQuerySchema = z.object({
     status: statusEnum.optional(),
     // R15 — minimum 2 chars to avoid `?q=a` triggering a regex-on-collection scan.
     q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
-});
+}).strict();
 
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 

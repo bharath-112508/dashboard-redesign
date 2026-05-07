@@ -189,7 +189,7 @@ export const listCorrectionsQuerySchema = z.object({
     status: z.enum(CORRECTION_REQUEST_STATUSES).optional(),
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(20),
-});
+}).strict();
 export type ListCorrectionsQuery = z.infer<typeof listCorrectionsQuerySchema>;
 
 // ─── POST /attendance/correction-requests/:id/{approve,reject} ──────────

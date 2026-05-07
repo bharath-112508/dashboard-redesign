@@ -1,6 +1,13 @@
 import cron, { type ScheduledTask } from 'node-cron';
 
-import { JOB_NAMES, JOB_SCHEDULES, JOB_TIMEZONE, type JobName } from '../constants/jobs.js';
+import {
+    JOB_CONSECUTIVE_FAILURE_THRESHOLD,
+    JOB_NAMES,
+    JOB_SCHEDULER_DRAIN_TIMEOUT_MS,
+    JOB_SCHEDULES,
+    JOB_TIMEZONE,
+    type JobName,
+} from '../constants/jobs.js';
 import { JOBS_ENABLED } from '../config/server.config.js';
 import logger from '../utils/logger.js';
 import { getInFlightRunJobs } from './runner.js';
@@ -38,6 +45,21 @@ import { runAuditLogMirror } from './audit-log-mirror.job.js';
 
 const tasks = new Map<JobName, ScheduledTask>();
 
+/**
+ * L4 — consecutive-failure tracker. Each entry counts how many cron
+ * ticks for that job have thrown contract-violation errors back to
+ * us in a row. Reset on the first non-throwing tick. When the
+ * counter crosses `JOB_CONSECUTIVE_FAILURE_THRESHOLD` we log a
+ * CRITICAL line distinct from the per-tick `error` so the operator
+ * gets a single "this job has been failing for ~3 hours" signal
+ * instead of N×repeat errors blending into the rest of the log.
+ *
+ * In-process only — a process restart resets the counter. That's
+ * fine: a process restart usually means the operator already saw
+ * the issue, and the next failure cycle re-counts from zero.
+ */
+const consecutiveFailures = new Map<JobName, number>();
+
 type JobRunner = () => Promise<unknown>;
 
 const REGISTRY: Record<JobName, JobRunner> = {
@@ -71,13 +93,37 @@ export const startScheduler = (): void => {
             const task = cron.schedule(
                 expression,
                 () => {
-                    runner().catch((err: unknown) => {
-                        try {
-                            logger.error({ err, job: name }, 'Cron tick threw — runner contract violated');
-                        } catch {
-                            // swallow — never propagate from the cron tick.
-                        }
-                    });
+                    runner()
+                        .then(() => {
+                            // L4 — successful tick resets the streak.
+                            consecutiveFailures.delete(name);
+                        })
+                        .catch((err: unknown) => {
+                            // L4 — increment per job; emit CRITICAL on
+                            // crossing the threshold so the operator
+                            // sees a single high-signal line instead
+                            // of N×repeat error logs.
+                            const next = (consecutiveFailures.get(name) ?? 0) + 1;
+                            consecutiveFailures.set(name, next);
+                            try {
+                                logger.error(
+                                    { err, job: name, consecutive_failures: next },
+                                    'Cron tick threw — runner contract violated'
+                                );
+                                if (next === JOB_CONSECUTIVE_FAILURE_THRESHOLD) {
+                                    logger.fatal(
+                                        {
+                                            job: name,
+                                            consecutive_failures: next,
+                                            threshold: JOB_CONSECUTIVE_FAILURE_THRESHOLD,
+                                        },
+                                        'Cron job has crossed the consecutive-failure threshold — investigate'
+                                    );
+                                }
+                            } catch {
+                                // swallow — never propagate from the cron tick.
+                            }
+                        });
                 },
                 {
                     timezone: JOB_TIMEZONE,
@@ -90,18 +136,6 @@ export const startScheduler = (): void => {
         }
     }
 };
-
-/**
- * F5 — graceful drain timeout. After `task.stop()` prevents new fires,
- * we await every in-flight `runJob` promise for up to this long. A
- * cron that's been running longer than this gets cut off when the
- * outer SIGTERM watchdog (`src/index.ts`) fires `process.exit(1)`.
- *
- * 25s leaves a small buffer under the SIGTERM watchdog (30s) so the
- * outer shutdown sequence still has time to disconnect Mongo cleanly
- * after the cron drain.
- */
-const SCHEDULER_DRAIN_TIMEOUT_MS = 25_000;
 
 export const stopScheduler = async (): Promise<void> => {
     // 1. Stop all timers so no NEW handler invocations start.
@@ -128,7 +162,7 @@ export const stopScheduler = async (): Promise<void> => {
     logger.info({ count: running.length }, 'Awaiting in-flight cron handlers to drain');
     let timer: NodeJS.Timeout | null = null;
     const drainTimeout = new Promise<'timeout'>((resolve) => {
-        timer = setTimeout(() => resolve('timeout'), SCHEDULER_DRAIN_TIMEOUT_MS);
+        timer = setTimeout(() => resolve('timeout'), JOB_SCHEDULER_DRAIN_TIMEOUT_MS);
     });
     const settledOrTimedOut = await Promise.race([
         Promise.allSettled(running).then(() => 'settled' as const),
@@ -138,7 +172,7 @@ export const stopScheduler = async (): Promise<void> => {
 
     if (settledOrTimedOut === 'timeout') {
         logger.warn(
-            { count: running.length, timeout_ms: SCHEDULER_DRAIN_TIMEOUT_MS },
+            { count: running.length, timeout_ms: JOB_SCHEDULER_DRAIN_TIMEOUT_MS },
             'Scheduler drain timed out; outer shutdown watchdog will force-exit'
         );
     } else {

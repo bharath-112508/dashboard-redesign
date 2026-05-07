@@ -87,7 +87,7 @@ export const listRolesQuerySchema = z.object({
         .union([z.literal('true'), z.literal('false'), z.boolean()])
         .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
         .optional(),
-});
+}).strict();
 
 export type ListRolesQuery = z.infer<typeof listRolesQuerySchema>;
 

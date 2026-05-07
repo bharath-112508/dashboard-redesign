@@ -216,6 +216,93 @@ describe('createUser — single-admin enforcement (R6)', () => {
     });
 });
 
+// ─── H1: user-create + leave-balance-init atomicity ──────────────────────
+
+describe('createUser — H1 atomicity (balance-init failure aborts user create)', () => {
+    // Pre-H1 contract: balance-init failure was caught + logged as a
+    // warning; the user was created anyway. Net effect: silent lockout
+    // for new joiners.
+    //
+    // H1 contract: balance-init failure propagates out of
+    // `withTransaction`, callers see a rejection. In production (replica
+    // set) the user document is also rolled back; in test environments
+    // (no Mongo connection) `withTransaction` runs the callback with a
+    // null session, so we can verify the error path but not the
+    // transactional rollback itself — that's a Mongo concern that
+    // belongs in an integration test against a real replica set.
+    const employeeInput = {
+        email: 'newhire@example.com',
+        full_name: 'New Hire',
+        role: ROLES.EMPLOYEE,
+        initial_password: 'Aa1!aaaaaa',
+        internal_profile: {
+            employee_id: 'E-101',
+            job_title: 'Engineer',
+            department: 'Engineering',
+            date_of_joining: '2026-05-01',
+        },
+    };
+
+    it('propagates the rejection when initializeBalancesForUserYear throws', async () => {
+        userExistsMock.mockResolvedValueOnce(null); // no email collision
+        userCreateMock.mockResolvedValueOnce([
+            {
+                _id: new Types.ObjectId(),
+                email: 'newhire@example.com',
+                full_name: 'New Hire',
+                role: ROLES.EMPLOYEE,
+                status: 'active',
+                internal_profile: { date_of_joining: '2026-05-01' },
+                toJSON() {
+                    return { id: 'x' };
+                },
+            },
+        ]);
+        const balanceErr = new Error('seed failed');
+        initBalancesMock.mockRejectedValueOnce(balanceErr);
+
+        await expect(svc.createUser(employeeInput as never, new Types.ObjectId())).rejects.toBe(
+            balanceErr
+        );
+        // Pre-H1 the email + audit ran AFTER balance init even when
+        // balance init failed (the warning swallowed the error).
+        // Post-H1, the rejection short-circuits the whole flow.
+        expect(notifyUserInvitedMock).not.toHaveBeenCalled();
+        expect(recordAuditMock).not.toHaveBeenCalled();
+    });
+
+    it('skips balance init for client users (and therefore cannot fail this way)', async () => {
+        // Defensive coverage of the role-check inside the tx: if the
+        // caller-supplied profile happens to be a client, the balance
+        // init branch is skipped and the user create commits cleanly.
+        userExistsMock.mockResolvedValueOnce(null);
+        userCreateMock.mockResolvedValueOnce([
+            {
+                _id: new Types.ObjectId(),
+                email: 'client@example.com',
+                full_name: 'External Client',
+                role: ROLES.CLIENT,
+                status: 'active',
+                client_profile: { company: 'Acme' },
+                toJSON() {
+                    return { id: 'x' };
+                },
+            },
+        ]);
+
+        const clientInput = {
+            ...employeeInput,
+            email: 'client@example.com',
+            role: ROLES.CLIENT,
+            client_profile: { company: 'Acme' },
+            internal_profile: undefined,
+        };
+
+        await expect(svc.createUser(clientInput as never, new Types.ObjectId())).resolves.toBeDefined();
+        expect(initBalancesMock).not.toHaveBeenCalled();
+    });
+});
+
 // ─── deactivateUser ────────────────────────────────────────────────────
 
 describe('deactivateUser', () => {
