@@ -256,9 +256,12 @@ export const listUsers = async (
     }
 
     const skip = (query.page - 1) * query.limit;
+    const sortSpec: Record<string, 1 | -1> = query.sort
+        ? { [query.sort.field]: query.sort.dir === 'asc' ? 1 : -1 }
+        : { created_at: -1 };
 
     const [rows, total, photoTtl] = await Promise.all([
-        User.find(filter).sort({ created_at: -1 }).skip(skip).limit(query.limit),
+        User.find(filter).sort(sortSpec).skip(skip).limit(query.limit),
         User.countDocuments(filter),
         loadPhotoTtlMinutes(),
     ]);

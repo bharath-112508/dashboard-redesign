@@ -38,7 +38,13 @@ const clientProfileCreateSchema = z.object({
     access_type: z.enum(['login', 'readonly_link']),
 });
 
-const roleEnum = z.enum([ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE, ROLES.CLIENT]);
+const roleEnum = z.enum([
+    ROLES.ADMIN,
+    ROLES.MANAGER,
+    ROLES.TEAM_LEAD,
+    ROLES.EMPLOYEE,
+    ROLES.CLIENT,
+]);
 const statusEnum = z.enum([USER_STATUSES.ACTIVE, USER_STATUSES.DEACTIVATED]);
 
 // ─── POST /users ───────────────────────────────────────────────────────────
@@ -120,6 +126,25 @@ export const userIdParamSchema = z.object({
 
 // ─── GET /users ────────────────────────────────────────────────────────────
 
+// Whitelist of sortable fields. Anything outside this list is rejected at
+// validation time so we never wire a Mongo query against an unindexed or
+// PII-leaking column.
+export const USER_SORT_FIELDS = ['full_name', 'email', 'role', 'status', 'created_at'] as const;
+export type UserSortField = (typeof USER_SORT_FIELDS)[number];
+
+const sortParamSchema = z
+    .string()
+    .trim()
+    .regex(/^\w+:(asc|desc)$/, 'sort must be `field:asc` or `field:desc`')
+    .transform((raw) => {
+        const [field, dir] = raw.split(':') as [string, 'asc' | 'desc'];
+        return { field, dir };
+    })
+    .refine(
+        (parsed) => (USER_SORT_FIELDS as readonly string[]).includes(parsed.field),
+        { message: `sort field must be one of ${USER_SORT_FIELDS.join('|')}` }
+    );
+
 export const listUsersQuerySchema = z.object({
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -127,6 +152,7 @@ export const listUsersQuerySchema = z.object({
     status: statusEnum.optional(),
     // R15 — minimum 2 chars to avoid `?q=a` triggering a regex-on-collection scan.
     q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
+    sort: sortParamSchema.optional(),
 }).strict();
 
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
