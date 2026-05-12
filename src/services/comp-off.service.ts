@@ -75,6 +75,24 @@ export const listOwnCompOff = async (
 
 // ─── GET /comp-off ────────────────────────────────────────────────────────
 
+/**
+ * Per-page user-display hydration — mirrors the audit-log / attendance /
+ * leaves pattern so the admin ledger view can render names without an
+ * N+1 to `/users/:id`.
+ */
+interface CompOffUserDisplay {
+    id: string;
+    full_name: string | null;
+}
+
+const loadCompOffUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, CompOffUserDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const users = await User.find({ _id: { $in: ids } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(users.map((u) => [u._id.toString(), { id: u._id.toString(), full_name: u.full_name }]));
+};
+
 export const listCompOff = async (
     query: ListCompOffQuery
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
@@ -87,8 +105,19 @@ export const listCompOff = async (
         CompOffLedger.find(filter).sort({ created_at: -1 }).skip(skip).limit(query.limit),
         CompOffLedger.countDocuments(filter),
     ]);
+
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
+    const userMap = await loadCompOffUserDisplays(userIds);
+
     return {
-        data: rows.map(toPublic),
+        data: rows.map((r) => {
+            const obj = toPublic(r);
+            obj.user = userMap.get(r.user_id.toString()) ?? {
+                id: r.user_id.toString(),
+                full_name: null,
+            };
+            return obj;
+        }),
         meta: {
             page: query.page,
             limit: query.limit,

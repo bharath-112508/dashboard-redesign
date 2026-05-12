@@ -103,6 +103,33 @@ router.post(
     asyncHandler(users.postAdminResetPassword)
 );
 
+// ─── Admin profile photo (per-id resource) ────────────────────────────────
+//
+// Mirrors the `/me/profile-photo*` set but acts on another user. Gated on
+// `USER_WRITE` (same as `PATCH /:id`) so the same admin/manager surface
+// that can edit profile fields can also manage the avatar.
+
+router.post(
+    '/:id/profile-photo-upload-url',
+    requirePermission(PERMISSIONS.USER_WRITE),
+    validate({ params: userIdParamSchema, body: profilePhotoUploadUrlBodySchema }),
+    asyncHandler(users.adminPostProfilePhotoUploadUrl)
+);
+
+router.post(
+    '/:id/profile-photo',
+    requirePermission(PERMISSIONS.USER_WRITE),
+    validate({ params: userIdParamSchema, body: profilePhotoFinalizeBodySchema }),
+    asyncHandler(users.adminPostProfilePhotoFinalize)
+);
+
+router.delete(
+    '/:id/profile-photo',
+    requirePermission(PERMISSIONS.USER_WRITE),
+    validate({ params: userIdParamSchema }),
+    asyncHandler(users.adminDeleteProfilePhoto)
+);
+
 // ─── GDPR DSAR + erasure (BACKEND_AUDIT.md P1-8) ───────────────────────────
 // Admin-only. Two distinct permissions so an org can grant export
 // access to legal/HR without granting the destructive erasure flow.

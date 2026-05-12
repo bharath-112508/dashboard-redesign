@@ -2,7 +2,14 @@ import { Schema, Types, model, type Document, type Model } from 'mongoose';
 
 import { BASE_SCHEMA_OPTIONS } from './_base.js';
 import { COLLECTIONS } from '../constants/collections.js';
-import { ISO_DATE_REGEX, NAME_MAX } from '../constants/holiday.js';
+import {
+    DEFAULT_HOLIDAY_TYPE,
+    DESCRIPTION_MAX,
+    HOLIDAY_TYPES,
+    ISO_DATE_REGEX,
+    NAME_MAX,
+    type HolidayType,
+} from '../constants/holiday.js';
 
 /**
  * `holidays` — Data_Model.md §2.3.
@@ -11,11 +18,15 @@ import { ISO_DATE_REGEX, NAME_MAX } from '../constants/holiday.js';
  * canonical join key for downstream consumers (leave segment generator
  * §10.2, attendance finalizer Step 14).
  *
- * `is_optional` is reserved for future use: HR teams sometimes mark certain
- * regional / restricted holidays as opt-in. The leave/attendance code
- * currently treats every row as a full holiday regardless of this flag —
- * surfacing it only in the calendar response so the FE can render a
- * different chip for optional days.
+ * `type` (public | optional | special) replaces the legacy boolean
+ * `is_optional` flag — see `src/constants/holiday.ts` for the semantics.
+ * The leave / attendance engines still treat every row as a
+ * non-working day regardless of type; the type is informational so the
+ * FE can render distinct chips.
+ *
+ * `description` is free text (≤ 500 chars) so HR can attach context
+ * like "Diwali — office closed Mon–Tue" or "Pandemic shutdown — see
+ * intranet bulletin".
  *
  * Hard delete is OK here: nothing else stores a foreign key to this row, and
  * deleting a holiday simply means "we got the calendar wrong" — the leave
@@ -26,7 +37,8 @@ export interface HolidayDocument extends Document {
     _id: Types.ObjectId;
     date: string;
     name: string;
-    is_optional: boolean;
+    type: HolidayType;
+    description: string;
     created_by: Types.ObjectId;
     created_at: Date;
     updated_at: Date;
@@ -41,7 +53,18 @@ const holidaySchema = new Schema<HolidayDocument>(
             match: [ISO_DATE_REGEX, 'date must be YYYY-MM-DD'],
         },
         name: { type: String, required: true, trim: true, maxlength: NAME_MAX },
-        is_optional: { type: Boolean, required: true, default: false },
+        type: {
+            type: String,
+            enum: HOLIDAY_TYPES,
+            required: true,
+            default: DEFAULT_HOLIDAY_TYPE,
+        },
+        description: {
+            type: String,
+            default: '',
+            trim: true,
+            maxlength: DESCRIPTION_MAX,
+        },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
     },
     {

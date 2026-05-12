@@ -1,7 +1,14 @@
 import { z } from 'zod';
 import dayjs from 'dayjs';
 
-import { BULK_INSERT_MAX, ISO_DATE_REGEX, LIST_MAX_RANGE_YEARS, NAME_MAX } from '../constants/holiday.js';
+import {
+    BULK_INSERT_MAX,
+    DESCRIPTION_MAX,
+    HOLIDAY_TYPES,
+    ISO_DATE_REGEX,
+    LIST_MAX_RANGE_YEARS,
+    NAME_MAX,
+} from '../constants/holiday.js';
 
 /**
  * Zod schemas for `/holidays` (API_Contract.md §4.3, Data_Model.md §2.3).
@@ -28,13 +35,16 @@ const isoDate = z
     .refine((v) => dayjs(v, 'YYYY-MM-DD', true).isValid(), 'Must be a real calendar date');
 
 const nameSchema = z.string().trim().min(1).max(NAME_MAX);
+const typeSchema = z.enum(HOLIDAY_TYPES);
+const descriptionSchema = z.string().trim().max(DESCRIPTION_MAX);
 
 // ─── POST /holidays ────────────────────────────────────────────────────────
 
 export const createHolidayBodySchema = z.object({
     date: isoDate,
     name: nameSchema,
-    is_optional: z.boolean().optional(),
+    type: typeSchema.optional(),
+    description: descriptionSchema.optional(),
 });
 
 export type CreateHolidayBody = z.infer<typeof createHolidayBodySchema>;
@@ -67,7 +77,8 @@ export const patchHolidayBodySchema = z
     .object({
         date: isoDate,
         name: nameSchema,
-        is_optional: z.boolean(),
+        type: typeSchema,
+        description: descriptionSchema,
     })
     .partial()
     .refine((data) => Object.keys(data).length > 0, {
@@ -83,10 +94,7 @@ export const listHolidaysQuerySchema = z
         from_date: isoDate.optional(),
         to_date: isoDate.optional(),
         year: z.coerce.number().int().gte(1970).lte(9999).optional(),
-        is_optional: z
-            .union([z.literal('true'), z.literal('false'), z.boolean()])
-            .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
-            .optional(),
+        type: typeSchema.optional(),
     })
     .superRefine((data, ctx) => {
         if (data.from_date && data.to_date) {

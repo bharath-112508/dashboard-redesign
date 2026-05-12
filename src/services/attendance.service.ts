@@ -10,6 +10,7 @@ import {
     type AttendanceCorrectionRequestDocument,
 } from '../models/attendance-correction-request.model.js';
 import { OfficeLocation } from '../models/office-location.model.js';
+import { User } from '../models/user.model.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
@@ -302,6 +303,28 @@ export const listMyAttendance = async (
 
 // ─── GET /attendance (manager / admin) ───────────────────────────────────
 
+/**
+ * Per-page user-display hydration — mirrors the audit-log
+ * `loadActorDisplays` pattern so the FE doesn't have to N+1 against
+ * `/users/:id` to render names on the team-attendance table.
+ *
+ * `full_name` is nullable to cover the rare "user has been hard-deleted
+ * since the attendance row was written" case; we preserve the id for
+ * traceability and let the FE render a placeholder.
+ */
+interface UserDisplay {
+    id: string;
+    full_name: string | null;
+}
+
+const loadUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, UserDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const rows = await User.find({ _id: { $in: ids } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(rows.map((r) => [r._id.toString(), { id: r._id.toString(), full_name: r.full_name }]));
+};
+
 export const listAttendance = async (
     query: ListAttendanceQuery
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
@@ -324,8 +347,18 @@ export const listAttendance = async (
         AttendanceRecord.countDocuments(filter),
     ]);
 
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
+    const userMap = await loadUserDisplays(userIds);
+
     return {
-        data: rows.map((r) => r.toJSON() as unknown as Record<string, unknown>),
+        data: rows.map((r) => {
+            const obj = r.toJSON() as unknown as Record<string, unknown>;
+            obj.user = userMap.get(r.user_id.toString()) ?? {
+                id: r.user_id.toString(),
+                full_name: null,
+            };
+            return obj;
+        }),
         meta: {
             page: query.page,
             limit: query.limit,

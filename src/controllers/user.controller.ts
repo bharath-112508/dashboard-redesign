@@ -137,6 +137,39 @@ export const deleteProfilePhoto = async (req: Request, res: Response): Promise<R
     return ok(res, data);
 };
 
+// ─── Admin profile-photo endpoints (per-id resource) ────────────────────
+//
+// Mirror the /me/* set above but accept the path-id as the SUBJECT.
+// The acting admin is still `caller` (used for the audit actor); the
+// service resolves blob-key namespacing + audit target to `targetUserId`.
+// Gate on `USER_WRITE` at the route layer (same as `PATCH /users/:id`).
+
+export const adminPostProfilePhotoUploadUrl = async (req: Request, res: Response): Promise<Response> => {
+    const targetUserId = parseTargetId(req);
+    const data = await profilePhotoService.mintUploadUrl(
+        req.body as ProfilePhotoUploadUrlBody,
+        callerForPhoto(req),
+        targetUserId.toString()
+    );
+    return ok(res, data);
+};
+
+export const adminPostProfilePhotoFinalize = async (req: Request, res: Response): Promise<Response> => {
+    const targetUserId = parseTargetId(req);
+    const data = await profilePhotoService.finalizeProfilePhoto(
+        req.body as ProfilePhotoFinalizeBody,
+        callerForPhoto(req),
+        targetUserId.toString()
+    );
+    return ok(res, data);
+};
+
+export const adminDeleteProfilePhoto = async (req: Request, res: Response): Promise<Response> => {
+    const targetUserId = parseTargetId(req);
+    const data = await profilePhotoService.clearProfilePhoto(callerForPhoto(req), targetUserId.toString());
+    return ok(res, data);
+};
+
 // ─── GDPR DSAR + erasure (BACKEND_AUDIT.md P1-8) ────────────────────────────
 //
 // Both endpoints are admin-only via `USER_DATA_EXPORT` /

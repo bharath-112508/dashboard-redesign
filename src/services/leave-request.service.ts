@@ -7,6 +7,7 @@ import timezonePlugin from 'dayjs/plugin/timezone.js';
 import { LeaveRequest, type LeaveRequestDocument, type LeaveSegment } from '../models/leave-request.model.js';
 import { LeaveBalance, recomputeAvailable } from '../models/leave-balance.model.js';
 import { LeaveType, type LeaveTypeDocument } from '../models/leave-type.model.js';
+import { User } from '../models/user.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { SlMonthlyForfeiture } from '../models/sl-monthly-forfeiture.model.js';
 import { AppError } from '../utils/app-error.js';
@@ -576,6 +577,28 @@ const toRequestPublic = async (
     return json;
 };
 
+/**
+ * Per-page user-display hydration — mirrors the audit-log /attendance
+ * pattern so the manager queue can render names without N+1 lookups
+ * against `/users/:id`.
+ *
+ * `full_name` is nullable to cover the rare "user hard-deleted since
+ * the leave row was written" case; we preserve the id so the FE can
+ * still link back.
+ */
+interface LeaveUserDisplay {
+    id: string;
+    full_name: string | null;
+}
+
+const loadLeaveUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, LeaveUserDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const rows = await User.find({ _id: { $in: ids } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(rows.map((r) => [r._id.toString(), { id: r._id.toString(), full_name: r.full_name }]));
+};
+
 export const listLeaves = async (
     query: ListLeavesQuery,
     caller: { id: Types.ObjectId; role: RoleType }
@@ -606,7 +629,21 @@ export const listLeaves = async (
     ]);
 
     const cache = new Map<string, LeaveTypeDocument>();
-    const data = await Promise.all(rows.map((r) => toRequestPublic(r, cache)));
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
+    const [userMap, data] = await Promise.all([
+        loadLeaveUserDisplays(userIds),
+        Promise.all(rows.map((r) => toRequestPublic(r, cache))),
+    ]);
+    for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r) continue;
+        const row = data[i];
+        if (!row) continue;
+        row.user = userMap.get(r.user_id.toString()) ?? {
+            id: r.user_id.toString(),
+            full_name: null,
+        };
+    }
     return {
         data,
         meta: {
@@ -676,10 +713,7 @@ export const approveLeave = async (
             findOpts
         );
         if (!u) {
-            throw AppError.conflict(
-                'Leave request is no longer pending',
-                ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING
-            );
+            throw AppError.conflict('Leave request is no longer pending', ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING);
         }
 
         // Move pending → used on each segment. Same session as the

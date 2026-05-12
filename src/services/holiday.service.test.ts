@@ -63,10 +63,17 @@ const makeHoliday = (overrides: Record<string, unknown> = {}) => {
         _id: new Types.ObjectId(),
         date: '2026-01-26',
         name: 'Republic Day',
-        is_optional: false,
+        type: 'public' as const,
+        description: '',
         save: vi.fn(),
         toJSON() {
-            return { id: this._id.toString(), date: this.date, name: this.name, is_optional: this.is_optional };
+            return {
+                id: this._id.toString(),
+                date: this.date,
+                name: this.name,
+                type: this.type,
+                description: this.description,
+            };
         },
         ...overrides,
     };
@@ -261,19 +268,23 @@ describe('updateHoliday', () => {
     });
 
     it('applies partial fields and saves; audit row carries before/after diff', async () => {
-        const doc = makeHoliday({ name: 'Old', is_optional: false });
+        const doc = makeHoliday({ name: 'Old', type: 'public', description: '' });
         holidayFindByIdMock.mockResolvedValueOnce(doc);
         const audit = makeAudit();
 
-        await svc.updateHoliday(doc._id, { name: 'New', is_optional: true }, audit);
+        await svc.updateHoliday(doc._id, { name: 'New', type: 'optional', description: 'Regional — see HR' }, audit);
 
         expect(doc.save).toHaveBeenCalledTimes(1);
         const [, payload] = recordAuditMock.mock.calls[0]!;
         expect(payload).toMatchObject({
             action: 'holiday.update',
             target: { kind: 'holiday', id: doc._id },
-            before: expect.objectContaining({ name: 'Old', is_optional: false }),
-            after: expect.objectContaining({ name: 'New', is_optional: true }),
+            before: expect.objectContaining({ name: 'Old', type: 'public', description: '' }),
+            after: expect.objectContaining({
+                name: 'New',
+                type: 'optional',
+                description: 'Regional — see HR',
+            }),
         });
     });
 

@@ -363,6 +363,51 @@ export const deleteRate = async (id: Types.ObjectId, caller: BillingRateCaller):
 
 // ─── GET /billing-rates ──────────────────────────────────────────────────
 
+/**
+ * Per-page display hydration — mirrors the audit/attendance/leaves/
+ * timesheet pattern so the admin billing-rate UI can render names
+ * without N+1 lookups.
+ */
+interface BillingRateUserDisplay {
+    id: string;
+    full_name: string | null;
+}
+interface BillingRateProjectDisplay {
+    id: string;
+    name: string;
+    code: string;
+}
+interface BillingRateTaskDisplay {
+    id: string;
+    title: string | null;
+}
+
+const loadBillingRateUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, BillingRateUserDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const users = await User.find({ _id: { $in: ids } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(users.map((u) => [u._id.toString(), { id: u._id.toString(), full_name: u.full_name }]));
+};
+
+const loadBillingRateProjectDisplays = async (
+    ids: Types.ObjectId[]
+): Promise<Map<string, BillingRateProjectDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const projects = await Project.find({ _id: { $in: ids } })
+        .select('_id name code')
+        .lean<{ _id: Types.ObjectId; name: string; code: string }[]>();
+    return new Map(projects.map((p) => [p._id.toString(), { id: p._id.toString(), name: p.name, code: p.code }]));
+};
+
+const loadBillingRateTaskDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, BillingRateTaskDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const tasks = await Task.find({ _id: { $in: ids } })
+        .select('_id title')
+        .lean<{ _id: Types.ObjectId; title: string }[]>();
+    return new Map(tasks.map((t) => [t._id.toString(), { id: t._id.toString(), title: t.title }]));
+};
+
 export const listRates = async (
     query: ListBillingRatesQuery
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
@@ -381,8 +426,40 @@ export const listRates = async (
         BillingRate.countDocuments(filter),
     ]);
 
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
+    const projectIds = Array.from(new Set(rows.map((r) => r.project_id.toString()))).map(
+        (id) => new Types.ObjectId(id)
+    );
+    const taskIds = Array.from(new Set(rows.filter((r) => r.task_id).map((r) => r.task_id!.toString()))).map(
+        (id) => new Types.ObjectId(id)
+    );
+
+    const [userMap, projectMap, taskMap] = await Promise.all([
+        loadBillingRateUserDisplays(userIds),
+        loadBillingRateProjectDisplays(projectIds),
+        loadBillingRateTaskDisplays(taskIds),
+    ]);
+
     return {
-        data: rows.map(toPublic),
+        data: rows.map((r) => {
+            const obj = toPublic(r);
+            obj.user = userMap.get(r.user_id.toString()) ?? {
+                id: r.user_id.toString(),
+                full_name: null,
+            };
+            obj.project = projectMap.get(r.project_id.toString()) ?? {
+                id: r.project_id.toString(),
+                name: null,
+                code: null,
+            };
+            if (r.task_id) {
+                obj.task = taskMap.get(r.task_id.toString()) ?? {
+                    id: r.task_id.toString(),
+                    title: null,
+                };
+            }
+            return obj;
+        }),
         meta: {
             page: query.page,
             limit: query.limit,

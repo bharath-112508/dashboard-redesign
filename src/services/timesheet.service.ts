@@ -6,6 +6,8 @@ import {
     type TimesheetEntryDocument,
 } from '../models/timesheet-entry.model.js';
 import { Task } from '../models/task.model.js';
+import { Project } from '../models/project.model.js';
+import { User } from '../models/user.model.js';
 import { LeaveRequest } from '../models/leave-request.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -519,6 +521,37 @@ export const listMyEntries = async (
     };
 };
 
+/**
+ * Per-page display hydration — mirrors the audit/attendance/leaves
+ * pattern. Lets the admin team-timesheets UI render names and project
+ * labels without N+1 lookups against `/users/:id` and `/projects/:id`.
+ */
+interface TimesheetUserDisplay {
+    id: string;
+    full_name: string | null;
+}
+interface TimesheetProjectDisplay {
+    id: string;
+    name: string;
+    code: string;
+}
+
+const loadTimesheetUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, TimesheetUserDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const users = await User.find({ _id: { $in: ids } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(users.map((u) => [u._id.toString(), { id: u._id.toString(), full_name: u.full_name }]));
+};
+
+const loadTimesheetProjectDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, TimesheetProjectDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const projects = await Project.find({ _id: { $in: ids } })
+        .select('_id name code')
+        .lean<{ _id: Types.ObjectId; name: string; code: string }[]>();
+    return new Map(projects.map((p) => [p._id.toString(), { id: p._id.toString(), name: p.name, code: p.code }]));
+};
+
 /** Manager/admin listing — `user_id` filter optional. */
 export const listAllEntries = async (
     query: ListTimesheetsQuery,
@@ -532,8 +565,29 @@ export const listAllEntries = async (
         TimesheetEntry.find(filter).sort({ local_date: -1, user_id: 1, created_at: -1 }).skip(skip).limit(query.limit),
         TimesheetEntry.countDocuments(filter),
     ]);
+
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
+    const projectIds = Array.from(new Set(rows.filter((r) => r.project_id).map((r) => r.project_id!.toString()))).map(
+        (id) => new Types.ObjectId(id)
+    );
+    const [userMap, projectMap] = await Promise.all([
+        loadTimesheetUserDisplays(userIds),
+        loadTimesheetProjectDisplays(projectIds),
+    ]);
+
     return {
-        data: rows.map(toPublic),
+        data: rows.map((r) => {
+            const obj = toPublic(r);
+            obj.user = userMap.get(r.user_id.toString()) ?? {
+                id: r.user_id.toString(),
+                full_name: null,
+            };
+            if (r.project_id) {
+                const pid = r.project_id.toString();
+                obj.project = projectMap.get(pid) ?? { id: pid, name: null, code: null };
+            }
+            return obj;
+        }),
         meta: {
             page: query.page,
             limit: query.limit,
@@ -564,12 +618,34 @@ const groupKeyForBy = (groupBy: TimesheetSummaryGroupBy): Record<string, unknown
         case 'user':
             return { user_id: '$user_id' };
         case 'project':
-            return { project_id: '$project_id' };
+            // When grouping by project, split rows without a project_id
+            // (i.e. entry_type='general') by their `general_category` so
+            // each general bucket — Meetings, Code review, etc. — gets
+            // its own row instead of being lumped into a single null.
+            return {
+                project_id: '$project_id',
+                general_category: {
+                    $cond: [{ $eq: ['$project_id', null] }, '$general_category', null],
+                },
+            };
         case 'task':
             return { task_id: '$task_id' };
         case 'date':
             return { local_date: '$local_date' };
     }
+};
+
+interface TimesheetTaskDisplay {
+    id: string;
+    title: string | null;
+}
+
+const loadTimesheetTaskDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, TimesheetTaskDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const tasks = await Task.find({ _id: { $in: ids } })
+        .select('_id title')
+        .lean<{ _id: Types.ObjectId; title: string }[]>();
+    return new Map(tasks.map((t) => [t._id.toString(), { id: t._id.toString(), title: t.title }]));
 };
 
 export const summary = async (query: SummaryQuery, caller: Caller): Promise<Array<Record<string, unknown>>> => {
@@ -606,13 +682,54 @@ export const summary = async (query: SummaryQuery, caller: Caller): Promise<Arra
         { $sort: { total_minutes: -1 } },
     ]);
 
-    return rows.map((r) => ({
-        group_key: r._id,
-        billable_total_minutes: r.billable_total_minutes,
-        non_billable_total_minutes: r.non_billable_total_minutes,
-        total_minutes: r.total_minutes,
-        entry_count: r.entry_count,
-    }));
+    // Hydrate display info matching `group_by`. Each row's `group_key`
+    // carries one of `user_id` / `project_id` / `task_id` / `local_date`;
+    // we batch-load the matching collection once per page so the FE can
+    // render names without N+1 lookups.
+    const collectIds = (key: 'user_id' | 'project_id' | 'task_id'): Types.ObjectId[] =>
+        Array.from(
+            new Set(
+                rows
+                    .map((r) => r._id[key])
+                    .filter((v): v is Types.ObjectId | string => v != null)
+                    .map((v) => (v instanceof Types.ObjectId ? v.toString() : String(v)))
+            )
+        ).map((s) => new Types.ObjectId(s));
+
+    let userMap: Map<string, TimesheetUserDisplay> = new Map();
+    let projectMap: Map<string, TimesheetProjectDisplay> = new Map();
+    let taskMap: Map<string, TimesheetTaskDisplay> = new Map();
+    if (query.group_by === 'user') {
+        userMap = await loadTimesheetUserDisplays(collectIds('user_id'));
+    } else if (query.group_by === 'project') {
+        projectMap = await loadTimesheetProjectDisplays(collectIds('project_id'));
+    } else if (query.group_by === 'task') {
+        taskMap = await loadTimesheetTaskDisplays(collectIds('task_id'));
+    }
+
+    return rows.map((r) => {
+        const out: Record<string, unknown> = {
+            group_key: r._id,
+            billable_total_minutes: r.billable_total_minutes,
+            non_billable_total_minutes: r.non_billable_total_minutes,
+            total_minutes: r.total_minutes,
+            entry_count: r.entry_count,
+        };
+        if (query.group_by === 'user') {
+            const id = r._id.user_id;
+            const idStr = id instanceof Types.ObjectId ? id.toString() : id ? String(id) : null;
+            out.user = idStr ? (userMap.get(idStr) ?? { id: idStr, full_name: null }) : null;
+        } else if (query.group_by === 'project') {
+            const id = r._id.project_id;
+            const idStr = id instanceof Types.ObjectId ? id.toString() : id ? String(id) : null;
+            out.project = idStr ? (projectMap.get(idStr) ?? { id: idStr, name: null, code: null }) : null;
+        } else if (query.group_by === 'task') {
+            const id = r._id.task_id;
+            const idStr = id instanceof Types.ObjectId ? id.toString() : id ? String(id) : null;
+            out.task = idStr ? (taskMap.get(idStr) ?? { id: idStr, title: null }) : null;
+        }
+        return out;
+    });
 };
 
 // ─── Internal: used by the timesheet-reminder cron job ───────────────────

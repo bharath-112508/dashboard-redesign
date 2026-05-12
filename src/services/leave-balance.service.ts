@@ -122,9 +122,7 @@ export const initializeBalancesForUserYear = async (params: {
     // so an unconditional chain breaks them; the production code path
     // (where Mongoose returns real Query objects) supports both forms.
     if (joining_year === undefined || joining_month === undefined) {
-        const userQuery = User.findById(params.user_id).select(
-            'role status internal_profile.date_of_joining'
-        );
+        const userQuery = User.findById(params.user_id).select('role status internal_profile.date_of_joining');
         if (params.session) userQuery.session(params.session);
         const u = await userQuery;
         if (!u) return 0;
@@ -290,6 +288,24 @@ export const listOwnBalances = async (user_id: Types.ObjectId, year?: number): P
     return Promise.all(rows.map((r) => toBalancePublic(r, cache)));
 };
 
+/**
+ * Per-page user-display hydration — mirrors the audit-log / attendance /
+ * leaves pattern. Lets the admin team-balances UI render names without
+ * N+1 lookups against `/users/:id`.
+ */
+interface BalanceUserDisplay {
+    id: string;
+    full_name: string | null;
+}
+
+const loadBalanceUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, BalanceUserDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const users = await User.find({ _id: { $in: ids } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(users.map((u) => [u._id.toString(), { id: u._id.toString(), full_name: u.full_name }]));
+};
+
 export const listBalances = async (query: ListLeaveBalancesQuery): Promise<Record<string, unknown>[]> => {
     const filter: Filter = {};
     const targetYear = query.year ?? currentYear();
@@ -305,8 +321,23 @@ export const listBalances = async (query: ListLeaveBalancesQuery): Promise<Recor
     }
 
     const rows = await LeaveBalance.find(filter).sort({ user_id: 1, leave_type_id: 1 });
-    const cache = await buildTypeCache(rows);
-    return Promise.all(rows.map((r) => toBalancePublic(r, cache)));
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
+    const [cache, userMap, data] = await Promise.all([
+        buildTypeCache(rows),
+        loadBalanceUserDisplays(userIds),
+        Promise.resolve(rows),
+    ]);
+    const out = await Promise.all(data.map((r) => toBalancePublic(r, cache)));
+    for (let i = 0; i < data.length; i++) {
+        const r = data[i];
+        const o = out[i];
+        if (!r || !o) continue;
+        o.user = userMap.get(r.user_id.toString()) ?? {
+            id: r.user_id.toString(),
+            full_name: null,
+        };
+    }
+    return out;
 };
 
 // ─── PATCH /leave-balances/:id ────────────────────────────────────────────

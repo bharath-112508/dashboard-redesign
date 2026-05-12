@@ -148,19 +148,28 @@ const loadSasTtl = async (): Promise<SasTtl> => {
 };
 
 // ─── POST /users/me/profile-photo-upload-url ─────────────────────────────
+//
+// `targetUserId` is optional. The /me/* routes pass nothing — the caller
+// is the subject. The admin /users/:id/* routes pass the path id so a
+// privileged caller can mint an upload URL on behalf of another user;
+// the audit row's `actor_id` is still the admin (caller.audit), and the
+// blob_key is namespaced under the SUBJECT's id, not the actor's.
 
 export const mintUploadUrl = async (
     input: ProfilePhotoUploadUrlBody,
-    caller: ProfilePhotoCaller
+    caller: ProfilePhotoCaller,
+    targetUserId?: string
 ): Promise<MintProfilePhotoUploadUrlResult> => {
     assertAzureConfigured();
 
     assertSizeAllowed(input.file_size);
     assertMimeAllowed(input.mime_type);
 
+    const subjectId = targetUserId ? new Types.ObjectId(targetUserId) : caller.id;
+
     const ttl = await loadSasTtl();
     const container = AZURE_BLOB_PROFILE_PHOTOS_CONTAINER;
-    const blobKey = buildBlobKey(caller.id, input.file_name);
+    const blobKey = buildBlobKey(subjectId, input.file_name);
 
     let minted: { url: string; expires_at: Date };
     try {
@@ -207,18 +216,21 @@ export const mintUploadUrl = async (
 
 export const finalizeProfilePhoto = async (
     input: ProfilePhotoFinalizeBody,
-    caller: ProfilePhotoCaller
+    caller: ProfilePhotoCaller,
+    targetUserId?: string
 ): Promise<Record<string, unknown>> => {
     assertAzureConfigured();
 
     assertSizeAllowed(input.file_size);
     assertMimeAllowed(input.mime_type);
 
-    // Re-validate the blob_key prefix: must be under this caller's
+    const subjectId = targetUserId ? new Types.ObjectId(targetUserId) : caller.id;
+
+    // Re-validate the blob_key prefix: must be under the SUBJECT's
     // namespace AND in the configured profile-photo container. Either
     // mismatch is treated identically — the FE never legitimately
-    // produces a key outside its own scope.
-    const expectedPrefix = expectedBlobKeyPrefix(caller.id);
+    // produces a key outside the subject's own scope.
+    const expectedPrefix = expectedBlobKeyPrefix(subjectId);
     if (!input.blob_key.startsWith(expectedPrefix) || input.blob_container !== AZURE_BLOB_PROFILE_PHOTOS_CONTAINER) {
         throw AppError.unprocessable(
             'blob_key does not belong to this user / container',
@@ -249,7 +261,7 @@ export const finalizeProfilePhoto = async (
     }
     if (typeof head.size === 'number') assertSizeAllowed(head.size);
 
-    const user = await loadUser(caller.id);
+    const user = await loadUser(subjectId);
     const previousBlobKey = user.profile_photo_blob_key;
 
     user.profile_photo_blob_key = input.blob_key;
@@ -288,9 +300,11 @@ export const finalizeProfilePhoto = async (
 // The blob delete is best-effort.
 
 export const clearProfilePhoto = async (
-    caller: ProfilePhotoCaller
+    caller: ProfilePhotoCaller,
+    targetUserId?: string
 ): Promise<{ cleared: true; previous_blob_key: string | null }> => {
-    const user = await loadUser(caller.id);
+    const subjectId = targetUserId ? new Types.ObjectId(targetUserId) : caller.id;
+    const user = await loadUser(subjectId);
     const previousBlobKey = user.profile_photo_blob_key;
 
     if (previousBlobKey === null) {

@@ -4,6 +4,7 @@ import { Holiday, type HolidayDocument } from '../models/holiday.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import { DEFAULT_HOLIDAY_TYPE } from '../constants/holiday.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import type {
     BulkCreateHolidaysBody,
@@ -47,7 +48,8 @@ export const createHoliday = async (
         const doc = await Holiday.create({
             date: input.date,
             name: input.name,
-            is_optional: input.is_optional ?? false,
+            type: input.type ?? DEFAULT_HOLIDAY_TYPE,
+            description: input.description ?? '',
             created_by,
         });
         if (audit) {
@@ -86,7 +88,8 @@ export const bulkCreateHolidays = async (
         .map((i) => ({
             date: i.date,
             name: i.name,
-            is_optional: i.is_optional ?? false,
+            type: i.type ?? DEFAULT_HOLIDAY_TYPE,
+            description: i.description ?? '',
             created_by,
         }));
 
@@ -170,8 +173,8 @@ export const listHolidays = async (
     } else if (to) {
         filter.date = { $lte: to };
     }
-    if (query.is_optional !== undefined) {
-        filter.is_optional = query.is_optional;
+    if (query.type !== undefined) {
+        filter.type = query.type;
     }
 
     const rows = await Holiday.find(filter).sort({ date: 1 });
@@ -197,7 +200,8 @@ export const updateHoliday = async (
 
     if (patch.date !== undefined) doc.date = patch.date;
     if (patch.name !== undefined) doc.name = patch.name;
-    if (patch.is_optional !== undefined) doc.is_optional = patch.is_optional;
+    if (patch.type !== undefined) doc.type = patch.type;
+    if (patch.description !== undefined) doc.description = patch.description;
 
     try {
         await doc.save();
