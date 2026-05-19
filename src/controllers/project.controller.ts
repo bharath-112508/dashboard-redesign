@@ -11,6 +11,7 @@ import type {
     CreateProjectBody,
     ListProjectsQuery,
     PatchCustomStatusBody,
+    PatchDefaultStatusOrdersBody,
     PatchProjectBody,
     ProjectClientsBulkBody,
     ProjectMembersBulkBody,
@@ -101,6 +102,18 @@ export const getCustomStatuses = async (req: Request, res: Response): Promise<Re
 export const postCustomStatus = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.addCustomStatus(idOf(req), req.body as CreateCustomStatusBody, callerOf(req));
     return created(res, data);
+};
+
+export const patchDefaultStatusOrders = async (
+    req: Request,
+    res: Response
+): Promise<Response> => {
+    const data = await service.patchDefaultStatusOrders(
+        idOf(req),
+        req.body as PatchDefaultStatusOrdersBody,
+        callerOf(req)
+    );
+    return ok(res, data);
 };
 
 // ─── Custom statuses (top-level item routes by sub-doc id) ───────────────

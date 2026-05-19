@@ -11,6 +11,7 @@ import {
     createCustomStatusBodySchema,
     createProjectBodySchema,
     listProjectsQuerySchema,
+    patchDefaultStatusOrdersBodySchema,
     patchProjectBodySchema,
     projectClientIdParamSchema,
     projectClientsBulkBodySchema,
@@ -144,6 +145,18 @@ router.post(
     requirePermission(PERMISSIONS.PROJECT_WRITE),
     validate({ params: projectIdParamSchema, body: createCustomStatusBodySchema }),
     asyncHandler(ctrl.postCustomStatus)
+);
+
+// ─── Default-status ordering: /projects/:id/default-status-orders ────────
+// Reorder the four built-in status columns (`to_do` / `in_progress` /
+// `review` / `done`) for this project. Admins / managers can interleave
+// defaults with custom columns on the board.
+
+router.patch(
+    '/:id/default-status-orders',
+    requirePermission(PERMISSIONS.PROJECT_WRITE),
+    validate({ params: projectIdParamSchema, body: patchDefaultStatusOrdersBodySchema }),
+    asyncHandler(ctrl.patchDefaultStatusOrders)
 );
 
 // ─── Sprints (nested create + list) ──────────────────────────────────────

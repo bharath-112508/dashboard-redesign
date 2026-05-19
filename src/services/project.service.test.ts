@@ -569,7 +569,13 @@ describe('custom statuses', () => {
         await expect(
             svc.addCustomStatus(
                 proj._id,
-                { key: 'qa_passed', label: 'QA Again', order: 6, is_terminal: false },
+                {
+                    key: 'qa_passed',
+                    label: 'QA Again',
+                    order: 6,
+                    is_terminal: false,
+                    is_active: true,
+                },
                 adminCaller()
             )
         ).rejects.toMatchObject({ code: ERROR_CODES.CUSTOM_STATUS_KEY_TAKEN });
@@ -582,7 +588,13 @@ describe('custom statuses', () => {
 
         const out = await svc.addCustomStatus(
             proj._id,
-            { key: 'qa_passed', label: 'QA Passed', order: 5, is_terminal: false },
+            {
+                key: 'qa_passed',
+                label: 'QA Passed',
+                order: 5,
+                is_terminal: false,
+                is_active: true,
+            },
             adminCaller()
         );
 

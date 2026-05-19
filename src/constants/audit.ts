@@ -130,6 +130,9 @@ export const AUDIT_ACTIONS = {
     PROJECT_CUSTOM_STATUS_CREATE: 'project.custom_status_create',
     PROJECT_CUSTOM_STATUS_UPDATE: 'project.custom_status_update',
     PROJECT_CUSTOM_STATUS_DELETE: 'project.custom_status_delete',
+    /** Project's `default_status_orders` (built-in column ordering) was
+     *  re-arranged by an admin / manager. */
+    PROJECT_DEFAULT_STATUS_ORDERS_UPDATE: 'project.default_status_orders_update',
     SPRINT_CREATE: 'sprint.create',
     SPRINT_UPDATE: 'sprint.update',
     SPRINT_DELETE: 'sprint.delete',

@@ -49,8 +49,9 @@ const customStatusKeySchema = z
 export const createCustomStatusBodySchema = z.object({
     key: customStatusKeySchema,
     label: z.string().trim().min(1).max(CUSTOM_STATUS_LABEL_MAX),
-    order: z.number().int().min(0).max(999).default(0),
+    order: z.number().int().min(0).max(99_999).default(0),
     is_terminal: z.boolean().default(false),
+    is_active: z.boolean().default(true),
 });
 
 export type CreateCustomStatusBody = z.infer<typeof createCustomStatusBodySchema>;
@@ -58,13 +59,44 @@ export type CreateCustomStatusBody = z.infer<typeof createCustomStatusBodySchema
 export const patchCustomStatusBodySchema = z
     .object({
         label: z.string().trim().min(1).max(CUSTOM_STATUS_LABEL_MAX),
-        order: z.number().int().min(0).max(999),
+        order: z.number().int().min(0).max(99_999),
         is_terminal: z.boolean(),
+        is_active: z.boolean(),
     })
     .partial()
     .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be supplied' });
 
 export type PatchCustomStatusBody = z.infer<typeof patchCustomStatusBodySchema>;
+
+// ─── PATCH /projects/:id/default-status-orders ────────────────────────────
+//
+// Reorders the four built-in statuses for a project. Body must include
+// each canonical key exactly once with a non-negative integer order. The
+// service replaces the whole array atomically — no partial updates so the
+// "each key exactly once" invariant is easy to enforce.
+
+export const patchDefaultStatusOrdersBodySchema = z.object({
+    orders: z
+        .array(
+            z.object({
+                key: z.enum(DEFAULT_TASK_STATUS_KEYS as unknown as [string, ...string[]]),
+                order: z.number().int().min(0).max(99_999),
+                // Optional — when omitted, the service preserves the
+                // current value so older callers that only reorder
+                // keep working without sending the flag explicitly.
+                is_active: z.boolean().optional(),
+            })
+        )
+        .length(DEFAULT_TASK_STATUS_KEYS.length, {
+            message: `orders must contain exactly ${DEFAULT_TASK_STATUS_KEYS.length} entries`,
+        })
+        .refine(
+            (arr) => new Set(arr.map((o) => o.key)).size === DEFAULT_TASK_STATUS_KEYS.length,
+            { message: 'each default-status key must appear exactly once' }
+        ),
+});
+
+export type PatchDefaultStatusOrdersBody = z.infer<typeof patchDefaultStatusOrdersBodySchema>;
 
 // ─── POST /projects ───────────────────────────────────────────────────────
 

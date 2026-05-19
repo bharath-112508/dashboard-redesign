@@ -54,6 +54,31 @@ export const SPRINT_STATUS_VALUES: readonly SprintStatus[] = Object.values(SPRIN
 
 export const DEFAULT_TASK_STATUS_KEYS = ['to_do', 'in_progress', 'review', 'done'] as const;
 
+// Canonical board ordering of the four built-in statuses. Project create
+// seeds `default_status_orders[]` with these values; admins can re-arrange
+// per project via `PATCH /projects/:id/default-status-orders`. Values are
+// spaced by 100 so customs can be interleaved without renumbering.
+export const DEFAULT_STATUS_ORDER_VALUES: Record<
+    (typeof DEFAULT_TASK_STATUS_KEYS)[number],
+    number
+> = {
+    to_do: 100,
+    in_progress: 200,
+    review: 300,
+    done: 400,
+};
+
+export const buildCanonicalDefaultOrders = (): Array<{
+    key: string;
+    order: number;
+    is_active: boolean;
+}> =>
+    DEFAULT_TASK_STATUS_KEYS.map((k) => ({
+        key: k,
+        order: DEFAULT_STATUS_ORDER_VALUES[k],
+        is_active: true,
+    }));
+
 // ─── Custom-task-status caps ─────────────────────────────────────────────
 
 export const CUSTOM_STATUS_KEY_MAX = 40;

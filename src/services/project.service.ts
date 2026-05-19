@@ -584,15 +584,35 @@ export const listCustomStatuses = async (
     id: Types.ObjectId,
     caller: ProjectCaller
 ): Promise<{
-    defaults: { key: string }[];
-    custom: Array<Pick<CustomTaskStatus, 'key' | 'label' | 'order' | 'is_terminal'> & { id: string }>;
+    defaults: { key: string; order: number; is_active: boolean }[];
+    custom: Array<
+        Pick<CustomTaskStatus, 'key' | 'label' | 'order' | 'is_terminal' | 'is_active'> & {
+            id: string;
+        }
+    >;
 }> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
     assertCallerCanRead(doc, caller);
 
+    // Defaults are returned with their project-scoped `order` + `is_active`
+    // values so the FE can merge defaults + customs into a single sorted
+    // column list and filter hidden columns out. Fall-back values keep
+    // the API safe during the migration window for pre-existing projects.
+    const orderByKey = new Map<string, number>();
+    const activeByKey = new Map<string, boolean>();
+    for (const o of doc.default_status_orders ?? []) {
+        orderByKey.set(o.key, o.order);
+        activeByKey.set(o.key, o.is_active);
+    }
+    const defaults = DEFAULT_TASK_STATUS_KEYS.map((k, i) => ({
+        key: k,
+        order: orderByKey.get(k) ?? (i + 1) * 100,
+        is_active: activeByKey.get(k) ?? true,
+    })).sort((a, b) => a.order - b.order);
+
     return {
-        defaults: DEFAULT_TASK_STATUS_KEYS.map((k) => ({ key: k })),
+        defaults,
         custom: doc.custom_task_statuses
             .map((s) => ({
                 id: s._id.toString(),
@@ -600,6 +620,7 @@ export const listCustomStatuses = async (
                 label: s.label,
                 order: s.order,
                 is_terminal: s.is_terminal,
+                is_active: s.is_active,
             }))
             .sort((a, b) => a.order - b.order),
     };
@@ -624,6 +645,7 @@ export const addCustomStatus = async (
         label: body.label,
         order: body.order,
         is_terminal: body.is_terminal,
+        is_active: body.is_active,
     });
     doc.custom_task_statuses.push(sub);
     await doc.save();
@@ -642,7 +664,72 @@ export const addCustomStatus = async (
         label: sub.label,
         order: sub.order,
         is_terminal: sub.is_terminal,
+        is_active: sub.is_active,
     };
+};
+
+/**
+ * Replace the project's `default_status_orders` array atomically. Body
+ * validator already guarantees:
+ *   - exactly four entries
+ *   - each canonical key appears exactly once
+ *   - `order` is a non-negative integer
+ *
+ * So this just maps body → schema shape and writes. Returns the updated
+ * `defaults` array in the same shape `listCustomStatuses` uses, so the FE
+ * can swap it into its cache without an extra GET.
+ */
+export const patchDefaultStatusOrders = async (
+    id: Types.ObjectId,
+    body: { orders: Array<{ key: string; order: number; is_active?: boolean }> },
+    caller: ProjectCaller
+): Promise<{
+    defaults: { key: string; order: number; is_active: boolean }[];
+}> => {
+    const doc = await Project.findById(id);
+    if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    assertCallerCanRead(doc, caller);
+
+    // Snapshot current is_active per key so we can preserve values for
+    // entries where the caller omitted the flag (validator marks it
+    // optional). Then atomically replace the array.
+    const activeByKey = new Map<string, boolean>();
+    for (const o of doc.default_status_orders) {
+        activeByKey.set(o.key, o.is_active);
+    }
+    const before = doc.default_status_orders.map((o) => ({
+        key: o.key,
+        order: o.order,
+        is_active: o.is_active,
+    }));
+
+    doc.default_status_orders.splice(0);
+    for (const entry of body.orders) {
+        doc.default_status_orders.push({
+            key: entry.key,
+            order: entry.order,
+            is_active: entry.is_active ?? activeByKey.get(entry.key) ?? true,
+        });
+    }
+    await doc.save();
+
+    const after = doc.default_status_orders.map((o) => ({
+        key: o.key,
+        order: o.order,
+        is_active: o.is_active,
+    }));
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.PROJECT_DEFAULT_STATUS_ORDERS_UPDATE,
+            target: { kind: AUDIT_TARGET_KINDS.PROJECT, id: doc._id },
+            before: { default_status_orders: before },
+            after: { default_status_orders: after },
+        });
+    }
+
+    const defaults = after.slice().sort((a, b) => a.order - b.order);
+    return { defaults };
 };
 
 // Top-level lookup: `PATCH /project-custom-statuses/:id` — find owning project
@@ -667,11 +754,13 @@ export const patchCustomStatus = async (
         label: sub.label,
         order: sub.order,
         is_terminal: sub.is_terminal,
+        is_active: sub.is_active,
     };
 
     if (patch.label !== undefined) sub.label = patch.label;
     if (patch.order !== undefined) sub.order = patch.order;
     if (patch.is_terminal !== undefined) sub.is_terminal = patch.is_terminal;
+    if (patch.is_active !== undefined) sub.is_active = patch.is_active;
 
     await doc.save();
 
@@ -687,6 +776,7 @@ export const patchCustomStatus = async (
                     label: sub.label,
                     order: sub.order,
                     is_terminal: sub.is_terminal,
+                    is_active: sub.is_active,
                 },
             },
         });
@@ -698,6 +788,7 @@ export const patchCustomStatus = async (
         label: sub.label,
         order: sub.order,
         is_terminal: sub.is_terminal,
+        is_active: sub.is_active,
     };
 };
 

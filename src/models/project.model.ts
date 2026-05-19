@@ -3,10 +3,12 @@ import { Schema, Types, model, type Document, type Model } from 'mongoose';
 import { BASE_SCHEMA_OPTIONS } from './_base.js';
 import { COLLECTIONS } from '../constants/collections.js';
 import {
+    buildCanonicalDefaultOrders,
     CUSTOM_STATUSES_PER_PROJECT_MAX,
     CUSTOM_STATUS_KEY_MAX,
     CUSTOM_STATUS_KEY_REGEX,
     CUSTOM_STATUS_LABEL_MAX,
+    DEFAULT_TASK_STATUS_KEYS,
     PROJECT_CLIENTS_MAX,
     PROJECT_CODE_MAX,
     PROJECT_CODE_REGEX,
@@ -53,6 +55,10 @@ export interface CustomTaskStatus {
     label: string;
     order: number;
     is_terminal: boolean;
+    /** When false, the status column is hidden from the board / new task
+     *  dropdowns, but tasks already assigned to it are kept (no data
+     *  loss). Default `true` so existing rows continue to render. */
+    is_active: boolean;
 }
 
 const customTaskStatusSchema = new Schema<CustomTaskStatus>(
@@ -67,8 +73,39 @@ const customTaskStatusSchema = new Schema<CustomTaskStatus>(
         label: { type: String, required: true, trim: true, maxlength: CUSTOM_STATUS_LABEL_MAX },
         order: { type: Number, required: true, min: 0, default: 0 },
         is_terminal: { type: Boolean, required: true, default: false },
+        is_active: { type: Boolean, required: true, default: true },
     },
     { _id: true, timestamps: false, versionKey: false }
+);
+
+// ─── Sub-doc: default-status ordering ────────────────────────────────────
+//
+// Each project carries an `order` value for each of the four built-in
+// statuses so admins can interleave defaults with custom columns on the
+// board. `key` must be one of `DEFAULT_TASK_STATUS_KEYS`; `order` is a
+// non-negative integer (no uniqueness constraint — ties are sorted by
+// canonical key order, which gives a stable render).
+
+export interface DefaultStatusOrder {
+    key: string;
+    order: number;
+    /** Whether this built-in column is shown on the board. Default
+     *  `true`; admins can deactivate individual built-ins (e.g. hide
+     *  "review" for a project that doesn't use review steps). */
+    is_active: boolean;
+}
+
+const defaultStatusOrderSchema = new Schema<DefaultStatusOrder>(
+    {
+        key: {
+            type: String,
+            required: true,
+            enum: DEFAULT_TASK_STATUS_KEYS,
+        },
+        order: { type: Number, required: true, min: 0 },
+        is_active: { type: Boolean, required: true, default: true },
+    },
+    { _id: false, timestamps: false, versionKey: false }
 );
 
 // ─── Project document ────────────────────────────────────────────────────
@@ -85,6 +122,7 @@ export interface ProjectDocument extends Document {
     member_ids: Types.ObjectId[];
     client_ids: Types.ObjectId[];
     custom_task_statuses: Types.DocumentArray<CustomTaskStatus>;
+    default_status_orders: Types.DocumentArray<DefaultStatusOrder>;
     created_by: Types.ObjectId;
     created_at: Date;
     updated_at: Date;
@@ -150,6 +188,35 @@ const projectSchema = new Schema<ProjectDocument>(
             validate: {
                 validator: (v: CustomTaskStatus[]) => v.length <= CUSTOM_STATUSES_PER_PROJECT_MAX,
                 message: `custom_task_statuses cannot exceed ${CUSTOM_STATUSES_PER_PROJECT_MAX} entries`,
+            },
+        },
+        // Project-scoped ordering of the four built-in statuses. Seeded
+        // with the canonical 100/200/300/400 values on create; admins
+        // re-order via the dedicated PATCH endpoint. Customs already
+        // carry their own `order`; the FE merges the two arrays and
+        // sorts by `order` to render the board.
+        default_status_orders: {
+            type: [defaultStatusOrderSchema],
+            default: buildCanonicalDefaultOrders,
+            validate: {
+                // Each of the four canonical keys must appear exactly once.
+                // Prevents drift (e.g. a key disappearing or a duplicate
+                // entry that would cause the board to render two columns
+                // for the same key).
+                validator: (v: DefaultStatusOrder[]) => {
+                    if (v.length !== DEFAULT_TASK_STATUS_KEYS.length) return false;
+                    const seen = new Set<string>();
+                    for (const entry of v) {
+                        if (seen.has(entry.key)) return false;
+                        seen.add(entry.key);
+                    }
+                    for (const k of DEFAULT_TASK_STATUS_KEYS) {
+                        if (!seen.has(k)) return false;
+                    }
+                    return true;
+                },
+                message:
+                    'default_status_orders must contain each of the four built-in keys exactly once',
             },
         },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
