@@ -940,10 +940,54 @@ export const calendarLeaves = async (query: CalendarLeavesQuery): Promise<Record
     // Hydrate leave-type info (via toRequestPublic) AND user display so the
     // FE calendar can render real names + type codes instead of "…<id>".
     // Same shape the list endpoint stamps, so the FE consumer is identical.
+    //
+    // Additionally stamp `display_end_date` — the LAST WORKING DAY in
+    // [start_date, end_date]. The bar in the FE calendar uses this as the
+    // visual endDate so a Thu→Sat request shows a 2-day bar (Thu–Fri) that
+    // matches the `total_days` count instead of visually spanning the
+    // weekend cells where nothing was consumed.
     const cache = new Map<string, LeaveTypeDocument>();
     const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map(
         (id) => new Types.ObjectId(id),
     );
+    const settings = await getOrInitSettings();
+    const workingDays = settings.work_schedule?.working_days ?? [1, 2, 3, 4, 5];
+    // Holiday window spans the union of every row's range so we don't miss
+    // holidays that fall inside a leave but outside the visible month.
+    const spanFrom = rows.reduce(
+        (acc, r) => (acc === '' || r.start_date < acc ? r.start_date : acc),
+        '' as string,
+    );
+    const spanTo = rows.reduce(
+        (acc, r) => (acc === '' || r.end_date > acc ? r.end_date : acc),
+        '' as string,
+    );
+    const holidayRows = spanFrom && spanTo
+        ? await Holiday.find({ date: { $gte: spanFrom, $lte: spanTo } }).select({
+              date: 1,
+              _id: 0,
+          })
+        : [];
+    const holidaySet = new Set(holidayRows.map((h) => h.date));
+
+    const lastWorkingDay = (startIso: string, endIso: string): string => {
+        // Walk backward from endIso, skipping non-working weekdays + holidays.
+        // Return the original end if no working day exists in the range
+        // (shouldn't happen — apply validates total_days > 0 — but defensive).
+        const [sy, sm, sd] = startIso.split('-').map(Number);
+        const startMs = new Date(sy!, (sm ?? 1) - 1, sd!).getTime();
+        const [ey, em, ed] = endIso.split('-').map(Number);
+        const cursor = new Date(ey!, (em ?? 1) - 1, ed!);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        while (cursor.getTime() >= startMs) {
+            const dow = cursor.getDay();
+            const iso = `${cursor.getFullYear()}-${pad(cursor.getMonth() + 1)}-${pad(cursor.getDate())}`;
+            if (workingDays.includes(dow) && !holidaySet.has(iso)) return iso;
+            cursor.setDate(cursor.getDate() - 1);
+        }
+        return endIso;
+    };
+
     const [userMap, data] = await Promise.all([
         loadLeaveUserDisplays(userIds),
         Promise.all(rows.map((r) => toRequestPublic(r, cache))),
@@ -957,6 +1001,7 @@ export const calendarLeaves = async (query: CalendarLeavesQuery): Promise<Record
             id: r.user_id.toString(),
             full_name: null,
         };
+        row.display_end_date = lastWorkingDay(r.start_date, r.end_date);
     }
     return data;
 };
