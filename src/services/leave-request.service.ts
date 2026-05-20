@@ -106,14 +106,12 @@ interface ApplyContext {
     activeTypes: LeaveTypeDocument[];
     typesByCode: Map<LeaveCode | string, LeaveTypeDocument>;
     typesById: Map<string, LeaveTypeDocument>;
-    clNoticeDays: number;
     timezone: string;
 }
 
 const loadApplyContext = async (spanFrom: string, spanTo: string): Promise<ApplyContext> => {
     const settings = await getOrInitSettings();
     const workingDays = settings.work_schedule?.working_days ?? [1, 2, 3, 4, 5];
-    const clNoticeDays = settings.leave_policy?.cl_advance_notice_days ?? 14;
 
     const [holidays, types] = await Promise.all([
         Holiday.find({ date: { $gte: spanFrom, $lte: spanTo } }).select({ date: 1, _id: 0 }),
@@ -126,7 +124,6 @@ const loadApplyContext = async (spanFrom: string, spanTo: string): Promise<Apply
         activeTypes: types,
         typesByCode: new Map(types.map((t) => [t.code, t])),
         typesById: new Map(types.map((t) => [t._id.toString(), t])),
-        clNoticeDays,
         timezone: settings.default_timezone || LEAVE_TIMEZONE,
     };
 };
@@ -340,13 +337,19 @@ export const applyLeave = async (
         throw AppError.unprocessable('Backdated leave is not allowed', ERROR_CODES.LEAVE_BACKDATED_NOT_ALLOWED);
     }
 
-    if (requestedType.code === LEAVE_CODES.CL && ctx.clNoticeDays > 0) {
-        const earliest = dayjs(today).add(ctx.clNoticeDays, 'day').format('YYYY-MM-DD');
+    // Advance-notice gate — per-leave-type. The admin-configured
+    // `LeaveType.advance_notice_days` is the single source of truth.
+    // A value of 0 means "no advance notice required". Built-in types
+    // ship with sane defaults (CL=14, SL/EL/CO/ML/PL=0) via the seeder
+    // and can be overridden at runtime through the leave-types CRUD.
+    const noticeDays = requestedType.advance_notice_days ?? 0;
+    if (noticeDays > 0) {
+        const earliest = dayjs(today).add(noticeDays, 'day').format('YYYY-MM-DD');
         if (body.start_date < earliest) {
             throw AppError.unprocessable(
-                `Casual leave must be applied at least ${ctx.clNoticeDays} days in advance (earliest start: ${earliest})`,
+                `${requestedType.name} must be applied at least ${noticeDays} day${noticeDays === 1 ? '' : 's'} in advance (earliest start: ${earliest})`,
                 ERROR_CODES.LEAVE_NOTICE_VIOLATION,
-                { earliest_start_date: earliest }
+                { earliest_start_date: earliest, advance_notice_days: noticeDays }
             );
         }
     }
@@ -933,6 +936,27 @@ export const calendarLeaves = async (query: CalendarLeavesQuery): Promise<Record
     })
         .sort({ start_date: 1 })
         .limit(1000);
+
+    // Hydrate leave-type info (via toRequestPublic) AND user display so the
+    // FE calendar can render real names + type codes instead of "…<id>".
+    // Same shape the list endpoint stamps, so the FE consumer is identical.
     const cache = new Map<string, LeaveTypeDocument>();
-    return Promise.all(rows.map((r) => toRequestPublic(r, cache)));
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map(
+        (id) => new Types.ObjectId(id),
+    );
+    const [userMap, data] = await Promise.all([
+        loadLeaveUserDisplays(userIds),
+        Promise.all(rows.map((r) => toRequestPublic(r, cache))),
+    ]);
+    for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r) continue;
+        const row = data[i];
+        if (!row) continue;
+        row.user = userMap.get(r.user_id.toString()) ?? {
+            id: r.user_id.toString(),
+            full_name: null,
+        };
+    }
+    return data;
 };
