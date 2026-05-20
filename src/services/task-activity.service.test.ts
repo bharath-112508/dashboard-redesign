@@ -206,7 +206,11 @@ describe('listActivities', () => {
     it('returns 404 when the parent task is missing', async () => {
         stubTaskLookup(null);
         await expect(
-            svc.listActivities(new Types.ObjectId(), { page: 1, limit: 20 }, adminCaller())
+            svc.listActivities(
+                new Types.ObjectId(),
+                { page: 1, limit: 20, include_subtasks: false },
+                adminCaller(),
+            )
         ).rejects.toMatchObject({ code: ERROR_CODES.TASK_NOT_FOUND });
         expect(loadProjectForCallerMock).not.toHaveBeenCalled();
     });
@@ -219,7 +223,13 @@ describe('listActivities', () => {
             Object.assign(new Error('Forbidden'), { code: ERROR_CODES.FORBIDDEN, statusCode: 403 })
         );
 
-        await expect(svc.listActivities(taskId, { page: 1, limit: 20 }, employeeCaller())).rejects.toMatchObject({
+        await expect(
+            svc.listActivities(
+                taskId,
+                { page: 1, limit: 20, include_subtasks: false },
+                employeeCaller(),
+            )
+        ).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
         expect(activityFindMock).not.toHaveBeenCalled();
@@ -241,6 +251,7 @@ describe('listActivities', () => {
             {
                 page: 1,
                 limit: 20,
+                include_subtasks: false,
                 activity_type: TASK_ACTIVITY_TYPES.STATUS_CHANGED,
                 actor_id: actorId.toString(),
             },
@@ -265,7 +276,11 @@ describe('listActivities', () => {
         loadProjectForCallerMock.mockResolvedValueOnce({ _id: projectId, member_ids: [], client_ids: [] });
         stubFindForList([], 0);
 
-        await svc.listActivities(taskId, { page: 2, limit: 10 }, adminCaller());
+        await svc.listActivities(
+            taskId,
+            { page: 2, limit: 10, include_subtasks: false },
+            adminCaller(),
+        );
 
         const filterArg = activityFindMock.mock.calls[0][0] as Record<string, unknown>;
         expect(filterArg).toEqual({ task_id: taskId });

@@ -112,7 +112,21 @@ export const listActivities = async (
     // unchanged so the FE sees the canonical error.
     await loadProjectForCaller(task.project_id, caller);
 
-    const filter: Record<string, unknown> = { task_id: task._id };
+    // Opt-in roll-up: include activities for direct subtasks of this task.
+    // Nesting is capped at one level (matches the FE / model cap), so a
+    // single `$in` on `parent_task_id = task._id` is enough — no recursion.
+    let taskIds: Types.ObjectId[] = [task._id];
+    if (query.include_subtasks) {
+        const subtaskIds = await Task.find({ parent_task_id: task._id })
+            .select('_id')
+            .lean<{ _id: Types.ObjectId }[]>();
+        if (subtaskIds.length > 0) {
+            taskIds = [task._id, ...subtaskIds.map((s) => s._id)];
+        }
+    }
+
+    const filter: Record<string, unknown> =
+        taskIds.length === 1 ? { task_id: task._id } : { task_id: { $in: taskIds } };
     if (query.activity_type) filter.activity_type = query.activity_type;
     if (query.actor_id) filter.actor_id = new Types.ObjectId(query.actor_id);
 

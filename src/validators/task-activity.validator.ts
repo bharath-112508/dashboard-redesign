@@ -24,6 +24,12 @@ export const listActivitiesQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(ACTIVITY_LIST_MAX_LIMIT).default(ACTIVITY_LIST_DEFAULT_LIMIT),
     activity_type: z.enum(TASK_ACTIVITY_TYPE_VALUES as unknown as [string, ...string[]]).optional(),
     actor_id: objectIdSchema.optional(),
+    /**
+     * When `true`, also include activities for direct subtasks of the task
+     * (one level — matches the FE depth cap). Default `false` keeps the
+     * historical scoping where callers only see the task's own activity.
+     */
+    include_subtasks: z.coerce.boolean().default(false),
 }).strict();
 export type ListActivitiesQuery = z.infer<typeof listActivitiesQuerySchema>;
 
