@@ -249,6 +249,7 @@ export const listUsers = async (
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const filter: Filter = {};
     if (query.role) filter.role = query.role;
+    else if (query.exclude_role) filter.role = { $ne: query.exclude_role };
     if (query.status) filter.status = query.status;
     if (query.q) {
         const safe = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

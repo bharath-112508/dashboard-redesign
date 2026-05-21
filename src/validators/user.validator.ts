@@ -149,11 +149,19 @@ export const listUsersQuerySchema = z.object({
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(20),
     role: roleEnum.optional(),
+    // Exclude users with this role. Used by surfaces that list "internal
+    // staff only" (e.g. team timesheets picker should hide clients).
+    // Mutually exclusive with `role`: if both are set we 400 rather than
+    // silently picking one.
+    exclude_role: roleEnum.optional(),
     status: statusEnum.optional(),
     // R15 — minimum 2 chars to avoid `?q=a` triggering a regex-on-collection scan.
     q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
     sort: sortParamSchema.optional(),
-}).strict();
+}).strict().refine(
+    (q) => !(q.role && q.exclude_role),
+    { message: 'role and exclude_role cannot both be set', path: ['exclude_role'] },
+);
 
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 
