@@ -34,7 +34,7 @@ import logger from './logger.js';
  * intentional, otherwise a retried tx would lose its audit row.
  */
 export const withTransaction = async <T>(
-    callback: (session: ClientSession | null) => Promise<T>
+    callback: (session: ClientSession | undefined) => Promise<T>
 ): Promise<T> => {
     // If we can't open a session at all (no connection / mocked
     // Mongoose in tests), run the callback without one. The caller
@@ -49,7 +49,7 @@ export const withTransaction = async <T>(
     // would hang every test that flows through here. Bypass the
     // wait by checking the connection state up-front.
     if (mongoose.connection.readyState !== 1) {
-        return callback(null);
+        return callback(undefined);
     }
     let session: ClientSession;
     try {
@@ -59,7 +59,7 @@ export const withTransaction = async <T>(
             { err },
             'withTransaction: startSession failed; running callback without a session (no atomicity)'
         );
-        return callback(null);
+        return callback(undefined);
     }
 
     try {
@@ -80,7 +80,7 @@ export const withTransaction = async <T>(
                     { err },
                     'withTransaction: topology does not support transactions; falling back to non-atomic sequential writes'
                 );
-                return callback(null);
+                return callback(undefined);
             }
             throw err;
         }
