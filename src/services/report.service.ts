@@ -575,11 +575,17 @@ export const buildLeaveReport = async (query: LeaveReportQuery): Promise<LeaveRe
     const leaveTypeIds = Array.from(new Set(balances.map((b) => b.leave_type_id.toString()))).map(
         (id) => new Types.ObjectId(id)
     );
+    // The LeaveType model stores the human label as `name` (the form's
+    // "Name" field). The report's public shape calls it `label` so the
+    // FE table renders consistently with other report views — map here.
     const leaveTypeRows = await LeaveType.find({ _id: { $in: leaveTypeIds } })
-        .select('_id key label')
-        .lean<{ _id: Types.ObjectId; key: string; label: string }[]>();
+        .select('_id code name')
+        .lean<{ _id: Types.ObjectId; code: string; name: string }[]>();
     const leaveTypeById = new Map(
-        leaveTypeRows.map((lt) => [lt._id.toString(), { id: lt._id.toString(), key: lt.key, label: lt.label }])
+        leaveTypeRows.map((lt) => [
+            lt._id.toString(),
+            { id: lt._id.toString(), key: lt.code, label: lt.name },
+        ])
     );
 
     const balancesByUser = new Map<string, typeof balances>();
