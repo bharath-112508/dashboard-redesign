@@ -257,9 +257,13 @@ export const listUsers = async (
     }
 
     const skip = (query.page - 1) * query.limit;
+    // BUG-033 — primary sort + `_id` tiebreaker. Without the tiebreaker
+    // low-cardinality columns (e.g. `status`) leave rows within a group
+    // in arbitrary storage order, which makes the same query return
+    // different orderings across page-flips / refresh cycles ("shuffles").
     const sortSpec: Record<string, 1 | -1> = query.sort
-        ? { [query.sort.field]: query.sort.dir === 'asc' ? 1 : -1 }
-        : { created_at: -1 };
+        ? { [query.sort.field]: query.sort.dir === 'asc' ? 1 : -1, _id: 1 }
+        : { created_at: -1, _id: 1 };
 
     const [rows, total, photoTtl] = await Promise.all([
         User.find(filter).sort(sortSpec).skip(skip).limit(query.limit),

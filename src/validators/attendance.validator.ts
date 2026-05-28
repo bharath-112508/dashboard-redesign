@@ -151,10 +151,19 @@ export type PatchAttendanceBody = z.infer<typeof patchAttendanceBodySchema>;
 
 // ─── POST /attendance/correction-requests ────────────────────────────────
 
+// BUG-040 — multi-segment correction. `segments[]` is the canonical
+// shape going forward; `check_in` / `check_out` are kept as legacy
+// fallbacks for older clients that haven't been upgraded yet.
+const requestedSegmentSchema = z.object({
+    check_in: isoDateTime,
+    check_out: isoDateTime.nullable().optional(),
+});
+
 export const submitCorrectionBodySchema = z
     .object({
         attendance_record_id: objectIdSchema,
         requested_changes: z.object({
+            segments: z.array(requestedSegmentSchema).optional(),
             check_in: isoDateTime.nullable().optional(),
             check_out: isoDateTime.nullable().optional(),
             reason: z.string().trim().min(CORRECTION_REASON_MIN).max(CORRECTION_REASON_MAX),
@@ -162,8 +171,59 @@ export const submitCorrectionBodySchema = z
     })
     .superRefine((d, ctx) => {
         const c = d.requested_changes;
+        const hasSegments = Array.isArray(c.segments);
         const hasIn = c.check_in !== undefined && c.check_in !== null;
         const hasOut = c.check_out !== undefined && c.check_out !== null;
+
+        if (hasSegments) {
+            // Segments-mode: every entry must have a check_in; check_out
+            // may be null only for the LAST entry (an open session).
+            // Segments must be sorted and non-overlapping in time.
+            if (c.segments!.length === 0) {
+                // Empty array is a "delete-all" request. Allow it —
+                // admins can approve to clear the day. But require a
+                // reason that explains why.
+                return;
+            }
+            const segs = c.segments!;
+            for (let i = 0; i < segs.length; i += 1) {
+                const seg = segs[i]!;
+                if (seg.check_out !== null && seg.check_out !== undefined) {
+                    if (seg.check_in >= seg.check_out) {
+                        ctx.addIssue({
+                            code: 'custom',
+                            message: 'check_in must be earlier than check_out',
+                            path: ['requested_changes', 'segments', i, 'check_in'],
+                        });
+                    }
+                } else if (i !== segs.length - 1) {
+                    // Only the latest segment may be open.
+                    ctx.addIssue({
+                        code: 'custom',
+                        message: 'Only the final segment may have a null check_out',
+                        path: ['requested_changes', 'segments', i, 'check_out'],
+                    });
+                }
+                if (i > 0) {
+                    const prev = segs[i - 1]!;
+                    if (prev.check_out === null || prev.check_out === undefined) {
+                        // can't happen given the gate above, but kept
+                        // as a defensive check.
+                        continue;
+                    }
+                    if (prev.check_out > seg.check_in) {
+                        ctx.addIssue({
+                            code: 'custom',
+                            message: 'Segments must be in chronological order without overlap',
+                            path: ['requested_changes', 'segments', i, 'check_in'],
+                        });
+                    }
+                }
+            }
+            return;
+        }
+
+        // Legacy single-pair path.
         if (!hasIn && !hasOut) {
             ctx.addIssue({
                 code: 'custom',

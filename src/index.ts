@@ -17,6 +17,7 @@ import { ok } from './utils/api-response.js';
 import logger from './utils/logger.js';
 import { getMetricsContentType, getMetricsText, recordHttp } from './utils/metrics.js';
 import { seedDefaultLeaveTypes } from './services/leave-type.service.js';
+import { migrateAttendanceSegments } from './services/attendance.service.js';
 import { bootstrapRolesMigration } from './services/role.service.js';
 import { migratePlaintextSlackBotToken } from './services/slack-settings.service.js';
 import { getScheduledJobCount, startScheduler, stopScheduler } from './jobs/index.js';
@@ -281,6 +282,23 @@ const startServer = async () => {
         // on any pre-RBAC users still carrying only the legacy `role`
         // string. Idempotent on a fully-migrated DB.
         await bootstrapRolesMigration();
+
+        // BUG-040 — one-time backfill of multi-segment attendance.
+        // Walks any AttendanceRecord with a top-level check_in but an
+        // empty segments[] array and seeds segments from the legacy
+        // embed. Idempotent — re-running it on a fully migrated DB is
+        // a no-op.
+        try {
+            const result = await migrateAttendanceSegments();
+            if (result.backfilled > 0) {
+                logger.info(
+                    { backfilled: result.backfilled },
+                    'Attendance segments backfill complete'
+                );
+            }
+        } catch (err) {
+            logger.error({ err }, 'Attendance segments backfill failed');
+        }
 
         // J1: encrypt-at-rest migration for any pre-J1 plaintext Slack
         // bot_token. Idempotent — a value that already looks like an

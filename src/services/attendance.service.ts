@@ -4,6 +4,7 @@ import {
     AttendanceRecord,
     type AttendanceRecordDocument,
     type AttendancePunch,
+    type AttendanceSegment,
 } from '../models/attendance-record.model.js';
 import {
     AttendanceCorrectionRequest,
@@ -137,19 +138,44 @@ const enforceLocationPolicies = async (body: CheckInBody | CheckOutBody, clientI
 };
 
 /**
- * Compute total worked + overtime minutes from a (in, out) pair using the
- * system's `daily_expected_hours`. Overtime is everything beyond the
- * configured shift.
+ * BUG-040 — sum worked minutes across every CLOSED segment. Open
+ * segments (a current in-progress session) don't contribute until
+ * they're closed; the FE shows the live elapsed time separately.
+ * Overtime is everything beyond the configured `daily_expected_hours`.
  */
-const computeWorkedMinutes = async (
-    inAt: Date,
-    outAt: Date
+const segmentMinutes = (s: AttendanceSegment): number => {
+    if (!s.check_out) return 0;
+    return Math.max(0, Math.round((s.check_out.time.getTime() - s.check_in.time.getTime()) / 60_000));
+};
+
+const computeWorkedAcrossSegments = async (
+    segments: AttendanceSegment[]
 ): Promise<{ total_worked_minutes: number; overtime_minutes: number }> => {
     const settings = await getOrInitSettings();
     const expectedMinutes = (settings.work_schedule.daily_expected_hours ?? 8) * 60;
-    const total = Math.max(0, Math.round((outAt.getTime() - inAt.getTime()) / 60_000));
+    const total = segments.reduce((acc, s) => acc + segmentMinutes(s), 0);
     const overtime = Math.max(0, total - expectedMinutes);
     return { total_worked_minutes: total, overtime_minutes: overtime };
+};
+
+/**
+ * BUG-040 — keep the top-level `check_in` / `check_out` aliases in
+ * lock-step with the segments[] source of truth, so every legacy
+ * reader (reports, exports, FE banner, admin patch flow) keeps
+ * working unchanged.
+ *
+ *   check_in  = segments[0].check_in           (first arrival)
+ *   check_out = segments[last].check_out       (null while open)
+ */
+const syncAliasesFromSegments = (record: AttendanceRecordDocument): void => {
+    const segs = record.segments ?? [];
+    if (segs.length === 0) {
+        record.check_in = null;
+        record.check_out = null;
+        return;
+    }
+    record.check_in = segs[0]!.check_in;
+    record.check_out = segs[segs.length - 1]!.check_out;
 };
 
 const assertCanReviewCorrections = (caller_role: RoleType) => {
@@ -183,14 +209,17 @@ export const checkIn = async (
         ip: clientIp,
     };
 
-    // Try to insert a brand-new row. The unique compound index gives us
-    // race-safe one-per-day semantics; the service-level lookup below
-    // distinguishes "already checked in today" from "already checked in
-    // AND out" so the error message is precise.
+    // BUG-040 — three valid entry points to a check-in:
+    //   (a) brand-new day for this user                 → create row with one segment
+    //   (b) row exists but no segments yet (EOD placeholder) → seed first segment
+    //   (c) row exists and the LATEST segment is closed → append a new segment
+    //                                                     (re-check-in after lunch / errand)
+    // The only refusal is "latest segment still open" → ALREADY_CHECKED_IN.
     try {
         const created = await AttendanceRecord.create({
             user_id,
             local_date,
+            segments: [{ check_in: punch, check_out: null }],
             check_in: punch,
             check_out: null,
             status: 'present',
@@ -201,18 +230,26 @@ export const checkIn = async (
         return created.toJSON() as unknown as Record<string, unknown>;
     } catch (err: unknown) {
         if (err && typeof err === 'object' && 'code' in err && (err as { code: number }).code === 11000) {
-            // Row already exists for today — surface a precise error.
             const existing = await AttendanceRecord.findOne({ user_id, local_date });
-            if (existing?.check_in) {
-                throw AppError.conflict('Already checked in for today', ERROR_CODES.ALREADY_CHECKED_IN);
-            }
-            // Row exists but check_in is null — possibly an EOD placeholder
-            // (absent / on_leave). Update it in place so the user can still
-            // record an actual check-in.
             if (existing) {
-                existing.check_in = punch;
+                const segs = existing.segments ?? [];
+                const lastSeg = segs.length > 0 ? segs[segs.length - 1] : null;
+                if (lastSeg && !lastSeg.check_out) {
+                    throw AppError.conflict(
+                        'Already checked in for today',
+                        ERROR_CODES.ALREADY_CHECKED_IN
+                    );
+                }
+                if (segs.length === 0) {
+                    // EOD placeholder row — seed the first segment.
+                    existing.segments = [{ check_in: punch, check_out: null }];
+                } else {
+                    // All previous segments are closed — append a fresh one.
+                    existing.segments.push({ check_in: punch, check_out: null });
+                }
                 existing.status = 'present';
                 existing.flagged_for_correction = false;
+                syncAliasesFromSegments(existing);
                 await existing.save();
                 return existing.toJSON() as unknown as Record<string, unknown>;
             }
@@ -239,24 +276,38 @@ export const checkOut = async (
     const local_date = todayLocalDate();
     const record = await AttendanceRecord.findOne({ user_id, local_date });
 
-    if (!record || !record.check_in) {
+    // BUG-040 — operate on the LATEST segment. If there's no open segment,
+    // the user hasn't checked in (NOT_CHECKED_IN). If all segments are
+    // already closed, treat the same — they need a fresh check-in first.
+    const segs = record?.segments ?? [];
+    const lastSeg = segs.length > 0 ? segs[segs.length - 1] : null;
+    if (!record || !lastSeg) {
         throw AppError.conflict('Not checked in for today', ERROR_CODES.NOT_CHECKED_IN);
     }
-    if (record.check_out) {
-        throw AppError.conflict('Already checked out for today', ERROR_CODES.ALREADY_CHECKED_OUT);
+    if (lastSeg.check_out) {
+        // Every segment already closed — user must check in again before
+        // they can check out. NOT_CHECKED_IN is the precise signal (the
+        // legacy ALREADY_CHECKED_OUT code is preserved in the constants
+        // for older clients but is no longer thrown by this service).
+        throw AppError.conflict('Not checked in for today', ERROR_CODES.NOT_CHECKED_IN);
     }
 
     const now = new Date();
-    record.check_out = {
+    lastSeg.check_out = {
         time: now,
         method: body.method,
         location_id,
         ip: clientIp,
     };
 
-    const computed = await computeWorkedMinutes(record.check_in.time, now);
+    const computed = await computeWorkedAcrossSegments(record.segments);
     record.total_worked_minutes = computed.total_worked_minutes;
     record.overtime_minutes = computed.overtime_minutes;
+    syncAliasesFromSegments(record);
+    // Mongoose doesn't always notice in-place mutations of nested subdocs
+    // (lastSeg.check_out = …). Explicitly mark the path dirty so the save
+    // persists the new check_out.
+    record.markModified('segments');
 
     await record.save();
     return record.toJSON() as unknown as Record<string, unknown>;
@@ -385,6 +436,11 @@ export const patchAttendance = async (
         throw AppError.notFound('Attendance record not found', ERROR_CODES.ATTENDANCE_RECORD_NOT_FOUND);
     }
 
+    // BUG-040 — segments[] is the source of truth. When an admin patches
+    // check_in / check_out at the top level, we route the change into
+    // segments[0].check_in and segments[last].check_out so the canonical
+    // shape stays consistent. If there's no segment yet (EOD placeholder
+    // being filled in by an admin), seed one.
     if (patch.check_in?.time) {
         const newIn: AttendancePunch = {
             time: new Date(patch.check_in.time),
@@ -394,7 +450,12 @@ export const patchAttendance = async (
                 : (record.check_in?.location_id ?? null),
             ip: record.check_in?.ip ?? '',
         };
-        record.check_in = newIn;
+        if (record.segments && record.segments.length > 0) {
+            record.segments[0]!.check_in = newIn;
+            record.markModified('segments');
+        } else {
+            record.segments = [{ check_in: newIn, check_out: null }];
+        }
     }
     if (patch.check_out?.time) {
         const newOut: AttendancePunch = {
@@ -405,13 +466,22 @@ export const patchAttendance = async (
                 : (record.check_out?.location_id ?? null),
             ip: record.check_out?.ip ?? '',
         };
-        record.check_out = newOut;
+        const segs = record.segments ?? [];
+        if (segs.length > 0) {
+            segs[segs.length - 1]!.check_out = newOut;
+            record.markModified('segments');
+        }
+        // If there's no segment at all, patching only check_out is an
+        // invalid state; leave it to validation upstream (the historical
+        // PATCH path required check_in to exist first).
     }
     if (patch.status) record.status = patch.status;
     if (patch.notes !== undefined) record.notes = patch.notes;
 
+    syncAliasesFromSegments(record);
+
     if (record.check_in && record.check_out) {
-        const computed = await computeWorkedMinutes(record.check_in.time, record.check_out.time);
+        const computed = await computeWorkedAcrossSegments(record.segments ?? []);
         record.total_worked_minutes = computed.total_worked_minutes;
         record.overtime_minutes = computed.overtime_minutes;
         record.flagged_for_correction = false;
@@ -457,12 +527,26 @@ export const submitCorrection = async (
         );
     }
 
+    // BUG-040 — preserve `segments` when the client sends it. Legacy
+    // single-pair clients still get their fields persisted as-is so
+    // the approve path can keep handling old pending requests.
+    const requestedSegments = body.requested_changes.segments;
     const created = await AttendanceCorrectionRequest.create({
         user_id,
         attendance_record_id: record._id,
         requested_changes: {
-            check_in: body.requested_changes.check_in ? new Date(body.requested_changes.check_in) : null,
-            check_out: body.requested_changes.check_out ? new Date(body.requested_changes.check_out) : null,
+            segments: requestedSegments
+                ? requestedSegments.map((s) => ({
+                      check_in: new Date(s.check_in),
+                      check_out: s.check_out ? new Date(s.check_out) : null,
+                  }))
+                : undefined,
+            check_in: body.requested_changes.check_in
+                ? new Date(body.requested_changes.check_in)
+                : null,
+            check_out: body.requested_changes.check_out
+                ? new Date(body.requested_changes.check_out)
+                : null,
             reason: body.requested_changes.reason,
         },
     });
@@ -548,26 +632,78 @@ export const approveCorrection = async (
     }
 
     const changes = reqDoc.requested_changes;
-    if (changes.check_in) {
-        record.check_in = {
-            time: changes.check_in,
-            method: record.check_in?.method ?? 'manual',
-            location_id: record.check_in?.location_id ?? null,
-            ip: record.check_in?.ip ?? '',
-        };
-        // Adjusted check-in must land on the same local_date for this row.
-        record.local_date = utcDateToLocalDate(changes.check_in);
+
+    // BUG-040 — multi-segment proposal path. When the request carries
+    // `segments[]` it replaces the record's segments wholesale (the
+    // employee submitted a fully-specified day). Existing punch
+    // metadata (method, location_id, ip) is preserved per index where
+    // possible so geofence/QR audit trails don't get clobbered by a
+    // manual time correction.
+    const proposedSegments = changes.segments;
+    if (proposedSegments && proposedSegments.length >= 0) {
+        const oldSegments = record.segments ?? [];
+        record.segments = proposedSegments.map((p, i) => {
+            const old = oldSegments[i];
+            const inMeta = old?.check_in;
+            const outMeta = old?.check_out;
+            return {
+                check_in: {
+                    time: p.check_in,
+                    method: inMeta?.method ?? 'manual',
+                    location_id: inMeta?.location_id ?? null,
+                    ip: inMeta?.ip ?? '',
+                },
+                check_out: p.check_out
+                    ? {
+                          time: p.check_out,
+                          method: outMeta?.method ?? 'manual',
+                          location_id: outMeta?.location_id ?? null,
+                          ip: outMeta?.ip ?? '',
+                      }
+                    : null,
+            };
+        });
+        record.markModified('segments');
+        // local_date follows the first segment's check_in so the row
+        // continues to live on the right business day after a shift.
+        if (record.segments.length > 0) {
+            record.local_date = utcDateToLocalDate(record.segments[0]!.check_in.time);
+        }
+    } else {
+        // Legacy single-pair correction.
+        if (changes.check_in) {
+            const newIn: AttendancePunch = {
+                time: changes.check_in,
+                method: record.check_in?.method ?? 'manual',
+                location_id: record.check_in?.location_id ?? null,
+                ip: record.check_in?.ip ?? '',
+            };
+            if (record.segments && record.segments.length > 0) {
+                record.segments[0]!.check_in = newIn;
+                record.markModified('segments');
+            } else {
+                record.segments = [{ check_in: newIn, check_out: null }];
+            }
+            record.local_date = utcDateToLocalDate(changes.check_in);
+        }
+        if (changes.check_out) {
+            const newOut: AttendancePunch = {
+                time: changes.check_out,
+                method: record.check_out?.method ?? 'manual',
+                location_id: record.check_out?.location_id ?? null,
+                ip: record.check_out?.ip ?? '',
+            };
+            const segs = record.segments ?? [];
+            if (segs.length > 0) {
+                segs[segs.length - 1]!.check_out = newOut;
+                record.markModified('segments');
+            }
+        }
     }
-    if (changes.check_out) {
-        record.check_out = {
-            time: changes.check_out,
-            method: record.check_out?.method ?? 'manual',
-            location_id: record.check_out?.location_id ?? null,
-            ip: record.check_out?.ip ?? '',
-        };
-    }
+
+    syncAliasesFromSegments(record);
     if (record.check_in && record.check_out) {
-        const computed = await computeWorkedMinutes(record.check_in.time, record.check_out.time);
+        const computed = await computeWorkedAcrossSegments(record.segments ?? []);
         record.total_worked_minutes = computed.total_worked_minutes;
         record.overtime_minutes = computed.overtime_minutes;
         if (record.status === 'incomplete') record.status = 'present';
@@ -630,6 +766,40 @@ export const rejectCorrection = async (
     });
 
     return reqDoc.toJSON() as unknown as Record<string, unknown>;
+};
+
+// ─── BUG-040 — one-time backfill of segments[] ──────────────────────────
+
+/**
+ * Walk every AttendanceRecord that has a top-level `check_in` but an
+ * empty `segments[]` array, and seed `segments: [{ check_in, check_out }]`
+ * from the legacy embed. Records that already have segments (post-fix
+ * writes) are left untouched, making this idempotent.
+ *
+ * Called once on server boot from `index.ts`, alongside the existing
+ * role-bootstrap migration. Logs the backfilled count so the operator
+ * can see it run; never blocks boot on failure.
+ */
+export const migrateAttendanceSegments = async (): Promise<{ backfilled: number }> => {
+    // Match docs that have a check_in punch but no segments yet. Mongo
+    // matches missing or zero-length arrays via `$size: 0` + `$exists`
+    // — the OR covers pre-segments documents and documents where the
+    // field defaulted to []. We only need a basic projection to update.
+    const cursor = AttendanceRecord.find({
+        check_in: { $ne: null },
+        $or: [{ segments: { $exists: false } }, { segments: { $size: 0 } }],
+    }).cursor();
+
+    let backfilled = 0;
+    for await (const record of cursor) {
+        if (!record.check_in) continue;
+        record.segments = [
+            { check_in: record.check_in, check_out: record.check_out ?? null },
+        ];
+        await record.save();
+        backfilled += 1;
+    }
+    return { backfilled };
 };
 
 // Re-exports for the helper callers (test fixtures, future cron).

@@ -225,11 +225,15 @@ describe('checkIn', () => {
         expect(out).toEqual({ status: 'present' });
     });
 
-    it('on E11000: existing row with check_in throws ALREADY_CHECKED_IN (no re-write)', async () => {
+    it('on E11000: existing row with an OPEN segment throws ALREADY_CHECKED_IN', async () => {
         const dup = Object.assign(new Error('dup'), { code: 11000 });
         attendanceRecordCreateMock.mockRejectedValueOnce(dup);
+        // Latest segment open → user has checked in but not out yet.
         attendanceRecordFindOneMock.mockResolvedValueOnce({
             check_in: { time: new Date(), method: 'manual', location_id: null, ip: '' },
+            segments: [
+                { check_in: { time: new Date() }, check_out: null },
+            ],
         });
 
         await expect(svc.checkIn(makeBody(), new Types.ObjectId(), '1.1.1.1')).rejects.toMatchObject({
@@ -237,14 +241,16 @@ describe('checkIn', () => {
         });
     });
 
-    it('on E11000: placeholder row (no check_in) is upgraded in place to status=present', async () => {
+    it('on E11000: placeholder row (no segments) is upgraded in place to status=present', async () => {
         const dup = Object.assign(new Error('dup'), { code: 11000 });
         attendanceRecordCreateMock.mockRejectedValueOnce(dup);
         const existing = {
             check_in: null,
             check_out: null,
+            segments: [] as { check_in: unknown; check_out: unknown }[],
             status: 'absent',
             flagged_for_correction: true,
+            markModified: vi.fn(),
             save: vi.fn().mockResolvedValue(undefined),
             toJSON: () => ({ status: 'present', upgraded: true }),
         };
@@ -255,8 +261,51 @@ describe('checkIn', () => {
         expect(existing.save).toHaveBeenCalledOnce();
         expect(existing.status).toBe('present');
         expect(existing.flagged_for_correction).toBe(false);
+        expect(existing.segments).toHaveLength(1);
+        expect(existing.segments[0]).toMatchObject({
+            check_in: expect.objectContaining({ method: 'manual', ip: '1.1.1.1' }),
+            check_out: null,
+        });
         expect(existing.check_in).toMatchObject({ method: 'manual', ip: '1.1.1.1' });
         expect(out).toEqual({ status: 'present', upgraded: true });
+    });
+
+    it('on E11000: row with all-closed segments appends a fresh segment for re-check-in (BUG-040)', async () => {
+        const dup = Object.assign(new Error('dup'), { code: 11000 });
+        attendanceRecordCreateMock.mockRejectedValueOnce(dup);
+        const firstIn = new Date('2026-04-24T03:30:00Z');
+        const firstOut = new Date('2026-04-24T06:30:00Z');
+        const existing = {
+            check_in: { time: firstIn, method: 'manual', location_id: null, ip: '' },
+            check_out: { time: firstOut, method: 'manual', location_id: null, ip: '' },
+            segments: [
+                {
+                    check_in: { time: firstIn, method: 'manual', location_id: null, ip: '' },
+                    check_out: { time: firstOut, method: 'manual', location_id: null, ip: '' },
+                },
+            ],
+            status: 'present',
+            flagged_for_correction: false,
+            markModified: vi.fn(),
+            save: vi.fn().mockResolvedValue(undefined),
+            toJSON() {
+                return { segments_count: this.segments.length };
+            },
+        };
+        attendanceRecordFindOneMock.mockResolvedValueOnce(existing);
+
+        const out = await svc.checkIn(makeBody(), new Types.ObjectId(), '1.1.1.1');
+
+        expect(existing.segments).toHaveLength(2);
+        expect(existing.segments[1]).toMatchObject({
+            check_in: expect.objectContaining({ method: 'manual', ip: '1.1.1.1' }),
+            check_out: null,
+        });
+        // Aliases re-synced: check_in stays at the first arrival, check_out
+        // flips back to null because the new last segment is open.
+        expect(existing.check_in).toMatchObject({ time: firstIn });
+        expect(existing.check_out).toBeNull();
+        expect(out).toEqual({ segments_count: 2 });
     });
 
     it('non-E11000 errors propagate unchanged', async () => {
@@ -285,22 +334,32 @@ describe('checkOut', () => {
         });
     });
 
-    it('rejects with NOT_CHECKED_IN when row exists but check_in is null (EOD placeholder)', async () => {
-        attendanceRecordFindOneMock.mockResolvedValueOnce({ check_in: null, check_out: null });
+    it('rejects with NOT_CHECKED_IN when row exists but no segments yet (EOD placeholder)', async () => {
+        attendanceRecordFindOneMock.mockResolvedValueOnce({
+            check_in: null,
+            check_out: null,
+            segments: [],
+        });
 
         await expect(svc.checkOut(makeBody(), new Types.ObjectId(), '1.1.1.1')).rejects.toMatchObject({
             code: ERROR_CODES.NOT_CHECKED_IN,
         });
     });
 
-    it('rejects with ALREADY_CHECKED_OUT when check_out is already populated', async () => {
+    it('rejects with NOT_CHECKED_IN when every segment is already closed (BUG-040)', async () => {
+        // Old behaviour returned ALREADY_CHECKED_OUT in this state. With
+        // multi-segment attendance the same situation means "no open
+        // segment to close" — user must check in again first.
         attendanceRecordFindOneMock.mockResolvedValueOnce({
             check_in: { time: new Date() },
             check_out: { time: new Date() },
+            segments: [
+                { check_in: { time: new Date() }, check_out: { time: new Date() } },
+            ],
         });
 
         await expect(svc.checkOut(makeBody(), new Types.ObjectId(), '1.1.1.1')).rejects.toMatchObject({
-            code: ERROR_CODES.ALREADY_CHECKED_OUT,
+            code: ERROR_CODES.NOT_CHECKED_IN,
         });
     });
 
@@ -309,11 +368,14 @@ describe('checkOut', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-04-24T12:30:00Z')); // 18:00 IST
 
+        const openSegment = { check_in: { time: inAt }, check_out: null as unknown };
         const record = {
             check_in: { time: inAt },
             check_out: null as unknown,
+            segments: [openSegment],
             total_worked_minutes: 0,
             overtime_minutes: 0,
+            markModified: vi.fn(),
             save: vi.fn().mockResolvedValue(undefined),
             toJSON() {
                 return {
@@ -326,6 +388,9 @@ describe('checkOut', () => {
 
         const out = await svc.checkOut(makeBody(), new Types.ObjectId(), '1.1.1.1');
 
+        // The check_out punch lives on the segment now; the top-level
+        // alias gets re-synced from segments[last].check_out.
+        expect(openSegment.check_out).toMatchObject({ method: 'manual', ip: '1.1.1.1' });
         expect(record.check_out).toMatchObject({ method: 'manual', ip: '1.1.1.1' });
         expect(record.total_worked_minutes).toBe(540); // 9h
         expect(record.overtime_minutes).toBe(60); // 9 − 8
@@ -340,11 +405,14 @@ describe('checkOut', () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date('2026-04-24T10:00:00Z'));
 
+        const openSegment = { check_in: { time: inAt }, check_out: null as unknown };
         const record = {
             check_in: { time: inAt },
             check_out: null as unknown,
+            segments: [openSegment],
             total_worked_minutes: 0,
             overtime_minutes: 0,
+            markModified: vi.fn(),
             save: vi.fn().mockResolvedValue(undefined),
             toJSON() {
                 return {
@@ -358,6 +426,52 @@ describe('checkOut', () => {
         await svc.checkOut(makeBody(), new Types.ObjectId(), '1.1.1.1');
 
         expect(record.total_worked_minutes).toBe(360);
+        expect(record.overtime_minutes).toBe(0);
+
+        vi.useRealTimers();
+    });
+
+    it('multi-segment day: 3h morning + 4h afternoon sums to 7h, no overtime (BUG-040)', async () => {
+        // Two completed segments earlier in the day, plus a fresh open
+        // segment now being closed. Total = 3h + 4h + (just-now → 1m
+        // window) ≈ 420m. Overtime stays 0 since expected is 8h.
+        const morningIn = new Date('2026-04-24T03:30:00Z');
+        const morningOut = new Date('2026-04-24T06:30:00Z'); // 3h
+        const lunchIn = new Date('2026-04-24T07:30:00Z');
+        const lunchOut = new Date('2026-04-24T11:30:00Z'); // 4h
+        const errandIn = new Date('2026-04-24T12:29:00Z');
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-04-24T12:30:00Z')); // closes the 1-min errand segment
+
+        const openSegment = {
+            check_in: { time: errandIn },
+            check_out: null as unknown,
+        };
+        const record = {
+            check_in: { time: morningIn },
+            check_out: null as unknown,
+            segments: [
+                { check_in: { time: morningIn }, check_out: { time: morningOut } },
+                { check_in: { time: lunchIn }, check_out: { time: lunchOut } },
+                openSegment,
+            ],
+            total_worked_minutes: 0,
+            overtime_minutes: 0,
+            markModified: vi.fn(),
+            save: vi.fn().mockResolvedValue(undefined),
+            toJSON() {
+                return {
+                    total_worked_minutes: this.total_worked_minutes,
+                    overtime_minutes: this.overtime_minutes,
+                };
+            },
+        };
+        attendanceRecordFindOneMock.mockResolvedValueOnce(record);
+
+        await svc.checkOut(makeBody(), new Types.ObjectId(), '1.1.1.1');
+
+        // 180 + 240 + 1 = 421 minutes worked across all closed segments.
+        expect(record.total_worked_minutes).toBe(421);
         expect(record.overtime_minutes).toBe(0);
 
         vi.useRealTimers();

@@ -36,11 +36,30 @@ export interface AttendancePunch {
     ip: string;
 }
 
+/**
+ * BUG-040 — multi-segment attendance. A user can check in and out of
+ * the same `local_date` more than once (lunch break that gets logged
+ * as a separate session, stepping out for an errand, etc.). The
+ * `segments[]` array is the source of truth; the top-level
+ * `check_in` / `check_out` fields stay as denormalised aliases for
+ * the FIRST segment's `check_in` and the LATEST segment's
+ * `check_out`, so existing reads / reports / exports keep working
+ * without changes.
+ */
+export interface AttendanceSegment {
+    check_in: AttendancePunch;
+    check_out: AttendancePunch | null;
+}
+
 export interface AttendanceRecordDocument extends Document {
     _id: Types.ObjectId;
     user_id: Types.ObjectId;
     local_date: string; // "YYYY-MM-DD"
+    /** BUG-040 — array of in/out pairs. Latest entry is the "current" one. */
+    segments: AttendanceSegment[];
+    /** Alias of `segments[0].check_in`. Kept for backwards-compat reads. */
     check_in: AttendancePunch | null;
+    /** Alias of `segments[last].check_out`. Null while the latest segment is open. */
     check_out: AttendancePunch | null;
     total_worked_minutes: number | null;
     overtime_minutes: number;
@@ -68,6 +87,14 @@ const punchSchema = new Schema<AttendancePunch>(
     { _id: false }
 );
 
+const segmentSchema = new Schema<AttendanceSegment>(
+    {
+        check_in: { type: punchSchema, required: true },
+        check_out: { type: punchSchema, default: null },
+    },
+    { _id: false }
+);
+
 const attendanceRecordSchema = new Schema<AttendanceRecordDocument>(
     {
         user_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
@@ -80,6 +107,7 @@ const attendanceRecordSchema = new Schema<AttendanceRecordDocument>(
                 message: 'local_date must be ISO date (YYYY-MM-DD)',
             },
         },
+        segments: { type: [segmentSchema], default: [] },
         check_in: { type: punchSchema, default: null },
         check_out: { type: punchSchema, default: null },
         total_worked_minutes: { type: Number, default: null },

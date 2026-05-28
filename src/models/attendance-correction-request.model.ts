@@ -9,9 +9,20 @@ import { CORRECTION_REQUEST_STATUSES, type CorrectionRequestStatus } from '../co
  *
  * Employee-initiated record of a missed / wrong check-in or check-out.
  * Manager or admin reviews via `/correction-requests/:id/{approve,reject}`.
- * On approve, the service applies `requested_changes.check_in`/`check_out`
- * to the underlying `attendance_records` row, recomputes worked minutes,
- * and clears `flagged_for_correction`.
+ *
+ * BUG-040 multi-segment support:
+ *   - `requested_changes.segments[]` is the canonical multi-segment
+ *     proposal. When present and non-empty on approve, the service
+ *     REPLACES the record's `segments[]` with this exact list, then
+ *     recomputes worked minutes and re-syncs the legacy
+ *     `check_in` / `check_out` aliases on the attendance record.
+ *   - `requested_changes.check_in` / `check_out` are the legacy single
+ *     punch fields kept for backwards compatibility. They still work
+ *     for old clients that haven't been upgraded yet; on approve they
+ *     route to `segments[0].check_in` / `segments[last].check_out`
+ *     respectively.
+ *   - At submission time, the validator requires EITHER `segments` OR
+ *     one of the legacy fields, not both.
  *
  * Concurrency:
  *  - At most one `pending` request may exist per `attendance_record_id`;
@@ -20,7 +31,15 @@ import { CORRECTION_REQUEST_STATUSES, type CorrectionRequestStatus } from '../co
  *    pre-7.0 didn't always honour them; the lookup is cheap and explicit.
  */
 
+export interface RequestedSegment {
+    check_in: Date;
+    check_out: Date | null;
+}
+
 export interface RequestedChanges {
+    /** Multi-segment proposal — replaces the record's segments on approve. */
+    segments?: RequestedSegment[];
+    /** Legacy single-pair fields — used when `segments` is absent. */
     check_in: Date | null;
     check_out: Date | null;
     reason: string;
@@ -39,8 +58,17 @@ export interface AttendanceCorrectionRequestDocument extends Document {
     updated_at: Date;
 }
 
+const requestedSegmentSchema = new Schema<RequestedSegment>(
+    {
+        check_in: { type: Date, required: true },
+        check_out: { type: Date, default: null },
+    },
+    { _id: false }
+);
+
 const requestedChangesSchema = new Schema<RequestedChanges>(
     {
+        segments: { type: [requestedSegmentSchema], default: undefined },
         check_in: { type: Date, default: null },
         check_out: { type: Date, default: null },
         reason: { type: String, required: true },
