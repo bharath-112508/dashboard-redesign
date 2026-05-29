@@ -176,6 +176,21 @@ export const createProject = async (
     const memberIds = dedupeObjectIds(input.member_ids);
     const clientIds = dedupeObjectIds(input.client_ids);
 
+    // BUG-007 — visibility for non-admin/manager callers is scoped to
+    // `member_ids` (team_lead / employee). If a Team Lead creates a
+    // project without explicitly adding themselves to the member list,
+    // they instantly lose visibility of the project they just made.
+    // Auto-add the creator to member_ids when they're a member-scoped
+    // role so they always see their own project in GET /projects.
+    // Admins/Managers bypass the visibility filter, so we don't
+    // pollute member_ids with their IDs.
+    if (
+        PROJECT_MEMBER_SCOPED_ROLES.includes(caller.role) &&
+        !memberIds.some((id) => id.equals(caller.id))
+    ) {
+        memberIds.push(caller.id);
+    }
+
     await validateMemberCandidates(memberIds);
     await validateClientCandidates(clientIds);
 
