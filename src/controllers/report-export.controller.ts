@@ -3,10 +3,13 @@ import { Types } from 'mongoose';
 import { StatusCodes } from 'http-status-codes';
 import { z } from 'zod';
 
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import * as service from '../services/report-export.service.js';
+import { recordAudit } from '../services/audit.service.js';
 import { ok } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import { buildAuditContext } from '../utils/audit-context.js';
+import { isAzureConfigured } from '../utils/azure-blob.js';
 import { parseExportBody } from '../validators/report-export.validator.js';
 import type { ExportRequestPath, ExportIdPath } from '../validators/report-export.validator.js';
 
@@ -60,9 +63,43 @@ export const postExport = async (req: Request, res: Response): Promise<Response>
         throw err;
     }
 
+    const caller = callerOf(req);
+
+    // BUG-069 — when Azure Blob storage isn't configured the async
+    // pipeline can't upload, leaving the row stuck in `failed` with
+    // STORAGE_NOT_CONFIGURED. Fall back to a synchronous generate +
+    // stream-back-as-response so the export still works (dev, on-prem,
+    // any deployment without blob storage). The async / polling path
+    // stays intact when Azure IS configured.
+    if (!isAzureConfigured()) {
+        const filters = body.filters as Record<string, unknown>;
+        const { buffer, fileName, mime } = await service.generateExportInline({
+            name,
+            format: body.format,
+            filters,
+        });
+
+        if (caller.audit) {
+            await recordAudit(caller.audit, {
+                action: AUDIT_ACTIONS.REPORT_EXPORT_CREATE,
+                target: { kind: AUDIT_TARGET_KINDS.REPORT_EXPORT, id: new Types.ObjectId() },
+                after: { report_name: name, format: body.format, status: 'ready_inline' },
+                metadata: { filters, inline: true, size_bytes: buffer.length },
+            });
+        }
+
+        res.setHeader('Content-Type', mime);
+        res.setHeader('Content-Disposition', `attachment; filename="${fileName.replace(/"/g, '')}"`);
+        res.setHeader('Content-Length', String(buffer.length));
+        // Signal to the FE that this response is the file itself, not a
+        // JSON `{ id, status }` envelope to poll.
+        res.setHeader('X-Export-Inline', '1');
+        return res.status(StatusCodes.OK).end(buffer);
+    }
+
     const result = await service.enqueueExport(
         { name, format: body.format, filters: body.filters as Record<string, unknown> },
-        callerOf(req)
+        caller
     );
 
     // 202 Accepted per API_Contract §10.3 — the row is created but the

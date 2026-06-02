@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import {
+    DEFAULT_TASK_STATUSES,
     TASK_COLLABORATORS_MAX,
     TASK_DEPENDENCIES_MAX,
     TASK_DESCRIPTION_MAX,
@@ -31,6 +32,39 @@ import {
 const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId');
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD');
 
+/**
+ * BUG-041 — Done tasks can't have a future due date. The user picks the
+ * status BEFORE the due date in the form, and once they've said it's
+ * already finished, a future due date is nonsensical. The rule fires only
+ * when both `status` and `due_date` are present in the payload (PATCH may
+ * omit either independently).
+ *
+ * "Today" is server-local YYYY-MM-DD. We compare strings — ISO 8601 dates
+ * are lexicographically sortable so `due_date <= todayIso` is equivalent
+ * to a calendar comparison without needing a timezone library here.
+ */
+const todayIso = (): string => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const enforceNoFutureDoneDate = <
+    T extends { status?: string | undefined; due_date?: string | undefined },
+>(
+    data: T,
+    ctx: z.RefinementCtx
+): void => {
+    if (data.status !== DEFAULT_TASK_STATUSES.DONE) return;
+    if (!data.due_date) return;
+    if (data.due_date <= todayIso()) return;
+    ctx.addIssue({
+        code: 'custom',
+        path: ['due_date'],
+        message: "Tasks marked Done can't have a future due date — pick today or an earlier date.",
+    });
+};
+
 // Shared sub-shape for create/patch optional ID fields. `null` is meaningful
 // for `sprint_id` (backlog) / `story_id` (no story) / `parent_task_id` (top-
 // level) — coercing to `undefined` would lose the user's intent to detach.
@@ -38,22 +72,24 @@ const optionalNullableObjectId = z.union([objectIdSchema, z.null()]).optional();
 
 // ─── POST /tasks ──────────────────────────────────────────────────────────
 
-export const createTaskBodySchema = z.object({
-    project_id: objectIdSchema,
-    sprint_id: optionalNullableObjectId,
-    story_id: optionalNullableObjectId,
-    parent_task_id: optionalNullableObjectId,
-    title: z.string().trim().min(1).max(TASK_TITLE_MAX),
-    description: z.string().trim().max(TASK_DESCRIPTION_MAX).default(''),
-    status: z.string().trim().min(1).max(TASK_STATUS_KEY_MAX).optional(),
-    priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
-    due_date: isoDateSchema,
-    estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX).optional(),
-    primary_assignee_id: optionalNullableObjectId,
-    collaborator_ids: z.array(objectIdSchema).max(TASK_COLLABORATORS_MAX).optional(),
-    depends_on_task_ids: z.array(objectIdSchema).max(TASK_DEPENDENCIES_MAX).optional(),
-    position: z.number().int().min(0).optional(),
-});
+export const createTaskBodySchema = z
+    .object({
+        project_id: objectIdSchema,
+        sprint_id: optionalNullableObjectId,
+        story_id: optionalNullableObjectId,
+        parent_task_id: optionalNullableObjectId,
+        title: z.string().trim().min(1).max(TASK_TITLE_MAX),
+        description: z.string().trim().max(TASK_DESCRIPTION_MAX).default(''),
+        status: z.string().trim().min(1).max(TASK_STATUS_KEY_MAX).optional(),
+        priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
+        due_date: isoDateSchema,
+        estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX).optional(),
+        primary_assignee_id: optionalNullableObjectId,
+        collaborator_ids: z.array(objectIdSchema).max(TASK_COLLABORATORS_MAX).optional(),
+        depends_on_task_ids: z.array(objectIdSchema).max(TASK_DEPENDENCIES_MAX).optional(),
+        position: z.number().int().min(0).optional(),
+    })
+    .superRefine(enforceNoFutureDoneDate);
 export type CreateTaskBody = z.infer<typeof createTaskBodySchema>;
 
 // ─── PATCH /tasks/:id ─────────────────────────────────────────────────────
@@ -77,7 +113,12 @@ export const patchTaskBodySchema = z
         position: z.number().int().min(0),
     })
     .partial()
-    .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be supplied' });
+    .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be supplied' })
+    // BUG-041 — same Done/future-date rule as createTaskBodySchema. Note
+    // the patch path may carry only one of {status, due_date}: the
+    // refinement no-ops in that case (the service layer applies the
+    // patch then revalidates the resulting state if needed).
+    .superRefine(enforceNoFutureDoneDate);
 export type PatchTaskBody = z.infer<typeof patchTaskBodySchema>;
 
 // ─── POST /tasks/:id/reorder ──────────────────────────────────────────────

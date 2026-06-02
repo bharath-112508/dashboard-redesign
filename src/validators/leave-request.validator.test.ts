@@ -201,9 +201,14 @@ describe('rejectLeaveBodySchema', () => {
 // ─── cancelLeaveBodySchema ───────────────────────────────────────────────
 
 describe('cancelLeaveBodySchema', () => {
-    it('requires non-empty cancellation_reason', () => {
+    it('accepts an omitted cancellation_reason (BUG-035 — reason optional)', () => {
+        const r = cancelLeaveBodySchema.safeParse({});
+        expect(r.success).toBe(true);
+    });
+
+    it('accepts an empty cancellation_reason (BUG-035 — reason optional)', () => {
         const r = cancelLeaveBodySchema.safeParse({ cancellation_reason: '' });
-        expect(r.success).toBe(false);
+        expect(r.success).toBe(true);
     });
 
     it('accepts a real reason', () => {

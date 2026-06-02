@@ -126,7 +126,10 @@ export type RejectLeaveBody = z.infer<typeof rejectLeaveBodySchema>;
 
 export const cancelLeaveBodySchema = z
     .object({
-        cancellation_reason: z.string().trim().min(1).max(CANCELLATION_REASON_MAX),
+        // Optional per BUG-035 — users cancelling their own pending requests
+        // shouldn't have to justify the cancellation. When present, the
+        // upper bound is still enforced.
+        cancellation_reason: z.string().trim().max(CANCELLATION_REASON_MAX).optional(),
     })
     .strict();
 

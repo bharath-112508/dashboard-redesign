@@ -1,6 +1,69 @@
 import { z } from 'zod';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
+
 import { ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
+
+// ─── Phone — BUG-044 ─────────────────────────────────────────────────────
+//
+// Country-aware validation via libphonenumber-js. Phones must be in E.164
+// shape ('+' + country code + national number) so the parser can pick the
+// country deterministically. Empty / whitespace input is treated as "not
+// supplied" (the BE phone field is optional). When supplied, the value
+// must parse AND `.isValid()` — that catches "too few digits for the
+// country", impossible country codes, etc.
+//
+// The transform normalises the value to canonical E.164 (`+15555550123`),
+// so downstream callers don't have to deal with whitespace/dashes/parens.
+const phoneSchema = z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : undefined))
+    .refine(
+        (v) => {
+            if (v === undefined) return true;
+            const parsed = parsePhoneNumberFromString(v);
+            return parsed?.isValid() ?? false;
+        },
+        {
+            message:
+                "Enter a valid phone in international format ('+' followed by country code and digits) — length and digit count must match the country.",
+        }
+    )
+    .transform((v) => {
+        if (v === undefined) return undefined;
+        const parsed = parsePhoneNumberFromString(v);
+        return parsed?.number ?? v;
+    });
+
+// ─── Timezone — BUG-045 ────────────────────────────────────────────────────
+//
+// Profile used to accept any string here ('IST', ' ', 'India', etc.).
+// We require an IANA-style identifier (`Region/City`, or the bare `UTC`)
+// and confirm the runtime recognises it via `Intl.DateTimeFormat`.
+// Plain `Intl.DateTimeFormat` is otherwise too permissive — it silently
+// accepts legacy abbreviations like 'IST'/'EST'/'PST' that we never want
+// persisted. The shape gate (`/` or `UTC`) rejects those before the
+// resolution step. Empty/whitespace is treated as not supplied.
+const isSupportedTimezone = (v: string): boolean => {
+    if (v !== 'UTC' && !v.includes('/')) return false;
+    try {
+        new Intl.DateTimeFormat(undefined, { timeZone: v });
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+const timezoneSchema = z
+    .string()
+    .trim()
+    .optional()
+    .transform((v) => (v ? v : undefined))
+    .refine((v) => v === undefined || isSupportedTimezone(v), {
+        message: 'Pick a supported IANA timezone (e.g. "Asia/Kolkata", "America/New_York").',
+    });
 
 /**
  * Zod schemas for `/users` routes.
@@ -53,9 +116,9 @@ export const createUserBodySchema = z
     .object({
         email: z.string().trim().toLowerCase().email(),
         full_name: z.string().trim().min(1),
-        phone: z.string().trim().optional(),
+        phone: phoneSchema,
         role: roleEnum,
-        timezone: z.string().trim().optional(),
+        timezone: timezoneSchema,
         slack_user_id: z.string().trim().optional(),
         initial_password: z.string().min(1, 'initial_password is required'),
         internal_profile: internalProfileCreateSchema.optional(),
@@ -107,8 +170,8 @@ const clientProfilePatchSchema = clientProfileCreateSchema.partial();
 export const updateUserBodySchema = z
     .object({
         full_name: z.string().trim().min(1).optional(),
-        phone: z.string().trim().optional(),
-        timezone: z.string().trim().optional(),
+        phone: phoneSchema,
+        timezone: timezoneSchema,
         slack_user_id: z.string().trim().nullable().optional(),
         slack_notifications_enabled: z.boolean().optional(),
         internal_profile: internalProfilePatchSchema.optional(),

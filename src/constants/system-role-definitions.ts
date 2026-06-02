@@ -91,6 +91,11 @@ const TEAM_LEAD_ADDITIONS: readonly Permission[] = [
     PERMISSIONS.TASK_TEMPLATE_WRITE,
     PERMISSIONS.SHARE_LINK_WRITE,
     PERMISSIONS.DASHBOARD_MANAGER,
+    // BUG-039 — team leads need to see the role catalog so the Roles
+    // tab on /admin/users/:id can render. Strictly metadata read; the
+    // writes (role assignment / extras) remain admin-only via USER_WRITE
+    // and ROLE_WRITE / USER_ROLE_CHANGE.
+    PERMISSIONS.ROLE_READ,
 ];
 
 /** Manager adds on top of team-lead: reports + billing + clients + audit-log read. */

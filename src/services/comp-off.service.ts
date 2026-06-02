@@ -1,11 +1,13 @@
 import { Types } from 'mongoose';
 
 import { CompOffLedger, type CompOffLedgerDocument } from '../models/comp-off-ledger.model.js';
+import { LeaveBalance, recomputeAvailable } from '../models/leave-balance.model.js';
+import { LeaveType } from '../models/leave-type.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
-import { COMP_OFF_SOURCES, COMP_OFF_TYPES, type CompOffType } from '../constants/leave.js';
+import { COMP_OFF_SOURCES, COMP_OFF_TYPES, LEAVE_CODES, type CompOffType } from '../constants/leave.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { AdjustCompOffBody, ListCompOffQuery, MyCompOffQuery } from '../validators/comp-off.validator.js';
@@ -40,6 +42,51 @@ const recomputeBalance = async (user_id: Types.ObjectId): Promise<number> => {
     const balance = earned - consumed;
     await User.updateOne({ _id: user_id }, { $set: { comp_off_balance: balance } });
     return balance;
+};
+
+/**
+ * Mirror the comp-off ledger total into `LeaveBalance(user, COMP_OFF, year).adjusted`
+ * so the apply-leave engine — which reads availability from `LeaveBalance` —
+ * actually sees comp-off grants (BUG-036). The ledger remains the source of
+ * truth for the comp-off page (`users.comp_off_balance`); this row is the
+ * leave-application's read view, kept in sync at every ledger mutation.
+ *
+ * We touch the current year only: comp-off is not year-segmented at the
+ * grant level, and the apply-leave engine looks up the row by the
+ * requested leave's year. If a user wants to spend comp-off in a year
+ * other than the current one, that's a separate gap from this bug.
+ */
+const syncLeaveBalanceForCompOff = async (
+    user_id: Types.ObjectId,
+    balance: number
+): Promise<void> => {
+    const compOffType = await LeaveType.findOne({ code: LEAVE_CODES.COMP_OFF, is_active: true });
+    if (!compOffType) return;
+    const year = new Date().getFullYear();
+    const existing = await LeaveBalance.findOne({
+        user_id,
+        leave_type_id: compOffType._id,
+        year,
+    });
+    if (existing) {
+        existing.adjusted = balance;
+        existing.available = recomputeAvailable(existing);
+        await existing.save();
+        return;
+    }
+    const seedDoc = {
+        user_id,
+        leave_type_id: compOffType._id,
+        year,
+        allocated: 0,
+        carried_forward: 0,
+        used: 0,
+        pending: 0,
+        adjusted: balance,
+        monthly_forfeited: 0,
+        available: balance,
+    };
+    await LeaveBalance.create(seedDoc);
 };
 
 const isReviewer = (role: RoleType): boolean => role === ROLES.ADMIN || role === ROLES.MANAGER;
@@ -137,9 +184,21 @@ export const adjustCompOff = async (
     if (!isReviewer(actor.role)) throw AppError.forbidden();
 
     const targetUserId = new Types.ObjectId(body.user_id);
-    const userExists = await User.exists({ _id: targetUserId });
-    if (!userExists) {
+    const target = await User.findById(targetUserId).select('role');
+    if (!target) {
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
+    }
+    // BUG-037 — clients are external; comp-off is a staff-only construct.
+    // The Adjust dialog already filters clients out of the picker, but a
+    // direct API caller (curl, a stale window, future tooling) must also
+    // be rejected with an explicit error rather than silently creating
+    // ledger rows that can never be consumed via leave.
+    if (target.role === ROLES.CLIENT) {
+        throw AppError.unprocessable(
+            'Comp-off cannot be assigned to clients',
+            ERROR_CODES.FORBIDDEN_ROLE_TARGET,
+            { role: target.role }
+        );
     }
 
     // Guard against driving balance negative on a `consume` adjustment.
@@ -167,6 +226,13 @@ export const adjustCompOff = async (
     });
 
     const balanceAfter = await recomputeBalance(targetUserId);
+
+    // BUG-036 — keep the leave-application read view in sync. The
+    // apply-leave engine reads availability from LeaveBalance and was
+    // blind to comp-off grants; mirror the ledger total into the
+    // current-year COMP_OFF row's `adjusted` so the user can actually
+    // spend what we just credited.
+    await syncLeaveBalanceForCompOff(targetUserId, balanceAfter);
 
     if (audit) {
         // I1 — sensitive admin write: signed delta + operator-supplied

@@ -29,6 +29,9 @@ export const ERROR_CODES = {
     COMMENT_EDIT_FORBIDDEN: 'COMMENT_EDIT_FORBIDDEN',
     COMMENT_DELETE_FORBIDDEN: 'COMMENT_DELETE_FORBIDDEN',
     ATTACHMENT_DELETE_FORBIDDEN: 'ATTACHMENT_DELETE_FORBIDDEN',
+    /** Target user's role disqualifies them for the requested action — e.g.
+     *  granting comp-off to a client (BUG-037). */
+    FORBIDDEN_ROLE_TARGET: 'FORBIDDEN_ROLE_TARGET',
 
     // 404 — Not Found
     RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',

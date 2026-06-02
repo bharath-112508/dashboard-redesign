@@ -651,6 +651,89 @@ export interface TaskCommentMentionDispatchInput {
     body_preview: string;
 }
 
+// ─── Public API: task comment watchers (BUG-068) ────────────────────────
+//
+// Sibling of `notifyTaskCommentMention` for the broader watcher set —
+// task assignee, collaborators, creator, prior commenters. Whoever sits
+// closer to the task than just being @-mentioned. **In-app only**: the
+// mention path keeps the email channel for the "you were tagged" call;
+// everyone else gets a quiet bell ping that the comments tab refreshes
+// to anyway. Caller is responsible for de-duping against the @mention
+// set so a recipient never gets two rows for the same comment.
+
+export interface TaskCommentWatcherDispatchInput {
+    comment_id: Types.ObjectId;
+    task_id: Types.ObjectId;
+    project_id: Types.ObjectId;
+    author_id: Types.ObjectId;
+    /** Already de-duped + excludes the author + excludes anyone in mentions. */
+    watcher_user_ids: Types.ObjectId[];
+    /** Pre-sanitised, plain-text comment body. Used for the in-app body. */
+    body_preview: string;
+    /** Used in the in-app title so the bell drawer reads `"X commented on TaskTitle"`. */
+    task_title: string;
+}
+
+export const notifyTaskCommentWatchers = async (input: TaskCommentWatcherDispatchInput): Promise<void> => {
+    const context = 'notify.task_comment_watchers';
+    try {
+        if (input.watcher_user_ids.length === 0) return;
+
+        const recipientIds = input.watcher_user_ids.filter((id) => !id.equals(input.author_id));
+        if (recipientIds.length === 0) return;
+
+        const [author, recipients] = await Promise.all([
+            findUserById(input.author_id),
+            User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
+                .select('_id email full_name role slack_user_id slack_notifications_enabled')
+                .lean<RecipientUser[]>(),
+        ]);
+
+        if (!author) {
+            logger.warn({ context, author_id: input.author_id.toString() }, 'author missing — skipping');
+            return;
+        }
+        if (recipients.length === 0) {
+            logger.info({ context }, 'No active recipients to notify');
+            return;
+        }
+
+        const linkUrl = `/tasks/${input.task_id.toString()}`;
+        // In-app body cap is NOTIFICATION_BODY_MAX (2 000). Defensive
+        // truncate so a 5 000-char comment doesn't trip validation.
+        const inAppBody =
+            input.body_preview.length > 1_900 ? `${input.body_preview.slice(0, 1_900).trimEnd()}…` : input.body_preview;
+
+        // Watchers get in-app only — pass null for email + skip slack to
+        // keep this quieter than the mention path. The mention email is
+        // the place to escalate; "someone you collaborate with commented"
+        // shouldn't blow up everyone's inbox.
+        await runWithConcurrency(recipients, NOTIFICATION_FAN_OUT_CONCURRENCY, (r) =>
+            dispatchToRecipient(
+                r,
+                {
+                    type: NOTIFICATION_TYPES.TASK_COMMENT,
+                    title: `${author.full_name} commented on ${input.task_title}`,
+                    body: inAppBody,
+                    link_url: linkUrl,
+                    related_entity: {
+                        kind: RELATED_ENTITY_KINDS.TASK,
+                        id: input.task_id,
+                    },
+                },
+                null,
+                context,
+                null
+            )
+        );
+    } catch (err) {
+        logger.warn(
+            { err, code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED, dispatch_event: context },
+            'Task-comment watcher dispatch failed'
+        );
+    }
+};
+
 export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatchInput): Promise<void> => {
     const context = 'notify.task_comment_mention';
     try {

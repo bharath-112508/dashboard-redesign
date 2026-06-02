@@ -13,7 +13,7 @@ import { recordActivity } from './task-activity.service.js';
 import { loadProjectForCaller } from './project.service.js';
 import type { ProjectCaller } from './project.service.js';
 import { sanitiseCommentBody } from '../utils/comment-sanitiser.js';
-import { notifyTaskCommentMention } from './notification-dispatcher.service.js';
+import { notifyTaskCommentMention, notifyTaskCommentWatchers } from './notification-dispatcher.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { CreateCommentBody, ListCommentsQuery, PatchCommentBody } from '../validators/comment.validator.js';
 
@@ -55,13 +55,23 @@ const toPublic = (doc: TaskCommentDocument): Record<string, unknown> => doc.toJS
  * Load the parent task + assert the caller can see its project. All
  * comment endpoints fan through this so visibility lives in one place.
  */
+interface LoadedTask {
+    _id: Types.ObjectId;
+    project_id: Types.ObjectId;
+    // BUG-068 — added for the watcher fan-out on createComment.
+    title: string;
+    primary_assignee_id: Types.ObjectId | null;
+    collaborator_ids: Types.ObjectId[];
+    created_by: Types.ObjectId;
+}
+
 const loadTaskAndProject = async (
     taskId: Types.ObjectId,
     caller: ProjectCaller
-): Promise<{ task: { _id: Types.ObjectId; project_id: Types.ObjectId }; project: ProjectDocument }> => {
+): Promise<{ task: LoadedTask; project: ProjectDocument }> => {
     const task = await Task.findById(taskId)
-        .select('_id project_id')
-        .lean<{ _id: Types.ObjectId; project_id: Types.ObjectId } | null>();
+        .select('_id project_id title primary_assignee_id collaborator_ids created_by')
+        .lean<LoadedTask | null>();
     if (!task) throw AppError.notFound('Task not found', ERROR_CODES.TASK_NOT_FOUND);
     const project = await loadProjectForCaller(task.project_id, caller);
     return { task, project };
@@ -197,10 +207,16 @@ export const createComment = async (
         });
     }
 
+    // BUG-068 — recipient rules:
+    //   1. If the comment has @mentions → notify ONLY those mentioned
+    //      users (existing mention path, in-app + email).
+    //   2. Otherwise → notify the people ASSIGNED to the task: primary
+    //      assignee + collaborators (the "Contributors" picker in the
+    //      task detail view). Quiet in-app only, no email.
+    //   3. If neither mentions nor assignees → no notification.
+    //   Prior commenters and the task creator are NOT in the recipient
+    //   list — only people explicitly tied to the task get pinged.
     if (mentions.length > 0) {
-        // Fire-and-forget. The dispatcher logs its own failures and
-        // never throws — the comment write is the user's primary
-        // success signal.
         await notifyTaskCommentMention({
             comment_id: created._id,
             task_id: task._id,
@@ -209,6 +225,27 @@ export const createComment = async (
             mentioned_user_ids: mentions,
             body_preview: cleanBody,
         });
+    } else {
+        const assigneeSet = new Set<string>();
+        if (task.primary_assignee_id) {
+            assigneeSet.add(task.primary_assignee_id.toString());
+        }
+        for (const cid of task.collaborator_ids ?? []) {
+            assigneeSet.add(cid.toString());
+        }
+        assigneeSet.delete(caller.id.toString());
+
+        if (assigneeSet.size > 0) {
+            await notifyTaskCommentWatchers({
+                comment_id: created._id,
+                task_id: task._id,
+                project_id: project._id,
+                author_id: caller.id,
+                watcher_user_ids: Array.from(assigneeSet).map((s) => new Types.ObjectId(s)),
+                body_preview: cleanBody,
+                task_title: task.title,
+            });
+        }
     }
 
     await recordActivity({

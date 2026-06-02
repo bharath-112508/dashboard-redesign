@@ -280,6 +280,25 @@ const generate = async (row: ReportExportDocument): Promise<Buffer> => {
     return generator(table);
 };
 
+// BUG-069 — inline export entry point used by the controller when Azure
+// Blob isn't configured. Builds the report + renders the file in one
+// shot so the controller can stream it back as the HTTP response. No
+// row is persisted (the async pipeline owns retention); audit is still
+// the controller's responsibility — we just produce the bytes.
+export const generateExportInline = async (input: {
+    name: ReportExportName;
+    format: ExportFormat;
+    filters: Record<string, unknown>;
+}): Promise<{ buffer: Buffer; fileName: string; mime: string }> => {
+    const builder = REPORT_BUILDERS[input.name];
+    const generator = FORMAT_GENERATORS[input.format];
+    const table = await builder(input.filters);
+    const buffer = await generator(table);
+    const fileName = buildExportFileName(input.name, input.format, new Date());
+    const mime = EXPORT_FORMAT_CONFIG[input.format].mime;
+    return { buffer, fileName, mime };
+};
+
 class StorageNotConfiguredError extends Error {
     code = ERROR_CODES.STORAGE_NOT_CONFIGURED;
     constructor() {

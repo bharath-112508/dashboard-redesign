@@ -46,11 +46,17 @@ export const getListUsers = async (req: Request, res: Response): Promise<Respons
 };
 
 // ─── GET /users/:id ─────────────────────────────────────────────────────────
-// Admin/Manager can fetch anyone; any authenticated user can fetch themself.
+// Admin / Manager / Team-Lead can fetch anyone; any authenticated user can
+// fetch themself. (BUG-039 — team-lead added to the privileged list so
+// the user-detail page renders for them. The detail page is intentionally
+// read-only for team-lead — see USER_WRITE gates in the FE Roles tab.)
 export const getUserById = async (req: Request, res: Response): Promise<Response> => {
     const caller = callerId(req);
     const target = parseTargetId(req);
-    const isPrivileged = req.user?.role === ROLES.ADMIN || req.user?.role === ROLES.MANAGER;
+    const isPrivileged =
+        req.user?.role === ROLES.ADMIN ||
+        req.user?.role === ROLES.MANAGER ||
+        req.user?.role === ROLES.TEAM_LEAD;
     if (!isPrivileged && !caller.equals(target)) {
         throw AppError.forbidden();
     }
