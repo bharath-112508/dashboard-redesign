@@ -6,8 +6,13 @@ import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
-import { REPORT_SUBSCRIPTION_MAX_PER_RUN, REPORT_SUBSCRIPTION_PER_USER_CAP } from '../constants/report-subscription.js';
-import { type ReportExportName } from '../constants/export.js';
+import {
+    REPORT_SUBSCRIPTION_ATTACHMENT_MAX_BYTES,
+    REPORT_SUBSCRIPTION_MAX_PER_RUN,
+    REPORT_SUBSCRIPTION_PER_USER_CAP,
+    type ReportSubscriptionOutputFormat,
+} from '../constants/report-subscription.js';
+import { EXPORT_FORMAT_CONFIG, type ExportFormat, type ReportExportName } from '../constants/export.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { parsePresetFilters } from '../validators/report-preset.validator.js';
 import {
@@ -16,9 +21,22 @@ import {
     buildLeaveReport,
     buildUtilizationReport,
 } from './report.service.js';
-import { renderReportSubscriptionEmail } from './report-subscription.email.js';
+import {
+    renderReportSubscriptionAttachmentNotice,
+    renderReportSubscriptionEmail,
+} from './report-subscription.email.js';
+import {
+    toTabularAttendance,
+    toTabularBilling,
+    toTabularLeaves,
+    toTabularUtilization,
+    type TabularReport,
+} from './report-exporters/tabular.js';
+import { generateCsv } from './report-exporters/csv.js';
+import { generateXlsx } from './report-exporters/xlsx.js';
+import { generatePdf } from './report-exporters/pdf.js';
 import { recordAudit, recordSystemAudit, type AuditContext } from './audit.service.js';
-import { sendEmail } from '../utils/mailer.js';
+import { sendEmail, type EmailAttachment } from '../utils/mailer.js';
 import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
 import logger from '../utils/logger.js';
 import type { PaginationMeta } from '../utils/api-response.js';
@@ -103,6 +121,7 @@ export const createSubscription = async (
             filters,
             day_of_week: body.day_of_week,
             hour_local: body.hour_local,
+            output_format: body.output_format,
             is_active: body.is_active,
         });
     } catch (err: unknown) {
@@ -185,6 +204,7 @@ export const updateSubscription = async (
     }
     if (body.day_of_week !== undefined) doc.day_of_week = body.day_of_week;
     if (body.hour_local !== undefined) doc.hour_local = body.hour_local;
+    if (body.output_format !== undefined) doc.output_format = body.output_format;
     if (body.is_active !== undefined) doc.is_active = body.is_active;
 
     try {
@@ -263,6 +283,101 @@ const buildReportForSubscription = async (
     }
 };
 
+const toTabularFor = (
+    name: ReportExportName,
+    result: BillingReportResult | UtilizationReportResult | AttendanceReportResult | LeaveReportResult
+): TabularReport => {
+    switch (name) {
+        case 'billing':
+            return toTabularBilling(result as BillingReportResult);
+        case 'utilization':
+            return toTabularUtilization(result as UtilizationReportResult);
+        case 'attendance':
+            return toTabularAttendance(result as AttendanceReportResult);
+        case 'leaves':
+            return toTabularLeaves(result as LeaveReportResult);
+    }
+};
+
+/**
+ * V2-BE-13 — generate the attachment buffer for the subscription's
+ * configured `output_format` (csv/xlsx/pdf). Returns `null` to signal
+ * a controlled fallback to `inline` HTML; the caller audit-logs the
+ * fallback so operators can spot drift.
+ *
+ * Failure paths:
+ *  - Generator threw (PDF engine crash, blank table, etc.) → null
+ *  - Result exceeds `REPORT_SUBSCRIPTION_ATTACHMENT_MAX_BYTES` → null
+ *
+ * Either way, the recipient still gets data (the caller falls back).
+ * The size cap is enforced HERE so we never thread a 50 MB Buffer
+ * through the mailer / transport layer just to have the provider
+ * reject it.
+ */
+interface AttachmentBuildSuccess {
+    attachment: EmailAttachment;
+    table: TabularReport;
+}
+interface AttachmentBuildFallback {
+    attachment: null;
+    table: TabularReport;
+    fallback_reason: 'generation_failed' | 'attachment_too_large';
+    error_message?: string;
+    bytes?: number;
+}
+type AttachmentBuildResult = AttachmentBuildSuccess | AttachmentBuildFallback;
+
+const buildAttachmentBuffer = async (
+    format: Exclude<ReportSubscriptionOutputFormat, 'inline'>,
+    table: TabularReport
+): Promise<Buffer> => {
+    switch (format) {
+        case 'csv':
+            return generateCsv(table);
+        case 'xlsx':
+            return await generateXlsx(table);
+        case 'pdf':
+            return await generatePdf(table);
+    }
+};
+
+const buildSubscriptionAttachment = async (
+    sub: ReportSubscriptionDocument,
+    result: BillingReportResult | UtilizationReportResult | AttendanceReportResult | LeaveReportResult,
+    todayIso: string
+): Promise<AttachmentBuildResult> => {
+    const table = toTabularFor(sub.report_name, result);
+    const format = sub.output_format as Exclude<ReportSubscriptionOutputFormat, 'inline'>;
+
+    let content: Buffer;
+    try {
+        content = await buildAttachmentBuffer(format, table);
+    } catch (err) {
+        return {
+            attachment: null,
+            table,
+            fallback_reason: 'generation_failed',
+            error_message: err instanceof Error ? err.message.slice(0, 200) : 'unknown',
+        };
+    }
+
+    if (content.length > REPORT_SUBSCRIPTION_ATTACHMENT_MAX_BYTES) {
+        return {
+            attachment: null,
+            table,
+            fallback_reason: 'attachment_too_large',
+            bytes: content.length,
+        };
+    }
+
+    const { extension, mime } = EXPORT_FORMAT_CONFIG[format as ExportFormat];
+    const filename = `${sub.name.replace(/[^\w-]+/g, '_').slice(0, 60) || 'report'}-${todayIso}.${extension}`;
+    return {
+        attachment: { filename, contentType: mime, content },
+        table,
+    };
+};
+
 /**
  * Daily 07:00 IST sweep. Idempotency:
  *  - Outer: `job_runs` unique index on `(name, run_key)`.
@@ -320,7 +435,53 @@ export const runWeeklyReportSweep = async (now: Date = new Date()): Promise<Swee
             }
 
             const result = await buildReportForSubscription(sub.report_name, sub.filters as Record<string, unknown>);
-            const email = renderReportSubscriptionEmail(sub.report_name, result, sub.name);
+
+            // V2-BE-13 — choose inline vs attachment based on the
+            // subscription's `output_format`. On generation failure or
+            // size-cap breach we fall back to inline + audit-log so the
+            // recipient never gets nothing.
+            let email: { subject: string; html: string; text: string };
+            let attachments: EmailAttachment[] | undefined;
+            let delivery_format: 'inline' | 'csv' | 'xlsx' | 'pdf' = 'inline';
+            let fallback_audit: { reason: string; detail?: string } | null = null;
+
+            if (sub.output_format === 'inline') {
+                email = renderReportSubscriptionEmail(sub.report_name, result, sub.name);
+            } else {
+                const built = await buildSubscriptionAttachment(sub, result, todayIso);
+                if (built.attachment) {
+                    email = renderReportSubscriptionAttachmentNotice(
+                        sub.report_name,
+                        result,
+                        sub.name,
+                        built.attachment.filename
+                    );
+                    attachments = [built.attachment];
+                    delivery_format = sub.output_format;
+                } else {
+                    // Controlled fallback — generate inline HTML so the
+                    // user still gets the data; record what failed.
+                    email = renderReportSubscriptionEmail(sub.report_name, result, sub.name);
+                    fallback_audit = {
+                        reason: built.fallback_reason,
+                        detail:
+                            built.fallback_reason === 'generation_failed'
+                                ? built.error_message
+                                : built.bytes !== undefined
+                                  ? `${built.bytes} bytes (cap ${REPORT_SUBSCRIPTION_ATTACHMENT_MAX_BYTES})`
+                                  : undefined,
+                    };
+                    logger.warn(
+                        {
+                            subscription_id: sub._id.toString(),
+                            requested_format: sub.output_format,
+                            fallback_reason: built.fallback_reason,
+                            detail: fallback_audit.detail,
+                        },
+                        'Attachment build failed; falling back to inline HTML'
+                    );
+                }
+            }
 
             await sendEmail({
                 to: owner.email,
@@ -328,6 +489,7 @@ export const runWeeklyReportSweep = async (now: Date = new Date()): Promise<Swee
                 html: email.html,
                 text: email.text,
                 context: 'report_subscription.send',
+                attachments,
             });
 
             // Stamp atomically — defends against a concurrent tick
@@ -375,6 +537,14 @@ export const runWeeklyReportSweep = async (now: Date = new Date()): Promise<Swee
                     fire_date: todayIso,
                     recipient_email: owner.email,
                     delivery: 'sent',
+                    requested_format: sub.output_format,
+                    delivered_format: delivery_format,
+                    ...(fallback_audit
+                        ? {
+                              fallback_reason: fallback_audit.reason,
+                              fallback_detail: fallback_audit.detail ?? null,
+                          }
+                        : {}),
                 },
             });
 

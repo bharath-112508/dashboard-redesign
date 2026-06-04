@@ -8,12 +8,11 @@ import { PERMISSIONS } from '../constants/permissions.js';
 /**
  * Dashboard routes (API_Contract.md §14, Step 13).
  *
- * Three surfaces shipped: admin / manager / employee. The
- * `/dashboard/client` surface is **not yet implemented** — clients
- * see project data via `GET /projects` filtered to their `client_ids`,
- * which is what the FE currently renders for them. Adding the
- * dedicated dashboard is a route-level addition (1 controller + 1
- * service helper) when the FE has a real client landing-page design.
+ * Four surfaces shipped: admin / manager / employee / client. Each
+ * route is gated by its matching `dashboard.*` permission so a
+ * caller with multiple role bundles only ever hits one endpoint per
+ * navigation. Per-row visibility (e.g. a client only seeing the
+ * projects they're on) is enforced at the service layer.
  */
 
 const router = Router();
@@ -22,5 +21,6 @@ router.use(authenticate);
 router.get('/admin', requirePermission(PERMISSIONS.DASHBOARD_ADMIN), asyncHandler(ctrl.getAdmin));
 router.get('/manager', requirePermission(PERMISSIONS.DASHBOARD_MANAGER), asyncHandler(ctrl.getManager));
 router.get('/employee', requirePermission(PERMISSIONS.DASHBOARD_EMPLOYEE), asyncHandler(ctrl.getEmployee));
+router.get('/client', requirePermission(PERMISSIONS.DASHBOARD_CLIENT), asyncHandler(ctrl.getClient));
 
 export default router;

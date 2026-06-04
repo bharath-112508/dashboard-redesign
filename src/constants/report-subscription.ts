@@ -71,3 +71,30 @@ export const REPORT_SUBSCRIPTION_DEFAULT_HOUR_LOCAL = 7;
 
 /** Top-K rows shown in the inline summary; the rest are hinted at via "and N more". */
 export const REPORT_SUBSCRIPTION_PREVIEW_ROW_LIMIT = 10;
+
+// ─── Output format (V2-BE-13) ──────────────────────────────────────────
+//
+// `inline` keeps the legacy behaviour: report rendered as HTML inside
+// the email body. The other three values attach a generated file to a
+// short notice email. The generators already exist for ad-hoc exports
+// (`services/report-exporters/`); the subscription path reuses them.
+//
+// If attachment generation fails (PDF engine crash, blank report, etc.)
+// the service falls back to `inline` and audit-logs the fallback so the
+// recipient still gets the data and operators can spot drift.
+
+export const REPORT_SUBSCRIPTION_OUTPUT_FORMATS = ['inline', 'csv', 'xlsx', 'pdf'] as const;
+export type ReportSubscriptionOutputFormat = (typeof REPORT_SUBSCRIPTION_OUTPUT_FORMATS)[number];
+export const REPORT_SUBSCRIPTION_DEFAULT_OUTPUT_FORMAT: ReportSubscriptionOutputFormat = 'inline';
+
+/**
+ * Hard cap on generated attachment size before we refuse to send.
+ * Mail providers (ACS 30 MB, Mailjet 15 MB) reject above their own
+ * limits; 10 MB sits well under both and catches pathologically large
+ * reports before they waste compute time. A report that hits this cap
+ * is almost certainly a misconfigured filter (e.g., a 5-year leave
+ * report with no project filter); falling back to inline HTML would
+ * produce the same problem in a different shape, so the policy on
+ * overflow is "fail this send + audit-log, retry tomorrow."
+ */
+export const REPORT_SUBSCRIPTION_ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;

@@ -80,6 +80,14 @@ export const buildAcsTransport = (config: { connectionString: string; fromAddres
                         plainText: msg.text,
                     },
                     recipients: { to: [{ address: msg.to }] },
+                    // V2-BE-13 — ACS Email accepts attachments inline in
+                    // the message payload, base64-encoded. Per the SDK
+                    // shape: `{ name, contentType, contentInBase64 }`.
+                    attachments: msg.attachments?.map((a) => ({
+                        name: a.filename,
+                        contentType: a.contentType,
+                        contentInBase64: a.content.toString('base64'),
+                    })),
                 })
             );
             const result = await withSendTimeout('acs', EMAIL_TRANSPORT_SEND_TIMEOUT_MS, poller.pollUntilDone());

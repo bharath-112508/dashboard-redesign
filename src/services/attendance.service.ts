@@ -588,8 +588,31 @@ export const listCorrections = async (
         AttendanceCorrectionRequest.countDocuments(filter),
     ]);
 
+    // Batch-load the requester's display name in one round-trip so the
+    // admin correction queue can render names without N+1 lookups. We
+    // emit `user_full_name` as a flat field on each row (matching the
+    // FE's `CorrectionRequestRecord` shape). `null` means the user has
+    // actually been hard-deleted — the FE renders "deleted user" only
+    // in that case. Without this join, every row arrived without a
+    // name and the FE assumed everyone was deleted.
+    const uniqueUserIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map(
+        (id) => new Types.ObjectId(id)
+    );
+    const userRows = uniqueUserIds.length
+        ? await User.find({ _id: { $in: uniqueUserIds } })
+              .select('_id full_name')
+              .lean<{ _id: Types.ObjectId; full_name: string }[]>()
+        : [];
+    const nameById = new Map(userRows.map((u) => [u._id.toString(), u.full_name]));
+
+    const data = rows.map((r) => {
+        const json = r.toJSON() as unknown as Record<string, unknown>;
+        json.user_full_name = nameById.get(r.user_id.toString()) ?? null;
+        return json;
+    });
+
     return {
-        data: rows.map((r) => r.toJSON() as unknown as Record<string, unknown>),
+        data,
         meta: {
             page: query.page,
             limit: query.limit,

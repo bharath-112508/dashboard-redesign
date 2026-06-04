@@ -1,6 +1,9 @@
 import { APP_BASE_URL, PASSWORD_RESET_URL_PATH } from '../config/server.config.js';
 import { getEmailTransport } from './email-transports/index.js';
 
+import type { EmailAttachment } from './email-transports/types.js';
+export type { EmailAttachment } from './email-transports/types.js';
+
 /**
  * Mailer abstraction (BACKEND_AUDIT.md P0-1).
  *
@@ -33,6 +36,14 @@ export interface SendEmailInput {
      * (e.g. `'notification.leave_approved'`).
      */
     context?: string;
+    /**
+     * Optional attachments (V2-BE-13). Each entry is `{ filename,
+     * contentType, content: Buffer }`; transports convert to their
+     * provider-native shape (ACS base64, Mailjet base64, stub log).
+     * The mailer does NOT cap size — callers (e.g.,
+     * `report-subscription.service`) own the limit + fallback policy.
+     */
+    attachments?: EmailAttachment[];
 }
 
 export const sendEmail = async (input: SendEmailInput): Promise<void> => {
@@ -43,6 +54,7 @@ export const sendEmail = async (input: SendEmailInput): Promise<void> => {
         html: input.html,
         text: input.text,
         context: input.context,
+        attachments: input.attachments,
     });
 };
 

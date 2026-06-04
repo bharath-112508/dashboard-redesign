@@ -3,15 +3,30 @@ import { Types } from 'mongoose';
 import { Task } from '../models/task.model.js';
 
 /**
- * Story-side accessors over the `tasks` collection.
+ * Story-side data accessors over the `tasks` collection.
  *
- * Originally written with `mongoose.connection.collection(...)` because
- * the Task model didn't exist when stories shipped (Step 17 vs Step 18).
- * Now backed by the proper `Task` model, but the surface stays here so:
- *   - The narrow projections + the aggregation pipeline live in one
- *     place rather than scattered across `story.service`.
- *   - Tests can `vi.mock('./tasks-collection.js')` to stub the three
- *     story-shaped reads/writes without faking the full Task model.
+ * These three helpers exist because the **story** domain needs to run
+ * queries against tasks (rollup-by-story, narrow-projection-by-story,
+ * detach-on-story-delete) that aren't task API use cases. They live
+ * here — outside both `story.service.ts` and `task.service.ts` — for
+ * three reasons:
+ *
+ *   1. Keeps `task.service.ts` from accumulating cross-domain queries.
+ *      The task domain owns task use cases; queries other domains run
+ *      against the tasks collection don't belong there.
+ *
+ *   2. Keeps `story.service.ts` focused on business logic. The
+ *      aggregation pipeline + narrow projections + two-phase detach
+ *      are data-access plumbing, not story rules.
+ *
+ *   3. Gives tests a clean mock boundary —
+ *      `vi.mock('./story-task-queries.js')` stubs the three functions
+ *      in a single line, instead of mocking the Task model surface.
+ *
+ * Historical note: originally written with
+ * `mongoose.connection.collection(...)` because the Task model didn't
+ * exist when stories shipped (Step 17 vs Step 18). Now backed by the
+ * proper `Task` model.
  */
 
 // ─── Shared shape for the read-only fields the story service touches ─────

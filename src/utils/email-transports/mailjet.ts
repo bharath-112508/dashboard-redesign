@@ -90,6 +90,20 @@ export const buildMailjetTransport = (config: {
                     Subject: msg.subject,
                     TextPart: msg.text,
                     HTMLPart: msg.html,
+                    // V2-BE-13 — Mailjet v3.1 attachments shape:
+                    // `{ Filename, ContentType, Base64Content }`. Only
+                    // emit the field when there's payload — older
+                    // Mailjet accounts treat an empty array as a
+                    // schema error.
+                    ...(msg.attachments && msg.attachments.length > 0
+                        ? {
+                              Attachments: msg.attachments.map((a) => ({
+                                  Filename: a.filename,
+                                  ContentType: a.contentType,
+                                  Base64Content: a.content.toString('base64'),
+                              })),
+                          }
+                        : {}),
                 },
             ],
         };

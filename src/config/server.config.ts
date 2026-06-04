@@ -182,6 +182,20 @@ export const AZURE_BLOB_TASK_ATTACHMENTS_CONTAINER = getEnv(
 );
 export const AZURE_BLOB_PROFILE_PHOTOS_CONTAINER = getEnv('AZURE_BLOB_PROFILE_PHOTOS_CONTAINER', 'profile-photos');
 
+// ─── Application Insights (V2-OPS-3) ────────────────────────────────────
+//
+// Optional structured-log shipper. When the connection string is set,
+// `utils/logger.ts` attaches a `pino-applicationinsights` transport so
+// every pino log line is sent to App Insights as trace telemetry. When
+// it's null (dev, test, any non-Azure deploy), the logger uses
+// `pino-pretty` (dev) or stdout JSON (production) exactly as before —
+// no boot-time penalty, no SDK initialisation.
+//
+// Format: the standard connection string from the App Insights resource,
+// e.g. `InstrumentationKey=…;IngestionEndpoint=…;LiveEndpoint=…;…`. The
+// value is opaque to us; we only check for non-empty + pass it through.
+export const APPLICATIONINSIGHTS_CONNECTION_STRING = process.env.APPLICATIONINSIGHTS_CONNECTION_STRING?.trim() || null;
+
 // ─── Reverse-proxy trust (BACKEND_AUDIT.md P2-13) ──────────────────────
 //
 // Express's `req.ip` reads from `X-Forwarded-For` only when `trust proxy`

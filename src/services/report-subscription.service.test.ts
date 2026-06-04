@@ -37,6 +37,9 @@ const {
     buildLeaveMock,
     recordAuditMock,
     recordSystemAuditMock,
+    generateCsvMock,
+    generateXlsxMock,
+    generatePdfMock,
 } = vi.hoisted(() => ({
     subCreateMock: vi.fn(),
     subFindOneMock: vi.fn(),
@@ -51,6 +54,9 @@ const {
     buildLeaveMock: vi.fn(),
     recordAuditMock: vi.fn(),
     recordSystemAuditMock: vi.fn(),
+    generateCsvMock: vi.fn(),
+    generateXlsxMock: vi.fn(),
+    generatePdfMock: vi.fn(),
 }));
 
 vi.mock('../models/report-subscription.model.js', () => ({
@@ -82,6 +88,10 @@ vi.mock('./audit.service.js', () => ({
     recordAudit: recordAuditMock,
     recordSystemAudit: recordSystemAuditMock,
 }));
+
+vi.mock('./report-exporters/csv.js', () => ({ generateCsv: generateCsvMock }));
+vi.mock('./report-exporters/xlsx.js', () => ({ generateXlsx: generateXlsxMock }));
+vi.mock('./report-exporters/pdf.js', () => ({ generatePdf: generatePdfMock }));
 
 const svc = await import('./report-subscription.service.js');
 
@@ -128,6 +138,7 @@ const validBody = (overrides: Record<string, unknown> = {}) => ({
     filters: validBillingFilters(),
     day_of_week: 1, // Monday
     hour_local: 7,
+    output_format: 'inline' as const,
     is_active: true,
     ...overrides,
 });
@@ -142,6 +153,7 @@ const makeSubDoc = (overrides: Record<string, unknown> = {}) => {
         filters: validBillingFilters(),
         day_of_week: 1,
         hour_local: 7,
+        output_format: 'inline',
         is_active: true,
         last_sent_at: null,
         save: vi.fn(),
@@ -460,5 +472,86 @@ describe('runWeeklyReportSweep', () => {
 
         const audit = recordSystemAuditMock.mock.calls[0][0] as { metadata: { delivery: string } };
         expect(audit.metadata.delivery).toBe('failed');
+    });
+
+    // ─── V2-BE-13: attachment formats ──────────────────────────────────
+
+    it('xlsx subscription generates an attachment and stamps delivered_format', async () => {
+        const sub = makeSubDoc({ day_of_week: 1, output_format: 'xlsx', name: 'Weekly billing' });
+        subFindMock.mockReturnValueOnce(sweepStub([sub]));
+        userFindByIdMock.mockReturnValueOnce(findByIdStub(ownerActive()));
+        buildBillingMock.mockResolvedValueOnce(billingResultFixture());
+        const fakeXlsx = Buffer.from('PK\x03\x04 fake xlsx body');
+        generateXlsxMock.mockResolvedValueOnce(fakeXlsx);
+        subFindOneAndUpdateMock.mockResolvedValueOnce({ _id: sub._id });
+
+        const summary = await svc.runWeeklyReportSweep(new Date('2026-05-04T07:00:00+05:30'));
+
+        expect(summary.emails_sent).toBe(1);
+        expect(generateXlsxMock).toHaveBeenCalledTimes(1);
+        const sent = sendEmailMock.mock.calls[0][0] as {
+            attachments?: Array<{ filename: string; contentType: string; content: Buffer }>;
+        };
+        expect(sent.attachments).toHaveLength(1);
+        expect(sent.attachments![0].filename).toMatch(/\.xlsx$/);
+        expect(sent.attachments![0].contentType).toBe(
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+        expect(sent.attachments![0].content).toBe(fakeXlsx);
+
+        const audit = recordSystemAuditMock.mock.calls[0][0] as {
+            metadata: { delivered_format?: string; requested_format?: string };
+        };
+        expect(audit.metadata.requested_format).toBe('xlsx');
+        expect(audit.metadata.delivered_format).toBe('xlsx');
+    });
+
+    it('falls back to inline HTML when the generator throws and audit-logs fallback_reason', async () => {
+        const sub = makeSubDoc({ day_of_week: 1, output_format: 'pdf' });
+        subFindMock.mockReturnValueOnce(sweepStub([sub]));
+        userFindByIdMock.mockReturnValueOnce(findByIdStub(ownerActive()));
+        buildBillingMock.mockResolvedValueOnce(billingResultFixture());
+        generatePdfMock.mockRejectedValueOnce(new Error('pdfkit blew up on a wide table'));
+        subFindOneAndUpdateMock.mockResolvedValueOnce({ _id: sub._id });
+
+        const summary = await svc.runWeeklyReportSweep(new Date('2026-05-04T07:00:00+05:30'));
+
+        expect(summary.emails_sent).toBe(1);
+        const sent = sendEmailMock.mock.calls[0][0] as { attachments?: unknown };
+        // No attachments — inline fallback path.
+        expect(sent.attachments).toBeUndefined();
+
+        const audit = recordSystemAuditMock.mock.calls[0][0] as {
+            metadata: {
+                requested_format?: string;
+                delivered_format?: string;
+                fallback_reason?: string;
+            };
+        };
+        expect(audit.metadata.requested_format).toBe('pdf');
+        expect(audit.metadata.delivered_format).toBe('inline');
+        expect(audit.metadata.fallback_reason).toBe('generation_failed');
+    });
+
+    it('falls back to inline when the generated attachment exceeds the size cap', async () => {
+        const sub = makeSubDoc({ day_of_week: 1, output_format: 'csv' });
+        subFindMock.mockReturnValueOnce(sweepStub([sub]));
+        userFindByIdMock.mockReturnValueOnce(findByIdStub(ownerActive()));
+        buildBillingMock.mockResolvedValueOnce(billingResultFixture());
+        // 10 MB + 1 byte — one byte past the cap.
+        generateCsvMock.mockReturnValueOnce(Buffer.alloc(10 * 1024 * 1024 + 1));
+        subFindOneAndUpdateMock.mockResolvedValueOnce({ _id: sub._id });
+
+        const summary = await svc.runWeeklyReportSweep(new Date('2026-05-04T07:00:00+05:30'));
+
+        expect(summary.emails_sent).toBe(1);
+        const sent = sendEmailMock.mock.calls[0][0] as { attachments?: unknown };
+        expect(sent.attachments).toBeUndefined();
+
+        const audit = recordSystemAuditMock.mock.calls[0][0] as {
+            metadata: { fallback_reason?: string; delivered_format?: string };
+        };
+        expect(audit.metadata.delivered_format).toBe('inline');
+        expect(audit.metadata.fallback_reason).toBe('attachment_too_large');
     });
 });

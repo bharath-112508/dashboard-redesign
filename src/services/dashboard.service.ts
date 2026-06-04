@@ -7,6 +7,9 @@ import { LeaveBalance } from '../models/leave-balance.model.js';
 import { LeaveType, type LeaveTypeDocument } from '../models/leave-type.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { Notification } from '../models/notification.model.js';
+import { Project } from '../models/project.model.js';
+import { Task } from '../models/task.model.js';
+import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { isAdminLike } from '../utils/role-check.js';
@@ -431,6 +434,228 @@ export const buildEmployeeDashboard = async (user_id: Types.ObjectId): Promise<E
         today: { attendance },
         leave_balances,
         recent_leaves,
+        unread_notifications,
+    };
+};
+
+// ─── Client dashboard (V2-BE-2) ────────────────────────────────────────────
+//
+// Clients see only the projects they're a client on (`client_ids ∋ caller.id`)
+// and tasks within those projects. The same `PROJECT_CLIENT_SCOPED_ROLES`
+// filter that `project.service` enforces gates everything below — we resolve
+// the visible project-id set once and pass it through to each card. If a
+// client is on zero projects, every card returns its empty fallback (no 500s,
+// no leaked data from other tenants' projects).
+
+const DASHBOARD_CLIENT_RECENT_PROJECTS = 5;
+const DASHBOARD_CLIENT_RECENT_ACTIVITY = 10;
+
+interface ClientProjectCard {
+    id: string;
+    name: string;
+    code: string;
+    status: string;
+    task_count: number;
+    open_task_count: number;
+    last_activity_at: string | null;
+}
+
+interface ClientTaskActivityCard {
+    id: string;
+    title: string;
+    status: string;
+    project_id: string;
+    project_name: string;
+    updated_at: string;
+}
+
+interface ClientDashboardPayload {
+    generated_at: string;
+    user_id: string;
+    scope: 'client';
+    projects: {
+        total: number;
+        recent: ClientProjectCard[];
+    };
+    recent_task_activity: ClientTaskActivityCard[];
+    unread_notifications: number;
+}
+
+/** Resolve the set of project IDs visible to this client. Single source of
+ *  truth — every card below scopes its query through this list. */
+const resolveClientProjectIds = async (user_id: Types.ObjectId): Promise<Types.ObjectId[]> => {
+    const rows = await Project.find({ client_ids: user_id })
+        .select({ _id: 1 })
+        .lean<{ _id: Types.ObjectId }[]>();
+    return rows.map((r) => r._id);
+};
+
+/** Per-project rollup → ClientProjectCard for the top-N most recently active.
+ *  One aggregation pipeline so we don't N+1 over projects. */
+const computeClientProjectCards = async (
+    user_id: Types.ObjectId,
+    limit: number
+): Promise<{ total: number; recent: ClientProjectCard[] }> => {
+    const projects = await Project.find({ client_ids: user_id })
+        .select({
+            _id: 1,
+            name: 1,
+            code: 1,
+            status: 1,
+            custom_task_statuses: 1,
+            updated_at: 1,
+        })
+        .lean<
+            {
+                _id: Types.ObjectId;
+                name: string;
+                code: string;
+                status: string;
+                custom_task_statuses: { key: string; is_terminal: boolean }[];
+                updated_at: Date;
+            }[]
+        >();
+
+    if (projects.length === 0) return { total: 0, recent: [] };
+
+    const projectIds = projects.map((p) => p._id);
+
+    // Per-project terminal-status set: `done` + any custom status flagged
+    // terminal. Used below to compute `open_task_count`.
+    const terminalByProject = new Map<string, Set<string>>();
+    for (const p of projects) {
+        const set = new Set<string>([DEFAULT_DONE_TASK_STATUS_KEY]);
+        for (const s of p.custom_task_statuses ?? []) {
+            if (s.is_terminal) set.add(s.key);
+        }
+        terminalByProject.set(p._id.toString(), set);
+    }
+
+    // One aggregation over all visible projects: task_count + per-status
+    // counts + last task update timestamp per project.
+    const rollups = await Task.aggregate<{
+        _id: Types.ObjectId;
+        task_count: number;
+        statuses: { status: string; count: number }[];
+        last_activity_at: Date | null;
+    }>([
+        { $match: { project_id: { $in: projectIds } } },
+        {
+            $group: {
+                _id: { project: '$project_id', status: '$status' },
+                count: { $sum: 1 },
+                last_activity_at: { $max: '$updated_at' },
+            },
+        },
+        {
+            $group: {
+                _id: '$_id.project',
+                task_count: { $sum: '$count' },
+                statuses: { $push: { status: '$_id.status', count: '$count' } },
+                last_activity_at: { $max: '$last_activity_at' },
+            },
+        },
+    ]);
+
+    const rollupById = new Map<string, (typeof rollups)[number]>();
+    for (const r of rollups) rollupById.set(r._id.toString(), r);
+
+    const cards: ClientProjectCard[] = projects.map((p) => {
+        const rollup = rollupById.get(p._id.toString());
+        const terminal = terminalByProject.get(p._id.toString()) ?? new Set([DEFAULT_DONE_TASK_STATUS_KEY]);
+        const open_task_count = rollup
+            ? rollup.statuses.reduce((acc, s) => acc + (terminal.has(s.status) ? 0 : s.count), 0)
+            : 0;
+        return {
+            id: p._id.toString(),
+            name: p.name,
+            code: p.code,
+            status: p.status,
+            task_count: rollup?.task_count ?? 0,
+            open_task_count,
+            last_activity_at:
+                rollup?.last_activity_at?.toISOString() ?? p.updated_at?.toISOString() ?? null,
+        };
+    });
+
+    // Sort by most recent activity desc, then by name to stabilise ties.
+    cards.sort((a, b) => {
+        const ad = a.last_activity_at ?? '';
+        const bd = b.last_activity_at ?? '';
+        if (ad !== bd) return bd.localeCompare(ad);
+        return a.name.localeCompare(b.name);
+    });
+
+    return { total: projects.length, recent: cards.slice(0, limit) };
+};
+
+/** Last N tasks (by updated_at) across all of the client's visible projects. */
+const computeClientRecentTaskActivity = async (
+    projectIds: readonly Types.ObjectId[],
+    limit: number
+): Promise<ClientTaskActivityCard[]> => {
+    if (projectIds.length === 0) return [];
+    const tasks = await Task.find({ project_id: { $in: projectIds } })
+        .sort({ updated_at: -1 })
+        .limit(limit)
+        .select({ _id: 1, title: 1, status: 1, project_id: 1, updated_at: 1 })
+        .lean<
+            {
+                _id: Types.ObjectId;
+                title: string;
+                status: string;
+                project_id: Types.ObjectId;
+                updated_at: Date;
+            }[]
+        >();
+    if (tasks.length === 0) return [];
+
+    // One round trip to resolve project names for the labels.
+    const projects = await Project.find({ _id: { $in: tasks.map((t) => t.project_id) } })
+        .select({ _id: 1, name: 1 })
+        .lean<{ _id: Types.ObjectId; name: string }[]>();
+    const nameById = new Map<string, string>();
+    for (const p of projects) nameById.set(p._id.toString(), p.name);
+
+    return tasks.map((t) => ({
+        id: t._id.toString(),
+        title: t.title,
+        status: t.status,
+        project_id: t.project_id.toString(),
+        project_name: nameById.get(t.project_id.toString()) ?? '',
+        updated_at: t.updated_at.toISOString(),
+    }));
+};
+
+export const buildClientDashboard = async (user_id: Types.ObjectId): Promise<ClientDashboardPayload> => {
+    // Resolve visible projects once; pass the id list to dependent cards so
+    // we don't query `Project.find({ client_ids })` twice.
+    const projectIds = await safeCard(
+        'client.resolve_projects',
+        () => resolveClientProjectIds(user_id),
+        [] as Types.ObjectId[]
+    );
+
+    const [projects, recent_task_activity, unread_notifications] = await Promise.all([
+        safeCard(
+            'client.projects',
+            () => computeClientProjectCards(user_id, DASHBOARD_CLIENT_RECENT_PROJECTS),
+            { total: 0, recent: [] as ClientProjectCard[] }
+        ),
+        safeCard(
+            'client.recent_task_activity',
+            () => computeClientRecentTaskActivity(projectIds, DASHBOARD_CLIENT_RECENT_ACTIVITY),
+            [] as ClientTaskActivityCard[]
+        ),
+        safeCard('client.unread_notifications', () => computeEmployeeUnreadNotifications(user_id), 0),
+    ]);
+
+    return {
+        generated_at: new Date().toISOString(),
+        user_id: user_id.toString(),
+        scope: 'client',
+        projects,
+        recent_task_activity,
         unread_notifications,
     };
 };

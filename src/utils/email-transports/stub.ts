@@ -28,6 +28,11 @@ export const stubTransport: EmailTransport = async (msg) => {
             subject: msg.subject,
             context: msg.context ?? null,
             text_preview: msg.text.slice(0, 280),
+            attachments: msg.attachments?.map((a) => ({
+                filename: a.filename,
+                contentType: a.contentType,
+                bytes: a.content.length,
+            })),
         },
         'DEV: email (transport=stub)'
     );

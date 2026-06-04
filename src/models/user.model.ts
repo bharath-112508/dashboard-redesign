@@ -86,6 +86,14 @@ export interface UserDocument extends Document {
      * fan-out.
      */
     slack_notifications_enabled: boolean;
+    /**
+     * V2-BE-10 — global Web Push opt-in. Defaults to `true` so a user
+     * who registers a browser subscription gets push automatically.
+     * Toggling this to `false` silences push without unsubscribing the
+     * browser endpoints (they're kept so the toggle can be flipped back
+     * on without re-prompting for the browser permission).
+     */
+    push_notifications_enabled: boolean;
     comp_off_balance: number;
 
     // Role-specific
@@ -204,6 +212,7 @@ const userSchema = new Schema<UserDocument>(
         timezone: { type: String, default: DEFAULT_TIMEZONE },
         slack_user_id: { type: String, default: null },
         slack_notifications_enabled: { type: Boolean, required: true, default: true },
+        push_notifications_enabled: { type: Boolean, required: true, default: true },
         comp_off_balance: { type: Number, default: 0, min: 0 },
 
         internal_profile: { type: internalProfileSchema, required: false },

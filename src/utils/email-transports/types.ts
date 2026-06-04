@@ -9,6 +9,15 @@
  * doesn't block the primary write — the per-send failure is logged
  * at warn with `NOTIFICATION_DISPATCH_FAILED`).
  */
+export interface EmailAttachment {
+    /** Display filename — e.g. `"leaves-report-2026-06-03.xlsx"`. */
+    filename: string;
+    /** MIME type — e.g. `"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"`. */
+    contentType: string;
+    /** Raw binary content. Transports convert to base64 as required. */
+    content: Buffer;
+}
+
 export interface EmailMessage {
     to: string;
     subject: string;
@@ -16,6 +25,8 @@ export interface EmailMessage {
     text: string;
     /** Free-form correlation tag — surfaced in transport logs. */
     context?: string;
+    /** Optional attachments (V2-BE-13). Each transport encodes per its API. */
+    attachments?: EmailAttachment[];
 }
 
 export type EmailTransport = (msg: EmailMessage) => Promise<void>;

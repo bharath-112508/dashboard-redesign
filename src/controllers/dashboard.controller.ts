@@ -41,3 +41,10 @@ export const getEmployee = async (req: Request, res: Response): Promise<Response
     const data = await service.buildEmployeeDashboard(callerId(req));
     return ok(res, data);
 };
+
+// ─── GET /dashboard/client (V2-BE-2) ──────────────────────────────────────
+
+export const getClient = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.buildClientDashboard(callerId(req));
+    return ok(res, data);
+};

@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Types } from 'mongoose';
 
 /**
- * Story-side `tasks-collection` helpers — three accessors, each with
+ * Story-side `story-task-queries` helpers — three accessors, each with
  * a small but contract-bearing query:
  *
  *   1. `aggregateStoryDerivedRows` — short-circuits on empty
@@ -31,7 +31,7 @@ vi.mock('../models/task.model.js', () => ({
     },
 }));
 
-const utils = await import('./tasks-collection.js');
+const utils = await import('./story-task-queries.js');
 
 /** Build the chained-find return shape the helpers use: `.select(...).lean<T>()`. */
 const findChain = (rows: unknown[]) => ({

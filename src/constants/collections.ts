@@ -48,6 +48,7 @@ export const COLLECTIONS = {
 
     // Cross-cutting
     NOTIFICATIONS: 'notifications',
+    PUSH_SUBSCRIPTIONS: 'push_subscriptions',
     AUDIT_LOGS: 'audit_logs',
     JOB_RUNS: 'job_runs',
     REPORT_EXPORTS: 'report_exports',

@@ -9,6 +9,8 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/mailer.js';
 import { postSlackMessage, slackContextFrom, type SlackContext } from '../utils/slack.js';
+import { isPushConfigured, sendPushNotification, type PushPayload } from '../utils/push.js';
+import { listSubscriptionsForUser } from './push-subscription.service.js';
 import { runWithConcurrency } from '../utils/run-with-concurrency.js';
 
 /**
@@ -86,7 +88,13 @@ interface NotificationPayload {
 
 type RecipientUser = Pick<
     UserDocument,
-    '_id' | 'email' | 'full_name' | 'role' | 'slack_user_id' | 'slack_notifications_enabled'
+    | '_id'
+    | 'email'
+    | 'full_name'
+    | 'role'
+    | 'slack_user_id'
+    | 'slack_notifications_enabled'
+    | 'push_notifications_enabled'
 >;
 
 // ─── Internal: per-recipient fan-out ─────────────────────────────────────
@@ -163,6 +171,52 @@ const dispatchToRecipient = async (
             text: buildSlackText(payload),
             context: `${context}.dm`,
         });
+    }
+
+    // 4. Web Push — V2-BE-10. Best-effort (`sendPushNotification`
+    // swallows its own errors and auto-prunes 410/404 endpoints).
+    // Gated on:
+    //   (a) VAPID is configured (`isPushConfigured()` is a pure
+    //       sync env check; no DB hit, so we don't need to pass it
+    //       through from the caller like the Slack workspace state).
+    //   (b) Recipient has at least one stored subscription (zero rows
+    //       skips the inner loop entirely).
+    //   (c) Recipient hasn't toggled `push_notifications_enabled = false`
+    //       — kept symmetrical with the Slack opt-out.
+    if (isPushConfigured() && recipient.push_notifications_enabled !== false) {
+        try {
+            const subscriptions = await listSubscriptionsForUser(recipient._id);
+            if (subscriptions.length > 0) {
+                const pushPayload: PushPayload = {
+                    title: payload.title,
+                    body: payload.body,
+                    link_url: payload.link_url,
+                    type: payload.type,
+                    related_id: inAppRow?._id.toString(),
+                };
+                // Sequential per recipient — most users have 1-2 subs.
+                // Outer parallelism is already handled by
+                // `runWithConcurrency(5)` across recipients.
+                for (const subscription of subscriptions) {
+                    await sendPushNotification({
+                        subscription,
+                        payload: pushPayload,
+                        context: `${context}.push`,
+                    });
+                }
+            }
+        } catch (err) {
+            logger.warn(
+                {
+                    err,
+                    code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED,
+                    channel: 'push',
+                    dispatch_event: context,
+                    recipient_id: recipient._id.toString(),
+                },
+                'Notification push fan-out failed'
+            );
+        }
     }
 
     return inAppRow;
@@ -251,7 +305,7 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
     if (excludeUserId) filter._id = { $ne: excludeUserId };
 
     const rows = await User.find(filter)
-        .select('_id email full_name role slack_user_id slack_notifications_enabled')
+        .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
         .lean<RecipientUser[]>();
     return rows ?? [];
 };
@@ -259,7 +313,7 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
 const findUserById = async (id: Types.ObjectId): Promise<RecipientUser | null> => {
     return (
         (await User.findById(id)
-            .select('_id email full_name role slack_user_id slack_notifications_enabled')
+            .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
             .lean<RecipientUser>()) ?? null
     );
 };
@@ -685,7 +739,7 @@ export const notifyTaskCommentWatchers = async (input: TaskCommentWatcherDispatc
         const [author, recipients] = await Promise.all([
             findUserById(input.author_id),
             User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
-                .select('_id email full_name role slack_user_id slack_notifications_enabled')
+                .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
                 .lean<RecipientUser[]>(),
         ]);
 
@@ -745,7 +799,7 @@ export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatch
         const [author, recipients] = await Promise.all([
             findUserById(input.author_id),
             User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
-                .select('_id email full_name role slack_user_id slack_notifications_enabled')
+                .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
                 .lean<RecipientUser[]>(),
         ]);
 

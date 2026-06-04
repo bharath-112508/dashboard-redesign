@@ -103,6 +103,7 @@ export const remindUnloggedUsers = async (now: Date, log: JobContext['log']): Pr
                 role: u.role,
                 slack_user_id: u.slack_user_id,
                 slack_notifications_enabled: u.slack_notifications_enabled,
+                push_notifications_enabled: u.push_notifications_enabled,
             },
             local_date: targetDate,
             expected_hours: expectedHours,

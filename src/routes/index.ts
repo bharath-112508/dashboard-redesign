@@ -32,6 +32,7 @@ import reportSubscriptionRoutes from './report-subscription.routes.js';
 import { projectShareLinksNestedRouter, publicShareLinksRouter, shareLinksRouter } from './share-link.routes.js';
 import roleRoutes, { userRolesAssignRouter } from './role.routes.js';
 import commandPaletteRoutes from './command-palette.routes.js';
+import pushRoutes from './push.routes.js';
 
 const appRoutes = Router();
 
@@ -52,6 +53,7 @@ appRoutes.use('/leave-balances', leaveBalanceRoutes);
 appRoutes.use('/leaves', leaveRequestRoutes);
 appRoutes.use('/comp-off', compOffRoutes);
 appRoutes.use('/notifications', notificationRoutes);
+appRoutes.use('/push', pushRoutes);
 appRoutes.use('/dashboard', dashboardRoutes);
 appRoutes.use('/projects', projectRoutes);
 appRoutes.use('/sprints', sprintRoutes);

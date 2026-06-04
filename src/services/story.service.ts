@@ -22,7 +22,7 @@ import {
     findTasksByStoryId,
     type StoryTaskRow,
     type TaskDerivedRow,
-} from '../utils/tasks-collection.js';
+} from '../utils/story-task-queries.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     CreateStoryBody,
@@ -44,7 +44,7 @@ import type {
  *    (defence in depth) and throws `STORY_WRITE_FORBIDDEN` per
  *    API_Contract §7.4.
  *  - **Derived fields** are computed at read time via a single aggregation
- *    over the `tasks` collection (`utils/tasks-collection.ts`). The
+ *    over the `tasks` collection (`utils/story-task-queries.ts`). The
  *    aggregation is one round-trip indexed by `{project_id, story_id}`,
  *    so the Story-board's perf target (200 tasks < 200ms P95) holds.
  *  - **Reorder** shifts neighbours rather than using fractional ranks. For
@@ -470,7 +470,7 @@ export const listStoryTasks = async (
 
     // Pagination is in-memory (the per-story task count is small enough)
     // so the contract is simple. `findTasksByStoryId` runs a narrow
-    // `Task.find(...).select(...)` — see `utils/tasks-collection.ts`.
+    // `Task.find(...).select(...)` — see `utils/story-task-queries.ts`.
     const rows = await findTasksByStoryId(story._id);
     const start = (query.page - 1) * query.limit;
     const slice = rows.slice(start, start + query.limit);

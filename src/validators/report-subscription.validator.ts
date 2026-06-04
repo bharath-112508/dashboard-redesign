@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { REPORT_EXPORT_NAMES } from '../constants/export.js';
 import {
     REPORT_SUBSCRIPTION_DEFAULT_HOUR_LOCAL,
+    REPORT_SUBSCRIPTION_DEFAULT_OUTPUT_FORMAT,
     REPORT_SUBSCRIPTION_LIST_DEFAULT_LIMIT,
     REPORT_SUBSCRIPTION_LIST_MAX_LIMIT,
     REPORT_SUBSCRIPTION_MAX_DAY_OF_WEEK,
@@ -10,6 +11,7 @@ import {
     REPORT_SUBSCRIPTION_MIN_DAY_OF_WEEK,
     REPORT_SUBSCRIPTION_MIN_HOUR_LOCAL,
     REPORT_SUBSCRIPTION_NAME_MAX,
+    REPORT_SUBSCRIPTION_OUTPUT_FORMATS,
 } from '../constants/report-subscription.js';
 
 /**
@@ -36,6 +38,7 @@ const hourLocalSchema = z
     .int()
     .min(REPORT_SUBSCRIPTION_MIN_HOUR_LOCAL)
     .max(REPORT_SUBSCRIPTION_MAX_HOUR_LOCAL);
+const outputFormatSchema = z.enum(REPORT_SUBSCRIPTION_OUTPUT_FORMATS);
 
 // ─── Create body ──────────────────────────────────────────────────────
 
@@ -46,6 +49,7 @@ export const createReportSubscriptionBodySchema = z
         filters: z.record(z.string(), z.unknown()),
         day_of_week: dayOfWeekSchema,
         hour_local: hourLocalSchema.default(REPORT_SUBSCRIPTION_DEFAULT_HOUR_LOCAL),
+        output_format: outputFormatSchema.default(REPORT_SUBSCRIPTION_DEFAULT_OUTPUT_FORMAT),
         is_active: z.boolean().default(true),
     })
     .strict();
@@ -59,6 +63,7 @@ export const patchReportSubscriptionBodySchema = z
         filters: z.record(z.string(), z.unknown()).optional(),
         day_of_week: dayOfWeekSchema.optional(),
         hour_local: hourLocalSchema.optional(),
+        output_format: outputFormatSchema.optional(),
         is_active: z.boolean().optional(),
     })
     .strict()
@@ -68,6 +73,7 @@ export const patchReportSubscriptionBodySchema = z
             b.filters !== undefined ||
             b.day_of_week !== undefined ||
             b.hour_local !== undefined ||
+            b.output_format !== undefined ||
             b.is_active !== undefined,
         { message: 'patch must include at least one field to update' }
     );

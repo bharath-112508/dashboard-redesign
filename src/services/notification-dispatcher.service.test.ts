@@ -35,6 +35,9 @@ const {
     loggerWarnMock,
     getOrInitSettingsMock,
     postSlackMessageMock,
+    isPushConfiguredMock,
+    sendPushNotificationMock,
+    listSubscriptionsForUserMock,
 } = vi.hoisted(() => {
     return {
         notificationCreateMock: vi.fn(),
@@ -42,6 +45,9 @@ const {
         userFindByIdMock: vi.fn(),
         userFindMock: vi.fn(),
         loggerWarnMock: vi.fn(),
+        isPushConfiguredMock: vi.fn().mockReturnValue(false),
+        sendPushNotificationMock: vi.fn().mockResolvedValue(true),
+        listSubscriptionsForUserMock: vi.fn().mockResolvedValue([]),
         // Step-25 dispatcher gates Slack on `system_settings.slack`. The
         // existing tests don't care about Slack, so the default is "Slack
         // disabled" — `loadSlackDispatchForType` returns null and the
@@ -122,6 +128,18 @@ vi.mock('../utils/slack.js', async (importOriginal) => {
     };
 });
 
+// V2-BE-10 — push channel is silently disabled by default (`isPushConfigured`
+// returns false) so existing tests stay unchanged. The push-specific test
+// below flips it on and verifies the 4th channel fires.
+vi.mock('../utils/push.js', () => ({
+    isPushConfigured: isPushConfiguredMock,
+    sendPushNotification: sendPushNotificationMock,
+}));
+
+vi.mock('./push-subscription.service.js', () => ({
+    listSubscriptionsForUser: listSubscriptionsForUserMock,
+}));
+
 // Pull dispatcher AFTER the mocks are wired so the SUT picks them up.
 const dispatcher = await import('./notification-dispatcher.service.js');
 
@@ -159,9 +177,16 @@ beforeEach(() => {
     userFindByIdMock.mockReset();
     userFindMock.mockReset();
     loggerWarnMock.mockReset();
+    isPushConfiguredMock.mockReset();
+    sendPushNotificationMock.mockReset();
+    listSubscriptionsForUserMock.mockReset();
 
     notificationCreateMock.mockResolvedValue({ _id: new Types.ObjectId() });
     sendEmailMock.mockResolvedValue(undefined);
+    // Push is off by default; the push-channel test flips it on.
+    isPushConfiguredMock.mockReturnValue(false);
+    sendPushNotificationMock.mockResolvedValue(true);
+    listSubscriptionsForUserMock.mockResolvedValue([]);
 
     // Default: any `findById` returns the requester (overridden per test).
     userFindByIdMock.mockImplementation((id: Types.ObjectId) => {
@@ -535,5 +560,107 @@ describe('Slack integration', () => {
         expect(postSlackMessageMock).toHaveBeenCalledTimes(1);
         const channel = (postSlackMessageMock.mock.calls[0][1] as { channel: string }).channel;
         expect(channel).toBe('U-MGR');
+    });
+});
+
+// ─── Push channel (V2-BE-10) ──────────────────────────────────────────────
+
+describe('push channel', () => {
+    const requesterId2 = new Types.ObjectId();
+    const adminId2 = new Types.ObjectId();
+    const requester2 = {
+        _id: requesterId2,
+        email: 'emp@example.com',
+        full_name: 'Employee One',
+        role: ROLES.EMPLOYEE,
+        push_notifications_enabled: true,
+    };
+    const adminWithPush = {
+        _id: adminId2,
+        email: 'admin@example.com',
+        full_name: 'Adam Admin',
+        role: ROLES.ADMIN,
+        push_notifications_enabled: true,
+    };
+
+    const submitInput = () => ({
+        request_id: new Types.ObjectId(),
+        requester_id: requesterId2,
+        leave_type_code: 'CL',
+        leave_type_label: 'Casual Leave',
+        start_date: '2026-06-10',
+        end_date: '2026-06-10',
+        total_days: 1,
+        reason: 'family event',
+    });
+
+    it('fires push for each recipient with at least one subscription when VAPID is configured', async () => {
+        isPushConfiguredMock.mockReturnValue(true);
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) => {
+            if (id.equals(adminId2)) return queryReturning(adminWithPush);
+            return queryReturning(requester2);
+        });
+        userFindMock.mockReturnValue(queryReturning([adminWithPush]));
+        listSubscriptionsForUserMock.mockResolvedValueOnce([
+            { _id: new Types.ObjectId(), endpoint: 'https://fcm.googleapis.com/fcm/send/a' },
+            { _id: new Types.ObjectId(), endpoint: 'https://fcm.googleapis.com/fcm/send/b' },
+        ]);
+
+        await dispatcher.notifyLeaveSubmitted(submitInput());
+
+        // One recipient (admin), two subscriptions → two push sends.
+        expect(sendPushNotificationMock).toHaveBeenCalledTimes(2);
+        const firstCall = sendPushNotificationMock.mock.calls[0]?.[0] as {
+            payload: { title: string; type: string };
+        };
+        expect(firstCall.payload.title).toContain('Leave request from');
+        expect(firstCall.payload.type).toBe('leave_requested');
+    });
+
+    it('skips push when VAPID is unconfigured (default state)', async () => {
+        isPushConfiguredMock.mockReturnValue(false);
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) => {
+            if (id.equals(adminId2)) return queryReturning(adminWithPush);
+            return queryReturning(requester2);
+        });
+        userFindMock.mockReturnValue(queryReturning([adminWithPush]));
+
+        await dispatcher.notifyLeaveSubmitted(submitInput());
+
+        expect(sendPushNotificationMock).not.toHaveBeenCalled();
+        expect(listSubscriptionsForUserMock).not.toHaveBeenCalled();
+    });
+
+    it('skips push for a recipient who has opted out (push_notifications_enabled = false)', async () => {
+        isPushConfiguredMock.mockReturnValue(true);
+        const optedOut = { ...adminWithPush, push_notifications_enabled: false };
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) => {
+            if (id.equals(adminId2)) return queryReturning(optedOut);
+            return queryReturning(requester2);
+        });
+        userFindMock.mockReturnValue(queryReturning([optedOut]));
+
+        await dispatcher.notifyLeaveSubmitted(submitInput());
+
+        expect(sendPushNotificationMock).not.toHaveBeenCalled();
+        // listSubscriptionsForUser shouldn't even fire — opt-out short-
+        // circuits the lookup.
+        expect(listSubscriptionsForUserMock).not.toHaveBeenCalled();
+    });
+
+    it('does not throw when listSubscriptionsForUser fails — logs and continues', async () => {
+        isPushConfiguredMock.mockReturnValue(true);
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) => {
+            if (id.equals(adminId2)) return queryReturning(adminWithPush);
+            return queryReturning(requester2);
+        });
+        userFindMock.mockReturnValue(queryReturning([adminWithPush]));
+        listSubscriptionsForUserMock.mockRejectedValueOnce(new Error('mongo timeout'));
+
+        await expect(dispatcher.notifyLeaveSubmitted(submitInput())).resolves.not.toThrow();
+        expect(loggerWarnMock).toHaveBeenCalledWith(
+            expect.objectContaining({ channel: 'push' }),
+            'Notification push fan-out failed'
+        );
     });
 });

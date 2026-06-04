@@ -40,6 +40,9 @@ const {
     leaveTypeFindMock,
     holidayCountMock,
     notificationCountMock,
+    projectFindMock,
+    taskAggregateMock,
+    taskFindMock,
     initializeBalancesMock,
     loggerWarnMock,
 } = vi.hoisted(() => ({
@@ -55,6 +58,9 @@ const {
     leaveTypeFindMock: vi.fn(),
     holidayCountMock: vi.fn(),
     notificationCountMock: vi.fn(),
+    projectFindMock: vi.fn(),
+    taskAggregateMock: vi.fn(),
+    taskFindMock: vi.fn(),
     initializeBalancesMock: vi.fn(),
     loggerWarnMock: vi.fn(),
 }));
@@ -106,6 +112,19 @@ vi.mock('../models/notification.model.js', () => ({
     },
 }));
 
+vi.mock('../models/project.model.js', () => ({
+    Project: {
+        find: projectFindMock,
+    },
+}));
+
+vi.mock('../models/task.model.js', () => ({
+    Task: {
+        aggregate: taskAggregateMock,
+        find: taskFindMock,
+    },
+}));
+
 vi.mock('./leave-balance.service.js', () => ({
     initializeBalancesForUserYear: initializeBalancesMock,
 }));
@@ -128,6 +147,7 @@ const queryStub = (rows: unknown[]) => {
         sort: () => stub,
         limit: () => stub,
         select: () => stub,
+        lean: () => Promise.resolve(rows),
         then: (resolve: (v: unknown) => void) => Promise.resolve(rows).then(resolve),
     };
     return stub;
@@ -146,6 +166,9 @@ beforeEach(() => {
     leaveTypeFindMock.mockReset();
     holidayCountMock.mockReset();
     notificationCountMock.mockReset();
+    projectFindMock.mockReset();
+    taskAggregateMock.mockReset();
+    taskFindMock.mockReset();
     initializeBalancesMock.mockReset();
     loggerWarnMock.mockReset();
 
@@ -363,6 +386,182 @@ describe('buildEmployeeDashboard', () => {
         expect(result.today.attendance.checked_in).toBe(false);
         expect(loggerWarnMock).toHaveBeenCalledWith(
             expect.objectContaining({ card: 'employee.attendance_today' }),
+            'Dashboard card aggregation failed'
+        );
+    });
+});
+
+// ─── Client dashboard (V2-BE-2) ────────────────────────────────────────────
+
+describe('buildClientDashboard', () => {
+    it('returns empty cards for a client on zero projects', async () => {
+        const userId = new Types.ObjectId();
+
+        // Both `resolveClientProjectIds` and `computeClientProjectCards`
+        // call `Project.find({ client_ids })`. Both get an empty list.
+        projectFindMock
+            .mockReturnValueOnce(queryStub([]))
+            .mockReturnValueOnce(queryStub([]));
+        notificationCountMock.mockResolvedValueOnce(0);
+
+        const result = await dashboard.buildClientDashboard(userId);
+
+        expect(result.scope).toBe('client');
+        expect(result.user_id).toBe(userId.toString());
+        expect(result.projects).toEqual({ total: 0, recent: [] });
+        expect(result.recent_task_activity).toEqual([]);
+        expect(result.unread_notifications).toBe(0);
+        // `Task.aggregate` / `Task.find` MUST NOT be called when the
+        // visible project list is empty — short-circuit prevents leaking
+        // tasks from other tenants' projects.
+        expect(taskAggregateMock).not.toHaveBeenCalled();
+        expect(taskFindMock).not.toHaveBeenCalled();
+    });
+
+    it('rolls up project + task data for a client on N projects', async () => {
+        const userId = new Types.ObjectId();
+        const p1 = new Types.ObjectId();
+        const p2 = new Types.ObjectId();
+        const t1 = new Types.ObjectId();
+        const t2 = new Types.ObjectId();
+
+        // `resolveClientProjectIds` — returns the two ids.
+        projectFindMock.mockReturnValueOnce(
+            queryStub([{ _id: p1 }, { _id: p2 }])
+        );
+        // `computeClientProjectCards` — full project docs (second
+        // `Project.find` call).
+        projectFindMock.mockReturnValueOnce(
+            queryStub([
+                {
+                    _id: p1,
+                    name: 'Acme Site',
+                    code: 'ACME',
+                    status: 'active',
+                    custom_task_statuses: [{ key: 'archived', is_terminal: true }],
+                    updated_at: new Date('2026-05-20T00:00:00.000Z'),
+                },
+                {
+                    _id: p2,
+                    name: 'Beta Portal',
+                    code: 'BETA',
+                    status: 'active',
+                    custom_task_statuses: [],
+                    updated_at: new Date('2026-04-10T00:00:00.000Z'),
+                },
+            ])
+        );
+        // `Task.aggregate` rollup — p1 has 3 tasks (1 done + 1 archived terminal
+        // + 1 in_progress); p2 has 2 tasks both open.
+        taskAggregateMock.mockResolvedValueOnce([
+            {
+                _id: p1,
+                task_count: 3,
+                statuses: [
+                    { status: 'done', count: 1 },
+                    { status: 'archived', count: 1 },
+                    { status: 'in_progress', count: 1 },
+                ],
+                last_activity_at: new Date('2026-06-01T00:00:00.000Z'),
+            },
+            {
+                _id: p2,
+                task_count: 2,
+                statuses: [
+                    { status: 'to_do', count: 1 },
+                    { status: 'review', count: 1 },
+                ],
+                last_activity_at: new Date('2026-05-28T00:00:00.000Z'),
+            },
+        ]);
+        // `recent_task_activity` — `Task.find().sort().limit().select().lean()`.
+        taskFindMock.mockReturnValueOnce(
+            queryStub([
+                {
+                    _id: t1,
+                    title: 'Set up domain',
+                    status: 'in_progress',
+                    project_id: p1,
+                    updated_at: new Date('2026-06-01T00:00:00.000Z'),
+                },
+                {
+                    _id: t2,
+                    title: 'Wire-frame review',
+                    status: 'review',
+                    project_id: p2,
+                    updated_at: new Date('2026-05-28T00:00:00.000Z'),
+                },
+            ])
+        );
+        // Project-name lookup inside `computeClientRecentTaskActivity` —
+        // third `Project.find` call.
+        projectFindMock.mockReturnValueOnce(
+            queryStub([
+                { _id: p1, name: 'Acme Site' },
+                { _id: p2, name: 'Beta Portal' },
+            ])
+        );
+        notificationCountMock.mockResolvedValueOnce(7);
+
+        const result = await dashboard.buildClientDashboard(userId);
+
+        expect(result.projects.total).toBe(2);
+        expect(result.projects.recent).toHaveLength(2);
+
+        // Sort: p1 last_activity (2026-06-01) is more recent than p2 (2026-05-28).
+        const [first, second] = result.projects.recent;
+        expect(first.id).toBe(p1.toString());
+        expect(first.name).toBe('Acme Site');
+        expect(first.task_count).toBe(3);
+        // Terminal set for p1 = {done, archived} — open = in_progress only.
+        expect(first.open_task_count).toBe(1);
+        expect(first.last_activity_at).toBe('2026-06-01T00:00:00.000Z');
+        expect(second.id).toBe(p2.toString());
+        expect(second.task_count).toBe(2);
+        // No terminals overlap with p2's statuses → all 2 are open.
+        expect(second.open_task_count).toBe(2);
+
+        expect(result.recent_task_activity).toHaveLength(2);
+        expect(result.recent_task_activity[0].title).toBe('Set up domain');
+        expect(result.recent_task_activity[0].project_name).toBe('Acme Site');
+        expect(result.recent_task_activity[1].project_name).toBe('Beta Portal');
+
+        expect(result.unread_notifications).toBe(7);
+    });
+
+    it('falls back gracefully when a card aggregation throws', async () => {
+        const userId = new Types.ObjectId();
+        const p1 = new Types.ObjectId();
+
+        // `resolveClientProjectIds` succeeds.
+        projectFindMock.mockReturnValueOnce(queryStub([{ _id: p1 }]));
+        // `computeClientProjectCards` — `Project.find` succeeds, but the
+        // task-aggregate inside it throws.
+        projectFindMock.mockReturnValueOnce(
+            queryStub([
+                {
+                    _id: p1,
+                    name: 'Acme Site',
+                    code: 'ACME',
+                    status: 'active',
+                    custom_task_statuses: [],
+                    updated_at: new Date('2026-05-20T00:00:00.000Z'),
+                },
+            ])
+        );
+        taskAggregateMock.mockRejectedValueOnce(new Error('mongo down'));
+        // `recent_task_activity` still tries — succeed with empty rows.
+        taskFindMock.mockReturnValueOnce(queryStub([]));
+        notificationCountMock.mockResolvedValueOnce(0);
+
+        const result = await dashboard.buildClientDashboard(userId);
+
+        // Projects card fell back to the empty shape (NOT a 500).
+        expect(result.projects).toEqual({ total: 0, recent: [] });
+        expect(result.recent_task_activity).toEqual([]);
+        expect(result.unread_notifications).toBe(0);
+        expect(loggerWarnMock).toHaveBeenCalledWith(
+            expect.objectContaining({ card: 'client.projects' }),
             'Dashboard card aggregation failed'
         );
     });

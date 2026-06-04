@@ -127,21 +127,7 @@ export const renderReportSubscriptionEmail = (
     reportResult: BillingReportResult | UtilizationReportResult | AttendanceReportResult | LeaveReportResult,
     subscriptionName: string
 ): RenderedEmail => {
-    let table: TabularReport;
-    switch (reportName) {
-        case 'billing':
-            table = toTabularBilling(reportResult as BillingReportResult);
-            break;
-        case 'utilization':
-            table = toTabularUtilization(reportResult as UtilizationReportResult);
-            break;
-        case 'attendance':
-            table = toTabularAttendance(reportResult as AttendanceReportResult);
-            break;
-        case 'leaves':
-            table = toTabularLeaves(reportResult as LeaveReportResult);
-            break;
-    }
+    const table = buildTabular(reportName, reportResult);
 
     const { html, text } = renderHtml(table);
     return {
@@ -149,4 +135,69 @@ export const renderReportSubscriptionEmail = (
         html,
         text,
     };
+};
+
+/**
+ * Render the "your report is attached" notice (V2-BE-13). Used when the
+ * subscription's `output_format` is `csv`/`xlsx`/`pdf` — the rows ride
+ * the attached file, the email body shows the summary block + a small
+ * pointer to open the file.
+ */
+export const renderReportSubscriptionAttachmentNotice = (
+    reportName: ReportExportName,
+    reportResult: BillingReportResult | UtilizationReportResult | AttendanceReportResult | LeaveReportResult,
+    subscriptionName: string,
+    attachmentFilename: string
+): RenderedEmail => {
+    const table = buildTabular(reportName, reportResult);
+
+    const summaryRowsHtml = table.summary
+        .map(
+            (s) =>
+                `<tr><td style="padding:4px 12px 4px 0;color:#555;"><b>${escapeHtml(s.label)}</b></td>` +
+                `<td style="padding:4px 0;">${escapeHtml(s.value)}</td></tr>`
+        )
+        .join('');
+
+    const html =
+        "<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;" +
+        'color:#222;max-width:720px;">' +
+        `<h2 style="margin:0 0 16px;">${escapeHtml(table.title)}</h2>` +
+        (table.summary.length > 0
+            ? `<table style="border-collapse:collapse;margin-bottom:16px;">${summaryRowsHtml}</table>`
+            : '') +
+        `<p style="margin:0 0 8px;">Your scheduled report is attached as <b>${escapeHtml(attachmentFilename)}</b> ` +
+        `(${table.rows.length} row${table.rows.length === 1 ? '' : 's'}).</p>` +
+        '<p style="color:#777;font-size:13px;margin:0;">' +
+        'Open the file in your usual tool (Excel, Numbers, a PDF reader, or anything that handles CSV).' +
+        '</p>' +
+        '</div>';
+
+    const summaryText = table.summary.map((s) => `${s.label}: ${s.value}`).join('\n');
+    const text =
+        `${table.title}\n\n` +
+        (summaryText ? `${summaryText}\n\n` : '') +
+        `Attached: ${attachmentFilename} (${table.rows.length} row${table.rows.length === 1 ? '' : 's'}).\n`;
+
+    return {
+        subject: `${subscriptionName} — ${table.title}`,
+        html,
+        text,
+    };
+};
+
+const buildTabular = (
+    reportName: ReportExportName,
+    reportResult: BillingReportResult | UtilizationReportResult | AttendanceReportResult | LeaveReportResult
+): TabularReport => {
+    switch (reportName) {
+        case 'billing':
+            return toTabularBilling(reportResult as BillingReportResult);
+        case 'utilization':
+            return toTabularUtilization(reportResult as UtilizationReportResult);
+        case 'attendance':
+            return toTabularAttendance(reportResult as AttendanceReportResult);
+        case 'leaves':
+            return toTabularLeaves(reportResult as LeaveReportResult);
+    }
 };

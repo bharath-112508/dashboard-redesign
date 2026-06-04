@@ -3,11 +3,14 @@ import { Schema, model, Types, type Document, type Model } from 'mongoose';
 import { BASE_SCHEMA_OPTIONS } from './_base.js';
 import { COLLECTIONS } from '../constants/collections.js';
 import {
+    REPORT_SUBSCRIPTION_DEFAULT_OUTPUT_FORMAT,
     REPORT_SUBSCRIPTION_MAX_DAY_OF_WEEK,
     REPORT_SUBSCRIPTION_MAX_HOUR_LOCAL,
     REPORT_SUBSCRIPTION_MIN_DAY_OF_WEEK,
     REPORT_SUBSCRIPTION_MIN_HOUR_LOCAL,
     REPORT_SUBSCRIPTION_NAME_MAX,
+    REPORT_SUBSCRIPTION_OUTPUT_FORMATS,
+    type ReportSubscriptionOutputFormat,
 } from '../constants/report-subscription.js';
 import { REPORT_EXPORT_NAMES, type ReportExportName } from '../constants/export.js';
 
@@ -37,6 +40,13 @@ export interface ReportSubscriptionDocument extends Document {
     day_of_week: number;
     /** 0..23 IST. Soft floor at the cron tick; later hours roll over. */
     hour_local: number;
+    /**
+     * V2-BE-13 — delivery format. `inline` (default) keeps the legacy
+     * HTML-in-body shape; `csv`/`xlsx`/`pdf` attach a generated file
+     * to a short notice email. Older rows that pre-date this field
+     * decode as `inline` via the Mongoose default.
+     */
+    output_format: ReportSubscriptionOutputFormat;
 
     is_active: boolean;
     /** YYYY-MM-DD (IST) of the most recent successful send. Null until first delivery. */
@@ -80,6 +90,12 @@ const reportSubscriptionSchema = new Schema<ReportSubscriptionDocument>(
             required: true,
             min: REPORT_SUBSCRIPTION_MIN_HOUR_LOCAL,
             max: REPORT_SUBSCRIPTION_MAX_HOUR_LOCAL,
+        },
+        output_format: {
+            type: String,
+            required: true,
+            enum: REPORT_SUBSCRIPTION_OUTPUT_FORMATS,
+            default: REPORT_SUBSCRIPTION_DEFAULT_OUTPUT_FORMAT,
         },
         is_active: { type: Boolean, required: true, default: true },
         last_sent_at: { type: String, default: null, match: /^\d{4}-\d{2}-\d{2}$/ },

@@ -58,7 +58,7 @@ vi.mock('../models/project.model.js', () => ({
     Project: { findById: vi.fn(), findOne: vi.fn(), find: vi.fn(), countDocuments: vi.fn(), create: vi.fn() },
 }));
 
-vi.mock('../utils/tasks-collection.js', () => ({
+vi.mock('../utils/story-task-queries.js', () => ({
     aggregateStoryDerivedRows: aggregateStoryDerivedRowsMock,
     findTasksByStoryId: findTasksByStoryIdMock,
     detachStoryFromTasks: detachStoryFromTasksMock,
