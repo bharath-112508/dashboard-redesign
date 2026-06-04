@@ -4,6 +4,8 @@ import { Types } from 'mongoose';
 import * as service from '../services/leave-type.service.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import { created, ok } from '../utils/api-response.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import { callerHasPermission } from '../middlewares/auth.middleware.js';
 import type {
     CreateLeaveTypeBody,
     ListLeaveTypesQuery,
@@ -14,7 +16,11 @@ const parseId = (req: Request): Types.ObjectId => new Types.ObjectId(req.params.
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {
     const q = req.query as unknown as ListLeaveTypesQuery;
-    const data = await service.listLeaveTypes({ is_active: q.is_active });
+    // BUG-002 — scrub privileged params for non-WRITE callers.
+    const privileged = callerHasPermission(req, PERMISSIONS.LEAVE_TYPE_WRITE);
+    const showDeleted = privileged ? q.show_deleted : false;
+    const isActive = privileged ? q.is_active : q.is_active === false ? undefined : q.is_active;
+    const data = await service.listLeaveTypes({ is_active: isActive, show_deleted: showDeleted });
     return ok(res, data);
 };
 

@@ -5,6 +5,8 @@ import * as service from '../services/office-location.service.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import { callerHasPermission } from '../middlewares/auth.middleware.js';
 import type {
     CreateOfficeLocationBody,
     ListOfficeLocationsQuery,
@@ -38,7 +40,14 @@ export const postCreate = async (req: Request, res: Response): Promise<Response>
 // ─── GET /office-locations ────────────────────────────────────────────────
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {
-    const { data, meta } = await service.listOfficeLocations(req.query as unknown as ListOfficeLocationsQuery);
+    const query = req.query as unknown as ListOfficeLocationsQuery;
+    // BUG-002 — privileged params (`show_deleted=true`, `is_active=false`)
+    // expose the soft-delete bucket; scrub them for callers without WRITE.
+    if (!callerHasPermission(req, PERMISSIONS.OFFICE_LOCATION_WRITE)) {
+        query.show_deleted = false;
+        if (query.is_active === false) delete query.is_active;
+    }
+    const { data, meta } = await service.listOfficeLocations(query);
     return paginated(res, data, meta);
 };
 

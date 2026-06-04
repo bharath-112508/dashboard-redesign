@@ -218,6 +218,15 @@ export const listUsersQuerySchema = z.object({
     // silently picking one.
     exclude_role: roleEnum.optional(),
     status: statusEnum.optional(),
+    // BUG-002 — when true, include soft-deleted (deactivated) users in the
+    // result. Default false → list shows only active users. The controller
+    // silently drops this if the caller lacks USER_WRITE so non-privileged
+    // surfaces can't bypass the active-only default by setting the query.
+    show_deleted: z
+        .union([z.boolean(), z.literal('true'), z.literal('false')])
+        .transform((v) => v === true || v === 'true')
+        .optional()
+        .default(false),
     // R15 — minimum 2 chars to avoid `?q=a` triggering a regex-on-collection scan.
     q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
     sort: sortParamSchema.optional(),

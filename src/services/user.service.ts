@@ -251,6 +251,12 @@ export const listUsers = async (
     if (query.role) filter.role = query.role;
     else if (query.exclude_role) filter.role = { $ne: query.exclude_role };
     if (query.status) filter.status = query.status;
+    // BUG-002 — soft-delete UX: hide deactivated users by default.
+    // Caller can opt-in via `show_deleted=true` if they hold USER_WRITE
+    // (the controller scrubs the flag for non-privileged callers).
+    // An explicit `?status=` always wins (e.g. status=deactivated for a
+    // permitted caller listing only the soft-deleted bucket).
+    else if (!query.show_deleted) filter.status = USER_STATUSES.ACTIVE;
     if (query.q) {
         const safe = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         filter.$or = [{ email: { $regex: safe, $options: 'i' } }, { full_name: { $regex: safe, $options: 'i' } }];

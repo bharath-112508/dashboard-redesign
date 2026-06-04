@@ -127,6 +127,10 @@ export const listOfficeLocations = async (
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const filter: Filter = {};
     if (query.is_active !== undefined) filter.is_active = query.is_active;
+    // BUG-002 — hide deleted (is_active=false) rows by default; opt-in via
+    // `show_deleted=true`. An explicit `is_active=...` wins (e.g. an admin
+    // listing only the deleted bucket).
+    else if (!query.show_deleted) filter.is_active = true;
     if (query.q) {
         const safe = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         filter.$or = [{ name: { $regex: safe, $options: 'i' } }, { address: { $regex: safe, $options: 'i' } }];

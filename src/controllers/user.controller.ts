@@ -10,6 +10,8 @@ import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import { ROLES } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import { callerHasPermission } from '../middlewares/auth.middleware.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import type {
     AssignableQuery,
@@ -41,6 +43,15 @@ export const postCreateUser = async (req: Request, res: Response): Promise<Respo
 // ─── GET /users ─────────────────────────────────────────────────────────────
 export const getListUsers = async (req: Request, res: Response): Promise<Response> => {
     const query = req.query as unknown as ListUsersQuery;
+    // BUG-002 — `show_deleted=true` (or explicit `status=deactivated`) is
+    // a privileged view of the soft-delete bucket. Only callers who can
+    // write users get to see it; everyone else is forced to the active
+    // bucket. We scrub silently so the front-end toggle simply does
+    // nothing for non-permitted users.
+    if (!callerHasPermission(req, PERMISSIONS.USER_WRITE)) {
+        query.show_deleted = false;
+        if (query.status === 'deactivated') delete query.status;
+    }
     const { data, meta } = await userService.listUsers(query);
     return paginated(res, data, meta);
 };

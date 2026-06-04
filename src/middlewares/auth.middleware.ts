@@ -218,3 +218,17 @@ export const requirePermission = (...requiredPermissions: Permission[]) => {
         throw AppError.forbidden();
     };
 };
+
+/**
+ * Inline permission probe — same wildcard rules as `requirePermission`
+ * but returns a boolean instead of throwing. Used by list controllers
+ * that need to *silently* scrub privileged query params (e.g.
+ * `show_deleted=true`) when a non-permitted caller sends them, rather
+ * than rejecting the whole request.
+ */
+export const callerHasPermission = (req: Request, permission: Permission): boolean => {
+    if (!req.user) return false;
+    const held = req.user.permissions ?? [];
+    if (held.includes(PERMISSIONS.SYSTEM_ADMIN) || isCallerAdmin(req.user)) return true;
+    return held.includes(permission);
+};

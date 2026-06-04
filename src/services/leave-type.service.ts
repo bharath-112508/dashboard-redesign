@@ -66,9 +66,15 @@ export const seedDefaultLeaveTypes = async (): Promise<{ inserted: LeaveCode[]; 
 
 // ─── GET /leave-types ─────────────────────────────────────────────────────
 
-export const listLeaveTypes = async (filters: { is_active?: boolean }): Promise<Record<string, unknown>[]> => {
+export const listLeaveTypes = async (filters: {
+    is_active?: boolean;
+    show_deleted?: boolean;
+}): Promise<Record<string, unknown>[]> => {
     const filter: Filter = {};
     if (filters.is_active !== undefined) filter.is_active = filters.is_active;
+    // BUG-002 — hide soft-deleted (is_active=false) rows by default; opt-in
+    // via `show_deleted=true`. Explicit `is_active=...` wins.
+    else if (!filters.show_deleted) filter.is_active = true;
     const rows = await LeaveType.find(filter).sort({ code: 1 });
     return toPublicMany(rows);
 };
