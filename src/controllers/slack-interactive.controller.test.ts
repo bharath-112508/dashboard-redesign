@@ -17,6 +17,15 @@ vi.mock('../services/leave-request.service.js', () => ({
     rejectLeave: (...args: unknown[]) => rejectLeaveMock(...args),
 }));
 
+const checkInMock = vi.fn();
+const checkOutMock = vi.fn();
+const getMyTodayMock = vi.fn();
+vi.mock('../services/attendance.service.js', () => ({
+    checkIn: (...args: unknown[]) => checkInMock(...args),
+    checkOut: (...args: unknown[]) => checkOutMock(...args),
+    getMyToday: (...args: unknown[]) => getMyTodayMock(...args),
+}));
+
 const resolveSlackUserMock = vi.fn();
 vi.mock('../services/slack-user-mapping.service.js', () => ({
     resolveSlackUser: (...args: unknown[]) => resolveSlackUserMock(...args),
@@ -88,12 +97,28 @@ describe('handleInteractive — skeleton', () => {
 });
 
 describe('handleSlashCommand — skeleton', () => {
-    it('responds 200 + ephemeral "not implemented" for any command', async () => {
+    it('responds ephemeral "not implemented" for an unknown command', async () => {
+        // Pre-Task-17 every command was a skeleton; now /checkin (Task 17)
+        // does real work. Use a still-unimplemented command name to keep
+        // the skeleton contract under test.
+        resolveSlackUserMock.mockReset();
+        getOrInitSettingsMock.mockReset();
+        slackContextFromMock.mockReset();
+        getOrInitSettingsMock.mockResolvedValue({
+            slack: { enabled: true, bot_token: 'xoxb', channels: { leaves: '#leaves' } },
+        });
+        slackContextFromMock.mockReturnValue({ enabled: true, botToken: 'xoxb' });
+        resolveSlackUserMock.mockResolvedValueOnce({
+            _id: new Types.ObjectId(),
+            role: 'employee',
+        });
+
         const res = await request(buildApp())
-            .post('/slack/commands/checkin')
+            .post('/slack/commands/unknown_cmd')
             .send('user_id=U_TEST');
         expect(res.status).toBe(200);
         expect(res.body.response_type).toBe('ephemeral');
+        expect(res.body.text).toMatch(/not implemented/i);
     });
 });
 
@@ -191,5 +216,148 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
         expect(rejectLeaveMock).toHaveBeenCalledTimes(1);
         const [id] = rejectLeaveMock.mock.calls[0];
         expect(String(id)).toBe(leaveId);
+    });
+});
+
+// ─── Phase 2: /checkin /checkout /status ────────────────────────────────
+
+describe('handleSlashCommand — Phase 2', () => {
+    beforeEach(() => {
+        resolveSlackUserMock.mockReset();
+        getOrInitSettingsMock.mockReset();
+        slackContextFromMock.mockReset();
+        checkInMock.mockReset();
+        checkOutMock.mockReset();
+        getMyTodayMock.mockReset();
+        getOrInitSettingsMock.mockResolvedValue({
+            slack: { enabled: true, bot_token: 'xoxb', channels: { leaves: '#leaves' } },
+        });
+        slackContextFromMock.mockReturnValue({ enabled: true, botToken: 'xoxb' });
+    });
+
+    it('/checkin: rejects ephemeral when caller is unidentified', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce(null);
+        const res = await request(buildApp())
+            .post('/slack/commands/checkin')
+            .send('user_id=U_TEST');
+        expect(res.body.response_type).toBe('ephemeral');
+        expect(res.body.text).toMatch(/identify your Viljetech account/i);
+        expect(checkInMock).not.toHaveBeenCalled();
+    });
+
+    it('/checkin: checks in + reports the time on success', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackUserMock.mockResolvedValueOnce({
+            _id: userId,
+            role: 'employee',
+        });
+        const inAt = new Date('2026-06-05T04:12:00.000Z'); // 09:42 IST
+        checkInMock.mockResolvedValueOnce({
+            check_in: { time: inAt, method: 'manual', location_id: null, ip: '' },
+            segments: [{ check_in: { time: inAt }, check_out: null }],
+        });
+        const res = await request(buildApp())
+            .post('/slack/commands/checkin')
+            .send('user_id=U_TEST');
+        expect(res.status).toBe(200);
+        expect(res.body.response_type).toBe('ephemeral');
+        expect(res.body.text).toMatch(/Checked in at 09:42/);
+        // Service called with body { method: 'manual' } + the resolved user id.
+        expect(checkInMock).toHaveBeenCalledWith(
+            { method: 'manual' },
+            userId,
+            ''
+        );
+    });
+
+    it('/checkin: ALREADY_CHECKED_IN → ephemeral "already checked in"', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce({
+            _id: new Types.ObjectId(),
+            role: 'employee',
+        });
+        checkInMock.mockRejectedValueOnce({ code: 'ALREADY_CHECKED_IN' });
+        const res = await request(buildApp())
+            .post('/slack/commands/checkin')
+            .send('user_id=U_TEST');
+        expect(res.body.text).toMatch(/already checked in/i);
+    });
+
+    it('/checkout: checks out + reports worked time', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackUserMock.mockResolvedValueOnce({
+            _id: userId,
+            role: 'employee',
+        });
+        // 09:00 → 17:33 IST = 8h 33m worked
+        const outAt = new Date('2026-06-05T12:03:00.000Z'); // 17:33 IST
+        checkOutMock.mockResolvedValueOnce({
+            segments: [
+                {
+                    check_in: { time: new Date('2026-06-05T03:30:00.000Z') }, // 09:00 IST
+                    check_out: { time: outAt },
+                },
+            ],
+            total_worked_minutes: 8 * 60 + 33,
+        });
+        const res = await request(buildApp())
+            .post('/slack/commands/checkout')
+            .send('user_id=U_TEST');
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/Checked out at 17:33/);
+        expect(res.body.text).toMatch(/8h 33m/);
+        expect(checkOutMock).toHaveBeenCalledWith({ method: 'manual' }, userId, '');
+    });
+
+    it('/checkout: NOT_CHECKED_IN → ephemeral hint to /checkin first', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce({
+            _id: new Types.ObjectId(),
+            role: 'employee',
+        });
+        checkOutMock.mockRejectedValueOnce({ code: 'NOT_CHECKED_IN' });
+        const res = await request(buildApp())
+            .post('/slack/commands/checkout')
+            .send('user_id=U_TEST');
+        expect(res.body.text).toMatch(/not currently checked in/i);
+    });
+
+    it('/status: lists today\'s segments + total worked', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce({
+            _id: new Types.ObjectId(),
+            role: 'employee',
+        });
+        // Two closed segments + one open (in → "now"). Times in UTC,
+        // formatter outputs IST.
+        getMyTodayMock.mockResolvedValueOnce({
+            segments: [
+                {
+                    check_in: { time: new Date('2026-06-05T03:30:00.000Z') }, // 09:00 IST
+                    check_out: { time: new Date('2026-06-05T07:30:00.000Z') }, // 13:00 IST
+                },
+                {
+                    check_in: { time: new Date('2026-06-05T08:30:00.000Z') }, // 14:00 IST
+                    check_out: null,
+                },
+            ],
+            total_worked_minutes: 4 * 60,
+        });
+        const res = await request(buildApp())
+            .post('/slack/commands/status')
+            .send('user_id=U_TEST');
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/09:00.*13:00/);
+        expect(res.body.text).toMatch(/14:00.*now/);
+        expect(res.body.text).toMatch(/4h 0m/);
+    });
+
+    it('/status: no record today → ephemeral "No segments today"', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce({
+            _id: new Types.ObjectId(),
+            role: 'employee',
+        });
+        getMyTodayMock.mockResolvedValueOnce(null);
+        const res = await request(buildApp())
+            .post('/slack/commands/status')
+            .send('user_id=U_TEST');
+        expect(res.body.text).toMatch(/no segments today/i);
     });
 });

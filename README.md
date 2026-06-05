@@ -125,6 +125,51 @@ Exit code is the cumulative count of assertion failures across smokes
 (0 = all green). Each smoke is `set -u` clean and bash-3.2 compatible
 (works on stock macOS).
 
+## Slack interactive setup (Phase 0–2)
+
+The backend exposes two webhook surfaces Slack hits with signed
+payloads:
+
+- `POST /api/v1/slack/interactive` — Block Kit button clicks (Approve / Reject leave).
+- `POST /api/v1/slack/commands/:command` — slash commands: `/checkin`, `/checkout`, `/status`.
+
+Both verify `X-Slack-Signature` (HMAC-SHA256 of `v0:<ts>:<rawBody>`)
+with `SLACK_SIGNING_SECRET` and reject anything older than 5 min.
+Unsigned / mis-signed requests get a 401 before the controller runs.
+
+### Dev wiring
+
+The backend has to be reachable over HTTPS for Slack to deliver
+webhooks. Use a stable tunnel (ngrok / cloudflared / smee) and point
+your Slack app at it:
+
+1. Slack app → **Basic Information** → copy the **Signing Secret** →
+   set `SLACK_SIGNING_SECRET=<value>` in `viljetech-platform-backend/.env`.
+2. Slack app → **Interactivity & Shortcuts** → enable → Request URL =
+   `https://<your-tunnel>/api/v1/slack/interactive`.
+3. Slack app → **Slash Commands** → create each of `/checkin`,
+   `/checkout`, `/status`. Request URL for each =
+   `https://<your-tunnel>/api/v1/slack/commands/<command>`.
+4. Reinstall the app to the workspace (Slack re-issues the bot token).
+   In Viljetech, paste the new token at **Admin → Settings → Slack**
+   (it's stored AES-encrypted at rest).
+5. Restart the backend.
+
+Quick smoke (the 401 confirms the signature middleware is wired):
+
+```bash
+curl -X POST http://localhost:3001/api/v1/slack/interactive \
+    -H 'Content-Type: application/json' \
+    --data '{}'
+# → 401 Unauthorized
+```
+
+To verify a real signed call from Slack: click any Approve/Reject
+button on a leave message in `#leaves`, or run `/checkin` in any
+channel. The backend logs `SLACK_INTERACTIVE_REJECTED` (warn) for
+sig-fail / unknown-action / permission-denied so grepping the logs
+shows rejected webhooks at a glance.
+
 ## Status
 
 Early scaffold — wiring and guardrails only. Feature modules are implemented per the `Roadmap_and_Milestones.md`.

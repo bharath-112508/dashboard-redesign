@@ -4,6 +4,7 @@ import { Types } from 'mongoose';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { approveLeave, rejectLeave } from '../services/leave-request.service.js';
+import { checkIn, checkOut, getMyToday } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
 import {
     fetchSlackUserInfo,
@@ -190,9 +191,152 @@ export const handleInteractive: RequestHandler = async (req, res) => {
     res.status(200).json(ephemeral(`Unknown action: ${action.action_id}`));
 };
 
+/**
+ * Format a Date as `HH:MM` in IST (Asia/Kolkata) — every slash-command
+ * confirmation surfaces this so the user gets a quick "checked in at
+ * 09:42" without having to open the app.
+ */
+const formatTimeIST = (d: Date): string =>
+    new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).format(d);
+
 export const handleSlashCommand: RequestHandler = async (req, res) => {
     const command = req.params.command;
-    // Phase 2 (Tasks 17–19) wires the /checkin /checkout /status
-    // handlers here.
-    res.status(200).json(ephemeral(`/${command} is not implemented yet.`));
+    const slackUserId = (req.body as { user_id?: string })?.user_id;
+    if (!slackUserId) {
+        res.status(200).json(ephemeral('Missing Slack user id.'));
+        return;
+    }
+
+    const user = await resolveCaller(slackUserId);
+    if (!user) {
+        res.status(200).json(
+            ephemeral(
+                "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin."
+            )
+        );
+        return;
+    }
+
+    try {
+        if (command === 'checkin') {
+            // Slack has no QR / no geolocation — record as a manual
+            // check-in. The attendance service still respects
+            // org-level geofence policies (which may reject) but for
+            // a manual punch from a trusted Slack workspace that's
+            // the right semantic.
+            const result = (await checkIn(
+                { method: 'manual' },
+                user._id,
+                ''
+            )) as { check_in?: { time?: Date | string } | null };
+            const rawTime = result?.check_in?.time;
+            const inAt =
+                rawTime instanceof Date
+                    ? rawTime
+                    : rawTime
+                    ? new Date(rawTime)
+                    : new Date();
+            res.status(200).json(
+                ephemeral(
+                    `✅ Checked in at ${formatTimeIST(inAt)}. Use \`/checkout\` when you're done.`
+                )
+            );
+            return;
+        }
+        if (command === 'checkout') {
+            // Same manual-method posture as `/checkin`.
+            const result = (await checkOut(
+                { method: 'manual' },
+                user._id,
+                ''
+            )) as {
+                segments?: Array<{ check_out?: { time?: Date | string } | null }>;
+                total_worked_minutes?: number;
+            };
+            // The service closes the latest segment — `segments[-1]` carries
+            // the check-out time. Fall back to "now" if the shape isn't what
+            // we expect (defensive — the assertion has been right in tests
+            // and integration).
+            const segs = result?.segments ?? [];
+            const lastSeg = segs[segs.length - 1];
+            const rawOut = lastSeg?.check_out?.time;
+            const outAt =
+                rawOut instanceof Date
+                    ? rawOut
+                    : rawOut
+                    ? new Date(rawOut)
+                    : new Date();
+            const worked = result?.total_worked_minutes ?? 0;
+            const h = Math.floor(worked / 60);
+            const m = worked % 60;
+            res.status(200).json(
+                ephemeral(
+                    `✅ Checked out at ${formatTimeIST(outAt)} (${h}h ${m}m worked).`
+                )
+            );
+            return;
+        }
+        if (command === 'status') {
+            const record = (await getMyToday(user._id)) as {
+                segments?: Array<{
+                    check_in?: { time?: Date | string } | null;
+                    check_out?: { time?: Date | string } | null;
+                }>;
+                total_worked_minutes?: number;
+            } | null;
+            const segs = record?.segments ?? [];
+            if (segs.length === 0) {
+                res.status(200).json(ephemeral('No segments today.'));
+                return;
+            }
+            const lines = segs.map((s) => {
+                const rawIn = s.check_in?.time;
+                const rawOut = s.check_out?.time;
+                const inT =
+                    rawIn instanceof Date ? rawIn : rawIn ? new Date(rawIn) : null;
+                const outT =
+                    rawOut instanceof Date ? rawOut : rawOut ? new Date(rawOut) : null;
+                const inStr = inT ? formatTimeIST(inT) : '—';
+                const outStr = outT ? formatTimeIST(outT) : 'now';
+                return `• ${inStr} → ${outStr}`;
+            });
+            const worked = record?.total_worked_minutes ?? 0;
+            const h = Math.floor(worked / 60);
+            const m = worked % 60;
+            res.status(200).json(
+                ephemeral(`${lines.join('\n')}\n\n*Total:* ${h}h ${m}m`)
+            );
+            return;
+        }
+        res.status(200).json(ephemeral(`/${command} is not implemented yet.`));
+    } catch (err: unknown) {
+        const code = (err as { code?: string })?.code;
+        if (code === ERROR_CODES.ALREADY_CHECKED_IN) {
+            res.status(200).json(
+                ephemeral("You're already checked in. Use `/checkout` to end your day or `/status` to see today's segments.")
+            );
+            return;
+        }
+        if (code === ERROR_CODES.NOT_CHECKED_IN) {
+            res.status(200).json(
+                ephemeral("You're not currently checked in. Use `/checkin` first.")
+            );
+            return;
+        }
+        logger.warn(
+            {
+                err,
+                command,
+                code: ERROR_CODES.SLACK_INTERACTIVE_REJECTED,
+                reason: 'slash_command_threw',
+            },
+            'Slack slash command failed'
+        );
+        res.status(200).json(ephemeral('Sorry, something went wrong.'));
+    }
 };
