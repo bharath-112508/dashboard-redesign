@@ -160,7 +160,7 @@ export const sendTestMessage = async (
 
     const text = input.text ?? 'Viljetech Slack integration test — if you see this, channel routing works.';
 
-    const delivered = await postSlackMessage(slackCtx, {
+    const result = await postSlackMessage(slackCtx, {
         channel: input.channel,
         text,
         context: 'admin-test-message',
@@ -170,11 +170,11 @@ export const sendTestMessage = async (
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.SLACK_TEST_MESSAGE,
             target: { kind: AUDIT_TARGET_KINDS.SYSTEM_SETTINGS, id: settings._id },
-            metadata: { channel: input.channel, delivered },
+            metadata: { channel: input.channel, delivered: result.success },
         });
     }
 
-    if (!delivered) {
+    if (!result.success) {
         // The test endpoint surfaces the failure synchronously so the
         // admin can fix their token / channel without trawling logs.
         // The dispatcher's regular sends still swallow failures per

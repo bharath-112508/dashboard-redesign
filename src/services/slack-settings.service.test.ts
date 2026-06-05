@@ -258,7 +258,8 @@ describe('sendTestMessage', () => {
     });
 
     it('returns delivered:true and audits when Slack accepts the message', async () => {
-        postSlackMessageMock.mockResolvedValueOnce(true);
+        // postSlackMessage now returns { success, ts?, channel? } (Phase 1 prereq).
+        postSlackMessageMock.mockResolvedValueOnce({ success: true, ts: '1.1', channel: 'C1' });
         const caller = {
             id: new Types.ObjectId(),
             audit: { actor_id: new Types.ObjectId(), actor_role: 'admin' as const, ip: null, user_agent: null },
@@ -271,7 +272,7 @@ describe('sendTestMessage', () => {
     });
 
     it('throws 502 SLACK_DISPATCH_FAILED when Slack rejects the message — but still audits the failure', async () => {
-        postSlackMessageMock.mockResolvedValueOnce(false);
+        postSlackMessageMock.mockResolvedValueOnce({ success: false });
         const caller = {
             id: new Types.ObjectId(),
             audit: { actor_id: new Types.ObjectId(), actor_role: 'admin' as const, ip: null, user_agent: null },
@@ -288,14 +289,14 @@ describe('sendTestMessage', () => {
     });
 
     it('uses the caller-supplied text when provided, else a default', async () => {
-        postSlackMessageMock.mockResolvedValueOnce(true);
+        postSlackMessageMock.mockResolvedValueOnce({ success: true, ts: '1.1', channel: 'C1' });
         await svc.sendTestMessage({ channel: '#x', text: 'hello world' }, makeCaller());
         expect(postSlackMessageMock).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({ text: 'hello world', channel: '#x' })
         );
 
-        postSlackMessageMock.mockResolvedValueOnce(true);
+        postSlackMessageMock.mockResolvedValueOnce({ success: true, ts: '1.1', channel: 'C1' });
         await svc.sendTestMessage({ channel: '#x' }, makeCaller());
         const call = postSlackMessageMock.mock.calls[1][1] as { text: string };
         expect(call.text).toContain('Viljetech Slack integration test');

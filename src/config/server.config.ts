@@ -106,6 +106,16 @@ if (JWT_REFRESH_ACTIVE_KID && !JWT_REFRESH_KEY_REGISTRY.has(JWT_REFRESH_ACTIVE_K
 export const MFA_ENCRYPTION_KEY = getEnv('MFA_ENCRYPTION_KEY');
 export const MFA_ISSUER = getEnv('MFA_ISSUER', 'Viljetech');
 
+// Slack interactive signature-verification secret (Phase 0).
+// HMAC-SHA256 key Slack signs every interactive / slash-command webhook
+// payload with — copy from your Slack app's "Basic Information" page.
+//
+// Required ONLY when the /api/v1/slack/* routes accept requests. If
+// unset, the slack-webhook middleware responds 503 on the first hit
+// (rather than failing boot) so the rest of the app stays usable when
+// Slack interactivity is intentionally off.
+export const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET ?? null;
+
 // ─── MFA encryption-key rotation (BACKEND_AUDIT.md R16) ────────────────
 //
 // Single-key mode (default): `MFA_ENCRYPTION_KEY` only. Ciphertext is

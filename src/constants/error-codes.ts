@@ -139,6 +139,10 @@ export const ERROR_CODES = {
     NOTIFICATION_DISPATCH_FAILED: 'NOTIFICATION_DISPATCH_FAILED',
     SLACK_NOT_CONFIGURED: 'SLACK_NOT_CONFIGURED',
     SLACK_DISPATCH_FAILED: 'SLACK_DISPATCH_FAILED',
+    // Phase 0 — incoming Slack webhook was rejected. Tag used for
+    // warn-level logs on signature-fail / unknown-action / permission-
+    // denied so operators can grep one code.
+    SLACK_INTERACTIVE_REJECTED: 'SLACK_INTERACTIVE_REJECTED',
     PUSH_NOT_CONFIGURED: 'PUSH_NOT_CONFIGURED',
     PUSH_DISPATCH_FAILED: 'PUSH_DISPATCH_FAILED',
     AUDIT_WRITE_FAILED: 'AUDIT_WRITE_FAILED',

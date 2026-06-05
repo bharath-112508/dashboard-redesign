@@ -126,19 +126,49 @@ interface SlackPostResponse {
     ok: boolean;
     error?: string;
     ts?: string;
+    channel?: string;
 }
 
 /**
- * POST to `chat.postMessage`. Returns `true` when Slack accepted the
- * message, `false` on any failure (network, auth, rate limit, malformed
- * channel). Never throws. The non-throwing contract matches
+ * Result envelope from `postSlackMessage` / `postOrUpdateSlackMessage`.
+ *
+ * Phase-1 prereq: callers (notably the leave dispatcher) need Slack's
+ * `ts` + resolved channel ID so a later state change can `chat.update`
+ * the same message in-place. The boolean-return shape (v1) discarded
+ * both. The envelope is non-throwing — `success: false` covers every
+ * failure mode (HTTP non-2xx, `ok=false` body, network error, timeout).
+ *
+ * The object is always truthy, so legacy `if (await postSlackMessage(...))`
+ * call sites that just checked the boolean will silently treat both
+ * success AND failure as truthy. Migrate each call site to
+ * `result.success` explicitly.
+ */
+export interface SlackPostResult {
+    success: boolean;
+    /** Slack's message identifier — opaque string like `"1717573200.012345"`.
+     *  Combined with `channel`, lets us `chat.update` the same message later. */
+    ts?: string;
+    /** Resolved channel ID (e.g. `"C012ABC"`). Slack returns this even when the
+     *  caller passed a channel name like `"#leaves"` — store it so subsequent
+     *  updates don't re-resolve the name. */
+    channel?: string;
+}
+
+/**
+ * POST to `chat.postMessage`. Returns a `SlackPostResult` envelope —
+ * `{ success: true, ts, channel }` when Slack accepted the message,
+ * `{ success: false }` on any failure (network, auth, rate limit,
+ * malformed channel). Never throws. The non-throwing contract matches
  * `mailer.sendEmail` so the dispatcher never has to catch around it.
  *
  * Slack's API returns HTTP 200 even on logical failure (with
  * `{ok: false, error}`) — we treat both `!response.ok` and
  * `body.ok === false` as a fail-and-log.
  */
-export const postSlackMessage = async (ctx: SlackContext, input: PostSlackMessageInput): Promise<boolean> => {
+export const postSlackMessage = async (
+    ctx: SlackContext,
+    input: PostSlackMessageInput,
+): Promise<SlackPostResult> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
 
@@ -166,7 +196,7 @@ export const postSlackMessage = async (ctx: SlackContext, input: PostSlackMessag
                 },
                 'Slack chat.postMessage returned a non-2xx status'
             );
-            return false;
+            return { success: false };
         }
 
         const body = (await response.json()) as SlackPostResponse;
@@ -183,9 +213,9 @@ export const postSlackMessage = async (ctx: SlackContext, input: PostSlackMessag
                 },
                 'Slack chat.postMessage rejected the message'
             );
-            return false;
+            return { success: false };
         }
-        return true;
+        return { success: true, ts: body.ts, channel: body.channel };
     } catch (err) {
         const isAbort = (err as { name?: string })?.name === 'AbortError';
         logger.warn(
@@ -198,7 +228,7 @@ export const postSlackMessage = async (ctx: SlackContext, input: PostSlackMessag
             },
             isAbort ? 'Slack chat.postMessage timed out' : 'Slack chat.postMessage threw'
         );
-        return false;
+        return { success: false };
     } finally {
         clearTimeout(timeoutId);
     }

@@ -114,14 +114,21 @@ describe('slackContextFrom', () => {
 describe('postSlackMessage', () => {
     const ctx = { enabled: true, botToken: 'xoxb-test' } as const;
 
-    it('returns true and POSTs the right shape on the happy path', async () => {
-        fetchMock.mockResolvedValueOnce(okResponse());
-        const ok = await postSlackMessage(ctx, {
+    it('returns { success: true, ts, channel } and POSTs the right shape on the happy path', async () => {
+        // Phase 1 prereq — the caller needs `ts` + `channel` from this call so
+        // a subsequent decision can `chat.update` the same message in place.
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({ ok: true, ts: '1717573200.012345', channel: 'C123ABC' }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+        );
+        const result = await postSlackMessage(ctx, {
             channel: '#leaves',
             text: 'hello',
             context: 'unit-test',
         });
-        expect(ok).toBe(true);
+        expect(result).toEqual({ success: true, ts: '1717573200.012345', channel: 'C123ABC' });
 
         const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
         expect(url).toBe('https://slack.com/api/chat.postMessage');
@@ -132,22 +139,22 @@ describe('postSlackMessage', () => {
         expect(body).toEqual({ channel: '#leaves', text: 'hello' });
     });
 
-    it('returns false (not throw) on a non-2xx HTTP response', async () => {
+    it('returns { success: false } (not throw) on a non-2xx HTTP response', async () => {
         fetchMock.mockResolvedValueOnce(new Response('forbidden', { status: 403 }));
-        const ok = await postSlackMessage(ctx, { channel: '#x', text: 'y', context: 'unit-test' });
-        expect(ok).toBe(false);
+        const result = await postSlackMessage(ctx, { channel: '#x', text: 'y', context: 'unit-test' });
+        expect(result).toEqual({ success: false });
     });
 
-    it('returns false when Slack body has ok=false (logical failure like channel_not_found)', async () => {
+    it('returns { success: false } when Slack body has ok=false (logical failure like channel_not_found)', async () => {
         fetchMock.mockResolvedValueOnce(slackErrorResponse('channel_not_found'));
-        const ok = await postSlackMessage(ctx, { channel: '#nope', text: 'y', context: 'unit-test' });
-        expect(ok).toBe(false);
+        const result = await postSlackMessage(ctx, { channel: '#nope', text: 'y', context: 'unit-test' });
+        expect(result).toEqual({ success: false });
     });
 
-    it('returns false (not throw) on a fetch network error', async () => {
+    it('returns { success: false } (not throw) on a fetch network error', async () => {
         fetchMock.mockRejectedValueOnce(new Error('ECONNRESET'));
-        const ok = await postSlackMessage(ctx, { channel: '#x', text: 'y', context: 'unit-test' });
-        expect(ok).toBe(false);
+        const result = await postSlackMessage(ctx, { channel: '#x', text: 'y', context: 'unit-test' });
+        expect(result).toEqual({ success: false });
     });
 
     it('truncates text > SLACK_TEXT_MAX (3000 chars) and still posts', async () => {

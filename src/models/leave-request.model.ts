@@ -61,6 +61,28 @@ export interface LeaveRequestDocument extends Document {
     cancelled_at: Date | null;
     cancelled_by: Types.ObjectId | null;
     cancellation_reason: string | null;
+    /**
+     * Slack message coordinates — populated when the dispatcher first
+     * posts the request to `#leaves` (Phase 1). Subsequent state
+     * changes (approve / reject / cancel) call `chat.update` with the
+     * same `(channel, ts)` so the channel has ONE message per leave
+     * that mutates in place, not a new post per state change.
+     *
+     * `channel` is the resolved channel ID Slack returned (e.g. "C123")
+     * — store the ID, not the configured channel name, so subsequent
+     * updates don't re-resolve.
+     *
+     * `null` for legacy leaves submitted before the field existed AND
+     * for any leave whose first post failed — dispatcher falls back to
+     * a fresh `chat.postMessage` if `null`, so older records degrade
+     * gracefully.
+     *
+     * Never indexed — we don't query by these.
+     */
+    slack_message: {
+        channel: string;
+        ts: string;
+    } | null;
     created_at: Date;
     updated_at: Date;
 }
@@ -127,6 +149,13 @@ const leaveRequestSchema = new Schema<LeaveRequestDocument>(
         cancelled_at: { type: Date, default: null },
         cancelled_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
         cancellation_reason: { type: String, default: null },
+        slack_message: {
+            type: {
+                channel: { type: String, required: true },
+                ts: { type: String, required: true },
+            },
+            default: null,
+        },
     },
     {
         ...BASE_SCHEMA_OPTIONS,

@@ -30,6 +30,24 @@ export const authRateLimiter = rateLimit({
 });
 
 /**
+ * Slack webhook limiter (Phase 0) — Slack signs every interactive /
+ * slash-command payload, so signature verification is the real
+ * defence. The limiter sits in front to discourage forged-payload
+ * spam before the cryptographic check runs.
+ *
+ * Default: 30 req / min / IP. The inbound surface is one event per
+ * user click + per slash-command invocation — well under 30/min in
+ * practice, even at peak.
+ */
+export const slackWebhookRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 30,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { message: 'Too many requests.' },
+});
+
+/**
  * Per-user limiter factory (BACKEND_AUDIT.md P2-9).
  *
  * The global `generalRateLimiter` is per-IP, which has two failure
