@@ -8,7 +8,14 @@ import { NOTIFICATION_TYPES, RELATED_ENTITY_KINDS, type NotificationType } from 
 import { ERROR_CODES } from '../constants/error-codes.js';
 import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/mailer.js';
-import { postSlackMessage, slackContextFrom, type SlackContext } from '../utils/slack.js';
+import {
+    postOrUpdateSlackMessage,
+    postSlackMessage,
+    slackContextFrom,
+    type SlackContext,
+} from '../utils/slack.js';
+import { buildLeaveMessageBlocks } from '../utils/slack-block-kit/leave.js';
+import { LeaveRequest } from '../models/leave-request.model.js';
 import { isPushConfigured, sendPushNotification, type PushPayload } from '../utils/push.js';
 import { listSubscriptionsForUser } from './push-subscription.service.js';
 import { runWithConcurrency } from '../utils/run-with-concurrency.js';
@@ -364,12 +371,37 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
         // short-circuit.
         const slack = await loadSlackDispatch();
         if (slack) {
-            await dispatchSlackBroadcast(
-                slack,
-                NOTIFICATION_TYPES.LEAVE_REQUESTED,
-                `Leave request from ${requester.full_name}\n${broadcastBody}`,
-                context
-            );
+            // Phase 1 — post a Block Kit message with Approve / Reject
+            // buttons and persist Slack's `{channel, ts}` back to the
+            // leave doc so subsequent state changes (`notifyLeaveDecided`)
+            // can `chat.update` the SAME message in place.
+            const channel = slack.channels.leaves;
+            if (channel) {
+                const slackResult = await postOrUpdateSlackMessage(slack.ctx, {
+                    channel,
+                    blocks: buildLeaveMessageBlocks(
+                        {
+                            _id: input.request_id.toString(),
+                            employee_name: requester.full_name,
+                            type_label: input.leave_type_label,
+                            start_date: input.start_date,
+                            end_date: input.end_date,
+                        },
+                        { status: 'pending' },
+                    ),
+                    text: `Leave request from ${requester.full_name} — ${broadcastBody}`,
+                    existing: null,
+                    context: `${context}.broadcast`,
+                });
+                if (slackResult.success && slackResult.ts && slackResult.channel) {
+                    await LeaveRequest.findByIdAndUpdate(input.request_id, {
+                        slack_message: {
+                            channel: slackResult.channel,
+                            ts: slackResult.ts,
+                        },
+                    });
+                }
+            }
         }
 
         // R11 — bounded fan-out so a 50-member project can't blast
@@ -457,16 +489,58 @@ export const notifyLeaveDecided = async (input: LeaveDecisionDispatchInput): Pro
             cancelled: 'Leave request cancelled',
         } as const;
 
-        // Step 25 — single broadcast (per-recipient DMs are handled
-        // inside `dispatchToRecipient`).
+        // Phase 1 — edit the original leave message in-place via
+        // `chat.update` (no fresh post per decision). The dispatcher
+        // reads `slack_message` from the leave doc; legacy leaves
+        // submitted before Phase 1 have `null` here and degrade to a
+        // fresh post (still persisted back so any later state change
+        // can update). Per-recipient DMs continue inside
+        // `dispatchToRecipient` for the requester's verdict notice.
         const slack = await loadSlackDispatch();
         if (slack) {
-            await dispatchSlackBroadcast(
-                slack,
-                typeMap[input.decision],
-                `Leave ${verb}: ${requester.full_name} — ${input.leave_type_label} ${range} (${input.total_days}d) — by ${actorName}`,
-                context
-            );
+            const channel = slack.channels.leaves;
+            if (channel) {
+                const leaveDoc = await LeaveRequest.findById(input.request_id).select(
+                    'slack_message'
+                );
+                const slackResult = await postOrUpdateSlackMessage(slack.ctx, {
+                    channel,
+                    blocks: buildLeaveMessageBlocks(
+                        {
+                            _id: input.request_id.toString(),
+                            employee_name: requester.full_name,
+                            type_label: input.leave_type_label,
+                            start_date: input.start_date,
+                            end_date: input.end_date,
+                        },
+                        {
+                            status: input.decision,
+                            // Self-cancel — actor IS the requester. Skip the
+                            // "by …" line; "Cancelled" on its own reads cleaner.
+                            decided_by: actorIsRequester ? undefined : actorName,
+                        },
+                    ),
+                    text: `Leave ${verb}: ${requester.full_name} — ${input.leave_type_label} ${range} (${input.total_days}d)${actorIsRequester ? '' : ` — by ${actorName}`}`,
+                    existing: leaveDoc?.slack_message ?? null,
+                    context: `${context}.broadcast`,
+                });
+                // If we just fell back to a fresh post (legacy leave),
+                // persist the new coordinates so a later state change
+                // (e.g. cancel after admin-approved this) can chat.update.
+                if (
+                    !leaveDoc?.slack_message &&
+                    slackResult.success &&
+                    slackResult.ts &&
+                    slackResult.channel
+                ) {
+                    await LeaveRequest.findByIdAndUpdate(input.request_id, {
+                        slack_message: {
+                            channel: slackResult.channel,
+                            ts: slackResult.ts,
+                        },
+                    });
+                }
+            }
         }
 
         // R11 — bounded fan-out.

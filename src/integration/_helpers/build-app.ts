@@ -5,6 +5,7 @@ import compression from 'compression';
 import { StatusCodes } from 'http-status-codes';
 
 import appRoutes from '../../routes/index.js';
+import slackRoutes from '../../routes/slack.routes.js';
 import { globalErrorHandler } from '../../middlewares/error-handler.middleware.js';
 import { generalRateLimiter } from '../../middlewares/rate-limit.middleware.js';
 import { API_PREFIX, ERROR_CODES } from '../../constants/index.js';
@@ -63,6 +64,16 @@ export const buildTestApp = (): Express => {
 
     app.use(cors());
     app.use(compression());
+
+    // Slack webhook routes — MUST be mounted BEFORE the global body
+    // parsers. Slack signs the raw request bytes; once express.json /
+    // express.urlencoded consume the stream, the bytes are gone and
+    // signature verification fails. The slack router has its own raw-
+    // body parser inside (`slackWebhookMiddleware`) that captures the
+    // buffer, verifies HMAC, then re-parses req.body for the handler.
+    // The central `appRoutes` router no longer mounts /slack to avoid
+    // a double-mount fighting these parsers from below.
+    app.use(`${API_PREFIX}/slack`, slackRoutes);
 
     // Tighter parser on /auth then global default (mirrors prod ordering).
     app.use(`${API_PREFIX}/auth`, express.json({ limit: '4kb' }));

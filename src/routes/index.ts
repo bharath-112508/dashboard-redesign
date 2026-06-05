@@ -33,7 +33,11 @@ import { projectShareLinksNestedRouter, publicShareLinksRouter, shareLinksRouter
 import roleRoutes, { userRolesAssignRouter } from './role.routes.js';
 import commandPaletteRoutes from './command-palette.routes.js';
 import pushRoutes from './push.routes.js';
-import slackRoutes from './slack.routes.js';
+// NOTE: `/slack` routes are mounted DIRECTLY on the Express app in
+// `src/index.ts` (and the integration harness in
+// `src/integration/_helpers/build-app.ts`), BEFORE the global
+// `express.json` / `express.urlencoded` parsers — Slack signs the
+// raw bytes and the body parsers would consume the stream.
 
 const appRoutes = Router();
 
@@ -55,10 +59,8 @@ appRoutes.use('/leaves', leaveRequestRoutes);
 appRoutes.use('/comp-off', compOffRoutes);
 appRoutes.use('/notifications', notificationRoutes);
 appRoutes.use('/push', pushRoutes);
-// Slack interactive webhooks (Phase 0) — Block Kit button clicks +
-// slash commands. Internal stack handles the rate limiter, raw-body
-// capture, and signature verification.
-appRoutes.use('/slack', slackRoutes);
+// `/slack` is mounted directly on the Express app ahead of the body
+// parsers — see comment at the import block above.
 appRoutes.use('/dashboard', dashboardRoutes);
 appRoutes.use('/projects', projectRoutes);
 appRoutes.use('/sprints', sprintRoutes);

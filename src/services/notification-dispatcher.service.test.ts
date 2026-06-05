@@ -32,9 +32,12 @@ const {
     sendEmailMock,
     userFindByIdMock,
     userFindMock,
+    leaveRequestFindByIdMock,
+    leaveRequestFindByIdAndUpdateMock,
     loggerWarnMock,
     getOrInitSettingsMock,
     postSlackMessageMock,
+    postOrUpdateSlackMessageMock,
     isPushConfiguredMock,
     sendPushNotificationMock,
     listSubscriptionsForUserMock,
@@ -44,6 +47,8 @@ const {
         sendEmailMock: vi.fn(),
         userFindByIdMock: vi.fn(),
         userFindMock: vi.fn(),
+        leaveRequestFindByIdMock: vi.fn(),
+        leaveRequestFindByIdAndUpdateMock: vi.fn().mockResolvedValue(null),
         loggerWarnMock: vi.fn(),
         isPushConfiguredMock: vi.fn().mockReturnValue(false),
         sendPushNotificationMock: vi.fn().mockResolvedValue(true),
@@ -65,7 +70,14 @@ const {
                 },
             },
         }),
-        postSlackMessageMock: vi.fn().mockResolvedValue(true),
+        // DM path uses postSlackMessage (text-only). Broadcast path
+        // for leaves uses postOrUpdateSlackMessage (Block Kit + chat.update).
+        postSlackMessageMock: vi.fn().mockResolvedValue({ success: true, ts: '1.1', channel: 'CDM' }),
+        postOrUpdateSlackMessageMock: vi.fn().mockResolvedValue({
+            success: true,
+            ts: '1.1',
+            channel: 'CCHAN',
+        }),
     };
 });
 
@@ -97,6 +109,16 @@ vi.mock('../models/user.model.js', () => ({
     },
 }));
 
+// Phase 1 — dispatcher reads `slack_message` from the leave doc on
+// decisions to chat.update the original message, and writes
+// `slack_message` back after the initial post. Mock both.
+vi.mock('../models/leave-request.model.js', () => ({
+    LeaveRequest: {
+        findById: leaveRequestFindByIdMock,
+        findByIdAndUpdate: leaveRequestFindByIdAndUpdateMock,
+    },
+}));
+
 // `email-templates.ts` also imports `escapeHtml` from `mailer.js`, so we must
 // keep the rest of the module intact and only override `sendEmail`.
 vi.mock('../utils/mailer.js', async (importOriginal) => {
@@ -125,6 +147,7 @@ vi.mock('../utils/slack.js', async (importOriginal) => {
     return {
         ...actual,
         postSlackMessage: postSlackMessageMock,
+        postOrUpdateSlackMessage: postOrUpdateSlackMessageMock,
     };
 });
 
@@ -176,10 +199,42 @@ beforeEach(() => {
     sendEmailMock.mockReset();
     userFindByIdMock.mockReset();
     userFindMock.mockReset();
+    leaveRequestFindByIdMock.mockReset();
+    leaveRequestFindByIdAndUpdateMock.mockReset();
+    leaveRequestFindByIdMock.mockResolvedValue(null);
+    leaveRequestFindByIdAndUpdateMock.mockResolvedValue(null);
     loggerWarnMock.mockReset();
     isPushConfiguredMock.mockReset();
     sendPushNotificationMock.mockReset();
     listSubscriptionsForUserMock.mockReset();
+    // Phase 1 — broadcast path uses postOrUpdateSlackMessage; DM path
+    // uses postSlackMessage. Both default to success so failure paths
+    // are opt-in via the individual test.
+    postSlackMessageMock.mockReset();
+    postSlackMessageMock.mockResolvedValue({ success: true, ts: '1.1', channel: 'CDM' });
+    postOrUpdateSlackMessageMock.mockReset();
+    postOrUpdateSlackMessageMock.mockResolvedValue({
+        success: true,
+        ts: '1.1',
+        channel: 'CCHAN',
+    });
+    // Settings mock leaks between tests if not reset — restore the
+    // "Slack disabled" default so tests that don't override see no
+    // Slack fan-out.
+    getOrInitSettingsMock.mockReset();
+    getOrInitSettingsMock.mockResolvedValue({
+        slack: {
+            enabled: false,
+            bot_token: null,
+            channels: {
+                leaves: '#leaves',
+                attendance: '#attendance',
+                projects: '#projects',
+                timesheet: '#timesheet',
+                general: '#general',
+            },
+        },
+    });
 
     notificationCreateMock.mockResolvedValue({ _id: new Types.ObjectId() });
     sendEmailMock.mockResolvedValue(undefined);
@@ -323,6 +378,86 @@ describe('notifyLeaveDecided', () => {
         // No email — emails are only sent to the requester branch.
         expect(sendEmailMock).not.toHaveBeenCalled();
     });
+
+    // ─── Phase 1: editable Slack message ─────────────────────────────────
+    const enabledSlackForPhase1 = {
+        slack: {
+            enabled: true,
+            bot_token: 'xoxb-test',
+            channels: {
+                leaves: '#leaves',
+                attendance: '#attendance',
+                projects: '#projects',
+                timesheet: '#timesheet',
+                general: '#general',
+            },
+        },
+    };
+    const requesterWithSlackForPhase1 = {
+        ...requester,
+        slack_user_id: 'U-EMP',
+        slack_notifications_enabled: true,
+    };
+    const adminWithSlackForPhase1 = {
+        ...admin,
+        slack_user_id: 'U-ADM',
+        slack_notifications_enabled: true,
+    };
+
+    it('Phase 1 — calls chat.update with the persisted slack_message coordinates', async () => {
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackForPhase1);
+        userFindByIdMock.mockImplementation(() => queryReturning(requesterWithSlackForPhase1));
+        userFindMock.mockReturnValue(queryReturning([adminWithSlackForPhase1]));
+        // The leave was posted earlier and persisted its coordinates.
+        leaveRequestFindByIdMock.mockReturnValue({
+            select: () =>
+                Promise.resolve({
+                    slack_message: { channel: 'CSAVED', ts: '999.999' },
+                }),
+        });
+
+        await dispatcher.notifyLeaveDecided({
+            ...decisionInput,
+            decision: 'approved',
+            actor: { id: adminId },
+        });
+
+        expect(postOrUpdateSlackMessageMock).toHaveBeenCalledTimes(1);
+        const call = postOrUpdateSlackMessageMock.mock.calls[0][1] as {
+            existing: { channel: string; ts: string };
+        };
+        expect(call.existing).toEqual({ channel: 'CSAVED', ts: '999.999' });
+        // No fresh-post write-back when we updated an existing message.
+        expect(leaveRequestFindByIdAndUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it('Phase 1 — falls back to fresh post when slack_message is null (legacy leave) + persists back', async () => {
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackForPhase1);
+        userFindByIdMock.mockImplementation(() => queryReturning(requesterWithSlackForPhase1));
+        userFindMock.mockReturnValue(queryReturning([adminWithSlackForPhase1]));
+        // Legacy leave — submitted before Phase 1, no slack_message saved.
+        leaveRequestFindByIdMock.mockReturnValue({
+            select: () => Promise.resolve({ slack_message: null }),
+        });
+
+        await dispatcher.notifyLeaveDecided({
+            ...decisionInput,
+            decision: 'approved',
+            actor: { id: adminId },
+        });
+
+        // existing=null → postOrUpdateSlackMessage falls back to chat.postMessage,
+        // and we persist the new coordinates so any further decision can update.
+        expect(postOrUpdateSlackMessageMock).toHaveBeenCalledTimes(1);
+        const call = postOrUpdateSlackMessageMock.mock.calls[0][1] as { existing: unknown };
+        expect(call.existing).toBeNull();
+        expect(leaveRequestFindByIdAndUpdateMock).toHaveBeenCalledWith(
+            requestId,
+            expect.objectContaining({
+                slack_message: expect.objectContaining({ channel: 'CCHAN', ts: '1.1' }),
+            }),
+        );
+    });
 });
 
 // ─── notifyAttendanceCorrectionDecided ───────────────────────────────────
@@ -417,7 +552,14 @@ describe('Slack integration', () => {
     beforeEach(() => {
         notificationCreateMock.mockResolvedValue({});
         sendEmailMock.mockResolvedValue(undefined);
-        postSlackMessageMock.mockReset().mockResolvedValue(true);
+        postSlackMessageMock.mockReset();
+        postSlackMessageMock.mockResolvedValue({ success: true, ts: '1.1', channel: 'CDM' });
+        postOrUpdateSlackMessageMock.mockReset();
+        postOrUpdateSlackMessageMock.mockResolvedValue({
+            success: true,
+            ts: '1.1',
+            channel: 'CCHAN',
+        });
     });
 
     it('skips Slack entirely when settings.enabled is false', async () => {
@@ -437,7 +579,7 @@ describe('Slack integration', () => {
         expect(postSlackMessageMock).not.toHaveBeenCalled();
     });
 
-    it('fires ONE channel broadcast + ONE per-recipient DM when fully configured', async () => {
+    it('fires ONE channel broadcast (Block Kit) + ONE per-recipient DM when fully configured', async () => {
         getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
         userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
         userFindMock.mockReturnValue(queryReturning([adminWithSlack]));
@@ -451,11 +593,28 @@ describe('Slack integration', () => {
             total_days: 1,
         });
 
-        // 1 broadcast to #leaves + 1 DM to admin = 2 calls
-        expect(postSlackMessageMock).toHaveBeenCalledTimes(2);
-        const channels = postSlackMessageMock.mock.calls.map((c) => (c[1] as { channel: string }).channel);
-        expect(channels).toContain('#leaves');
-        expect(channels).toContain('U-ADM');
+        // Phase 1 split: broadcast goes through postOrUpdateSlackMessage
+        // (Block Kit + chat.update on later state changes); per-recipient
+        // DMs continue through postSlackMessage (plain text).
+        expect(postOrUpdateSlackMessageMock).toHaveBeenCalledTimes(1);
+        const broadcastCall = postOrUpdateSlackMessageMock.mock.calls[0][1] as {
+            channel: string;
+            existing: unknown;
+        };
+        expect(broadcastCall.channel).toBe('#leaves');
+        expect(broadcastCall.existing).toBeNull();
+
+        expect(postSlackMessageMock).toHaveBeenCalledTimes(1);
+        const dmCall = postSlackMessageMock.mock.calls[0][1] as { channel: string };
+        expect(dmCall.channel).toBe('U-ADM');
+
+        // slack_message persisted back so a later decide can chat.update.
+        expect(leaveRequestFindByIdAndUpdateMock).toHaveBeenCalledWith(
+            requestId,
+            expect.objectContaining({
+                slack_message: expect.objectContaining({ channel: 'CCHAN', ts: '1.1' }),
+            }),
+        );
     });
 
     it('skips DM for recipients without slack_user_id (broadcast still fires)', async () => {
@@ -472,10 +631,9 @@ describe('Slack integration', () => {
             total_days: 1,
         });
 
-        // Only the broadcast — no DM target available.
-        expect(postSlackMessageMock).toHaveBeenCalledTimes(1);
-        const channel = (postSlackMessageMock.mock.calls[0][1] as { channel: string }).channel;
-        expect(channel).toBe('#leaves');
+        // Broadcast (postOrUpdate) yes, DM (postSlackMessage) no — no slack_user_id.
+        expect(postOrUpdateSlackMessageMock).toHaveBeenCalledTimes(1);
+        expect(postSlackMessageMock).not.toHaveBeenCalled();
     });
 
     it('skips DM when recipient has slack_notifications_enabled = false', async () => {
@@ -493,15 +651,17 @@ describe('Slack integration', () => {
         });
 
         // Broadcast yes; opted-out admin = no DM.
-        expect(postSlackMessageMock).toHaveBeenCalledTimes(1);
+        expect(postOrUpdateSlackMessageMock).toHaveBeenCalledTimes(1);
+        expect(postSlackMessageMock).not.toHaveBeenCalled();
     });
 
     it('does not block the in-app + email fan-out when Slack send throws (best-effort contract)', async () => {
         getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
-        // postSlackMessage always returns true/false (never throws by
-        // design). Simulate a `false` return to confirm the dispatcher
-        // proceeds to the next step regardless.
-        postSlackMessageMock.mockResolvedValue(false);
+        // postSlackMessage / postOrUpdateSlackMessage never throw (best-
+        // effort contract). Simulate `{ success: false }` to confirm the
+        // dispatcher proceeds to the next step regardless.
+        postSlackMessageMock.mockResolvedValue({ success: false });
+        postOrUpdateSlackMessageMock.mockResolvedValue({ success: false });
         userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
         userFindMock.mockReturnValue(queryReturning([adminWithSlack]));
 

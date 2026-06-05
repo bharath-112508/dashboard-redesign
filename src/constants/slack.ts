@@ -62,6 +62,9 @@ export const NOTIFICATION_TYPE_TO_SLACK_CATEGORY: Record<NotificationType, Slack
 
 export const SLACK_API_BASE = 'https://slack.com/api';
 export const SLACK_API_POST_MESSAGE = `${SLACK_API_BASE}/chat.postMessage`;
+// Phase 1 — used to edit the original leave message in-place when a
+// decision lands. Same auth model as chat.postMessage.
+export const SLACK_API_UPDATE_MESSAGE = `${SLACK_API_BASE}/chat.update`;
 
 /**
  * Network timeout for a single Slack API call. Slack's docs target ~3s

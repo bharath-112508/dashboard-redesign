@@ -10,6 +10,7 @@ import { StatusCodes } from 'http-status-codes';
 import { JOBS_ENABLED, PORT, CORS_ORIGINS, NODE_ENV, TRUST_PROXY } from './config/server.config.js';
 import connectDB, { disconnectDB } from './config/database.config.js';
 import appRoutes from './routes/index.js';
+import slackRoutes from './routes/slack.routes.js';
 import { globalErrorHandler } from './middlewares/error-handler.middleware.js';
 import { generalRateLimiter } from './middlewares/rate-limit.middleware.js';
 import { API_PREFIX, ERROR_CODES } from './constants/index.js';
@@ -116,6 +117,16 @@ app.use(compression());
 // the bulk-holiday import and for moderate JSON payloads, small enough
 // to keep a runaway client from filling the request buffer. File
 // uploads bypass this entirely (Azure Blob SAS direct-to-storage).
+// Slack webhook routes — MUST be mounted BEFORE the global body
+// parsers below. Slack signs the RAW request bytes; once
+// `express.json` / `express.urlencoded` consume the stream the bytes
+// are gone and HMAC-SHA256 verification fails. The slack router has
+// its own raw-body parser inside (`slackWebhookMiddleware`) that
+// captures the buffer, verifies the signature, then re-parses
+// `req.body` for the handler. The central `appRoutes` router does
+// not re-mount `/slack` — this early mount is the only one.
+app.use(`${API_PREFIX}/slack`, slackRoutes);
+
 app.use(`${API_PREFIX}/auth`, express.json({ limit: '4kb' }));
 app.use(`${API_PREFIX}/auth`, express.urlencoded({ extended: true, limit: '4kb' }));
 

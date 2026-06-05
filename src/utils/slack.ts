@@ -1,6 +1,11 @@
 import logger from './logger.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { SLACK_API_POST_MESSAGE, SLACK_REQUEST_TIMEOUT_MS, SLACK_TEXT_MAX } from '../constants/slack.js';
+import {
+    SLACK_API_POST_MESSAGE,
+    SLACK_API_UPDATE_MESSAGE,
+    SLACK_REQUEST_TIMEOUT_MS,
+    SLACK_TEXT_MAX,
+} from '../constants/slack.js';
 import { decryptSecret } from './crypto-aes.js';
 import type { SlackSettings } from '../models/system-settings.model.js';
 
@@ -43,6 +48,23 @@ export interface PostSlackMessageInput {
      * (e.g. `'leave-submitted-broadcast'`,
      * `'task-comment-mention-dm'`).
      */
+    context: string;
+}
+
+/**
+ * Input for the rich post/update helper used by Phase 1 lifecycle
+ * messages. `blocks` is the Block Kit payload; the fallback `text`
+ * shows in notification popups + clients that can't render blocks.
+ */
+export interface PostOrUpdateInput {
+    channel: string;
+    blocks: unknown[];
+    /** Fallback notification text. Required by Slack when `blocks` is set. */
+    text?: string;
+    /** Pass `null` on the first post; pass `{ channel, ts }` from a prior
+     *  result to `chat.update` the same message in place. */
+    existing: { channel: string; ts: string } | null;
+    /** Same dispatch-event tag as `PostSlackMessageInput.context`. */
     context: string;
 }
 
@@ -227,6 +249,109 @@ export const postSlackMessage = async (
                 timed_out: isAbort,
             },
             isAbort ? 'Slack chat.postMessage timed out' : 'Slack chat.postMessage threw'
+        );
+        return { success: false };
+    } finally {
+        clearTimeout(timeoutId);
+    }
+};
+
+/**
+ * Phase 1 — Post a NEW Slack message OR update an existing one, based
+ * on `input.existing`. Same auth + timeout + non-throwing contract as
+ * `postSlackMessage`.
+ *
+ * When `existing` is null: posts via `chat.postMessage`, Slack returns
+ * a new `ts` + `channel` for the dispatcher to persist on the leave doc.
+ *
+ * When `existing` is set: edits the original message via `chat.update`
+ * keeping the same `ts` — the channel sees one message that mutates
+ * through the leave's lifecycle (pending → approved/rejected/cancelled)
+ * rather than a fresh post per state change.
+ *
+ * `chat.update`'s common failure mode is `message_not_found` (bot was
+ * kicked from the channel, message was deleted, ts mismatch). We log
+ * + return `{ success: false }`; the dispatcher treats this as a soft
+ * failure — the BE state change still succeeds, the channel just shows
+ * the stale message. Future: surface a "Slack sync failed" indicator
+ * in admin UI.
+ */
+export const postOrUpdateSlackMessage = async (
+    ctx: SlackContext,
+    input: PostOrUpdateInput,
+): Promise<SlackPostResult> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
+
+    const isUpdate = Boolean(input.existing);
+    const url = isUpdate ? SLACK_API_UPDATE_MESSAGE : SLACK_API_POST_MESSAGE;
+    const body = isUpdate
+        ? {
+              channel: input.existing!.channel,
+              ts: input.existing!.ts,
+              blocks: input.blocks,
+              text: input.text ? truncateText(input.text) : undefined,
+          }
+        : {
+              channel: input.channel,
+              blocks: input.blocks,
+              text: input.text ? truncateText(input.text) : undefined,
+          };
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                Authorization: `Bearer ${ctx.botToken}`,
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+        });
+
+        if (!response.ok) {
+            logger.warn(
+                {
+                    code: ERROR_CODES.SLACK_DISPATCH_FAILED,
+                    dispatch_event: input.context,
+                    channel: input.channel,
+                    is_update: isUpdate,
+                    http_status: response.status,
+                },
+                `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} returned a non-2xx status`,
+            );
+            return { success: false };
+        }
+
+        const parsed = (await response.json()) as SlackPostResponse;
+        if (!parsed.ok) {
+            logger.warn(
+                {
+                    code: ERROR_CODES.SLACK_DISPATCH_FAILED,
+                    dispatch_event: input.context,
+                    channel: input.channel,
+                    is_update: isUpdate,
+                    slack_error: parsed.error,
+                },
+                `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} rejected the message`,
+            );
+            return { success: false };
+        }
+        return { success: true, ts: parsed.ts, channel: parsed.channel };
+    } catch (err) {
+        const isAbort = (err as { name?: string })?.name === 'AbortError';
+        logger.warn(
+            {
+                err,
+                code: ERROR_CODES.SLACK_DISPATCH_FAILED,
+                dispatch_event: input.context,
+                channel: input.channel,
+                is_update: isUpdate,
+                timed_out: isAbort,
+            },
+            isAbort
+                ? `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} timed out`
+                : `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} threw`,
         );
         return { success: false };
     } finally {

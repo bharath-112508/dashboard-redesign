@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { isSlackConfigured, postSlackMessage, slackContextFrom } from './slack.js';
+import { isSlackConfigured, postOrUpdateSlackMessage, postSlackMessage, slackContextFrom } from './slack.js';
 import type { SlackSettings } from '../models/system-settings.model.js';
 
 /**
@@ -166,5 +166,77 @@ describe('postSlackMessage', () => {
         expect(body.text.length).toBeLessThanOrEqual(3_000);
         // Truncation marker tail
         expect(body.text.endsWith('…')).toBe(true);
+    });
+});
+
+// ─── postOrUpdateSlackMessage ────────────────────────────────────────────
+
+describe('postOrUpdateSlackMessage', () => {
+    const ctx = { enabled: true, botToken: 'xoxb-test' } as const;
+    const sampleBlocks = [{ type: 'header', text: { type: 'plain_text', text: 'hi' } }];
+
+    it('calls chat.postMessage when `existing` is null', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({ ok: true, ts: '1.1', channel: 'C123' }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+        );
+        const result = await postOrUpdateSlackMessage(ctx, {
+            channel: '#leaves',
+            blocks: sampleBlocks,
+            existing: null,
+            context: 'unit-test',
+        });
+        expect(result).toEqual({ success: true, ts: '1.1', channel: 'C123' });
+        const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+        expect(url).toContain('chat.postMessage');
+    });
+
+    it('calls chat.update when `existing` has channel + ts', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({ ok: true, ts: '1.1', channel: 'C123' }),
+                { status: 200, headers: { 'content-type': 'application/json' } },
+            ),
+        );
+        const result = await postOrUpdateSlackMessage(ctx, {
+            channel: '#leaves',
+            blocks: sampleBlocks,
+            existing: { channel: 'C123', ts: '1.1' },
+            context: 'unit-test',
+        });
+        expect(result.success).toBe(true);
+        const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+        expect(url).toContain('chat.update');
+        const body = JSON.parse(init.body as string);
+        expect(body).toMatchObject({ channel: 'C123', ts: '1.1' });
+    });
+
+    it('returns { success: false } when chat.update returns ok=false (e.g. message_not_found)', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(JSON.stringify({ ok: false, error: 'message_not_found' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            }),
+        );
+        const result = await postOrUpdateSlackMessage(ctx, {
+            channel: '#leaves',
+            blocks: sampleBlocks,
+            existing: { channel: 'C123', ts: '1.1' },
+            context: 'unit-test',
+        });
+        expect(result).toEqual({ success: false });
+    });
+
+    it('returns { success: false } (not throw) on chat.update network error', async () => {
+        fetchMock.mockRejectedValueOnce(new Error('ECONNRESET'));
+        const result = await postOrUpdateSlackMessage(ctx, {
+            channel: '#leaves',
+            blocks: sampleBlocks,
+            existing: { channel: 'C123', ts: '1.1' },
+            context: 'unit-test',
+        });
+        expect(result).toEqual({ success: false });
     });
 });
