@@ -1,4 +1,5 @@
 import { User } from '../models/user.model.js';
+import { SLACK_REQUEST_TIMEOUT_MS } from '../constants/slack.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -68,22 +69,31 @@ export const resolveSlackUser = async (slackUserId: string, ctx: ResolverContext
  *
  * https://api.slack.com/methods/users.info
  */
-export const fetchSlackUserInfo = async (
-    slackUserId: string,
-    botToken: string,
-): Promise<SlackUserInfo | null> => {
-    const res = await fetch(
-        `https://slack.com/api/users.info?user=${encodeURIComponent(slackUserId)}`,
-        {
+export const fetchSlackUserInfo = async (slackUserId: string, botToken: string): Promise<SlackUserInfo | null> => {
+    // Slack interactive has a 3-second response window. Bound the
+    // outbound `users.info` so a Slack-side stall doesn't blow past it
+    // and leave the user with no feedback.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
+    try {
+        const res = await fetch(`https://slack.com/api/users.info?user=${encodeURIComponent(slackUserId)}`, {
             headers: { Authorization: `Bearer ${botToken}` },
-        },
-    );
-    if (!res.ok) return null;
-    const body = (await res.json()) as {
-        ok: boolean;
-        user?: { profile?: { email?: string } };
-    };
-    if (!body.ok) return null;
-    const email = body.user?.profile?.email;
-    return email ? { email } : null;
+            signal: controller.signal,
+        });
+        if (!res.ok) return null;
+        const body = (await res.json()) as {
+            ok: boolean;
+            user?: { profile?: { email?: string } };
+        };
+        if (!body.ok) return null;
+        const email = body.user?.profile?.email;
+        return email ? { email } : null;
+    } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') {
+            logger.warn({ slack_user_id: slackUserId, code: 'SLACK_USERS_INFO_TIMEOUT' }, 'Slack users.info timed out');
+        }
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
 };

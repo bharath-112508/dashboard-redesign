@@ -455,6 +455,8 @@ export const applyLeave = async (
         start_date: body.start_date,
         end_date: body.end_date,
         total_days: engine.total_days,
+        reason: body.reason,
+        is_half_day: body.is_half_day ?? false,
     });
 
     return toRequestPublic(created, ctx.typesById);
@@ -783,6 +785,8 @@ const notifyLeaveDecisionFromRequest = async (
         start_date: req.start_date,
         end_date: req.end_date,
         total_days: req.total_days,
+        reason: req.reason,
+        is_half_day: req.is_half_day,
         decision,
         actor: { id: actor_id },
         remarks,
@@ -947,27 +951,20 @@ export const calendarLeaves = async (query: CalendarLeavesQuery): Promise<Record
     // matches the `total_days` count instead of visually spanning the
     // weekend cells where nothing was consumed.
     const cache = new Map<string, LeaveTypeDocument>();
-    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map(
-        (id) => new Types.ObjectId(id),
-    );
+    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
     const settings = await getOrInitSettings();
     const workingDays = settings.work_schedule?.working_days ?? [1, 2, 3, 4, 5];
     // Holiday window spans the union of every row's range so we don't miss
     // holidays that fall inside a leave but outside the visible month.
-    const spanFrom = rows.reduce(
-        (acc, r) => (acc === '' || r.start_date < acc ? r.start_date : acc),
-        '' as string,
-    );
-    const spanTo = rows.reduce(
-        (acc, r) => (acc === '' || r.end_date > acc ? r.end_date : acc),
-        '' as string,
-    );
-    const holidayRows = spanFrom && spanTo
-        ? await Holiday.find({ date: { $gte: spanFrom, $lte: spanTo } }).select({
-              date: 1,
-              _id: 0,
-          })
-        : [];
+    const spanFrom = rows.reduce((acc, r) => (acc === '' || r.start_date < acc ? r.start_date : acc), '' as string);
+    const spanTo = rows.reduce((acc, r) => (acc === '' || r.end_date > acc ? r.end_date : acc), '' as string);
+    const holidayRows =
+        spanFrom && spanTo
+            ? await Holiday.find({ date: { $gte: spanFrom, $lte: spanTo } }).select({
+                  date: 1,
+                  _id: 0,
+              })
+            : [];
     const holidaySet = new Set(holidayRows.map((h) => h.date));
 
     const lastWorkingDay = (startIso: string, endIso: string): string => {

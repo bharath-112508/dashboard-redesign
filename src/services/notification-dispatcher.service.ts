@@ -8,12 +8,7 @@ import { NOTIFICATION_TYPES, RELATED_ENTITY_KINDS, type NotificationType } from 
 import { ERROR_CODES } from '../constants/error-codes.js';
 import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/mailer.js';
-import {
-    postOrUpdateSlackMessage,
-    postSlackMessage,
-    slackContextFrom,
-    type SlackContext,
-} from '../utils/slack.js';
+import { postOrUpdateSlackMessage, postSlackMessage, slackContextFrom, type SlackContext } from '../utils/slack.js';
 import { buildLeaveMessageBlocks } from '../utils/slack-block-kit/leave.js';
 import { LeaveRequest } from '../models/leave-request.model.js';
 import { isPushConfigured, sendPushNotification, type PushPayload } from '../utils/push.js';
@@ -339,6 +334,11 @@ export interface LeaveDispatchInput {
     start_date: string;
     end_date: string;
     total_days: number;
+    /** Surfaced in the Slack channel message body. Falls back to
+     *  "_none_" when absent. */
+    reason?: string;
+    /** Tags the date range with "(half day)" in the Slack message. */
+    is_half_day?: boolean;
 }
 
 export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<void> => {
@@ -386,8 +386,10 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
                             type_label: input.leave_type_label,
                             start_date: input.start_date,
                             end_date: input.end_date,
+                            reason: input.reason,
+                            is_half_day: input.is_half_day,
                         },
-                        { status: 'pending' },
+                        { status: 'pending' }
                     ),
                     text: `Leave request from ${requester.full_name} — ${broadcastBody}`,
                     existing: null,
@@ -500,9 +502,7 @@ export const notifyLeaveDecided = async (input: LeaveDecisionDispatchInput): Pro
         if (slack) {
             const channel = slack.channels.leaves;
             if (channel) {
-                const leaveDoc = await LeaveRequest.findById(input.request_id).select(
-                    'slack_message'
-                );
+                const leaveDoc = await LeaveRequest.findById(input.request_id).select('slack_message');
                 const slackResult = await postOrUpdateSlackMessage(slack.ctx, {
                     channel,
                     blocks: buildLeaveMessageBlocks(
@@ -512,13 +512,15 @@ export const notifyLeaveDecided = async (input: LeaveDecisionDispatchInput): Pro
                             type_label: input.leave_type_label,
                             start_date: input.start_date,
                             end_date: input.end_date,
+                            reason: input.reason,
+                            is_half_day: input.is_half_day,
                         },
                         {
                             status: input.decision,
                             // Self-cancel — actor IS the requester. Skip the
                             // "by …" line; "Cancelled" on its own reads cleaner.
                             decided_by: actorIsRequester ? undefined : actorName,
-                        },
+                        }
                     ),
                     text: `Leave ${verb}: ${requester.full_name} — ${input.leave_type_label} ${range} (${input.total_days}d)${actorIsRequester ? '' : ` — by ${actorName}`}`,
                     existing: leaveDoc?.slack_message ?? null,
@@ -527,12 +529,7 @@ export const notifyLeaveDecided = async (input: LeaveDecisionDispatchInput): Pro
                 // If we just fell back to a fresh post (legacy leave),
                 // persist the new coordinates so a later state change
                 // (e.g. cancel after admin-approved this) can chat.update.
-                if (
-                    !leaveDoc?.slack_message &&
-                    slackResult.success &&
-                    slackResult.ts &&
-                    slackResult.channel
-                ) {
+                if (!leaveDoc?.slack_message && slackResult.success && slackResult.ts && slackResult.channel) {
                     await LeaveRequest.findByIdAndUpdate(input.request_id, {
                         slack_message: {
                             channel: slackResult.channel,

@@ -6,11 +6,9 @@ import { ROLES, type RoleType } from '../constants/roles.js';
 import { approveLeave, rejectLeave } from '../services/leave-request.service.js';
 import { checkIn, checkOut, getMyToday } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
-import {
-    fetchSlackUserInfo,
-    resolveSlackUser,
-} from '../services/slack-user-mapping.service.js';
+import { fetchSlackUserInfo, resolveSlackUser } from '../services/slack-user-mapping.service.js';
 import { slackContextFrom } from '../utils/slack.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -124,9 +122,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
                 },
                 'Slack interactive: caller lacks reviewer role'
             );
-            res.status(200).json(
-                ephemeral("You don't have permission to review leave requests.")
-            );
+            res.status(200).json(ephemeral("You don't have permission to review leave requests."));
             return;
         }
 
@@ -137,7 +133,15 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             return;
         }
         const leaveId = new Types.ObjectId(leaveIdStr);
-        const caller = { id: user._id, role: user.role as RoleType };
+        // Synthesise an audit context from the Slack request so the
+        // approve/reject row gets attributed to the Slack actor instead
+        // of being silently dropped (the service gates audit writes on
+        // `caller.audit`). `actor_role` mirrors the resolved user's role
+        // so audit consumers can filter the same way they do for HTTP.
+        const audit = buildAuditContext(req, {
+            overrideActor: { actor_id: user._id, actor_role: user.role as RoleType },
+        });
+        const caller = { id: user._id, role: user.role as RoleType, audit };
 
         try {
             if (isApprove) {
@@ -148,7 +152,16 @@ export const handleInteractive: RequestHandler = async (req, res) => {
                 // to handle it in the web app.
                 await approveLeave(leaveId, {} as Parameters<typeof approveLeave>[1], caller);
             } else {
-                await rejectLeave(leaveId, {} as Parameters<typeof rejectLeave>[1], caller);
+                // The reject body validator requires `approver_remarks`
+                // (min 1) on the HTTP route. Slack has no text input,
+                // so default to a recognisable string — the email +
+                // channel update render this verbatim and the audit row
+                // captures it as the rejection rationale.
+                await rejectLeave(
+                    leaveId,
+                    { approver_remarks: 'Rejected via Slack' } as Parameters<typeof rejectLeave>[1],
+                    caller
+                );
             }
             // Empty 200 — the channel `chat.update` (fired by the
             // dispatcher's notifyLeaveDecided) is the visible
@@ -229,32 +242,19 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
             // org-level geofence policies (which may reject) but for
             // a manual punch from a trusted Slack workspace that's
             // the right semantic.
-            const result = (await checkIn(
-                { method: 'manual' },
-                user._id,
-                ''
-            )) as { check_in?: { time?: Date | string } | null };
+            const result = (await checkIn({ method: 'manual' }, user._id, '')) as {
+                check_in?: { time?: Date | string } | null;
+            };
             const rawTime = result?.check_in?.time;
-            const inAt =
-                rawTime instanceof Date
-                    ? rawTime
-                    : rawTime
-                    ? new Date(rawTime)
-                    : new Date();
+            const inAt = rawTime instanceof Date ? rawTime : rawTime ? new Date(rawTime) : new Date();
             res.status(200).json(
-                ephemeral(
-                    `✅ Checked in at ${formatTimeIST(inAt)}. Use \`/checkout\` when you're done.`
-                )
+                ephemeral(`✅ Checked in at ${formatTimeIST(inAt)}. Use \`/checkout\` when you're done.`)
             );
             return;
         }
         if (command === 'checkout') {
             // Same manual-method posture as `/checkin`.
-            const result = (await checkOut(
-                { method: 'manual' },
-                user._id,
-                ''
-            )) as {
+            const result = (await checkOut({ method: 'manual' }, user._id, '')) as {
                 segments?: Array<{ check_out?: { time?: Date | string } | null }>;
                 total_worked_minutes?: number;
             };
@@ -265,20 +265,11 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
             const segs = result?.segments ?? [];
             const lastSeg = segs[segs.length - 1];
             const rawOut = lastSeg?.check_out?.time;
-            const outAt =
-                rawOut instanceof Date
-                    ? rawOut
-                    : rawOut
-                    ? new Date(rawOut)
-                    : new Date();
+            const outAt = rawOut instanceof Date ? rawOut : rawOut ? new Date(rawOut) : new Date();
             const worked = result?.total_worked_minutes ?? 0;
             const h = Math.floor(worked / 60);
             const m = worked % 60;
-            res.status(200).json(
-                ephemeral(
-                    `✅ Checked out at ${formatTimeIST(outAt)} (${h}h ${m}m worked).`
-                )
-            );
+            res.status(200).json(ephemeral(`✅ Checked out at ${formatTimeIST(outAt)} (${h}h ${m}m worked).`));
             return;
         }
         if (command === 'status') {
@@ -297,10 +288,8 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
             const lines = segs.map((s) => {
                 const rawIn = s.check_in?.time;
                 const rawOut = s.check_out?.time;
-                const inT =
-                    rawIn instanceof Date ? rawIn : rawIn ? new Date(rawIn) : null;
-                const outT =
-                    rawOut instanceof Date ? rawOut : rawOut ? new Date(rawOut) : null;
+                const inT = rawIn instanceof Date ? rawIn : rawIn ? new Date(rawIn) : null;
+                const outT = rawOut instanceof Date ? rawOut : rawOut ? new Date(rawOut) : null;
                 const inStr = inT ? formatTimeIST(inT) : '—';
                 const outStr = outT ? formatTimeIST(outT) : 'now';
                 return `• ${inStr} → ${outStr}`;
@@ -308,9 +297,7 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
             const worked = record?.total_worked_minutes ?? 0;
             const h = Math.floor(worked / 60);
             const m = worked % 60;
-            res.status(200).json(
-                ephemeral(`${lines.join('\n')}\n\n*Total:* ${h}h ${m}m`)
-            );
+            res.status(200).json(ephemeral(`${lines.join('\n')}\n\n*Total:* ${h}h ${m}m`));
             return;
         }
         res.status(200).json(ephemeral(`/${command} is not implemented yet.`));
@@ -318,13 +305,25 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
         const code = (err as { code?: string })?.code;
         if (code === ERROR_CODES.ALREADY_CHECKED_IN) {
             res.status(200).json(
-                ephemeral("You're already checked in. Use `/checkout` to end your day or `/status` to see today's segments.")
+                ephemeral(
+                    "You're already checked in. Use `/checkout` to end your day or `/status` to see today's segments."
+                )
             );
             return;
         }
         if (code === ERROR_CODES.NOT_CHECKED_IN) {
+            res.status(200).json(ephemeral("You're not currently checked in. Use `/checkin` first."));
+            return;
+        }
+        // Slack carries no client IP, no geolocation, no wifi info — if
+        // the org has geofence or wifi_restriction enabled the service
+        // throws LOCATION_NOT_ALLOWED (covers both). Surface a clear
+        // message instead of the generic "something went wrong."
+        if (code === ERROR_CODES.LOCATION_NOT_ALLOWED) {
             res.status(200).json(
-                ephemeral("You're not currently checked in. Use `/checkin` first.")
+                ephemeral(
+                    "Slack check-in isn't available from your location — please use the web app or the office QR code."
+                )
             );
             return;
         }

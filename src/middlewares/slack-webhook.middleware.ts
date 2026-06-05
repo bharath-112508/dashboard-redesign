@@ -34,7 +34,6 @@ import { verifySlackSignature } from '../utils/slack-signature.js';
  */
 
 declare module 'express-serve-static-core' {
-    // eslint-disable-next-line @typescript-eslint/no-empty-object-type
     interface Request {
         /** Slack signs the raw body — we keep a buffer of it so handlers
          *  that need to re-hash (e.g. for additional verification) can. */
