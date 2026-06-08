@@ -101,13 +101,7 @@ const clientProfileCreateSchema = z.object({
     access_type: z.enum(['login', 'readonly_link']),
 });
 
-const roleEnum = z.enum([
-    ROLES.ADMIN,
-    ROLES.MANAGER,
-    ROLES.TEAM_LEAD,
-    ROLES.EMPLOYEE,
-    ROLES.CLIENT,
-]);
+const roleEnum = z.enum([ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE, ROLES.CLIENT]);
 const statusEnum = z.enum([USER_STATUSES.ACTIVE, USER_STATUSES.DEACTIVATED]);
 
 // ─── POST /users ───────────────────────────────────────────────────────────
@@ -203,37 +197,39 @@ const sortParamSchema = z
         const [field, dir] = raw.split(':') as [string, 'asc' | 'desc'];
         return { field, dir };
     })
-    .refine(
-        (parsed) => (USER_SORT_FIELDS as readonly string[]).includes(parsed.field),
-        { message: `sort field must be one of ${USER_SORT_FIELDS.join('|')}` }
-    );
+    .refine((parsed) => (USER_SORT_FIELDS as readonly string[]).includes(parsed.field), {
+        message: `sort field must be one of ${USER_SORT_FIELDS.join('|')}`,
+    });
 
-export const listUsersQuerySchema = z.object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
-    role: roleEnum.optional(),
-    // Exclude users with this role. Used by surfaces that list "internal
-    // staff only" (e.g. team timesheets picker should hide clients).
-    // Mutually exclusive with `role`: if both are set we 400 rather than
-    // silently picking one.
-    exclude_role: roleEnum.optional(),
-    status: statusEnum.optional(),
-    // BUG-002 — when true, include soft-deleted (deactivated) users in the
-    // result. Default false → list shows only active users. The controller
-    // silently drops this if the caller lacks USER_WRITE so non-privileged
-    // surfaces can't bypass the active-only default by setting the query.
-    show_deleted: z
-        .union([z.boolean(), z.literal('true'), z.literal('false')])
-        .transform((v) => v === true || v === 'true')
-        .optional()
-        .default(false),
-    // R15 — minimum 2 chars to avoid `?q=a` triggering a regex-on-collection scan.
-    q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
-    sort: sortParamSchema.optional(),
-}).strict().refine(
-    (q) => !(q.role && q.exclude_role),
-    { message: 'role and exclude_role cannot both be set', path: ['exclude_role'] },
-);
+export const listUsersQuerySchema = z
+    .object({
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(100).default(20),
+        role: roleEnum.optional(),
+        // Exclude users with this role. Used by surfaces that list "internal
+        // staff only" (e.g. team timesheets picker should hide clients).
+        // Mutually exclusive with `role`: if both are set we 400 rather than
+        // silently picking one.
+        exclude_role: roleEnum.optional(),
+        status: statusEnum.optional(),
+        // BUG-002 — when true, include soft-deleted (deactivated) users in the
+        // result. Default false → list shows only active users. The controller
+        // silently drops this if the caller lacks USER_WRITE so non-privileged
+        // surfaces can't bypass the active-only default by setting the query.
+        show_deleted: z
+            .union([z.boolean(), z.literal('true'), z.literal('false')])
+            .transform((v) => v === true || v === 'true')
+            .optional()
+            .default(false),
+        // R15 — minimum 2 chars to avoid `?q=a` triggering a regex-on-collection scan.
+        q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
+        sort: sortParamSchema.optional(),
+    })
+    .strict()
+    .refine((q) => !(q.role && q.exclude_role), {
+        message: 'role and exclude_role cannot both be set',
+        path: ['exclude_role'],
+    });
 
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 
@@ -258,11 +254,14 @@ export type DeactivateUserBody = z.infer<typeof deactivateUserBodySchema>;
 export const assignableQuerySchema = z.object({
     role: roleEnum.optional(),
     /**
-     * When supplied, the response is restricted to users in the project's
-     * `member_ids[]` (i.e. people who can actually be assigned to a task /
-     * sprint within that project). Omit for a global assignee picker.
+     * C6 — `project_id` is now REQUIRED. Pre-fix the route returned the
+     * full non-client user directory (up to 500 users) to any
+     * authenticated caller — CLIENT-role users included. Requiring
+     * project scoping forces the caller to identify the project they're
+     * picking assignees for; the service then verifies the caller has
+     * read access to that project before returning its members.
      */
-    project_id: objectIdSchema.optional(),
+    project_id: objectIdSchema,
 });
 
 export type AssignableQuery = z.infer<typeof assignableQuerySchema>;

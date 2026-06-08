@@ -261,9 +261,7 @@ describe('createUser — H1 atomicity (balance-init failure aborts user create)'
         const balanceErr = new Error('seed failed');
         initBalancesMock.mockRejectedValueOnce(balanceErr);
 
-        await expect(svc.createUser(employeeInput as never, new Types.ObjectId())).rejects.toBe(
-            balanceErr
-        );
+        await expect(svc.createUser(employeeInput as never, new Types.ObjectId())).rejects.toBe(balanceErr);
         // Pre-H1 the email + audit ran AFTER balance init even when
         // balance init failed (the warning swallowed the error).
         // Post-H1, the rejection short-circuits the whole flow.
@@ -497,74 +495,115 @@ describe('listAssignable', () => {
         }),
     });
 
-    it('without project_id: returns active non-clients across the org', async () => {
-        // The default-picker shape — no project scoping. The filter
-        // shape that reaches User.find MUST exclude clients but not
-        // restrict by member_ids.
-        userFindMock.mockReturnValueOnce(buildUserChain([]));
+    // C6 — `project_id` is now required by the validator, AND the
+    // service verifies the caller has read access to that project
+    // before returning members. Pre-C6 the route returned the full
+    // non-client user directory (up to 500 active users) to any
+    // authenticated caller — CLIENT-role users included.
 
-        await svc.listAssignable({});
-
-        const [filter] = userFindMock.mock.calls[0]!;
-        expect(filter).toMatchObject({ status: 'active', role: { $ne: ROLES.CLIENT } });
-        expect(filter).not.toHaveProperty('_id');
-        expect(projectFindByIdMock).not.toHaveBeenCalled();
-    });
-
-    it('with project_id: narrows the result to the project member_ids', async () => {
-        // Cardinal pin: an assignee picker for a specific project must
-        // ONLY surface that project's members. Without this filter the
-        // FE would let an admin assign tasks within Project X to any
-        // user in the org — confusing UX and a soft authorization gap.
+    it('admin caller: returns the project members regardless of project membership', async () => {
         const projectId = new Types.ObjectId();
         const memberA = new Types.ObjectId();
         const memberB = new Types.ObjectId();
+        const adminId = new Types.ObjectId();
         projectFindByIdMock.mockReturnValueOnce({
-            select: () => ({ lean: () => Promise.resolve({ member_ids: [memberA, memberB] }) }),
+            select: () => ({
+                lean: () => Promise.resolve({ member_ids: [memberA, memberB], client_ids: [] }),
+            }),
         });
         userFindMock.mockReturnValueOnce(buildUserChain([]));
 
-        await svc.listAssignable({ project_id: projectId.toString() });
+        await svc.listAssignable({ project_id: projectId.toString() }, { id: adminId, role: ROLES.ADMIN });
 
-        // The User.find filter MUST carry the `_id: $in: member_ids`
-        // restriction — that's what enforces the project scope.
         const [filter] = userFindMock.mock.calls[0]!;
         expect(filter).toMatchObject({
             status: 'active',
             _id: { $in: [memberA, memberB] },
+            role: { $ne: ROLES.CLIENT },
         });
-        expect(projectFindByIdMock).toHaveBeenCalledWith(projectId.toString());
     });
 
-    it('with an unknown project_id: returns [] (no 404, no leak of other projects)', async () => {
-        // The picker semantic: "no one is assignable to a project that
-        // doesn't exist" → empty array. A 404 here would couple the
-        // picker UX to existence-probing, which is operator-confusing
-        // (this is a list endpoint, not a resource-fetch).
+    it('employee caller who is NOT a project member: throws FORBIDDEN', async () => {
+        const projectId = new Types.ObjectId();
+        const otherMember = new Types.ObjectId();
+        const outsider = new Types.ObjectId();
+        projectFindByIdMock.mockReturnValueOnce({
+            select: () => ({
+                lean: () => Promise.resolve({ member_ids: [otherMember], client_ids: [] }),
+            }),
+        });
+
+        await expect(
+            svc.listAssignable({ project_id: projectId.toString() }, { id: outsider, role: ROLES.EMPLOYEE })
+        ).rejects.toMatchObject({ statusCode: 403, code: 'FORBIDDEN' });
+
+        // User.find MUST NOT have run — access denied before query.
+        expect(userFindMock).not.toHaveBeenCalled();
+    });
+
+    it('employee caller who IS a project member: returns the project members', async () => {
+        const projectId = new Types.ObjectId();
+        const me = new Types.ObjectId();
+        const other = new Types.ObjectId();
+        projectFindByIdMock.mockReturnValueOnce({
+            select: () => ({
+                lean: () => Promise.resolve({ member_ids: [me, other], client_ids: [] }),
+            }),
+        });
+        userFindMock.mockReturnValueOnce(buildUserChain([]));
+
+        await svc.listAssignable({ project_id: projectId.toString() }, { id: me, role: ROLES.EMPLOYEE });
+
+        expect(userFindMock).toHaveBeenCalled();
+    });
+
+    it('client caller who IS in client_ids: gets the project members', async () => {
+        // Even clients can use the picker — e.g. to @-mention members
+        // in comments — provided they're attached to the project.
+        const projectId = new Types.ObjectId();
+        const me = new Types.ObjectId();
+        const member = new Types.ObjectId();
+        projectFindByIdMock.mockReturnValueOnce({
+            select: () => ({
+                lean: () => Promise.resolve({ member_ids: [member], client_ids: [me] }),
+            }),
+        });
+        userFindMock.mockReturnValueOnce(buildUserChain([]));
+
+        await svc.listAssignable({ project_id: projectId.toString() }, { id: me, role: ROLES.CLIENT });
+
+        expect(userFindMock).toHaveBeenCalled();
+    });
+
+    it('unknown project_id: throws 404 (no enumeration of project existence)', async () => {
         projectFindByIdMock.mockReturnValueOnce({
             select: () => ({ lean: () => Promise.resolve(null) }),
         });
 
-        const result = await svc.listAssignable({ project_id: new Types.ObjectId().toString() });
+        await expect(
+            svc.listAssignable(
+                { project_id: new Types.ObjectId().toString() },
+                { id: new Types.ObjectId(), role: ROLES.ADMIN }
+            )
+        ).rejects.toMatchObject({ statusCode: 404 });
 
-        expect(result).toEqual([]);
-        // User.find MUST NOT have been called — short-circuit saves the
-        // round-trip when the project doesn't exist.
         expect(userFindMock).not.toHaveBeenCalled();
     });
 
     it('honours an explicit `role` filter alongside `project_id`', async () => {
-        // E.g. "show me which managers are on Project X" — the role
-        // filter and project filter compose. The `role` override
-        // replaces the default `{$ne: CLIENT}` exclusion.
         const projectId = new Types.ObjectId();
         const member = new Types.ObjectId();
         projectFindByIdMock.mockReturnValueOnce({
-            select: () => ({ lean: () => Promise.resolve({ member_ids: [member] }) }),
+            select: () => ({
+                lean: () => Promise.resolve({ member_ids: [member], client_ids: [] }),
+            }),
         });
         userFindMock.mockReturnValueOnce(buildUserChain([]));
 
-        await svc.listAssignable({ project_id: projectId.toString(), role: ROLES.MANAGER });
+        await svc.listAssignable(
+            { project_id: projectId.toString(), role: ROLES.MANAGER },
+            { id: new Types.ObjectId(), role: ROLES.ADMIN }
+        );
 
         const [filter] = userFindMock.mock.calls[0]!;
         expect(filter).toMatchObject({

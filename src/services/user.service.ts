@@ -23,7 +23,6 @@ import { withTransaction } from '../utils/with-transaction.js';
 import { getSystemRoleByKey } from './role.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
-import logger from '../utils/logger.js';
 import { resolveProfilePhotoTtlMinutes, signProfilePhotoUrl } from './profile-photo.service.js';
 import { getOrInitSettings } from './settings.service.js';
 import { revokeLinksForDeactivatedClient } from './share-link.service.js';
@@ -584,29 +583,50 @@ export const changeUserRole = async (input: {
 
 // ─── GET /users/assignable ─────────────────────────────────────────────────
 
+/**
+ * C6 — Pre-fix this returned the full non-client user directory (up to
+ * 500 active users) to any authenticated caller — CLIENT-role users
+ * included. Post-fix: `project_id` is required (validator level) and
+ * the caller MUST have read access to that project before we return
+ * its members.
+ *
+ * Visibility rules mirror `project.service.assertCallerCanRead`:
+ *   - admin / manager: all projects
+ *   - team lead / employee: only projects they're a `member_ids[]` of
+ *   - client: only projects they're a `client_ids[]` of
+ *
+ * Unknown project_id → 404 (the validator already rejected non-ObjectId
+ * inputs, so this only fires when the project genuinely doesn't exist
+ * or has been hard-deleted).
+ */
 export const listAssignable = async (
-    query: AssignableQuery
+    query: AssignableQuery,
+    caller: { id: Types.ObjectId; role: RoleType }
 ): Promise<Array<{ id: string; full_name: string; role: RoleType; job_title: string | null }>> => {
-    const filter: Filter = { status: USER_STATUSES.ACTIVE };
+    const project = await Project.findById(query.project_id)
+        .select('member_ids client_ids')
+        .lean<{ member_ids: Types.ObjectId[]; client_ids: Types.ObjectId[] } | null>();
+    if (!project) {
+        throw AppError.notFound('Project not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+    }
+
+    // Access check — mirrors `project.service.assertCallerCanRead`.
+    const isAdminLike = caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER;
+    const inMembers = project.member_ids.some((u) => u.equals(caller.id));
+    const inClients = project.client_ids.some((u) => u.equals(caller.id));
+    if (!isAdminLike && !inMembers && !inClients) {
+        throw AppError.forbidden('You do not have access to this project', ERROR_CODES.FORBIDDEN);
+    }
+
+    const filter: Filter = {
+        status: USER_STATUSES.ACTIVE,
+        _id: { $in: project.member_ids },
+    };
     if (query.role) {
         filter.role = query.role;
     } else {
         // Default: exclude clients from assignee dropdowns.
         filter.role = { $ne: ROLES.CLIENT };
-    }
-
-    // Project scoping: when `project_id` is supplied, narrow to that
-    // project's `member_ids[]` so the assignee dropdown only surfaces
-    // people who can actually own work in that project. Unknown
-    // project_id → empty result (consistent with "no one is assignable
-    // to a project that doesn't exist") rather than a 404, since this
-    // is a picker endpoint, not a resource fetch.
-    if (query.project_id) {
-        const project = await Project.findById(query.project_id).select('member_ids').lean<{
-            member_ids: Types.ObjectId[];
-        } | null>();
-        if (!project) return [];
-        filter._id = { $in: project.member_ids };
     }
 
     const rows = await User.find(filter)

@@ -9,7 +9,7 @@ import { recordAudit } from '../services/audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
-import { ROLES } from '../constants/roles.js';
+import { ROLES, type RoleType } from '../constants/roles.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { callerHasPermission } from '../middlewares/auth.middleware.js';
 import { buildAuditContext } from '../utils/audit-context.js';
@@ -65,9 +65,7 @@ export const getUserById = async (req: Request, res: Response): Promise<Response
     const caller = callerId(req);
     const target = parseTargetId(req);
     const isPrivileged =
-        req.user?.role === ROLES.ADMIN ||
-        req.user?.role === ROLES.MANAGER ||
-        req.user?.role === ROLES.TEAM_LEAD;
+        req.user?.role === ROLES.ADMIN || req.user?.role === ROLES.MANAGER || req.user?.role === ROLES.TEAM_LEAD;
     if (!isPrivileged && !caller.equals(target)) {
         throw AppError.forbidden();
     }
@@ -122,7 +120,11 @@ export const postChangeUserRole = async (req: Request, res: Response): Promise<R
 
 // ─── GET /users/assignable ──────────────────────────────────────────────────
 export const getAssignableUsers = async (req: Request, res: Response): Promise<Response> => {
-    const rows = await userService.listAssignable(req.query as unknown as AssignableQuery);
+    if (!req.user?.role) throw AppError.unauthenticated();
+    const rows = await userService.listAssignable(req.query as unknown as AssignableQuery, {
+        id: callerId(req),
+        role: req.user.role as RoleType,
+    });
     return ok(res, rows);
 };
 
