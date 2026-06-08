@@ -1,6 +1,7 @@
-import { Types } from 'mongoose';
+import { Types, type ClientSession } from 'mongoose';
 
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
+import { withTransaction } from '../utils/with-transaction.js';
 import { CompOffLedger, type CompOffLedgerDocument } from '../models/comp-off-ledger.model.js';
 import { LeaveBalance, recomputeAvailable } from '../models/leave-balance.model.js';
 import { LeaveType } from '../models/leave-type.model.js';
@@ -29,11 +30,18 @@ type Filter = Record<string, unknown>;
 
 const toPublic = (doc: CompOffLedgerDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
 
-const recomputeBalance = async (user_id: Types.ObjectId): Promise<number> => {
-    const agg = await CompOffLedger.aggregate<{ _id: CompOffType; total: number }>([
+const recomputeBalance = async (user_id: Types.ObjectId, session?: ClientSession | null): Promise<number> => {
+    // Aggregate must run on the same session when a transaction is
+    // active so the read sees in-txn writes (e.g. the just-inserted
+    // ledger row from `adjustCompOff`'s post-CAS step). When no
+    // session is active (most call sites + tests where the
+    // aggregate mock returns a plain Promise), call the bare
+    // aggregate so we don't depend on the Aggregate chain.
+    const aggBuilder = CompOffLedger.aggregate<{ _id: CompOffType; total: number }>([
         { $match: { user_id } },
         { $group: { _id: '$type', total: { $sum: '$days' } } },
     ]);
+    const agg = session ? await aggBuilder.session(session) : await aggBuilder;
     let earned = 0;
     let consumed = 0;
     for (const row of agg) {
@@ -41,7 +49,14 @@ const recomputeBalance = async (user_id: Types.ObjectId): Promise<number> => {
         if (row._id === COMP_OFF_TYPES.CONSUMED) consumed = row.total;
     }
     const balance = earned - consumed;
-    await User.updateOne({ _id: user_id }, { $set: { comp_off_balance: balance } });
+    // Omit `session` entirely when no transaction is active so tests
+    // that strict-match the third arg via `toHaveBeenNthCalledWith`
+    // keep the pre-H5 call shape. Mirrors `releaseReservations` (C2).
+    if (session) {
+        await User.updateOne({ _id: user_id }, { $set: { comp_off_balance: balance } }, { session });
+    } else {
+        await User.updateOne({ _id: user_id }, { $set: { comp_off_balance: balance } });
+    }
     return balance;
 };
 
@@ -57,8 +72,13 @@ const recomputeBalance = async (user_id: Types.ObjectId): Promise<number> => {
  * requested leave's year. If a user wants to spend comp-off in a year
  * other than the current one, that's a separate gap from this bug.
  */
-const syncLeaveBalanceForCompOff = async (user_id: Types.ObjectId, balance: number): Promise<void> => {
-    const compOffType = await LeaveType.findOne({ code: LEAVE_CODES.COMP_OFF, is_active: true });
+const syncLeaveBalanceForCompOff = async (
+    user_id: Types.ObjectId,
+    balance: number,
+    session?: ClientSession | null
+): Promise<void> => {
+    const compOffTypeQuery = LeaveType.findOne({ code: LEAVE_CODES.COMP_OFF, is_active: true });
+    const compOffType = session ? await compOffTypeQuery.session(session) : await compOffTypeQuery;
     if (!compOffType) return;
     // H3 — `new Date().getFullYear()` uses UTC. An IST-midnight comp-off
     // grant (between 18:30-23:59 UTC on Dec 31) lands in the wrong
@@ -66,15 +86,18 @@ const syncLeaveBalanceForCompOff = async (user_id: Types.ObjectId, balance: numb
     // it. `leave-balance.service.ts` fixed this same bug; comp-off was
     // never updated. Use the canonical IST-aware helper.
     const year = dayjs().tz(DEFAULT_TIMEZONE).year();
-    const existing = await LeaveBalance.findOne({
+    const existingQuery = LeaveBalance.findOne({
         user_id,
         leave_type_id: compOffType._id,
         year,
     });
+    const existing = session ? await existingQuery.session(session) : await existingQuery;
     if (existing) {
         existing.adjusted = balance;
         existing.available = recomputeAvailable(existing);
-        await existing.save();
+        // Mongoose document `save()` accepts `{ session }`; pass when
+        // a transaction is active so the write joins the txn.
+        await (session ? existing.save({ session }) : existing.save());
         return;
     }
     const seedDoc = {
@@ -89,7 +112,11 @@ const syncLeaveBalanceForCompOff = async (user_id: Types.ObjectId, balance: numb
         monthly_forfeited: 0,
         available: balance,
     };
-    await LeaveBalance.create(seedDoc);
+    if (session) {
+        await LeaveBalance.create([seedDoc], { session });
+    } else {
+        await LeaveBalance.create(seedDoc);
+    }
 };
 
 const isReviewer = (role: RoleType): boolean => role === ROLES.ADMIN || role === ROLES.MANAGER;
@@ -202,63 +229,72 @@ export const adjustCompOff = async (
         });
     }
 
-    // C3 — atomic balance gate. Pre-C3 a load-then-check pattern
-    // (`recomputeBalance` → `if balance < days` → `CompOffLedger.create`)
-    // raced under concurrent consumes: two parallel adjust(consumed, 3)
-    // calls at balance=5 both read 5, both passed the guard, both
-    // inserted a ledger row → balance settled at -1. The CAS below
+    // H5 — wrap the multi-step write (CAS → ledger.create → recompute
+    // → sync) in a transaction so a partial failure rolls back all
+    // three stores together. Pre-H5: if `CompOffLedger.create`
+    // succeeded but `syncLeaveBalanceForCompOff` crashed, the ledger
+    // had a row but the LeaveBalance mirror was stale until the next
+    // adjust — the apply-leave engine reads from LeaveBalance, so a
+    // user couldn't spend the credit they were just granted.
+    //
+    // C3 — atomic balance gate (still applies). Pre-C3 a load-then-
+    // check pattern raced under concurrent consumes. The CAS below
     // closes the race by atomically decrementing `comp_off_balance`
     // (with a `$gte: days` predicate on consume) so the loser of any
     // race sees `null` and we throw `INSUFFICIENT_LEAVE_BALANCE`.
-    //
-    // Capture the pre-adjust balance via `recomputeBalance` for the
-    // audit before/after diff. The CAS then $inc's the same field
-    // (consume: -days, grant: +days); a subsequent `recomputeBalance`
-    // post-ledger-insert reconciles the User counter against the
-    // ledger sum (idempotent — same value, just guards against drift
-    // if any prior write was lost).
-    const balanceBefore = await recomputeBalance(targetUserId);
     const signedDelta = body.type === COMP_OFF_TYPES.EARNED ? body.days : -body.days;
-    const casPredicate: Record<string, unknown> = { _id: targetUserId };
-    if (body.type === COMP_OFF_TYPES.CONSUMED) {
-        // Loser sees null → 409. The race-safe gate.
-        casPredicate.comp_off_balance = { $gte: body.days };
-    }
-    const casResult = await User.findOneAndUpdate(
-        casPredicate,
-        { $inc: { comp_off_balance: signedDelta } },
-        { new: true }
-    );
-    if (!casResult) {
-        // Only the consume path can land here (grant has no predicate
-        // beyond `_id` and the target was already validated above).
-        throw AppError.conflict('Insufficient comp-off balance', ERROR_CODES.INSUFFICIENT_LEAVE_BALANCE, {
-            available: balanceBefore,
-            requested: body.days,
-        });
-    }
+    const txnResult = await withTransaction(async (session) => {
+        // Capture the pre-adjust balance for the audit before/after
+        // diff. Runs inside the txn so any concurrent CAS that lost
+        // the race is invisible to this read.
+        const balanceBefore = await recomputeBalance(targetUserId, session);
 
-    const ledger = await CompOffLedger.create({
-        user_id: targetUserId,
-        type: body.type,
-        days: body.days,
-        source_type: COMP_OFF_SOURCES.ADMIN_ADJUSTMENT,
-        source_ref_id: null,
-        remarks: body.remarks,
-        created_by: actor.id,
+        const casPredicate: Record<string, unknown> = { _id: targetUserId };
+        if (body.type === COMP_OFF_TYPES.CONSUMED) {
+            // Loser sees null → 409. The race-safe gate.
+            casPredicate.comp_off_balance = { $gte: body.days };
+        }
+        const findOpts: Record<string, unknown> = { new: true };
+        if (session) findOpts.session = session;
+        const casResult = await User.findOneAndUpdate(
+            casPredicate,
+            { $inc: { comp_off_balance: signedDelta } },
+            findOpts
+        );
+        if (!casResult) {
+            // Only the consume path can land here (grant has no
+            // predicate beyond `_id`; target was validated above).
+            throw AppError.conflict('Insufficient comp-off balance', ERROR_CODES.INSUFFICIENT_LEAVE_BALANCE, {
+                available: balanceBefore,
+                requested: body.days,
+            });
+        }
+
+        const createPayload = {
+            user_id: targetUserId,
+            type: body.type,
+            days: body.days,
+            source_type: COMP_OFF_SOURCES.ADMIN_ADJUSTMENT,
+            source_ref_id: null,
+            remarks: body.remarks,
+            created_by: actor.id,
+        };
+        const ledgerInTxn = session
+            ? (await CompOffLedger.create([createPayload], { session }))[0]!
+            : await CompOffLedger.create(createPayload);
+
+        // Reconciles `User.comp_off_balance` against the ledger sum.
+        // Idempotent — should produce the same value the CAS already
+        // set; runs inside the txn so the read sees the just-inserted
+        // ledger row.
+        const balanceAfter = await recomputeBalance(targetUserId, session);
+
+        // BUG-036 — keep the leave-application read view in sync.
+        await syncLeaveBalanceForCompOff(targetUserId, balanceAfter, session);
+
+        return { ledger: ledgerInTxn, balanceBefore, balanceAfter };
     });
-
-    // Reconciles `User.comp_off_balance` against the ledger sum.
-    // Idempotent — should produce the same value the CAS already set,
-    // and self-heals any past drift if some earlier write was lost.
-    const balanceAfter = await recomputeBalance(targetUserId);
-
-    // BUG-036 — keep the leave-application read view in sync. The
-    // apply-leave engine reads availability from LeaveBalance and was
-    // blind to comp-off grants; mirror the ledger total into the
-    // current-year COMP_OFF row's `adjusted` so the user can actually
-    // spend what we just credited.
-    await syncLeaveBalanceForCompOff(targetUserId, balanceAfter);
+    const { ledger, balanceBefore, balanceAfter } = txnResult;
 
     if (audit) {
         // I1 — sensitive admin write: signed delta + operator-supplied
