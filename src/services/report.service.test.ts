@@ -500,8 +500,8 @@ describe('buildLeaveReport', () => {
         );
         leaveTypeFindMock.mockReturnValueOnce(
             queryStub([
-                { _id: clTypeId, key: 'CL', label: 'Casual Leave' },
-                { _id: slTypeId, key: 'SL', label: 'Sick Leave' },
+                { _id: clTypeId, code: 'CL', name: 'Casual Leave' },
+                { _id: slTypeId, code: 'SL', name: 'Sick Leave' },
             ])
         );
 
