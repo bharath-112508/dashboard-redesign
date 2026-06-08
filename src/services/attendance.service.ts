@@ -21,6 +21,8 @@ import {
     notifyAttendanceCorrectionDecided,
     notifyAttendanceCorrectionSubmitted,
 } from './notification-dispatcher.service.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { haversineDistanceMeters, ATTENDANCE_REVIEW_ROLES } from '../constants/attendance.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
@@ -235,10 +237,7 @@ export const checkIn = async (
                 const segs = existing.segments ?? [];
                 const lastSeg = segs.length > 0 ? segs[segs.length - 1] : null;
                 if (lastSeg && !lastSeg.check_out) {
-                    throw AppError.conflict(
-                        'Already checked in for today',
-                        ERROR_CODES.ALREADY_CHECKED_IN
-                    );
+                    throw AppError.conflict('Already checked in for today', ERROR_CODES.ALREADY_CHECKED_IN);
                 }
                 if (segs.length === 0) {
                     // EOD placeholder row — seed the first segment.
@@ -424,10 +423,9 @@ export const listAttendance = async (
 export const patchAttendance = async (
     id: Types.ObjectId,
     patch: PatchAttendanceBody,
-    actor_id: Types.ObjectId,
-    actor_role: RoleType
+    caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
-    if (!ATTENDANCE_REVIEW_ROLES.includes(actor_role)) {
+    if (!ATTENDANCE_REVIEW_ROLES.includes(caller.role)) {
         throw AppError.forbidden();
     }
 
@@ -435,6 +433,17 @@ export const patchAttendance = async (
     if (!record) {
         throw AppError.notFound('Attendance record not found', ERROR_CODES.ATTENDANCE_RECORD_NOT_FOUND);
     }
+
+    // C1 — snapshot the mutating fields BEFORE the patch is applied
+    // so the audit `before` block captures the pre-edit state. We
+    // deep-clone via `.toObject()` so subsequent in-place mutations
+    // (segments, status, notes) don't leak into the snapshot.
+    const beforeSnapshot = {
+        segments: (record.toObject().segments ?? []) as unknown,
+        status: record.status,
+        notes: record.notes,
+        flagged_for_correction: record.flagged_for_correction,
+    };
 
     // BUG-040 — segments[] is the source of truth. When an admin patches
     // check_in / check_out at the top level, we route the change into
@@ -487,9 +496,27 @@ export const patchAttendance = async (
         record.flagged_for_correction = false;
     }
 
-    record.last_corrected_by = actor_id;
+    record.last_corrected_by = caller.id;
     record.last_corrected_at = new Date();
     await record.save();
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.ATTENDANCE_PATCH,
+            target: { kind: AUDIT_TARGET_KINDS.ATTENDANCE_RECORD, id: record._id },
+            before: beforeSnapshot as Record<string, unknown>,
+            after: {
+                segments: record.toObject().segments ?? [],
+                status: record.status,
+                notes: record.notes,
+                flagged_for_correction: record.flagged_for_correction,
+            },
+            metadata: {
+                user_id: record.user_id.toString(),
+                local_date: record.local_date,
+            },
+        });
+    }
     return record.toJSON() as unknown as Record<string, unknown>;
 };
 
@@ -504,8 +531,9 @@ export const verifyQr = async (qr_token: string): Promise<Record<string, unknown
 
 export const submitCorrection = async (
     body: SubmitCorrectionBody,
-    user_id: Types.ObjectId
+    caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
+    const user_id = caller.id;
     const record = await AttendanceRecord.findById(body.attendance_record_id);
     if (!record) {
         throw AppError.notFound('Attendance record not found', ERROR_CODES.ATTENDANCE_RECORD_NOT_FOUND);
@@ -541,12 +569,8 @@ export const submitCorrection = async (
                       check_out: s.check_out ? new Date(s.check_out) : null,
                   }))
                 : undefined,
-            check_in: body.requested_changes.check_in
-                ? new Date(body.requested_changes.check_in)
-                : null,
-            check_out: body.requested_changes.check_out
-                ? new Date(body.requested_changes.check_out)
-                : null,
+            check_in: body.requested_changes.check_in ? new Date(body.requested_changes.check_in) : null,
+            check_out: body.requested_changes.check_out ? new Date(body.requested_changes.check_out) : null,
             reason: body.requested_changes.reason,
         },
     });
@@ -556,6 +580,21 @@ export const submitCorrection = async (
         requester_id: user_id,
         local_date: record.local_date,
     });
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.CORRECTION_SUBMIT,
+            target: { kind: AUDIT_TARGET_KINDS.CORRECTION_REQUEST, id: created._id },
+            after: {
+                status: created.status,
+                requested_changes: created.toObject().requested_changes,
+            },
+            metadata: {
+                attendance_record_id: record._id.toString(),
+                local_date: record.local_date,
+            },
+        });
+    }
 
     return created.toJSON() as unknown as Record<string, unknown>;
 };
@@ -643,16 +682,24 @@ const loadPendingCorrection = async (id: Types.ObjectId): Promise<AttendanceCorr
 export const approveCorrection = async (
     id: Types.ObjectId,
     body: ReviewCorrectionBody,
-    reviewer_id: Types.ObjectId,
-    reviewer_role: RoleType
+    caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
-    assertCanReviewCorrections(reviewer_role);
+    const reviewer_id = caller.id;
+    assertCanReviewCorrections(caller.role);
 
     const reqDoc = await loadPendingCorrection(id);
     const record = await AttendanceRecord.findById(reqDoc.attendance_record_id);
     if (!record) {
         throw AppError.notFound('Underlying attendance record not found', ERROR_CODES.ATTENDANCE_RECORD_NOT_FOUND);
     }
+
+    // C1 — pre-edit snapshot of the record being mutated. The audit's
+    // `before` block reflects the attendance record's state before the
+    // approval applied the requested changes.
+    const recordBeforeSnapshot = {
+        segments: (record.toObject().segments ?? []) as unknown,
+        status: record.status,
+    };
 
     const changes = reqDoc.requested_changes;
 
@@ -751,6 +798,30 @@ export const approveCorrection = async (
         remarks: body.reviewer_remarks ?? null,
     });
 
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.CORRECTION_APPROVE,
+            target: { kind: AUDIT_TARGET_KINDS.CORRECTION_REQUEST, id: reqDoc._id },
+            before: {
+                request_status: 'pending',
+                record: recordBeforeSnapshot,
+            },
+            after: {
+                request_status: reqDoc.status,
+                reviewer_remarks: reqDoc.reviewer_remarks,
+                record: {
+                    segments: record.toObject().segments ?? [],
+                    status: record.status,
+                },
+            },
+            metadata: {
+                attendance_record_id: record._id.toString(),
+                requester_id: reqDoc.user_id.toString(),
+                local_date: record.local_date,
+            },
+        });
+    }
+
     return {
         request: reqDoc.toJSON(),
         record: record.toJSON(),
@@ -762,10 +833,10 @@ export const approveCorrection = async (
 export const rejectCorrection = async (
     id: Types.ObjectId,
     body: ReviewCorrectionBody,
-    reviewer_id: Types.ObjectId,
-    reviewer_role: RoleType
+    caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
-    assertCanReviewCorrections(reviewer_role);
+    const reviewer_id = caller.id;
+    assertCanReviewCorrections(caller.role);
 
     const reqDoc = await loadPendingCorrection(id);
     reqDoc.status = 'rejected';
@@ -787,6 +858,23 @@ export const rejectCorrection = async (
         actor: { id: reviewer_id },
         remarks: body.reviewer_remarks ?? null,
     });
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.CORRECTION_REJECT,
+            target: { kind: AUDIT_TARGET_KINDS.CORRECTION_REQUEST, id: reqDoc._id },
+            before: { status: 'pending' },
+            after: {
+                status: reqDoc.status,
+                reviewer_remarks: reqDoc.reviewer_remarks,
+            },
+            metadata: {
+                attendance_record_id: reqDoc.attendance_record_id.toString(),
+                requester_id: reqDoc.user_id.toString(),
+                local_date: record?.local_date ?? null,
+            },
+        });
+    }
 
     return reqDoc.toJSON() as unknown as Record<string, unknown>;
 };
@@ -816,9 +904,7 @@ export const migrateAttendanceSegments = async (): Promise<{ backfilled: number 
     let backfilled = 0;
     for await (const record of cursor) {
         if (!record.check_in) continue;
-        record.segments = [
-            { check_in: record.check_in, check_out: record.check_out ?? null },
-        ];
+        record.segments = [{ check_in: record.check_in, check_out: record.check_out ?? null }];
         await record.save();
         backfilled += 1;
     }

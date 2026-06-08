@@ -97,6 +97,24 @@ export const AUDIT_ACTIONS = {
     HOLIDAY_UPDATE: 'holiday.update',
     HOLIDAY_DELETE: 'holiday.delete',
 
+    // Attendance admin direct-edit + employee correction-request lifecycle
+    // (C1 / 2026-06-05 review). check_in / check_out are deliberately
+    // NOT audited — they're high-volume routine events with no
+    // forensic value; the admin-visible mutations below are the ones
+    // worth tracking. `attendance.patch` covers PATCH /attendance/:id
+    // (admin direct-edit of segments). The `correction.*` triplet
+    // covers the employee-submitted correction-request flow:
+    // submit (employee), approve / reject (admin). Each records a
+    // before/after segments snapshot so the future Step-31 audit UI
+    // can render a "who changed what" timeline. spec drift fixed:
+    // API_Contract.md §6 said attendance.correct; renamed to
+    // attendance.patch to keep PATCH (admin direct-edit) distinct
+    // from the correction-request flow.
+    ATTENDANCE_PATCH: 'attendance.patch',
+    CORRECTION_SUBMIT: 'correction.submit',
+    CORRECTION_APPROVE: 'correction.approve',
+    CORRECTION_REJECT: 'correction.reject',
+
     // Leave-type catalog admin CRUD (I1). The default-allocation, monthly
     // cap, and pro-rata strategy here drive every user's balance seeding,
     // so renaming or recapping a type effectively rewrites everyone's
@@ -286,6 +304,8 @@ export const AUDIT_TARGET_KINDS = {
     HOLIDAY: 'holiday',
     LEAVE_TYPE: 'leave_type',
     OFFICE_LOCATION: 'office_location',
+    ATTENDANCE_RECORD: 'attendance_record',
+    CORRECTION_REQUEST: 'correction_request',
     SYSTEM_SETTINGS: 'system_settings',
     JOB: 'job',
     PROJECT: 'project',

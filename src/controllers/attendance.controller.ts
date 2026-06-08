@@ -5,6 +5,8 @@ import * as service from '../services/attendance.service.js';
 import { created, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import { type RoleType } from '../constants/roles.js';
+import { buildAuditContext } from '../utils/audit-context.js';
+import type { AuditContext } from '../services/audit.service.js';
 import type {
     CheckInBody,
     CheckOutBody,
@@ -26,6 +28,18 @@ const callerRole = (req: Request): RoleType => {
     if (!req.user?.role) throw AppError.unauthenticated();
     return req.user.role as RoleType;
 };
+
+/**
+ * Caller + audit context. Used for admin direct-edit + correction
+ * mutations (C1 / 2026-06-05 review). Read-only endpoints keep using
+ * the bare `callerId`/`callerRole` helpers to avoid extra plumbing.
+ * Mirrors `auditingCaller` in `leave-request.controller.ts`.
+ */
+const auditingCaller = (req: Request): { id: Types.ObjectId; role: RoleType; audit: AuditContext } => ({
+    id: callerId(req),
+    role: callerRole(req),
+    audit: buildAuditContext(req),
+});
 
 const parseTargetId = (req: Request): Types.ObjectId => new Types.ObjectId(req.params.id as string);
 
@@ -79,8 +93,7 @@ export const patchOne = async (req: Request, res: Response): Promise<Response> =
     const data = await service.patchAttendance(
         parseTargetId(req),
         req.body as PatchAttendanceBody,
-        callerId(req),
-        callerRole(req)
+        auditingCaller(req)
     );
     return ok(res, data);
 };
@@ -88,7 +101,7 @@ export const patchOne = async (req: Request, res: Response): Promise<Response> =
 // ─── POST /attendance/correction-requests ────────────────────────────────
 
 export const postCorrection = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.submitCorrection(req.body as SubmitCorrectionBody, callerId(req));
+    const data = await service.submitCorrection(req.body as SubmitCorrectionBody, auditingCaller(req));
     return created(res, data);
 };
 
@@ -109,8 +122,7 @@ export const postApproveCorrection = async (req: Request, res: Response): Promis
     const data = await service.approveCorrection(
         parseTargetId(req),
         req.body as ReviewCorrectionBody,
-        callerId(req),
-        callerRole(req)
+        auditingCaller(req)
     );
     return ok(res, data);
 };
@@ -121,8 +133,7 @@ export const postRejectCorrection = async (req: Request, res: Response): Promise
     const data = await service.rejectCorrection(
         parseTargetId(req),
         req.body as ReviewCorrectionBody,
-        callerId(req),
-        callerRole(req)
+        auditingCaller(req)
     );
     return ok(res, data);
 };
