@@ -535,16 +535,27 @@ const reserveBalances = async (params: {
     }
 };
 
-const releaseReservations = async (params: { user_id: Types.ObjectId; segments: LeaveSegment[] }) => {
+const releaseReservations = async (params: {
+    user_id: Types.ObjectId;
+    segments: LeaveSegment[];
+    session?: import('mongoose').ClientSession;
+}) => {
     for (const seg of params.segments) {
-        await LeaveBalance.updateOne(
-            {
-                user_id: params.user_id,
-                leave_type_id: seg.leave_type_id,
-                year: seg.year,
-            },
-            { $inc: { pending: -seg.days, available: seg.days } }
-        );
+        const filter = {
+            user_id: params.user_id,
+            leave_type_id: seg.leave_type_id,
+            year: seg.year,
+        };
+        const update = { $inc: { pending: -seg.days, available: seg.days } };
+        // Omit `session` entirely when no transaction is active so tests
+        // that strict-match the third arg via `toHaveBeenNthCalledWith`
+        // keep the pre-C2 call shape. Mirrors the conditional pattern
+        // used inside `approveLeave`'s transaction at L729-740.
+        if (params.session) {
+            await LeaveBalance.updateOne(filter, update, { session: params.session });
+        } else {
+            await LeaveBalance.updateOne(filter, update);
+        }
     }
 };
 
@@ -802,24 +813,38 @@ export const rejectLeave = async (
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
     ensureCanReviewRequest(existing, caller);
 
-    const updated = await LeaveRequest.findOneAndUpdate(
-        { _id: existing._id, status: LEAVE_REQUEST_STATUSES.PENDING },
-        {
-            $set: {
-                status: LEAVE_REQUEST_STATUSES.REJECTED,
-                approver_id: caller.id,
-                approver_remarks: body.approver_remarks,
-                acted_at: new Date(),
-            },
-        },
-        { new: true }
-    );
-    if (!updated) {
-        throw AppError.conflict('Leave request is no longer pending', ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING);
-    }
+    // C2 — status transition + `pending → 0` refunds are atomic. Pre-C2
+    // the PENDING→REJECTED flip and the per-segment refund were
+    // separate writes; a crash between them left the request rejected
+    // but balance still in `pending`, silently consuming entitlement.
+    // Mirrors the `approveLeave` pattern at L702.
+    const updated = await withTransaction(async (session) => {
+        const findOpts = session ? { new: true, session } : { new: true };
 
-    // Refund pending → 0 (no used change since it never approved).
-    await releaseReservations({ user_id: updated.user_id, segments: updated.leave_segments });
+        const u = await LeaveRequest.findOneAndUpdate(
+            { _id: existing._id, status: LEAVE_REQUEST_STATUSES.PENDING },
+            {
+                $set: {
+                    status: LEAVE_REQUEST_STATUSES.REJECTED,
+                    approver_id: caller.id,
+                    approver_remarks: body.approver_remarks,
+                    acted_at: new Date(),
+                },
+            },
+            findOpts
+        );
+        if (!u) {
+            throw AppError.conflict('Leave request is no longer pending', ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING);
+        }
+
+        // Refund pending → 0 (no `used` change since it never approved).
+        await releaseReservations({
+            user_id: u.user_id,
+            segments: u.leave_segments,
+            session: session ?? undefined,
+        });
+        return u;
+    });
 
     if (caller.audit) {
         await recordAudit(caller.audit, {
@@ -870,41 +895,59 @@ export const cancelLeave = async (
     }
 
     const expectedStatus = existing.status as LeaveRequestStatus;
-    const updated = await LeaveRequest.findOneAndUpdate(
-        { _id: existing._id, status: expectedStatus },
-        {
-            $set: {
-                status: LEAVE_REQUEST_STATUSES.CANCELLED,
-                cancelled_at: new Date(),
-                cancelled_by: caller.id,
-                cancellation_reason: body.cancellation_reason,
-            },
-        },
-        { new: true }
-    );
-    if (!updated) {
-        throw AppError.conflict(
-            'Leave request status changed concurrently — refresh and retry',
-            ERROR_CODES.CONCURRENT_UPDATE_CONFLICT
-        );
-    }
+    // C2 — status transition + balance refunds are atomic. Pre-C2 the
+    // status flip and the per-segment refund were separate writes; a
+    // crash between them left the request cancelled but balance still
+    // marked `used` (after-approved cancel) or `pending`
+    // (pending cancel), silently inflating used / pending counters.
+    // Mirrors the `approveLeave` / `rejectLeave` pattern.
+    const updated = await withTransaction(async (session) => {
+        const findOpts = session ? { new: true, session } : { new: true };
 
-    // Refund per-segment to the original (type, year) row.
-    if (expectedStatus === LEAVE_REQUEST_STATUSES.APPROVED) {
-        for (const seg of updated.leave_segments) {
-            await LeaveBalance.updateOne(
-                {
-                    user_id: updated.user_id,
-                    leave_type_id: seg.leave_type_id,
-                    year: seg.year,
+        const u = await LeaveRequest.findOneAndUpdate(
+            { _id: existing._id, status: expectedStatus },
+            {
+                $set: {
+                    status: LEAVE_REQUEST_STATUSES.CANCELLED,
+                    cancelled_at: new Date(),
+                    cancelled_by: caller.id,
+                    cancellation_reason: body.cancellation_reason,
                 },
-                { $inc: { used: -seg.days, available: seg.days } }
+            },
+            findOpts
+        );
+        if (!u) {
+            throw AppError.conflict(
+                'Leave request status changed concurrently — refresh and retry',
+                ERROR_CODES.CONCURRENT_UPDATE_CONFLICT
             );
         }
-    } else {
-        // Pending → just release the reservation.
-        await releaseReservations({ user_id: updated.user_id, segments: updated.leave_segments });
-    }
+
+        // Refund per-segment to the original (type, year) row.
+        if (expectedStatus === LEAVE_REQUEST_STATUSES.APPROVED) {
+            for (const seg of u.leave_segments) {
+                const filter = {
+                    user_id: u.user_id,
+                    leave_type_id: seg.leave_type_id,
+                    year: seg.year,
+                };
+                const update = { $inc: { used: -seg.days, available: seg.days } };
+                if (session) {
+                    await LeaveBalance.updateOne(filter, update, { session });
+                } else {
+                    await LeaveBalance.updateOne(filter, update);
+                }
+            }
+        } else {
+            // Pending → just release the reservation.
+            await releaseReservations({
+                user_id: u.user_id,
+                segments: u.leave_segments,
+                session: session ?? undefined,
+            });
+        }
+        return u;
+    });
 
     if (caller.audit) {
         const isSelfCancel = caller.id.equals(existing.user_id);
