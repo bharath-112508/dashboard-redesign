@@ -294,17 +294,19 @@ describe('revokeLink', () => {
 // ─── resolveLink (public) ────────────────────────────────────────────────
 
 describe('resolveLink', () => {
-    // The service strips enumeration fields via `.select(...)` and then
-    // sorts. Mock both steps in the chain.
+    // The service strips enumeration fields via `.select(...)`, sorts,
+    // then (H19) caps each list with `.limit(cap + 1)` so a clipped
+    // result is detectable without a separate countDocuments. Mock
+    // every step in the chain.
     const stubProjectChildren = (): void => {
         sprintFindMock.mockReturnValueOnce({
-            select: () => ({ sort: () => Promise.resolve([]) }),
+            select: () => ({ sort: () => ({ limit: () => Promise.resolve([]) }) }),
         });
         storyFindMock.mockReturnValueOnce({
-            select: () => ({ sort: () => Promise.resolve([]) }),
+            select: () => ({ sort: () => ({ limit: () => Promise.resolve([]) }) }),
         });
         taskFindMock.mockReturnValueOnce({
-            select: () => ({ sort: () => Promise.resolve([]) }),
+            select: () => ({ sort: () => ({ limit: () => Promise.resolve([]) }) }),
         });
     };
 
@@ -362,6 +364,38 @@ describe('resolveLink', () => {
         expect(result.tasks).toEqual([]);
     });
 
+    it('flags `truncated: { tasks: true }` when the task list hits the cap (H19)', async () => {
+        const link = makeLink();
+        linkFindOneMock.mockResolvedValueOnce(link);
+        stubProjectFindById({
+            _id: link.project_id,
+            toJSON: () => ({ id: link.project_id.toString(), name: 'Demo' }),
+        });
+        // Sprint + story under cap → no truncation flag for them.
+        sprintFindMock.mockReturnValueOnce({
+            select: () => ({ sort: () => ({ limit: () => Promise.resolve([]) }) }),
+        });
+        storyFindMock.mockReturnValueOnce({
+            select: () => ({ sort: () => ({ limit: () => Promise.resolve([]) }) }),
+        });
+        // Tasks: return cap + 1 to simulate an overflowed result.
+        // The service pulls `limit(cap + 1)`; we hand back 1001 stub
+        // task docs and the service slices to 1000 in the response.
+        const tasksOverflow = Array.from({ length: 1001 }, (_, i) => ({
+            toJSON: () => ({ id: `t${i}` }),
+        }));
+        taskFindMock.mockReturnValueOnce({
+            select: () => ({ sort: () => ({ limit: () => Promise.resolve(tasksOverflow) }) }),
+        });
+
+        const result = await svc.resolveLink('any-raw-token');
+
+        // Response is sliced to the cap.
+        expect(result.tasks.length).toBe(1000);
+        // truncated flag is set only for tasks.
+        expect(result.truncated).toEqual({ tasks: true });
+    });
+
     it('returns 404 when the project has been deleted but a live link still references it', async () => {
         const link = makeLink();
         linkFindOneMock.mockResolvedValueOnce(link);
@@ -394,22 +428,24 @@ describe('resolveLink', () => {
                 });
             },
         });
+        // H19 — chain is now `select().sort().limit()`. Mock all three
+        // levels so the production `.limit(cap + 1)` call resolves.
         sprintFindMock.mockReturnValueOnce({
             select: (arg: string) => {
                 sprintSelectArgs.push(arg);
-                return { sort: () => Promise.resolve([]) };
+                return { sort: () => ({ limit: () => Promise.resolve([]) }) };
             },
         });
         storyFindMock.mockReturnValueOnce({
             select: (arg: string) => {
                 storySelectArgs.push(arg);
-                return { sort: () => Promise.resolve([]) };
+                return { sort: () => ({ limit: () => Promise.resolve([]) }) };
             },
         });
         taskFindMock.mockReturnValueOnce({
             select: (arg: string) => {
                 taskSelectArgs.push(arg);
-                return { sort: () => Promise.resolve([]) };
+                return { sort: () => ({ limit: () => Promise.resolve([]) }) };
             },
         });
 

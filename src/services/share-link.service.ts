@@ -274,7 +274,30 @@ export interface ResolvedShareLinkPayload {
     tasks: Record<string, unknown>[];
     /** When the link was last touched (now); reflects the post-update state. */
     last_accessed_at: Date;
+    /** H19 — set when any collection hit its cap and was clipped.
+     *  The FE renders a "showing N of M" warning when present. */
+    truncated?: {
+        sprints?: boolean;
+        stories?: boolean;
+        tasks?: boolean;
+    };
 }
+
+/**
+ * H19 — hard caps on the public share-link payload. The endpoint is
+ * UNAUTHENTICATED, anyone-with-the-URL access, so an unbounded
+ * `.find({ project_id })` on a large project rendered a multi-MB
+ * JSON response per anonymous request — a usable DOS amplification
+ * + heap-pressure vector. Caps sized to typical project shapes:
+ *   - sprints: 50  (≈ 1 sprint / 2 weeks × 2 years)
+ *   - stories: 100 (large product portfolios)
+ *   - tasks:   1000 (matches REPORT_ROW_CAP)
+ * The find queries pull `limit + 1` so we can detect overflow
+ * without a second `countDocuments` round-trip.
+ */
+const SHARE_LINK_SPRINT_CAP = 50;
+const SHARE_LINK_STORY_CAP = 100;
+const SHARE_LINK_TASK_CAP = 1_000;
 
 const docsToJson = <T extends { toJSON: () => unknown }>(rows: T[]): Record<string, unknown>[] =>
     rows.map((r) => r.toJSON() as Record<string, unknown>);
@@ -332,20 +355,42 @@ export const resolveLink = async (token: string): Promise<ResolvedShareLinkPaylo
         );
     }
 
-    const [sprints, stories, tasks] = await Promise.all([
-        Sprint.find({ project_id: link.project_id }).select('-created_by').sort({ start_date: 1, _id: 1 }),
-        Story.find({ project_id: link.project_id }).select('-created_by -updated_by').sort({ order: 1, _id: 1 }),
+    // H19 — pull `limit + 1` so we know whether the result was
+    // clipped without an extra `countDocuments` round-trip.
+    const [sprintsRaw, storiesRaw, tasksRaw] = await Promise.all([
+        Sprint.find({ project_id: link.project_id })
+            .select('-created_by')
+            .sort({ start_date: 1, _id: 1 })
+            .limit(SHARE_LINK_SPRINT_CAP + 1),
+        Story.find({ project_id: link.project_id })
+            .select('-created_by -updated_by')
+            .sort({ order: 1, _id: 1 })
+            .limit(SHARE_LINK_STORY_CAP + 1),
         Task.find({ project_id: link.project_id })
             .select('-collaborator_ids -created_by -updated_by')
-            .sort({ status_order: 1, _id: 1 }),
+            .sort({ status_order: 1, _id: 1 })
+            .limit(SHARE_LINK_TASK_CAP + 1),
     ]);
+
+    const sprintsClipped = sprintsRaw.length > SHARE_LINK_SPRINT_CAP;
+    const storiesClipped = storiesRaw.length > SHARE_LINK_STORY_CAP;
+    const tasksClipped = tasksRaw.length > SHARE_LINK_TASK_CAP;
+    const truncated =
+        sprintsClipped || storiesClipped || tasksClipped
+            ? {
+                  ...(sprintsClipped ? { sprints: true } : {}),
+                  ...(storiesClipped ? { stories: true } : {}),
+                  ...(tasksClipped ? { tasks: true } : {}),
+              }
+            : undefined;
 
     return {
         project: project.toJSON() as unknown as Record<string, unknown>,
-        sprints: docsToJson(sprints),
-        stories: docsToJson(stories),
-        tasks: docsToJson(tasks),
+        sprints: docsToJson(sprintsRaw.slice(0, SHARE_LINK_SPRINT_CAP)),
+        stories: docsToJson(storiesRaw.slice(0, SHARE_LINK_STORY_CAP)),
+        tasks: docsToJson(tasksRaw.slice(0, SHARE_LINK_TASK_CAP)),
         last_accessed_at: now,
+        ...(truncated ? { truncated } : {}),
     };
 };
 
