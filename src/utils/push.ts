@@ -92,12 +92,20 @@ export const sendPushNotification = async (input: SendPushInput): Promise<boolea
     const { subscription, payload, context } = input;
 
     try {
+        // H18 — bound the outbound push call. `web-push` uses Node's
+        // default agent with no socket timeout; a misbehaving Mozilla
+        // / FCM endpoint can stall the dispatcher's per-fanout worker
+        // (concurrency = 5) indefinitely. 10 s is the standard
+        // web-push timeout option and well past the p99 send latency
+        // of every legit provider. On timeout the library rejects
+        // and the catch below handles it like any other send failure.
         await webPush.sendNotification(
             {
                 endpoint: subscription.endpoint,
                 keys: { p256dh: subscription.keys.p256dh, auth: subscription.keys.auth },
             },
-            JSON.stringify(payload)
+            JSON.stringify(payload),
+            { timeout: 10_000 }
         );
         // Best-effort stamp — failure to write the timestamp must not
         // mask a successful send.
