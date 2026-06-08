@@ -12,7 +12,7 @@ import connectDB, { disconnectDB } from './config/database.config.js';
 import appRoutes from './routes/index.js';
 import slackRoutes from './routes/slack.routes.js';
 import { globalErrorHandler } from './middlewares/error-handler.middleware.js';
-import { generalRateLimiter } from './middlewares/rate-limit.middleware.js';
+import { generalRateLimiter, healthRateLimiter } from './middlewares/rate-limit.middleware.js';
 import { API_PREFIX, ERROR_CODES } from './constants/index.js';
 import { ok } from './utils/api-response.js';
 import logger from './utils/logger.js';
@@ -108,8 +108,16 @@ const corsOptions: CorsOptions = {
 };
 app.use(cors(corsOptions));
 
-app.use(compression());
-
+// M28 — `compression` is mounted AFTER the Slack raw-body boundary
+// below. Today it's response-only and the ordering wouldn't matter,
+// but a future "compression-equivalent" middleware that also reads
+// the request body (e.g. transparent request-body inflate, or a
+// security middleware that hashes the body) would silently break
+// Slack signature verification, which is computed over the raw
+// bytes. Keeping `compression` after the Slack mount is a
+// defensive ordering: when this stack picks up such a middleware,
+// the Slack boundary stays intact by construction. See also the
+// `slackRoutes` mount comment a few lines down.
 // ─── Body size limits (BACKEND_AUDIT.md P2-12) ────────────────────────
 //
 // Express's body-parser middleware short-circuits once `req.body` has
@@ -133,6 +141,13 @@ app.use(compression());
 // `req.body` for the handler. The central `appRoutes` router does
 // not re-mount `/slack` — this early mount is the only one.
 app.use(`${API_PREFIX}/slack`, slackRoutes);
+
+// M28 — `compression` lives AFTER the Slack raw-body mount on purpose
+// (see the long-form comment a few lines above). Today's compression
+// middleware only touches responses, but the ordering is locked in
+// here so a future request-touching variant can't silently break
+// signature verification.
+app.use(compression());
 
 app.use(`${API_PREFIX}/auth`, express.json({ limit: '4kb' }));
 app.use(`${API_PREFIX}/auth`, express.urlencoded({ extended: true, limit: '4kb' }));
@@ -179,11 +194,17 @@ app.use(API_PREFIX, generalRateLimiter);
 // Mongo was partitioned or the scheduler had stopped — a zombie
 // API would never auto-recover.
 
-app.get('/health', (_req, res) => {
+// M26 — `healthRateLimiter` (600/min/IP) on all health + metrics
+// routes. Pre-M26 these sat OUTSIDE `/api/*` and so escaped the
+// global limiter entirely; an anonymous flood could pin the cached
+// Mongo ping or the Prometheus serialiser. Comfortable margin above
+// any legitimate scrape (Prometheus default ~15-60s) and any
+// orchestrator liveness probe (~10s).
+app.get('/health', healthRateLimiter, (_req, res) => {
     return ok(res, { status: 'ok', env: NODE_ENV });
 });
 
-app.get('/health/live', (_req, res) => {
+app.get('/health/live', healthRateLimiter, (_req, res) => {
     return ok(res, { status: 'ok', env: NODE_ENV });
 });
 
@@ -236,7 +257,7 @@ const checkMongoCached = async (now: number): Promise<'ok' | string> => {
     return result;
 };
 
-app.get('/health/ready', async (_req, res) => {
+app.get('/health/ready', healthRateLimiter, async (_req, res) => {
     const checks: Record<string, 'ok' | string> = {};
     let healthy = true;
 
@@ -269,7 +290,7 @@ app.get('/health/ready', async (_req, res) => {
 // scrape origin (App Service VNet integration / Container Apps
 // internal port). If we ever expose it on the public LB, gate with
 // a shared-secret header here.
-app.get('/metrics', async (_req, res, next) => {
+app.get('/metrics', healthRateLimiter, async (_req, res, next) => {
     try {
         res.setHeader('Content-Type', getMetricsContentType());
         res.send(await getMetricsText());

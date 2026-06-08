@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Types } from 'mongoose';
 import { createHash } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import { gunzipSync } from 'node:zlib';
 
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -30,6 +31,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 
 const {
     auditLogFindMock,
+    auditLogFindOneMock,
     auditLogDeleteManyMock,
     archiveFindOneMock,
     archiveFindByIdMock,
@@ -37,11 +39,12 @@ const {
     archiveCountMock,
     archiveCreateMock,
     isAzureConfiguredMock,
-    putBlobMock,
+    putBlobStreamMock,
     downloadBlobMock,
     mintDownloadSasMock,
 } = vi.hoisted(() => ({
     auditLogFindMock: vi.fn(),
+    auditLogFindOneMock: vi.fn(),
     auditLogDeleteManyMock: vi.fn(),
     archiveFindOneMock: vi.fn(),
     archiveFindByIdMock: vi.fn(),
@@ -49,7 +52,7 @@ const {
     archiveCountMock: vi.fn(),
     archiveCreateMock: vi.fn(),
     isAzureConfiguredMock: vi.fn(),
-    putBlobMock: vi.fn(),
+    putBlobStreamMock: vi.fn(),
     downloadBlobMock: vi.fn(),
     mintDownloadSasMock: vi.fn(),
 }));
@@ -57,6 +60,7 @@ const {
 vi.mock('../models/audit-log.model.js', () => ({
     AuditLog: {
         find: auditLogFindMock,
+        findOne: auditLogFindOneMock,
         deleteMany: auditLogDeleteManyMock,
     },
 }));
@@ -76,11 +80,22 @@ vi.mock('../utils/azure-blob.js', async () => {
     return {
         ...actual,
         isAzureConfigured: isAzureConfiguredMock,
-        putBlob: putBlobMock,
+        putBlobStream: putBlobStreamMock,
         downloadBlob: downloadBlobMock,
         mintDownloadSas: mintDownloadSasMock,
     };
 });
+
+// M29 — capture the streamed bytes the service writes to `putBlobStream`.
+// Each test that asserts on the upload payload re-installs a single-shot
+// implementation that drains the Readable into this buffer.
+const drainStream = async (stream: Readable): Promise<Buffer> => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+        chunks.push(chunk as Buffer);
+    }
+    return Buffer.concat(chunks);
+};
 
 const svc = await import('./audit-archive.service.js');
 
@@ -128,11 +143,20 @@ const queryStub = (rows: unknown[]) => {
     return stub;
 };
 
+// M29 — between tests we install a default `putBlobStream` impl that
+// drains the stream into a Buffer and stashes it on the mock's last
+// call args (so happy-path assertions can grab it). Tests that assert
+// nothing was uploaded just check call count.
+let lastUploadedBytes: Buffer | null = null;
+
 beforeEach(() => {
     vi.resetAllMocks();
     isAzureConfiguredMock.mockReturnValue(true);
-    putBlobMock.mockResolvedValue({ size: 0 });
     auditLogDeleteManyMock.mockResolvedValue({ deletedCount: 0 });
+    lastUploadedBytes = null;
+    putBlobStreamMock.mockImplementation(async (args: { body: Readable }) => {
+        lastUploadedBytes = await drainStream(args.body);
+    });
     mintDownloadSasMock.mockReturnValue({
         url: 'https://blob.example/test?sas=abc',
         expires_at: new Date('2026-05-01T00:00:00Z'),
@@ -144,6 +168,12 @@ beforeEach(() => {
 describe('archiveDay (happy path)', () => {
     it('uploads a gzipped JSONL whose SHA-256 matches the stored chain hash', async () => {
         const rows = [auditRow(), auditRow(), auditRow()];
+
+        // M29 — the streaming refactor now does a `findOne` empty-day
+        // peek BEFORE the cursor (cheaper than spinning up a gzip
+        // pipeline only to find zero rows). Mock that to return the
+        // first row so the upload pipeline runs.
+        auditLogFindOneMock.mockReturnValueOnce(findOneStub(rows[0]));
 
         // No existing archive for today, no previous archive at all (genesis row).
         archiveFindOneMock
@@ -159,20 +189,22 @@ describe('archiveDay (happy path)', () => {
         expect(result.skipped_reason).toBeNull();
         expect(result.sha256_hash).toMatch(/^[a-f0-9]{64}$/);
 
-        // Upload happened with the right container + content-type.
-        expect(putBlobMock).toHaveBeenCalledTimes(1);
-        const uploadArgs = putBlobMock.mock.calls[0][0] as {
+        // Upload happened with the right container + content-type. The
+        // `body` is now a Readable stream; the default beforeEach impl
+        // drains it into `lastUploadedBytes`.
+        expect(putBlobStreamMock).toHaveBeenCalledTimes(1);
+        const uploadArgs = putBlobStreamMock.mock.calls[0][0] as {
             container: string;
             blobKey: string;
             contentType: string;
-            body: Buffer;
         };
         expect(uploadArgs.container).toBe('audit-archives');
         expect(uploadArgs.blobKey).toBe('archives/2026-01-01.jsonl.gz');
         expect(uploadArgs.contentType).toBe('application/gzip');
 
         // The hash recorded on the row matches the SHA-256 of what we uploaded.
-        const uploaded = uploadArgs.body;
+        expect(lastUploadedBytes).not.toBeNull();
+        const uploaded = lastUploadedBytes as unknown as Buffer;
         const computed = createHash('sha256').update(uploaded).digest('hex');
         expect(result.sha256_hash).toBe(computed);
 
@@ -196,6 +228,7 @@ describe('archiveDay (happy path)', () => {
         const previousArchiveId = new Types.ObjectId();
         const previousHash = 'a'.repeat(64);
 
+        auditLogFindOneMock.mockReturnValueOnce(findOneStub(auditRow()));
         archiveFindOneMock
             .mockReturnValueOnce(findOneStub(null)) // no existing for date
             .mockReturnValueOnce(findOneStub({ _id: previousArchiveId, sha256_hash: previousHash })); // prior archive
@@ -211,6 +244,7 @@ describe('archiveDay (happy path)', () => {
     });
 
     it('previous-archive lookup uses {sha256_hash: $ne null} so empty days do not sever the chain', async () => {
+        auditLogFindOneMock.mockReturnValueOnce(findOneStub(auditRow()));
         archiveFindOneMock
             .mockReturnValueOnce(findOneStub(null)) // existing-check
             .mockReturnValueOnce(findOneStub(null)); // previous lookup
@@ -229,15 +263,19 @@ describe('archiveDay (happy path)', () => {
     });
 
     it('writes an empty-day chain row WITHOUT uploading or deleting when no rows match', async () => {
+        // M29 — the new empty-day peek (`auditLogFindOneMock` returns
+        // null) is the only signal that drives the short-circuit; the
+        // cursor isn't created at all on this path.
+        auditLogFindOneMock.mockReturnValueOnce(findOneStub(null));
         archiveFindOneMock.mockReturnValueOnce(findOneStub(null)).mockReturnValueOnce(findOneStub(null));
-        auditLogFindMock.mockReturnValueOnce(cursorStub([])); // zero rows for the day
         archiveCreateMock.mockResolvedValueOnce({ _id: new Types.ObjectId() });
 
         const result = await svc.archiveDay('2026-01-03');
 
         expect(result.row_count).toBe(0);
         expect(result.skipped_reason).toBeNull();
-        expect(putBlobMock).not.toHaveBeenCalled();
+        expect(putBlobStreamMock).not.toHaveBeenCalled();
+        expect(auditLogFindMock).not.toHaveBeenCalled();
         expect(auditLogDeleteManyMock).not.toHaveBeenCalled();
 
         const created = archiveCreateMock.mock.calls[0][0] as Record<string, unknown>;
@@ -255,7 +293,7 @@ describe('archiveDay (happy path)', () => {
 
         expect(result.skipped_reason).toBe('already_archived');
         expect(auditLogFindMock).not.toHaveBeenCalled();
-        expect(putBlobMock).not.toHaveBeenCalled();
+        expect(putBlobStreamMock).not.toHaveBeenCalled();
         expect(archiveCreateMock).not.toHaveBeenCalled();
         // Self-heal sweep fires unconditionally on the existing-archive path.
         // In the normal case it matches zero rows and is a no-op.
@@ -286,8 +324,8 @@ describe('archiveDay (happy path)', () => {
 
     it('throws when Azure is unconfigured AND there are rows to archive', async () => {
         isAzureConfiguredMock.mockReturnValue(false);
+        auditLogFindOneMock.mockReturnValueOnce(findOneStub(auditRow()));
         archiveFindOneMock.mockReturnValueOnce(findOneStub(null)).mockReturnValueOnce(findOneStub(null));
-        auditLogFindMock.mockReturnValueOnce(cursorStub([auditRow()]));
 
         await expect(svc.archiveDay('2026-01-05')).rejects.toThrow(/AUDIT_ARCHIVE_STORAGE_NOT_CONFIGURED/);
         expect(archiveCreateMock).not.toHaveBeenCalled();
@@ -308,7 +346,9 @@ describe('runArchivalSweep (catch-up + cap)', () => {
         archiveFindOneMock
             .mockReturnValueOnce(findOneStub(null)) // archiveDay's existing-check
             .mockReturnValueOnce(findOneStub(null)); // archiveDay's previous lookup
-        auditLogFindMock.mockReturnValueOnce(cursorStub([])); // empty day, fast path
+        // M29 — empty-day fast path now driven by `AuditLog.findOne` (not
+        // the cursor); return null so the inner archiveDay short-circuits.
+        auditLogFindOneMock.mockReturnValueOnce(findOneStub(null));
         archiveCreateMock.mockResolvedValueOnce({ _id: new Types.ObjectId() });
 
         const summary = await svc.runArchivalSweep(new Date('2026-05-01T04:00:00Z'));
@@ -323,7 +363,9 @@ describe('runArchivalSweep (catch-up + cap)', () => {
         // Every candidate returns null (no existing archive) — simulating a
         // huge unbounded backlog. Sweep must still cap at the per-run limit.
         archiveFindOneMock.mockReturnValue(findOneStub(null));
-        auditLogFindMock.mockReturnValue(cursorStub([])); // every day is empty
+        // M29 — every inner archiveDay sees zero rows for the day, so the
+        // peek returns null and the upload pipeline never runs.
+        auditLogFindOneMock.mockReturnValue(findOneStub(null));
         archiveCreateMock.mockResolvedValue({ _id: new Types.ObjectId() });
 
         const summary = await svc.runArchivalSweep(new Date('2026-05-01T04:00:00Z'));

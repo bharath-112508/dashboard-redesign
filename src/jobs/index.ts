@@ -76,6 +76,29 @@ const REGISTRY: Record<JobName, JobRunner> = {
     [JOB_NAMES.AUDIT_LOG_MIRROR]: () => runAuditLogMirror(),
 };
 
+/**
+ * M25 — scale-out contract.
+ *
+ * `JOBS_ENABLED` is read once per process and gates *all* cron
+ * registration. On a single-instance deploy (the Phase 1 default)
+ * this is trivially correct. On a multi-instance scale-out, **set
+ * `JOBS_ENABLED=true` only on ONE designated instance** — every
+ * other instance must boot with `JOBS_ENABLED=false`.
+ *
+ * Why this matters even though `JobRun.{name, run_key}` is unique-
+ * indexed: the DB-side dedupe means only one instance's tick actually
+ * does work (the others E11000 into "skipped"), but every instance
+ * still runs the cron-firing bookkeeping, emits structured logs, and
+ * increments the cron metric counter. On a 4-instance fleet that's
+ * 4× the log volume + 4× metric noise for zero extra effect. The
+ * "skipped" rows also wash out the `success` rate on dashboards.
+ *
+ * A future Mongo-backed leader election (TTL doc in a `cron_leader`
+ * collection — each instance attempts an upsert with a 30s TTL on
+ * boot, only the lease holder runs crons) would make this automatic
+ * and survive instance-0 dying. Deferred — single-instance is
+ * adequate today and the env-flag contract is operationally simple.
+ */
 export const startScheduler = (): void => {
     if (!JOBS_ENABLED) {
         logger.info('Job scheduler disabled via JOBS_ENABLED=false');

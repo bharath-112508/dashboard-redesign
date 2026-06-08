@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { gzipSync } from 'node:zlib';
+import { PassThrough, Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { createGzip } from 'node:zlib';
 import { Types } from 'mongoose';
 
 import { AuditLog, type AuditLogDocument } from '../models/audit-log.model.js';
@@ -15,7 +17,7 @@ import {
 } from '../constants/audit-archive.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
-import { downloadBlob, isAzureConfigured, mintDownloadSas, putBlob } from '../utils/azure-blob.js';
+import { downloadBlob, isAzureConfigured, mintDownloadSas, putBlobStream } from '../utils/azure-blob.js';
 import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
 import logger from '../utils/logger.js';
 import type { PaginationMeta } from '../utils/api-response.js';
@@ -148,38 +150,32 @@ export const archiveDay = async (isoDate: string): Promise<ArchiveDayResult> => 
         };
     }
 
-    // Stream rows out via cursor — for a 1k-row day this fits in
-    // memory comfortably, but using a cursor protects against an
-    // anomalous spike (e.g. a malfunctioning cron writing 100k audit
-    // rows in a day).
-    const cursor = AuditLog.find({ created_at: { $gte: startUtc, $lte: endUtc } })
-        .sort({ created_at: 1, _id: 1 })
-        .lean<AuditLogDocument[]>()
-        .cursor();
-
-    const lines: string[] = [];
+    // M29 — streaming pipeline. Pre-M29 the loop accumulated every
+    // row's JSON line into `lines: string[]`, joined it into one
+    // mega-string, allocated a fresh Buffer, then ran `gzipSync` (which
+    // blocks the event loop). For a 100k-row anomalous day that's
+    // hundreds of MB peak memory + multi-second event-loop stalls.
+    //
+    // New flow: cursor → JSON-line generator → gzip Transform →
+    // PassThrough that updates a running SHA-256 + tracks size →
+    // BlockBlobClient.uploadStream. Memory bounded by the gzip chunk
+    // size × upload concurrency (~16 MiB, see `putBlobStream`), gzip
+    // is async, hash is incremental.
+    //
+    // We still need `archivedIds[]` for the final `deleteMany` — the
+    // delete predicate has to target the exact rows we archived, not
+    // a re-query of the time range (which could pick up late-arriving
+    // rows we didn't include in the blob). That array grows with row
+    // count, but each id is 12 bytes, so 100k rows = 1.2 MB — trivial.
     const archivedIds: Types.ObjectId[] = [];
-    for await (const row of cursor) {
-        archivedIds.push(row._id);
-        // Stable JSON shape — `_id` first so a future reader can
-        // grep by id without parsing the whole row.
-        lines.push(
-            JSON.stringify({
-                _id: row._id.toString(),
-                actor_id: row.actor_id ? row.actor_id.toString() : null,
-                actor_role: row.actor_role,
-                action: row.action,
-                target_entity: {
-                    kind: row.target_entity.kind,
-                    id: row.target_entity.id ? row.target_entity.id.toString() : null,
-                },
-                before: row.before ?? null,
-                after: row.after ?? null,
-                metadata: row.metadata ?? {},
-                created_at: row.created_at.toISOString(),
-            })
-        );
-    }
+    let rowCount = 0;
+
+    // Empty-day shortcut runs BEFORE the streaming setup: peek at the
+    // cursor result via a `findOne` + count. Cheaper than spinning up
+    // the gzip pipeline only to discover there's nothing to archive.
+    const firstRow = await AuditLog.findOne({ created_at: { $gte: startUtc, $lte: endUtc } })
+        .sort({ created_at: 1, _id: 1 })
+        .lean<{ _id: Types.ObjectId } | null>();
 
     // Chain link to the most recent **non-empty** archive — empty-day
     // rows have `sha256_hash: null` and would sever the chain (every
@@ -194,7 +190,7 @@ export const archiveDay = async (isoDate: string): Promise<ArchiveDayResult> => 
             sha256_hash: string | null;
         } | null>();
 
-    if (lines.length === 0) {
+    if (!firstRow) {
         // Empty-day row — no upload, no Mongo delete. Chain still
         // links so the verify walk surfaces "this day was archived
         // intentionally with zero rows".
@@ -215,25 +211,73 @@ export const archiveDay = async (isoDate: string): Promise<ArchiveDayResult> => 
         throw new Error('AUDIT_ARCHIVE_STORAGE_NOT_CONFIGURED');
     }
 
-    // Trailing newline for tools that expect line-terminated JSONL.
-    const jsonl = `${lines.join('\n')}\n`;
-    const gzipped = gzipSync(Buffer.from(jsonl, 'utf8'));
-    const sha256 = createHash('sha256').update(gzipped).digest('hex');
+    const cursor = AuditLog.find({ created_at: { $gte: startUtc, $lte: endUtc } })
+        .sort({ created_at: 1, _id: 1 })
+        .lean<AuditLogDocument[]>()
+        .cursor();
+
+    // Async generator → Readable. Yields one JSON line + '\n' per row
+    // and pushes the row's `_id` into the archive list as a side
+    // effect. Trailing newline is the JSONL convention.
+    const jsonlGenerator = async function* () {
+        for await (const row of cursor) {
+            archivedIds.push(row._id);
+            rowCount += 1;
+            yield JSON.stringify({
+                _id: row._id.toString(),
+                actor_id: row.actor_id ? row.actor_id.toString() : null,
+                actor_role: row.actor_role,
+                action: row.action,
+                target_entity: {
+                    kind: row.target_entity.kind,
+                    id: row.target_entity.id ? row.target_entity.id.toString() : null,
+                },
+                before: row.before ?? null,
+                after: row.after ?? null,
+                metadata: row.metadata ?? {},
+                created_at: row.created_at.toISOString(),
+            }) + '\n';
+        }
+    };
+
+    const jsonlStream = Readable.from(jsonlGenerator(), { encoding: 'utf8' });
+    const gzipStream = createGzip();
+    // The hash transform sits between gzip output and the uploader —
+    // every byte that lands in Blob is also fed into the running
+    // SHA-256, so `verifyArchive` (which hashes the downloaded blob)
+    // sees the same digest.
+    const hash = createHash('sha256');
+    let totalGzipBytes = 0;
+    const hashAndSize = new PassThrough();
+    hashAndSize.on('data', (chunk: Buffer) => {
+        hash.update(chunk);
+        totalGzipBytes += chunk.length;
+    });
+
     const blobKey = buildAuditArchiveBlobKey(isoDate);
 
-    await putBlob({
-        container: AUDIT_ARCHIVE_BLOB_CONTAINER,
-        blobKey,
-        body: gzipped,
-        contentType: AUDIT_ARCHIVE_CONTENT_TYPE,
-    });
+    // `pipeline` (promise variant) wires the four stages and propagates
+    // errors from any node up to the awaited promise. The Azure upload
+    // runs in parallel with the pipeline: it pulls from `hashAndSize`,
+    // so back-pressure from the network throttles the gzip + cursor.
+    await Promise.all([
+        pipeline(jsonlStream, gzipStream, hashAndSize),
+        putBlobStream({
+            container: AUDIT_ARCHIVE_BLOB_CONTAINER,
+            blobKey,
+            body: hashAndSize,
+            contentType: AUDIT_ARCHIVE_CONTENT_TYPE,
+        }),
+    ]);
+
+    const sha256 = hash.digest('hex');
 
     await AuditArchive.create({
         archive_date: isoDate,
         blob_container: AUDIT_ARCHIVE_BLOB_CONTAINER,
         blob_key: blobKey,
-        row_count: lines.length,
-        file_size_bytes: gzipped.length,
+        row_count: rowCount,
+        file_size_bytes: totalGzipBytes,
         sha256_hash: sha256,
         previous_archive_id: previous?._id ?? null,
         previous_archive_hash: previous?.sha256_hash ?? null,
@@ -245,9 +289,9 @@ export const archiveDay = async (isoDate: string): Promise<ArchiveDayResult> => 
 
     return {
         date: isoDate,
-        row_count: lines.length,
+        row_count: rowCount,
         skipped_reason: null,
-        file_size_bytes: gzipped.length,
+        file_size_bytes: totalGzipBytes,
         sha256_hash: sha256,
     };
 };

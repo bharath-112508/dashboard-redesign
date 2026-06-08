@@ -1,3 +1,5 @@
+import type { Readable } from 'node:stream';
+
 import {
     BlobSASPermissions,
     BlobServiceClient,
@@ -405,6 +407,42 @@ export const putBlob = async (input: {
         abortSignal: AbortSignal.timeout(BLOB_OP_TIMEOUT_MS),
     });
     return { size: input.body.length };
+};
+
+/**
+ * M29 — streaming upload. Used by the audit-archive cron, which feeds
+ * a (potentially large) gzip stream into Blob without ever materialising
+ * the full buffer in Node memory.
+ *
+ * Block / concurrency tuning:
+ *   - `bufferSize` (4 MiB) — Azure SDK accumulates up to this many bytes
+ *     before staging a block. Bigger = fewer blocks (4 MiB × 50 000 = 200
+ *     GiB cap, far above any realistic archive), smaller = lower
+ *     peak memory. 4 MiB is the SDK default for streaming.
+ *   - `maxConcurrency` (4) — number of parallel block uploads. Higher
+ *     uses more memory + bandwidth; 4 keeps peak memory at ~16 MiB and
+ *     saturates a typical 1 Gbps egress.
+ *
+ * The function awaits both stream completion and SDK confirmation
+ * before returning, so the caller can safely treat the upload as
+ * atomic on the resolved promise.
+ */
+export const putBlobStream = async (input: {
+    container: string;
+    blobKey: string;
+    body: Readable;
+    contentType: string;
+}): Promise<void> => {
+    const { serviceClient } = getContext();
+    const containerClient = serviceClient.getContainerClient(input.container);
+    await containerClient.createIfNotExists({
+        abortSignal: AbortSignal.timeout(BLOB_OP_TIMEOUT_MS),
+    });
+    const blockBlob = containerClient.getBlockBlobClient(input.blobKey);
+    await blockBlob.uploadStream(input.body, 4 * 1024 * 1024, 4, {
+        blobHTTPHeaders: { blobContentType: input.contentType },
+        abortSignal: AbortSignal.timeout(BLOB_OP_TIMEOUT_MS),
+    });
 };
 
 // ─── Path encoding ───────────────────────────────────────────────────────

@@ -27,6 +27,19 @@ router.post(
     asyncHandler(ctrl.postSubscribe)
 );
 
+// M21 — `POST /push/unsubscribe` is the canonical revoke verb.
+// `DELETE /push/subscribe` is kept as an alias for in-flight clients
+// still on the old shape; both handlers go through the same service
+// call so a one-deploy cutover is safe. The DELETE-with-body pattern
+// is fragile across fetch implementations (Service Worker `fetch`,
+// some CDN edges, certain interceptors silently strip DELETE bodies),
+// which is what motivated the swap.
+router.post(
+    '/unsubscribe',
+    validate({ body: unsubscribePushBodySchema }),
+    asyncHandler(ctrl.deleteSubscribe)
+);
+
 router.delete(
     '/subscribe',
     validate({ body: unsubscribePushBodySchema }),

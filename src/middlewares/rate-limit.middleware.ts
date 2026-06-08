@@ -30,6 +30,30 @@ export const authRateLimiter = rateLimit({
 });
 
 /**
+ * Health / metrics limiter (M26) — `/health/*` and `/metrics` live
+ * OUTSIDE `/api/*` so they don't get the global limiter. `/health/live`
+ * is a pure event-loop check (no DB hit) and could be slammed without
+ * harm, but `/health/ready` does a cached Mongo ping and `/metrics`
+ * runs the Prometheus serialiser. Both are documented as
+ * network-restricted (private to the orchestrator / Prometheus
+ * scraper), but if the infra ever exposes them externally there's
+ * no rate-limit fallback today.
+ *
+ * 600 / min / IP — comfortably above any legitimate scrape cadence
+ * (Prometheus default is 15-60 s; even at 1 Hz that's 60/min) and
+ * orchestrator liveness probes (typically 10 s = 6/min). Tight
+ * enough that an anonymous flood doesn't pin the Mongo ping cache or
+ * the metric serialiser.
+ */
+export const healthRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 600,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: { message: 'Too many requests. Please retry later.' },
+});
+
+/**
  * Slack webhook limiter (Phase 0) — Slack signs every interactive /
  * slash-command payload, so signature verification is the real
  * defence. The limiter sits in front to discourage forged-payload

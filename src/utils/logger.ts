@@ -10,18 +10,49 @@ const baseOptions: LoggerOptions = {
     level: LOG_LEVEL,
     base: { service: 'viljetech-platform-backend', env: NODE_ENV },
     timestamp: pino.stdTimeFunctions.isoTime,
+    // M23 — pino redact list. Every entry here is matched ANYWHERE in
+    // the log payload tree (pino uses dot-path globs). `*.<name>` would
+    // be cleaner but pino's redact engine evaluates each path on every
+    // line, so we keep the list focused on field names that genuinely
+    // carry secrets in this codebase.
+    //
+    // Pre-M23 only `authorization` / `cookie` / `password` / `token` /
+    // `refresh_token` were covered. Added the rest below because each
+    // is a known secret field somewhere in the codebase: if any
+    // accidentally lands in a `logger.error({ user })` /
+    // `logger.warn({ settings })` call, the redact strips it instead
+    // of shipping plaintext to pino + App Insights.
     redact: {
         paths: [
+            // HTTP request — common header / body secrets
             'req.headers.authorization',
             'req.headers.cookie',
             'req.body.password',
             'req.body.current_password',
             'req.body.new_password',
             'req.body.refresh_token',
+            // Generic top-level field names (defence in depth — caught
+            // even when the object isn't framed as a request).
             'password',
             'token',
             'refresh_token',
             'authorization',
+            // M23 additions — MFA + session secrets (mfa.service,
+            // auth.service, sessions).
+            'mfa_secret_encrypted',
+            'mfa_backup_codes_hashed',
+            'totp_secret',
+            'mfa_session_token',
+            // Tenant integrations (Slack, Web Push, Azure Blob).
+            'bot_token',
+            'slack_signing_secret',
+            'vapid_private_key',
+            'azure_storage_connection_string',
+            // Generic catch-alls — operators sometimes hand-build
+            // log payloads with these field names from settings docs.
+            'connection_string',
+            'api_secret',
+            'api_key',
         ],
         remove: true,
     },
