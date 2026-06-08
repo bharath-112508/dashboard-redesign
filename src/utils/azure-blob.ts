@@ -285,11 +285,23 @@ export interface BlobHead {
  * to `exists: false`. Any other error propagates so the caller can decide
  * whether to retry / 502.
  */
+/**
+ * H17 — per-call timeout on every Azure Blob operation. The SDK's
+ * default behavior is effectively unbounded via retries; a stalled
+ * blob call inside the audit-archive mirror or the report-export
+ * worker pins event-loop slots indefinitely. 30 s is well past every
+ * legitimate call (head/delete are tiny; uploads and downloads cap
+ * at our attachment size limits, comfortably under 30 s on a normal
+ * connection). On timeout the SDK rejects with an `ABORT_ERR`; that
+ * propagates to the caller exactly like any other blob failure.
+ */
+const BLOB_OP_TIMEOUT_MS = 30_000;
+
 export const headBlob = async (container: string, blobKey: string): Promise<BlobHead> => {
     const { serviceClient } = getContext();
     const blob = serviceClient.getContainerClient(container).getBlobClient(blobKey);
     try {
-        const props = await blob.getProperties();
+        const props = await blob.getProperties({ abortSignal: AbortSignal.timeout(BLOB_OP_TIMEOUT_MS) });
         return {
             exists: true,
             size: typeof props.contentLength === 'number' ? props.contentLength : undefined,
@@ -316,7 +328,12 @@ export const downloadBlob = async (container: string, blobKey: string): Promise<
     const { serviceClient } = getContext();
     const blob = serviceClient.getContainerClient(container).getBlobClient(blobKey);
     try {
-        const download = await blob.downloadToBuffer();
+        // H17 — `downloadToBuffer(offset?, count?, options?)`; pass
+        // `0, undefined` to download the whole blob with the timeout
+        // bound. The SDK rejects with `ABORT_ERR` on timeout.
+        const download = await blob.downloadToBuffer(0, undefined, {
+            abortSignal: AbortSignal.timeout(BLOB_OP_TIMEOUT_MS),
+        });
         return download;
     } catch (err: unknown) {
         const status = (err as { statusCode?: number })?.statusCode;
@@ -347,7 +364,7 @@ export const deleteBlob = async (container: string, blobKey: string): Promise<vo
         const blob = serviceClient.getContainerClient(container).getBlobClient(blobKey);
         // `deleteIfExists` swallows 404 by design — re-running a delete
         // for a row whose blob was already wiped (e.g. retries) is a no-op.
-        await blob.deleteIfExists();
+        await blob.deleteIfExists({ abortSignal: AbortSignal.timeout(BLOB_OP_TIMEOUT_MS) });
     } catch (err) {
         logger.warn(
             { err, code: 'BLOB_DELETE_FAILED', container, blob_key: blobKey },
@@ -379,10 +396,13 @@ export const putBlob = async (input: {
     const { serviceClient } = getContext();
     const containerClient = serviceClient.getContainerClient(input.container);
     // Idempotent — a 409 ContainerAlreadyExists is silently absorbed.
-    await containerClient.createIfNotExists();
+    await containerClient.createIfNotExists({
+        abortSignal: AbortSignal.timeout(BLOB_OP_TIMEOUT_MS),
+    });
     const blockBlob = containerClient.getBlockBlobClient(input.blobKey);
     await blockBlob.uploadData(input.body, {
         blobHTTPHeaders: { blobContentType: input.contentType },
+        abortSignal: AbortSignal.timeout(BLOB_OP_TIMEOUT_MS),
     });
     return { size: input.body.length };
 };
