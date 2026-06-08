@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { TaskComment, type TaskCommentDocument } from '../models/task-comment.model.js';
 import { Task } from '../models/task.model.js';
 import type { ProjectDocument } from '../models/project.model.js';
+import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
@@ -50,6 +51,40 @@ const isManagerOrAdmin = (role: string): boolean =>
     role === ROLES.ADMIN || role === ROLES.MANAGER || role === ROLES.TEAM_LEAD;
 
 const toPublic = (doc: TaskCommentDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
+
+/**
+ * M36 — batch-load `{ id, full_name }` for the unique author ids on a
+ * page so the FE doesn't fan out per-row `GET /users/:id` requests.
+ * 100 comments authored by 30 unique people = 1 round-trip here vs.
+ * 30 in the pre-M36 FE. Modelled after `loadActorDisplays` in
+ * `audit-log.service.ts`.
+ */
+interface AuthorDisplay {
+    id: string;
+    full_name: string | null;
+}
+
+const loadAuthorDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, AuthorDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const rows = await User.find({ _id: { $in: ids } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(rows.map((r) => [r._id.toString(), { id: r._id.toString(), full_name: r.full_name }]));
+};
+
+/**
+ * Stamp `{id, full_name}` onto a comment row. A hard-deleted author
+ * (rare) surfaces as `{id, full_name: null}` so the FE keeps the id
+ * for moderation tooling without crashing on missing data.
+ */
+const stampAuthor = (row: Record<string, unknown>, authorMap: Map<string, AuthorDisplay>): Record<string, unknown> => {
+    const authorId = row.author_id;
+    if (typeof authorId !== 'string') return row;
+    return {
+        ...row,
+        author: authorMap.get(authorId) ?? { id: authorId, full_name: null },
+    };
+};
 
 /**
  * Load the parent task + assert the caller can see its project. All
@@ -154,8 +189,16 @@ export const listComments = async (
         TaskComment.countDocuments(filter),
     ]);
 
+    // M36 — hydrate author display fields so the FE doesn't N+1 across
+    // `GET /users/:id` for every comment whose author isn't already in
+    // the project-member cache (ex-members, deactivated users).
+    const uniqueAuthorIds = Array.from(new Set(rows.map((r) => r.author_id.toString()))).map(
+        (id) => new Types.ObjectId(id)
+    );
+    const authorMap = await loadAuthorDisplays(uniqueAuthorIds);
+
     return {
-        data: rows.map(toPublic),
+        data: rows.map((r) => stampAuthor(toPublic(r), authorMap)),
         meta: {
             page: query.page,
             limit: query.limit,

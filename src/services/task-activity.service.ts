@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 
 import { TaskActivity, type TaskActivityDocument } from '../models/task-activity.model.js';
 import { Task } from '../models/task.model.js';
+import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { type TaskActivityType } from '../constants/task-activity.js';
@@ -50,6 +51,34 @@ export interface RecordActivityInput {
 }
 
 const toPublic = (doc: TaskActivityDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
+
+/**
+ * M38 — batch-load `{ id, full_name }` for the unique actor ids on a
+ * page so the FE doesn't fan out per-row `GET /users/:id` requests.
+ * Mirrors the M36 comment hydration and the original
+ * `loadActorDisplays` in `audit-log.service.ts`.
+ */
+interface ActorDisplay {
+    id: string;
+    full_name: string | null;
+}
+
+const loadActorDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, ActorDisplay>> => {
+    if (ids.length === 0) return new Map();
+    const rows = await User.find({ _id: { $in: ids } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(rows.map((r) => [r._id.toString(), { id: r._id.toString(), full_name: r.full_name }]));
+};
+
+const stampActor = (row: Record<string, unknown>, actorMap: Map<string, ActorDisplay>): Record<string, unknown> => {
+    const actorId = row.actor_id;
+    if (typeof actorId !== 'string') return row;
+    return {
+        ...row,
+        actor: actorMap.get(actorId) ?? { id: actorId, full_name: null },
+    };
+};
 
 // ─── Internal: best-effort recorder ──────────────────────────────────────
 //
@@ -136,8 +165,16 @@ export const listActivities = async (
         TaskActivity.countDocuments(filter),
     ]);
 
+    // M38 — hydrate actor display fields (same pattern as M36 + the
+    // audit-log read service). One round-trip for the page instead of
+    // N from the FE.
+    const uniqueActorIds = Array.from(new Set(rows.map((r) => r.actor_id.toString()))).map(
+        (id) => new Types.ObjectId(id)
+    );
+    const actorMap = await loadActorDisplays(uniqueActorIds);
+
     return {
-        data: rows.map(toPublic),
+        data: rows.map((r) => stampActor(toPublic(r), actorMap)),
         meta: {
             page: query.page,
             limit: query.limit,

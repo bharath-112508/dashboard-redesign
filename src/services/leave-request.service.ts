@@ -367,9 +367,12 @@ const loadAvailableMap = async (params: {
 }): Promise<Map<string, number>> => {
     // Self-heal balance rows for every touched year so the engine's
     // requires_additional_approval flag is computed against real values.
-    for (const y of params.years) {
-        await initializeBalancesForUserYear({ user_id: params.user_id, year: y });
-    }
+    // M37 — pre-M37 this was a sequential `for await` loop, so a
+    // three-year-spanning preview/apply paid 3× the per-year init
+    // latency. The year initialisations are independent (each writes
+    // its own (user_id, year) row), so `Promise.all` collapses them
+    // into a single tick of network latency.
+    await Promise.all(params.years.map((y) => initializeBalancesForUserYear({ user_id: params.user_id, year: y })));
     const rows = await LeaveBalance.find({
         user_id: params.user_id,
         year: { $in: params.years },

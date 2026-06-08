@@ -19,6 +19,7 @@ const {
     activityFindMock,
     activityCountDocumentsMock,
     taskFindByIdMock,
+    userFindMock,
     loadProjectForCallerMock,
     loggerWarnMock,
 } = vi.hoisted(() => ({
@@ -26,6 +27,7 @@ const {
     activityFindMock: vi.fn(),
     activityCountDocumentsMock: vi.fn(),
     taskFindByIdMock: vi.fn(),
+    userFindMock: vi.fn(),
     loadProjectForCallerMock: vi.fn(),
     loggerWarnMock: vi.fn(),
 }));
@@ -40,6 +42,13 @@ vi.mock('../models/task-activity.model.js', () => ({
 
 vi.mock('../models/task.model.js', () => ({
     Task: { findById: taskFindByIdMock },
+}));
+
+// M38 — activity rows ship hydrated `actor` displays. The list path
+// calls `User.find({_id: {$in: [...]}}).select(...).lean()` once per
+// page; stub the chain.
+vi.mock('../models/user.model.js', () => ({
+    User: { find: userFindMock },
 }));
 
 vi.mock('./project.service.js', async (importOriginal) => {
@@ -78,6 +87,11 @@ const stubFindForList = (rows: Array<{ toJSON: () => Record<string, unknown> }>,
 
 beforeEach(() => {
     vi.resetAllMocks();
+    // M38 — default actor-display hydration returns []; tests that
+    // care about the hydrated `actor` field override this.
+    userFindMock.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve([]) }),
+    });
 });
 
 // ─── recordActivity ──────────────────────────────────────────────────────
@@ -206,11 +220,7 @@ describe('listActivities', () => {
     it('returns 404 when the parent task is missing', async () => {
         stubTaskLookup(null);
         await expect(
-            svc.listActivities(
-                new Types.ObjectId(),
-                { page: 1, limit: 20, include_subtasks: false },
-                adminCaller(),
-            )
+            svc.listActivities(new Types.ObjectId(), { page: 1, limit: 20, include_subtasks: false }, adminCaller())
         ).rejects.toMatchObject({ code: ERROR_CODES.TASK_NOT_FOUND });
         expect(loadProjectForCallerMock).not.toHaveBeenCalled();
     });
@@ -224,11 +234,7 @@ describe('listActivities', () => {
         );
 
         await expect(
-            svc.listActivities(
-                taskId,
-                { page: 1, limit: 20, include_subtasks: false },
-                employeeCaller(),
-            )
+            svc.listActivities(taskId, { page: 1, limit: 20, include_subtasks: false }, employeeCaller())
         ).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
@@ -241,8 +247,12 @@ describe('listActivities', () => {
         const actorId = new Types.ObjectId();
         stubTaskLookup({ _id: taskId, project_id: projectId });
         loadProjectForCallerMock.mockResolvedValueOnce({ _id: projectId, member_ids: [], client_ids: [] });
+        // M38 — actor_id is now read off the doc (not its toJSON shape)
+        // so the per-page hydration can batch-load `{id, full_name}`.
+        // Stub matches that contract.
         const row = {
-            toJSON: () => ({ id: 'act1', activity_type: 'status_changed' }),
+            actor_id: actorId,
+            toJSON: () => ({ id: 'act1', activity_type: 'status_changed', actor_id: actorId.toString() }),
         };
         stubFindForList([row], 5);
 
@@ -276,11 +286,7 @@ describe('listActivities', () => {
         loadProjectForCallerMock.mockResolvedValueOnce({ _id: projectId, member_ids: [], client_ids: [] });
         stubFindForList([], 0);
 
-        await svc.listActivities(
-            taskId,
-            { page: 2, limit: 10, include_subtasks: false },
-            adminCaller(),
-        );
+        await svc.listActivities(taskId, { page: 2, limit: 10, include_subtasks: false }, adminCaller());
 
         const filterArg = activityFindMock.mock.calls[0][0] as Record<string, unknown>;
         expect(filterArg).toEqual({ task_id: taskId });

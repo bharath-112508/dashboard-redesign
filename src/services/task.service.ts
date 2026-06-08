@@ -466,9 +466,39 @@ export const listTasks = async (
 
 // ─── GET /tasks/:id ──────────────────────────────────────────────────────
 
+/**
+ * M35 — embed the minimal project shape on the task-detail response.
+ *
+ * Pre-M35 the FE did a waterfall: `useTask(id)` → wait → `useProject(task.project_id)`.
+ * The second query was disabled until the first resolved, so the
+ * project-hero (name + code + custom statuses) sat on a Suspense
+ * fallback until both round-trips completed.
+ *
+ * `loadTaskAndProject` already loads the project for the visibility
+ * check on every call. Including its minimal shape on the response
+ * is a zero-extra-query change for the BE and collapses the FE
+ * waterfall into a single read. The shape mirrors what
+ * `task-detail-page.tsx` actually consumes: `id, name, code,
+ * custom_task_statuses`.
+ */
 export const getTask = async (taskId: Types.ObjectId, caller: ProjectCaller): Promise<Record<string, unknown>> => {
-    const { task } = await loadTaskAndProject(taskId, caller);
-    return toPublic(task);
+    const { task, project } = await loadTaskAndProject(taskId, caller);
+    return {
+        ...toPublic(task),
+        project: {
+            id: project._id.toString(),
+            name: project.name,
+            code: project.code,
+            custom_task_statuses: (project.custom_task_statuses ?? []).map((s) => ({
+                id: s._id.toString(),
+                key: s.key,
+                label: s.label,
+                order: s.order,
+                is_terminal: s.is_terminal,
+                is_active: s.is_active,
+            })),
+        },
+    };
 };
 
 // ─── PATCH /tasks/:id ────────────────────────────────────────────────────
