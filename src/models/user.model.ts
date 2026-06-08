@@ -249,6 +249,14 @@ userSchema.index({ role: 1, status: 1 });
 userSchema.index({ 'internal_profile.reporting_manager_id': 1 });
 userSchema.index({ 'internal_profile.employee_id': 1 }, { unique: true, sparse: true });
 
+// M39 — `GET /users` default sort is `{ created_at: -1, _id: 1 }` with a
+// `status` predicate (active-by-default, deactivated only for callers
+// who hold USER_WRITE + show_deleted=true). The pre-M39 indexes
+// (`{ role, status }`, `{ employee_id }`) didn't cover this — Mongo
+// either collection-scanned or pulled `role+status` and in-memory
+// sorted. This compound serves the default list path directly.
+userSchema.index({ status: 1, created_at: -1 });
+
 /**
  * R6 — single-active-admin invariant backstop.
  *

@@ -172,6 +172,12 @@ leaveRequestSchema.index({ approver_id: 1, status: 1 });
 leaveRequestSchema.index({ status: 1, requires_additional_approval: 1 });
 leaveRequestSchema.index({ start_date: 1, end_date: 1 });
 leaveRequestSchema.index({ 'leave_segments.leave_type_id': 1, 'leave_segments.year': 1 });
+// M40 — `listLeaves` admin queue: `find({status, start_date: $lte}).sort({start_date: -1, _id: -1})`.
+// Existing `{user_id, start_date: -1}` doesn't apply (no user_id pin);
+// `{status, requires_additional_approval}` covers the predicate but not
+// the sort, so Mongo in-memory sorts the status-matching rows. This
+// compound serves both the predicate AND the sort in index order.
+leaveRequestSchema.index({ status: 1, start_date: -1 });
 
 export const LeaveRequest: Model<LeaveRequestDocument> = model<LeaveRequestDocument>(
     COLLECTIONS.LEAVE_REQUESTS,

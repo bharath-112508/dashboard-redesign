@@ -215,8 +215,7 @@ const projectSchema = new Schema<ProjectDocument>(
                     }
                     return true;
                 },
-                message:
-                    'default_status_orders must contain each of the four built-in keys exactly once',
+                message: 'default_status_orders must contain each of the four built-in keys exactly once',
             },
         },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
@@ -230,6 +229,13 @@ const projectSchema = new Schema<ProjectDocument>(
 // Indexes per Data_Model §5.1.
 //   `code` is already unique via the field-level `unique: true` above.
 projectSchema.index({ status: 1, is_archived: 1 });
+// M41 — `listProjects` default sort `{ created_at: -1 }` filtered by
+// `status` + `is_archived`. The `{status, is_archived}` index above
+// covers the predicate but Mongo can't walk it in `created_at` order.
+// This compound serves both predicate AND sort; `{status, is_archived}`
+// is left in place because it's the same prefix and dropping a live
+// index across deployments is riskier than the modest write-amp cost.
+projectSchema.index({ status: 1, is_archived: 1, created_at: -1 });
 projectSchema.index({ member_ids: 1 });
 projectSchema.index({ client_ids: 1 });
 // Reverse-lookup for `PATCH /project-custom-statuses/:id` and friends —
