@@ -883,37 +883,13 @@ export const rejectCorrection = async (
     return reqDoc.toJSON() as unknown as Record<string, unknown>;
 };
 
-// ─── BUG-040 — one-time backfill of segments[] ──────────────────────────
-
-/**
- * Walk every AttendanceRecord that has a top-level `check_in` but an
- * empty `segments[]` array, and seed `segments: [{ check_in, check_out }]`
- * from the legacy embed. Records that already have segments (post-fix
- * writes) are left untouched, making this idempotent.
- *
- * Called once on server boot from `index.ts`, alongside the existing
- * role-bootstrap migration. Logs the backfilled count so the operator
- * can see it run; never blocks boot on failure.
- */
-export const migrateAttendanceSegments = async (): Promise<{ backfilled: number }> => {
-    // Match docs that have a check_in punch but no segments yet. Mongo
-    // matches missing or zero-length arrays via `$size: 0` + `$exists`
-    // — the OR covers pre-segments documents and documents where the
-    // field defaulted to []. We only need a basic projection to update.
-    const cursor = AttendanceRecord.find({
-        check_in: { $ne: null },
-        $or: [{ segments: { $exists: false } }, { segments: { $size: 0 } }],
-    }).cursor();
-
-    let backfilled = 0;
-    for await (const record of cursor) {
-        if (!record.check_in) continue;
-        record.segments = [{ check_in: record.check_in, check_out: record.check_out ?? null }];
-        await record.save();
-        backfilled += 1;
-    }
-    return { backfilled };
-};
+// M16 — BUG-040 `migrateAttendanceSegments` removed. The one-time
+// backfill (legacy single-`check_in` rows → `segments[]`) ran on
+// every boot even after the DB was long-since migrated. Deleted to
+// stop the wasted cursor scan. If a future env genuinely needs the
+// backfill again, the function is preserved in git history and
+// should be re-introduced behind a deliberate boot flag rather than
+// running unconditionally.
 
 // Re-exports for the helper callers (test fixtures, future cron).
 export { todayLocalDate };

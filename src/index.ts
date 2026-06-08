@@ -18,7 +18,12 @@ import { ok } from './utils/api-response.js';
 import logger from './utils/logger.js';
 import { getMetricsContentType, getMetricsText, recordHttp } from './utils/metrics.js';
 import { seedDefaultLeaveTypes } from './services/leave-type.service.js';
-import { migrateAttendanceSegments } from './services/attendance.service.js';
+// M16 — `migrateAttendanceSegments` (BUG-040 one-time backfill) removed.
+// The backfill landed long enough ago that any unmigrated record would
+// have been caught by smoke tests; the per-boot cursor scan was
+// wasted work. If a future env needs a re-migration, the function is
+// preserved in git history and can be re-introduced behind an explicit
+// boot flag rather than running unconditionally.
 import { bootstrapRolesMigration } from './services/role.service.js';
 import { migratePlaintextSlackBotToken } from './services/slack-settings.service.js';
 import { migrateShareLinkTokensToHashed } from './services/share-link.service.js';
@@ -296,19 +301,10 @@ const startServer = async () => {
         // string. Idempotent on a fully-migrated DB.
         await bootstrapRolesMigration();
 
-        // BUG-040 — one-time backfill of multi-segment attendance.
-        // Walks any AttendanceRecord with a top-level check_in but an
-        // empty segments[] array and seeds segments from the legacy
-        // embed. Idempotent — re-running it on a fully migrated DB is
-        // a no-op.
-        try {
-            const result = await migrateAttendanceSegments();
-            if (result.backfilled > 0) {
-                logger.info({ backfilled: result.backfilled }, 'Attendance segments backfill complete');
-            }
-        } catch (err) {
-            logger.error({ err }, 'Attendance segments backfill failed');
-        }
+        // M16 — BUG-040 one-time backfill of multi-segment attendance
+        // was removed (was running on every boot even though the DB
+        // was long-since migrated). See attendance.service.ts for the
+        // matching deletion.
 
         // J1: encrypt-at-rest migration for any pre-J1 plaintext Slack
         // bot_token. Idempotent — a value that already looks like an
