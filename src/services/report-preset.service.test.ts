@@ -37,10 +37,28 @@ vi.mock('../models/report-preset.model.js', () => ({
     ReportPreset: {
         create: presetCreateMock,
         countDocuments: presetCountMock,
-        findOne: presetFindOneMock,
+        // H7 — `deletePreset` now calls `findOne(...).select('name
+        // report_name')` before the delete so the audit row can carry
+        // the preset's identity. Make the mock dual-shape: callers can
+        // either `await findOne(...)` directly (legacy, used by
+        // updatePreset / getPreset) OR `await findOne(...).select(...)`
+        // (new deletePreset path) — both resolve to whatever
+        // `presetFindOneMock` returned.
+        findOne: (filter: unknown) => {
+            const promise = Promise.resolve(presetFindOneMock(filter));
+            return {
+                select: () => promise,
+                then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+                    promise.then(resolve, reject),
+            };
+        },
         find: presetFindMock,
         deleteOne: presetDeleteOneMock,
     },
+}));
+
+vi.mock('./audit.service.js', () => ({
+    recordAudit: vi.fn(),
 }));
 
 const svc = await import('./report-preset.service.js');

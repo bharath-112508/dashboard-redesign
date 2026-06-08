@@ -7,6 +7,8 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { REPORT_PRESET_PER_USER_CAP } from '../constants/report-preset.js';
 import { type ReportExportName } from '../constants/export.js';
 import { parsePresetFilters } from '../validators/report-preset.validator.js';
+import { recordAudit, type AuditContext } from './audit.service.js';
+import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     CreateReportPresetBody,
@@ -63,7 +65,8 @@ const validateFilters = (name: ReportExportName, filters: unknown): Record<strin
 
 export const createPreset = async (
     body: CreateReportPresetBody,
-    callerId: Types.ObjectId
+    callerId: Types.ObjectId,
+    audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     // Per-user cap enforcement BEFORE the create attempt. Defence-in-
     // depth: even if a future migration loosens the unique compound
@@ -78,14 +81,14 @@ export const createPreset = async (
 
     const filters = validateFilters(body.report_name, body.filters);
 
+    let doc: ReportPresetDocument;
     try {
-        const doc = await ReportPreset.create({
+        doc = await ReportPreset.create({
             user_id: callerId,
             name: body.name,
             report_name: body.report_name,
             filters,
         });
-        return toPublic(doc);
     } catch (err: unknown) {
         // Unique-index collision on `(user_id, name)` — duplicate name.
         if (err && typeof err === 'object' && 'code' in err && (err as { code: number }).code === 11000) {
@@ -96,6 +99,18 @@ export const createPreset = async (
         }
         throw err;
     }
+
+    // H7 — sibling `report-subscription.*` was already audited; preset
+    // was the only saved-filter CRUD without a forensic trail.
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.REPORT_PRESET_CREATE,
+            target: { kind: AUDIT_TARGET_KINDS.REPORT_PRESET, id: doc._id },
+            after: { name: doc.name, report_name: doc.report_name },
+            metadata: { user_id: callerId.toString() },
+        });
+    }
+    return toPublic(doc);
 };
 
 // ─── List ──────────────────────────────────────────────────────────────
@@ -137,10 +152,15 @@ export const getPreset = async (id: Types.ObjectId, callerId: Types.ObjectId): P
 export const updatePreset = async (
     id: Types.ObjectId,
     body: PatchReportPresetBody,
-    callerId: Types.ObjectId
+    callerId: Types.ObjectId,
+    audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     const doc = await ReportPreset.findOne({ _id: id, user_id: callerId });
     if (!doc) throw AppError.notFound('Report preset not found', ERROR_CODES.REPORT_PRESET_NOT_FOUND);
+
+    // H7 — snapshot before for the audit row.
+    const beforeName = doc.name;
+    const beforeFilters = doc.filters;
 
     if (body.name !== undefined) doc.name = body.name;
     if (body.filters !== undefined) {
@@ -162,15 +182,40 @@ export const updatePreset = async (
         throw err;
     }
 
+    if (audit) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.REPORT_PRESET_UPDATE,
+            target: { kind: AUDIT_TARGET_KINDS.REPORT_PRESET, id: doc._id },
+            before: { name: beforeName, filters: beforeFilters as Record<string, unknown> },
+            after: { name: doc.name, filters: doc.filters as Record<string, unknown> },
+            metadata: { user_id: callerId.toString(), report_name: doc.report_name },
+        });
+    }
     return toPublic(doc);
 };
 
 // ─── Delete ────────────────────────────────────────────────────────────
 
-export const deletePreset = async (id: Types.ObjectId, callerId: Types.ObjectId): Promise<{ deleted: true }> => {
+export const deletePreset = async (
+    id: Types.ObjectId,
+    callerId: Types.ObjectId,
+    audit?: AuditContext
+): Promise<{ deleted: true }> => {
+    // H7 — load the row BEFORE deletion so the audit's `before` block
+    // can carry the name + report_name. Otherwise the audit row would
+    // point at an id with no useful context.
+    const doc = await ReportPreset.findOne({ _id: id, user_id: callerId }).select('name report_name');
     const result = await ReportPreset.deleteOne({ _id: id, user_id: callerId });
     if (result.deletedCount === 0) {
         throw AppError.notFound('Report preset not found', ERROR_CODES.REPORT_PRESET_NOT_FOUND);
+    }
+    if (audit && doc) {
+        await recordAudit(audit, {
+            action: AUDIT_ACTIONS.REPORT_PRESET_DELETE,
+            target: { kind: AUDIT_TARGET_KINDS.REPORT_PRESET, id },
+            before: { name: doc.name, report_name: doc.report_name },
+            metadata: { user_id: callerId.toString() },
+        });
     }
     return { deleted: true };
 };

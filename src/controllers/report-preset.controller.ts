@@ -4,6 +4,7 @@ import { Types } from 'mongoose';
 import * as service from '../services/report-preset.service.js';
 import { created, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import type {
     CreateReportPresetBody,
     ListReportPresetsQuery,
@@ -21,7 +22,7 @@ const idOf = (req: Request): Types.ObjectId => new Types.ObjectId((req.params as
 // ─── POST /report-presets ────────────────────────────────────────────────
 
 export const postCreate = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.createPreset(req.body as CreateReportPresetBody, callerId(req));
+    const data = await service.createPreset(req.body as CreateReportPresetBody, callerId(req), buildAuditContext(req));
     return created(res, data);
 };
 
@@ -42,13 +43,18 @@ export const getOne = async (req: Request, res: Response): Promise<Response> => 
 // ─── PATCH /report-presets/:id ───────────────────────────────────────────
 
 export const patchOne = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.updatePreset(idOf(req), req.body as PatchReportPresetBody, callerId(req));
+    const data = await service.updatePreset(
+        idOf(req),
+        req.body as PatchReportPresetBody,
+        callerId(req),
+        buildAuditContext(req)
+    );
     return ok(res, data);
 };
 
 // ─── DELETE /report-presets/:id ──────────────────────────────────────────
 
 export const deleteOne = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.deletePreset(idOf(req), callerId(req));
+    const data = await service.deletePreset(idOf(req), callerId(req), buildAuditContext(req));
     return ok(res, data);
 };

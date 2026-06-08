@@ -12,10 +12,12 @@ import { Types } from 'mongoose';
  *  - `listSubscriptionsForUser` is owner-scoped on the find filter.
  */
 
-const { findOneAndUpdateMock, deleteOneMock, findMock } = vi.hoisted(() => ({
+const { findOneAndUpdateMock, deleteOneMock, findMock, findOneMock, recordAuditMock } = vi.hoisted(() => ({
     findOneAndUpdateMock: vi.fn(),
     deleteOneMock: vi.fn(),
     findMock: vi.fn(),
+    findOneMock: vi.fn(),
+    recordAuditMock: vi.fn(),
 }));
 
 vi.mock('../models/push-subscription.model.js', () => ({
@@ -23,7 +25,16 @@ vi.mock('../models/push-subscription.model.js', () => ({
         findOneAndUpdate: findOneAndUpdateMock,
         deleteOne: deleteOneMock,
         find: findMock,
+        // H6 — service now does `findOne(...).select('_id')` before
+        // each subscribe/unsubscribe so the audit row carries a stable
+        // target. Tests must mock the chain — `.select()` resolves to
+        // whatever `findOneMock` returned.
+        findOne: (filter: unknown) => ({ select: () => findOneMock(filter) }),
     },
+}));
+
+vi.mock('./audit.service.js', () => ({
+    recordAudit: recordAuditMock,
 }));
 
 const svc = await import('./push-subscription.service.js');
@@ -32,6 +43,11 @@ beforeEach(() => {
     findOneAndUpdateMock.mockReset();
     deleteOneMock.mockReset();
     findMock.mockReset();
+    findOneMock.mockReset();
+    recordAuditMock.mockReset();
+    // Default: no existing row (insert path for upsert; idempotent
+    // unsubscribe for delete). Tests can override per-case.
+    findOneMock.mockResolvedValue(null);
 });
 
 describe('upsertSubscription', () => {

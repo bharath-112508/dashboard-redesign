@@ -283,6 +283,20 @@ export const AUDIT_ACTIONS = {
     REPORT_SUBSCRIPTION_DELETE: 'report_subscription.delete',
     REPORT_SUBSCRIPTION_SEND: 'report_subscription.send',
 
+    // Report presets — saved filter shapes per user (H7). Pre-H7 the
+    // CRUD ran without an audit trail even though
+    // `report-subscription.*` (the sibling surface) was fully audited.
+    REPORT_PRESET_CREATE: 'report_preset.create',
+    REPORT_PRESET_UPDATE: 'report_preset.update',
+    REPORT_PRESET_DELETE: 'report_preset.delete',
+
+    // Push subscriptions — browser notification-delivery targets (H6).
+    // Pre-H6 subscribe / unsubscribe ran without forensic trail; the
+    // ledger row carried only `created_by` and was hard-deleted on
+    // unsubscribe, leaving no record of who registered or revoked it.
+    PUSH_SUBSCRIPTION_CREATE: 'push_subscription.create',
+    PUSH_SUBSCRIPTION_DELETE: 'push_subscription.delete',
+
     // Custom roles (Phase 4 Step 47). System role mutations are
     // explicitly forbidden by the role service; only `is_system: false`
     // rows can be created / patched / deleted via API.
@@ -326,6 +340,8 @@ export const AUDIT_TARGET_KINDS = {
     REPORT_EXPORT: 'report_export',
     TASK_TEMPLATE: 'task_template',
     REPORT_SUBSCRIPTION: 'report_subscription',
+    REPORT_PRESET: 'report_preset',
+    PUSH_SUBSCRIPTION: 'push_subscription',
     ROLE: 'role',
 } as const;
 

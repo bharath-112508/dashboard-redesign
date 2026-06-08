@@ -4,10 +4,8 @@ import { Types } from 'mongoose';
 import * as service from '../services/push-subscription.service.js';
 import { noContent, ok } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
-import type {
-    SubscribePushBody,
-    UnsubscribePushBody,
-} from '../validators/push-subscription.validator.js';
+import { buildAuditContext } from '../utils/audit-context.js';
+import type { SubscribePushBody, UnsubscribePushBody } from '../validators/push-subscription.validator.js';
 
 /**
  * Push subscription controllers (V2-BE-10).
@@ -37,6 +35,9 @@ export const postSubscribe = async (req: Request, res: Response): Promise<Respon
         endpoint: body.endpoint,
         keys: body.keys,
         user_agent: body.user_agent ?? req.headers['user-agent'] ?? null,
+        // H6 — audit the subscribe (insert path only; idempotent
+        // re-subscribes don't emit a row, see service comment).
+        audit: buildAuditContext(req),
     });
     return ok(res, {
         id: sub._id.toString(),
@@ -49,7 +50,10 @@ export const postSubscribe = async (req: Request, res: Response): Promise<Respon
 
 export const deleteSubscribe = async (req: Request, res: Response): Promise<Response> => {
     const body = req.body as UnsubscribePushBody;
-    await service.deleteSubscriptionByEndpoint(callerId(req), body.endpoint);
+    // H6 — pass audit ctx; service only emits a row when an actual
+    // deletion happened (so idempotent retries on a missing endpoint
+    // stay silent).
+    await service.deleteSubscriptionByEndpoint(callerId(req), body.endpoint, buildAuditContext(req));
     // Idempotent — 204 even if there was no matching row.
     return noContent(res);
 };
