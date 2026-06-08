@@ -19,20 +19,24 @@ import { Types } from 'mongoose';
 const {
     leaveRequestFindByIdMock,
     leaveRequestFindOneAndUpdateMock,
+    leaveRequestFindMock,
     leaveBalanceUpdateOneMock,
     leaveTypeFindByIdMock,
     leaveTypeFindMock,
     holidayFindMock,
+    slForfeitureFindMock,
     settingsLoadMock,
     notifyDecidedMock,
     recordAuditMock,
 } = vi.hoisted(() => ({
     leaveRequestFindByIdMock: vi.fn(),
     leaveRequestFindOneAndUpdateMock: vi.fn(),
+    leaveRequestFindMock: vi.fn(),
     leaveBalanceUpdateOneMock: vi.fn(),
     leaveTypeFindByIdMock: vi.fn(),
     leaveTypeFindMock: vi.fn(),
     holidayFindMock: vi.fn(),
+    slForfeitureFindMock: vi.fn(),
     settingsLoadMock: vi.fn(),
     notifyDecidedMock: vi.fn(),
     recordAuditMock: vi.fn(),
@@ -42,7 +46,7 @@ vi.mock('../models/leave-request.model.js', () => ({
     LeaveRequest: {
         findById: leaveRequestFindByIdMock,
         findOneAndUpdate: leaveRequestFindOneAndUpdateMock,
-        find: vi.fn(),
+        find: leaveRequestFindMock,
         countDocuments: vi.fn(),
         create: vi.fn(),
     },
@@ -75,7 +79,7 @@ vi.mock('../models/holiday.model.js', () => ({
 }));
 
 vi.mock('../models/sl-monthly-forfeiture.model.js', () => ({
-    SlMonthlyForfeiture: { find: vi.fn().mockResolvedValue([]) },
+    SlMonthlyForfeiture: { find: slForfeitureFindMock },
 }));
 
 vi.mock('./settings.service.js', () => ({
@@ -87,9 +91,15 @@ vi.mock('./leave-balance.service.js', () => ({
     initializeBalancesForUserYear: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('./leave-segment.engine.js', () => ({
-    generateSegments: vi.fn(),
-}));
+vi.mock('./leave-segment.engine.js', async () => {
+    // Forward the real `enumerateWorkingDays` (pure helper used by
+    // `buildSlMonthUsedMap`) while keeping `generateSegments` stubbed.
+    const actual = await vi.importActual<typeof import('./leave-segment.engine.js')>('./leave-segment.engine.js');
+    return {
+        ...actual,
+        generateSegments: vi.fn(),
+    };
+});
 
 vi.mock('./notification-dispatcher.service.js', () => ({
     notifyLeaveDecided: notifyDecidedMock,
@@ -150,6 +160,7 @@ beforeEach(() => {
     leaveTypeFindMock.mockResolvedValue([]);
     // Holiday.find(...).select(...) — chainable query stub.
     holidayFindMock.mockReturnValue({ select: () => Promise.resolve([]) });
+    slForfeitureFindMock.mockResolvedValue([]);
     settingsLoadMock.mockResolvedValue({
         work_schedule: { working_days: [1, 2, 3, 4, 5] },
         leave_policy: { cl_advance_notice_days: 14 },
@@ -270,9 +281,7 @@ describe('approveLeave', () => {
         // First balance update succeeds; second throws — simulates a
         // mid-loop network partition or constraint violation.
         const balanceErr = new Error('balance write failed');
-        leaveBalanceUpdateOneMock
-            .mockResolvedValueOnce({ acknowledged: true })
-            .mockRejectedValueOnce(balanceErr);
+        leaveBalanceUpdateOneMock.mockResolvedValueOnce({ acknowledged: true }).mockRejectedValueOnce(balanceErr);
 
         await expect(
             svc.approveLeave(
@@ -458,5 +467,183 @@ describe('cancelLeave', () => {
         await expect(svc.cancelLeave(r._id, { cancellation_reason: 'x' }, employee)).rejects.toMatchObject({
             code: ERROR_CODES.CONCURRENT_UPDATE_CONFLICT,
         });
+    });
+});
+
+// ─── C4 — buildSlMonthUsedMap re-derive month-by-month ────────────────────
+
+describe('buildSlMonthUsedMap — C4 month attribution', () => {
+    const userId = new Types.ObjectId();
+    const slTypeId = new Types.ObjectId();
+    const workingDays = [1, 2, 3, 4, 5] as const;
+    const holidays = new Set<string>();
+
+    /** Build a mock LeaveRequest doc with SL segment + `created_at`. */
+    const mkReq = (overrides: {
+        start_date: string;
+        end_date: string;
+        sl_days: number;
+        year: number;
+        created_at: Date;
+    }) => ({
+        start_date: overrides.start_date,
+        end_date: overrides.end_date,
+        leave_segments: [
+            {
+                leave_type_id: slTypeId,
+                year: overrides.year,
+                days: overrides.sl_days,
+                equals: (id: Types.ObjectId) => id.equals(slTypeId),
+            },
+        ],
+        created_at: overrides.created_at,
+    });
+
+    /** Stub `LeaveRequest.find(...).sort(...)` to resolve to `docs`. */
+    const stubFind = (docs: ReturnType<typeof mkReq>[]) => {
+        leaveRequestFindMock.mockReturnValueOnce({
+            sort: () =>
+                Promise.resolve(
+                    docs.map((d) => ({
+                        ...d,
+                        leave_segments: d.leave_segments.map((s) => ({
+                            leave_type_id: {
+                                equals: (id: Types.ObjectId) => id.equals(slTypeId),
+                            },
+                            year: s.year,
+                            days: s.days,
+                        })),
+                    }))
+                ),
+        });
+    };
+
+    it('attributes a single-month SL request to that month only', async () => {
+        // Feb 16 (Mon) single-day SL; slDays=1.
+        stubFind([
+            mkReq({
+                start_date: '2026-02-16',
+                end_date: '2026-02-16',
+                sl_days: 1,
+                year: 2026,
+                created_at: new Date('2026-02-10T00:00:00Z'),
+            }),
+        ]);
+
+        const out = await svc.buildSlMonthUsedMap({
+            user_id: userId,
+            sl_type_id: slTypeId,
+            yearsTouched: [2026],
+            workingDays,
+            holidays,
+        });
+
+        expect(out.get('2026-2')).toBe(1);
+        expect(out.has('2026-1')).toBe(false);
+    });
+
+    it('distributes a cross-month SL span chronologically (Jan 30 → Feb 2, slDays=2 → 1 Jan + 1 Feb)', async () => {
+        // Jan 30 Fri, Jan 31 Sat (off), Feb 1 Sun (off), Feb 2 Mon.
+        // Working days = {Jan 30, Feb 2}. Engine would assign SL Jan +
+        // SL Feb (1 each, slots_per_month=1).
+        // Bug-prone case: pre-C4 the helper put both SL days under Jan.
+        stubFind([
+            mkReq({
+                start_date: '2026-01-30',
+                end_date: '2026-02-02',
+                sl_days: 2,
+                year: 2026,
+                created_at: new Date('2026-01-25T00:00:00Z'),
+            }),
+        ]);
+
+        const out = await svc.buildSlMonthUsedMap({
+            user_id: userId,
+            sl_type_id: slTypeId,
+            yearsTouched: [2026],
+            workingDays,
+            holidays,
+        });
+
+        // Expected: Jan and Feb each take 1 SL slot.
+        expect(out.get('2026-1')).toBe(1);
+        expect(out.get('2026-2')).toBe(1);
+    });
+
+    it('replays chronologically so a later cross-month request skips an already-exhausted earlier month', async () => {
+        // Request A — Jan 15 (Thu) SL, slDays=1, created_at 2026-01-10.
+        // Request B — Jan 28 (Wed) → Mar 4 (Wed), slDays=2,
+        //              created_at 2026-01-20.
+        //
+        // After replay, sl_used[Jan] = 1 (from A). When B is processed,
+        // the Jan slot is exhausted; B's 2 SL must spill to Feb + Mar.
+        stubFind([
+            mkReq({
+                start_date: '2026-01-15',
+                end_date: '2026-01-15',
+                sl_days: 1,
+                year: 2026,
+                created_at: new Date('2026-01-10T00:00:00Z'),
+            }),
+            mkReq({
+                start_date: '2026-01-28',
+                end_date: '2026-03-04',
+                sl_days: 2,
+                year: 2026,
+                created_at: new Date('2026-01-20T00:00:00Z'),
+            }),
+        ]);
+
+        const out = await svc.buildSlMonthUsedMap({
+            user_id: userId,
+            sl_type_id: slTypeId,
+            yearsTouched: [2026],
+            workingDays,
+            holidays,
+        });
+
+        // Jan stays at 1 (only A); B's 2 SL spill into Feb + Mar.
+        expect(out.get('2026-1')).toBe(1);
+        expect(out.get('2026-2')).toBe(1);
+        expect(out.get('2026-3')).toBe(1);
+    });
+
+    it('attributes a half-day SL (0.5 stored) to the request day month', async () => {
+        // Single half-day on Mar 18 (Wed). slDays=0.5.
+        stubFind([
+            mkReq({
+                start_date: '2026-03-18',
+                end_date: '2026-03-18',
+                sl_days: 0.5,
+                year: 2026,
+                created_at: new Date('2026-03-15T00:00:00Z'),
+            }),
+        ]);
+
+        const out = await svc.buildSlMonthUsedMap({
+            user_id: userId,
+            sl_type_id: slTypeId,
+            yearsTouched: [2026],
+            workingDays,
+            holidays,
+        });
+
+        expect(out.get('2026-3')).toBe(0.5);
+    });
+
+    it('merges SlMonthlyForfeiture rows on top of replayed allocations', async () => {
+        // No live SL requests, just a forfeiture row.
+        stubFind([]);
+        slForfeitureFindMock.mockResolvedValueOnce([{ user_id: userId, year: 2026, month: 4, forfeited_days: 1 }]);
+
+        const out = await svc.buildSlMonthUsedMap({
+            user_id: userId,
+            sl_type_id: slTypeId,
+            yearsTouched: [2026],
+            workingDays,
+            holidays,
+        });
+
+        expect(out.get('2026-4')).toBe(1);
     });
 });

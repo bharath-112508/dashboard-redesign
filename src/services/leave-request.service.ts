@@ -22,7 +22,12 @@ import {
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { getOrInitSettings } from './settings.service.js';
 import { findOrInitBalance, initializeBalancesForUserYear } from './leave-balance.service.js';
-import { generateSegments, type ComputedSegment, type SegmentEngineResult } from './leave-segment.engine.js';
+import {
+    enumerateWorkingDays,
+    generateSegments,
+    type ComputedSegment,
+    type SegmentEngineResult,
+} from './leave-segment.engine.js';
 import { notifyLeaveDecided, notifyLeaveSubmitted } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
@@ -130,34 +135,116 @@ const loadApplyContext = async (spanFrom: string, spanTo: string): Promise<Apply
 
 // ─── SL "already used this month" map (engine input) ──────────────────────
 
-const buildSlMonthUsedMap = async (params: {
+/**
+ * C4 — SL month attribution. Pre-C4 the helper read each historical
+ * request's `start_date.month` ONCE and attributed every stored SL day
+ * for that request to that single month. A request spanning Jan 30 →
+ * Feb 2 with 1 SL day in Feb got filed as Jan SL usage; the next Feb
+ * request then re-claimed its Feb slot, double-spending the cap.
+ *
+ * Post-C4 we re-derive month attribution by REPLAYING the engine's
+ * own chronological first-fit + `slots_per_month` cap algorithm
+ * against each historical request's actual working-day enumeration.
+ * Requests are processed in `created_at` order so the cap state at
+ * each request's apply time is reconstructed, not what the calendar
+ * looks like today.
+ *
+ * Holidays are loaded for the FULL year span of every touched year
+ * (not just the requesting leave's span) so historical requests
+ * outside the apply context's range are still correctly day-counted.
+ */
+export const buildSlMonthUsedMap = async (params: {
     user_id: Types.ObjectId;
     sl_type_id: Types.ObjectId;
     yearsTouched: number[];
+    workingDays: readonly number[];
+    /** Pre-loaded holiday set for the touched-year range. When omitted
+     *  the helper loads them itself, bounded by min/max year. */
+    holidays?: ReadonlySet<string>;
+    /** Default 1 — matches the engine's `slots_per_month` default and
+     *  every existing call site (which doesn't override). */
+    slotsPerMonth?: number;
 }): Promise<Map<string, number>> => {
+    const slotsPerMonth = params.slotsPerMonth ?? 1;
     const out = new Map<string, number>();
     if (params.yearsTouched.length === 0) return out;
 
-    // Existing SL segments (pending + approved) — sum days per month, keyed
-    // off the request's start_date month so SL cannot retroactively be split
-    // across months by a future request.
+    // Hydrate holidays for the full year boundaries if not pre-loaded —
+    // historical requests may extend beyond the apply context's span.
+    let holidays = params.holidays;
+    if (!holidays) {
+        const minYear = Math.min(...params.yearsTouched);
+        const maxYear = Math.max(...params.yearsTouched);
+        const holidayDocs = await Holiday.find({
+            date: { $gte: `${minYear}-01-01`, $lte: `${maxYear}-12-31` },
+        }).select({ date: 1, _id: 0 });
+        holidays = new Set(holidayDocs.map((h) => h.date));
+    }
+
+    // Chronological order so the replay mirrors the engine's allocation
+    // at each request's actual apply time. Without this, an earlier
+    // request's SL slot would be attributed to a later request that
+    // happened to be inserted into Mongo first by happenstance.
     const reqs = await LeaveRequest.find({
         user_id: params.user_id,
         status: { $in: [LEAVE_REQUEST_STATUSES.PENDING, LEAVE_REQUEST_STATUSES.APPROVED] },
         'leave_segments.leave_type_id': params.sl_type_id,
         'leave_segments.year': { $in: params.yearsTouched },
-    });
+    }).sort({ created_at: 1 });
+
     for (const r of reqs) {
-        const month = Number.parseInt(r.start_date.slice(5, 7), 10);
+        // Aggregate this request's SL days by year (engine emits at most
+        // one SL segment per year).
+        const slByYear = new Map<number, number>();
         for (const seg of r.leave_segments) {
             if (!seg.leave_type_id.equals(params.sl_type_id)) continue;
             if (!params.yearsTouched.includes(seg.year)) continue;
-            const key = `${seg.year}-${month}`;
-            out.set(key, (out.get(key) ?? 0) + seg.days);
+            slByYear.set(seg.year, (slByYear.get(seg.year) ?? 0) + seg.days);
+        }
+        if (slByYear.size === 0) continue;
+
+        // Enumerate the request's actual working days, then bucket by
+        // (year, month).
+        const workingDayList = enumerateWorkingDays({
+            start_date: r.start_date,
+            end_date: r.end_date,
+            working_days: params.workingDays,
+            holidays,
+        });
+        const buckets = new Map<number, Map<number, number>>();
+        for (const d of workingDayList) {
+            const yr = Number.parseInt(d.slice(0, 4), 10);
+            const mo = Number.parseInt(d.slice(5, 7), 10);
+            const yrBucket = buckets.get(yr) ?? new Map<number, number>();
+            yrBucket.set(mo, (yrBucket.get(mo) ?? 0) + 1);
+            buckets.set(yr, yrBucket);
+        }
+
+        // For each year with stored SL, replay chronological first-fit
+        // against the accumulating `out` map. `slRemaining` caps total
+        // allocation at the stored segment days; per-month allocation
+        // is capped at `slotsPerMonth - already_used` (the engine's
+        // exact rule).
+        for (const [year, slDays] of slByYear) {
+            const yrBucket = buckets.get(year);
+            if (!yrBucket) continue;
+            let slRemaining = slDays;
+            const orderedMonths = Array.from(yrBucket.keys()).sort((a, b) => a - b);
+            for (const month of orderedMonths) {
+                if (slRemaining <= 0) break;
+                const key = `${year}-${month}`;
+                const alreadyUsed = out.get(key) ?? 0;
+                const monthDayCount = yrBucket.get(month) ?? 0;
+                const take = Math.min(slotsPerMonth - alreadyUsed, monthDayCount, slRemaining);
+                if (take > 0) {
+                    out.set(key, alreadyUsed + take);
+                    slRemaining -= take;
+                }
+            }
         }
     }
 
-    // Plus forfeitures for the years touched.
+    // Forfeitures carry `{year, month}` on the row — additive.
     const fft = await SlMonthlyForfeiture.find({
         user_id: params.user_id,
         year: { $in: params.yearsTouched },
@@ -217,6 +304,8 @@ export const previewSplit = async (
               user_id: caller.id,
               sl_type_id: sl._id,
               yearsTouched: span,
+              workingDays: ctx.workingDays,
+              holidays: ctx.holidayDates,
           })
         : new Map();
 
@@ -371,6 +460,8 @@ export const applyLeave = async (
                   user_id: caller.id,
                   sl_type_id: sl._id,
                   yearsTouched,
+                  workingDays: ctx.workingDays,
+                  holidays: ctx.holidayDates,
               })
             : Promise.resolve(new Map()),
         loadAvailableMap({
