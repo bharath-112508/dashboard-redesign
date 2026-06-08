@@ -332,6 +332,23 @@ const startServer = async () => {
             startScheduler();
         });
 
+        // H16 — HTTP server timeouts. Node 18+ defaults are 300 s
+        // (`requestTimeout`) and 60 s (`headersTimeout`), which leave
+        // sockets tied up by Slowloris-style trickle attacks for the
+        // full default window. Behind Azure Front Door / any cloud
+        // LB, `keepAliveTimeout` must also be > the LB's idle timeout
+        // (~60 s for Front Door) or socket hang-ups create spurious
+        // 502s.
+        //
+        // 30 s request timeout is well past every legitimate API call
+        // (the longest sync path is the billing report exporter at
+        // ~1-2 s); 65 s headers timeout pads a small slack above
+        // keep-alive so a hung header doesn't slip past the keep-alive
+        // cleanup.
+        server.requestTimeout = 30_000;
+        server.headersTimeout = 65_000;
+        server.keepAliveTimeout = 61_000;
+
         const shutdown = async (signal: string) => {
             logger.info({ signal }, 'Shutdown signal received, closing gracefully');
 
