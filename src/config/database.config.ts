@@ -15,7 +15,11 @@ const connectDB = async () => {
 
 export const disconnectDB = async (): Promise<void> => {
     try {
-        await mongoose.connection.close();
+        // L1 — explicit `force=false` makes the graceful intent grep-able.
+        // The default is already `false`, but spelling it out documents
+        // the choice and pairs with C7's await-before-disconnect change:
+        // we WANT mongoose to drain in-flight ops, not yank them away.
+        await mongoose.connection.close(false);
         logger.info('Database connection closed');
     } catch (error) {
         logger.error({ err: error }, 'Error while closing database connection');

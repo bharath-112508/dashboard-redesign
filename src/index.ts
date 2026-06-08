@@ -302,10 +302,7 @@ const startServer = async () => {
         try {
             const result = await migrateAttendanceSegments();
             if (result.backfilled > 0) {
-                logger.info(
-                    { backfilled: result.backfilled },
-                    'Attendance segments backfill complete'
-                );
+                logger.info({ backfilled: result.backfilled }, 'Attendance segments backfill complete');
             }
         } catch (err) {
             logger.error({ err }, 'Attendance segments backfill failed');
@@ -341,11 +338,31 @@ const startServer = async () => {
                 process.exit(1);
             }, 30000);
 
-            // 1. Stop accepting new HTTP connections (in-flight requests
-            //    finish on their own; new ones get refused).
-            server.close(async () => {
-                logger.info('HTTP server closed');
-            });
+            // C7 — pre-fix `server.close(async () => …)` was fire-and-
+            // forget; `disconnectDB()` could run while an HTTP handler
+            // was still mid-await on Mongo, causing the in-flight
+            // request to 500 with `MongoNotConnectedError`. Now we
+            // promisify `server.close` and AWAIT it so step 2 only
+            // starts after every in-flight request has resolved.
+            //
+            // 1. Stop accepting new HTTP connections AND drain
+            //    in-flight requests.
+            try {
+                await new Promise<void>((resolve) => {
+                    server.close((err) => {
+                        if (err) {
+                            logger.warn({ err }, 'server.close errored during shutdown');
+                        } else {
+                            logger.info('HTTP server closed');
+                        }
+                        resolve();
+                    });
+                });
+            } catch (err) {
+                // server.close's callback handles errors above; the
+                // promise itself shouldn't throw, but defence in depth.
+                logger.warn({ err }, 'server.close promise rejected during shutdown');
+            }
 
             // 2. Drain cron handlers (F5 — `stopScheduler` is now
             //    async + awaits in-flight runJob promises up to 25s).
@@ -355,9 +372,10 @@ const startServer = async () => {
                 logger.warn({ err }, 'stopScheduler threw during shutdown');
             }
 
-            // 3. Disconnect Mongo — only AFTER cron has drained so
-            //    handlers that needed the DB to finalise their
-            //    `job_runs` row + audit didn't lose access mid-write.
+            // 3. Disconnect Mongo — only AFTER both HTTP + cron have
+            //    drained so handlers that needed the DB to finalise
+            //    their `job_runs` row + audit didn't lose access
+            //    mid-write.
             try {
                 await disconnectDB();
             } catch (err) {
