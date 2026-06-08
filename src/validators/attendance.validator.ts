@@ -163,7 +163,16 @@ export const submitCorrectionBodySchema = z
     .object({
         attendance_record_id: objectIdSchema,
         requested_changes: z.object({
-            segments: z.array(requestedSegmentSchema).optional(),
+            // H1 — segments is optional, but when supplied it MUST be
+            // non-empty. Pre-H1 an empty array was treated as a
+            // "delete-all" request and the service's
+            // `length >= 0`-always-true guard wiped `record.segments`
+            // without updating `local_date`. Empty proposals are now
+            // rejected at the validator boundary — admins who really
+            // want to clear a day patch via `PATCH /attendance/:id`
+            // (audited as `attendance.patch`), not via the
+            // correction-request flow.
+            segments: z.array(requestedSegmentSchema).min(1).optional(),
             check_in: isoDateTime.nullable().optional(),
             check_out: isoDateTime.nullable().optional(),
             reason: z.string().trim().min(CORRECTION_REASON_MIN).max(CORRECTION_REASON_MAX),
@@ -179,12 +188,8 @@ export const submitCorrectionBodySchema = z
             // Segments-mode: every entry must have a check_in; check_out
             // may be null only for the LAST entry (an open session).
             // Segments must be sorted and non-overlapping in time.
-            if (c.segments!.length === 0) {
-                // Empty array is a "delete-all" request. Allow it —
-                // admins can approve to clear the day. But require a
-                // reason that explains why.
-                return;
-            }
+            // Empty arrays are blocked above by `.min(1)` — by the
+            // time we get here, `segments!.length >= 1`.
             const segs = c.segments!;
             for (let i = 0; i < segs.length; i += 1) {
                 const seg = segs[i]!;
@@ -244,12 +249,14 @@ export type SubmitCorrectionBody = z.infer<typeof submitCorrectionBodySchema>;
 
 // ─── GET /attendance/correction-requests ─────────────────────────────────
 
-export const listCorrectionsQuerySchema = z.object({
-    user_id: objectIdSchema.optional(),
-    status: z.enum(CORRECTION_REQUEST_STATUSES).optional(),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
-}).strict();
+export const listCorrectionsQuerySchema = z
+    .object({
+        user_id: objectIdSchema.optional(),
+        status: z.enum(CORRECTION_REQUEST_STATUSES).optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(100).default(20),
+    })
+    .strict();
 export type ListCorrectionsQuery = z.infer<typeof listCorrectionsQuerySchema>;
 
 // ─── POST /attendance/correction-requests/:id/{approve,reject} ──────────

@@ -710,7 +710,11 @@ export const approveCorrection = async (
     // possible so geofence/QR audit trails don't get clobbered by a
     // manual time correction.
     const proposedSegments = changes.segments;
-    if (proposedSegments && proposedSegments.length >= 0) {
+    // H1 — `length >= 0` was always true when defined, so an empty array
+    // wiped `record.segments` without touching `local_date`. Empty
+    // proposals are now blocked at the validator (`.min(1)` on
+    // requested_changes.segments); the `> 0` here is belt-and-braces.
+    if (proposedSegments && proposedSegments.length > 0) {
         const oldSegments = record.segments ?? [];
         record.segments = proposedSegments.map((p, i) => {
             const old = oldSegments[i];
