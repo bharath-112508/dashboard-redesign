@@ -56,10 +56,7 @@ const recomputeBalance = async (user_id: Types.ObjectId): Promise<number> => {
  * requested leave's year. If a user wants to spend comp-off in a year
  * other than the current one, that's a separate gap from this bug.
  */
-const syncLeaveBalanceForCompOff = async (
-    user_id: Types.ObjectId,
-    balance: number
-): Promise<void> => {
+const syncLeaveBalanceForCompOff = async (user_id: Types.ObjectId, balance: number): Promise<void> => {
     const compOffType = await LeaveType.findOne({ code: LEAVE_CODES.COMP_OFF, is_active: true });
     if (!compOffType) return;
     const year = new Date().getFullYear();
@@ -194,25 +191,45 @@ export const adjustCompOff = async (
     // be rejected with an explicit error rather than silently creating
     // ledger rows that can never be consumed via leave.
     if (target.role === ROLES.CLIENT) {
-        throw AppError.unprocessable(
-            'Comp-off cannot be assigned to clients',
-            ERROR_CODES.FORBIDDEN_ROLE_TARGET,
-            { role: target.role }
-        );
+        throw AppError.unprocessable('Comp-off cannot be assigned to clients', ERROR_CODES.FORBIDDEN_ROLE_TARGET, {
+            role: target.role,
+        });
     }
 
-    // Guard against driving balance negative on a `consume` adjustment.
-    // Capture the pre-adjust balance for the audit before/after diff so
-    // the audit row reflects the actual transition rather than recomputing
-    // again post-write.
+    // C3 — atomic balance gate. Pre-C3 a load-then-check pattern
+    // (`recomputeBalance` → `if balance < days` → `CompOffLedger.create`)
+    // raced under concurrent consumes: two parallel adjust(consumed, 3)
+    // calls at balance=5 both read 5, both passed the guard, both
+    // inserted a ledger row → balance settled at -1. The CAS below
+    // closes the race by atomically decrementing `comp_off_balance`
+    // (with a `$gte: days` predicate on consume) so the loser of any
+    // race sees `null` and we throw `INSUFFICIENT_LEAVE_BALANCE`.
+    //
+    // Capture the pre-adjust balance via `recomputeBalance` for the
+    // audit before/after diff. The CAS then $inc's the same field
+    // (consume: -days, grant: +days); a subsequent `recomputeBalance`
+    // post-ledger-insert reconciles the User counter against the
+    // ledger sum (idempotent — same value, just guards against drift
+    // if any prior write was lost).
     const balanceBefore = await recomputeBalance(targetUserId);
+    const signedDelta = body.type === COMP_OFF_TYPES.EARNED ? body.days : -body.days;
+    const casPredicate: Record<string, unknown> = { _id: targetUserId };
     if (body.type === COMP_OFF_TYPES.CONSUMED) {
-        if (balanceBefore < body.days) {
-            throw AppError.conflict('Insufficient comp-off balance', ERROR_CODES.INSUFFICIENT_LEAVE_BALANCE, {
-                available: balanceBefore,
-                requested: body.days,
-            });
-        }
+        // Loser sees null → 409. The race-safe gate.
+        casPredicate.comp_off_balance = { $gte: body.days };
+    }
+    const casResult = await User.findOneAndUpdate(
+        casPredicate,
+        { $inc: { comp_off_balance: signedDelta } },
+        { new: true }
+    );
+    if (!casResult) {
+        // Only the consume path can land here (grant has no predicate
+        // beyond `_id` and the target was already validated above).
+        throw AppError.conflict('Insufficient comp-off balance', ERROR_CODES.INSUFFICIENT_LEAVE_BALANCE, {
+            available: balanceBefore,
+            requested: body.days,
+        });
     }
 
     const ledger = await CompOffLedger.create({
@@ -225,6 +242,9 @@ export const adjustCompOff = async (
         created_by: actor.id,
     });
 
+    // Reconciles `User.comp_off_balance` against the ledger sum.
+    // Idempotent — should produce the same value the CAS already set,
+    // and self-heals any past drift if some earlier write was lost.
     const balanceAfter = await recomputeBalance(targetUserId);
 
     // BUG-036 — keep the leave-application read view in sync. The
@@ -241,7 +261,6 @@ export const adjustCompOff = async (
         // adjust ran with no audit trail — the only durable record was
         // the ledger row itself, which doesn't carry actor context
         // beyond `created_by`.
-        const signedDelta = body.type === COMP_OFF_TYPES.EARNED ? body.days : -body.days;
         await recordAudit(audit, {
             action: AUDIT_ACTIONS.COMP_OFF_ADJUST,
             target: { kind: AUDIT_TARGET_KINDS.COMP_OFF_LEDGER, id: ledger._id },

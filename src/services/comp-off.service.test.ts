@@ -25,6 +25,7 @@ const {
     userExistsMock,
     userUpdateOneMock,
     userFindByIdMock,
+    userFindOneAndUpdateMock,
     recordAuditMock,
     leaveTypeFindOneMock,
     leaveBalanceFindOneMock,
@@ -35,6 +36,7 @@ const {
     userExistsMock: vi.fn(),
     userUpdateOneMock: vi.fn(),
     userFindByIdMock: vi.fn(),
+    userFindOneAndUpdateMock: vi.fn(),
     recordAuditMock: vi.fn(),
     leaveTypeFindOneMock: vi.fn(),
     leaveBalanceFindOneMock: vi.fn(),
@@ -60,6 +62,10 @@ vi.mock('../models/user.model.js', () => ({
         findById: (id: unknown) => ({
             select: () => userFindByIdMock(id),
         }),
+        // C3 — atomic CAS gate. Tests that drive `adjustCompOff` must
+        // configure this per-case (resolve to a truthy `User` doc on
+        // grant / sufficient consume, `null` on insufficient consume).
+        findOneAndUpdate: userFindOneAndUpdateMock,
     },
 }));
 
@@ -107,6 +113,11 @@ beforeEach(() => {
     // (none of which mock the role explicitly) sail through the
     // client-target guard. The client-rejection test overrides this.
     userFindByIdMock.mockResolvedValue({ role: 'employee' });
+    // C3 — default the CAS gate to "winner" so existing tests (which
+    // all describe grant or sufficient-balance consumes) keep working.
+    // The "insufficient balance" test overrides to `null` to simulate
+    // the loser-of-race / under-balance branch.
+    userFindOneAndUpdateMock.mockResolvedValue({ comp_off_balance: 0 });
     // BUG-036 — the COMP_OFF LeaveBalance sync is opportunistic: if the
     // leave type isn't seeded (or LeaveBalance models aren't mocked
     // explicitly in a test) it no-ops and tests stay focused on their
@@ -239,6 +250,10 @@ describe('adjustCompOff — I1 audit shape', () => {
     it('does NOT emit an audit row when the consume guard rejects (insufficient balance)', async () => {
         // Balance = 1, consume request = 5 → reject.
         compOffLedgerAggregateMock.mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 1 }]);
+        // C3 — CAS predicate `comp_off_balance: { $gte: 5 }` against
+        // balance=1 fails the gate → findOneAndUpdate returns null,
+        // service throws INSUFFICIENT_LEAVE_BALANCE.
+        userFindOneAndUpdateMock.mockResolvedValueOnce(null);
 
         await expect(
             svc.adjustCompOff(
@@ -256,6 +271,94 @@ describe('adjustCompOff — I1 audit shape', () => {
         // Ledger never created → no audit row should fire either.
         expect(compOffLedgerCreateMock).not.toHaveBeenCalled();
         expect(recordAuditMock).not.toHaveBeenCalled();
+    });
+});
+
+describe('adjustCompOff — C3 atomic CAS race-guard', () => {
+    it('passes `comp_off_balance: { $gte: days }` predicate on consume', async () => {
+        // Pre-state: balance = 5 (load-then-check would also pass).
+        compOffLedgerAggregateMock
+            .mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 5 }])
+            .mockResolvedValueOnce([
+                { _id: COMP_OFF_TYPES.EARNED, total: 5 },
+                { _id: COMP_OFF_TYPES.CONSUMED, total: 3 },
+            ]);
+        userFindOneAndUpdateMock.mockResolvedValue({ comp_off_balance: 2 });
+        compOffLedgerCreateMock.mockResolvedValue({
+            _id: new Types.ObjectId(),
+            user_id: new Types.ObjectId(),
+            type: COMP_OFF_TYPES.CONSUMED,
+            days: 3,
+            toJSON: () => ({}),
+        });
+
+        const targetUserId = new Types.ObjectId();
+        await svc.adjustCompOff(
+            { user_id: targetUserId.toString(), type: COMP_OFF_TYPES.CONSUMED, days: 3, remarks: 'spend' },
+            { id: new Types.ObjectId(), role: ROLES.ADMIN }
+        );
+
+        // The CAS predicate MUST carry the `$gte: days` guard so two
+        // concurrent consumes can't both pass under race.
+        expect(userFindOneAndUpdateMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                _id: targetUserId,
+                comp_off_balance: { $gte: 3 },
+            }),
+            { $inc: { comp_off_balance: -3 } },
+            { new: true }
+        );
+    });
+
+    it('omits the `$gte` predicate on grant (always succeeds, no lower bound)', async () => {
+        compOffLedgerAggregateMock
+            .mockResolvedValueOnce([])
+            .mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 2 }]);
+        userFindOneAndUpdateMock.mockResolvedValue({ comp_off_balance: 2 });
+        compOffLedgerCreateMock.mockResolvedValue({
+            _id: new Types.ObjectId(),
+            user_id: new Types.ObjectId(),
+            type: COMP_OFF_TYPES.EARNED,
+            days: 2,
+            toJSON: () => ({}),
+        });
+
+        const targetUserId = new Types.ObjectId();
+        await svc.adjustCompOff(
+            { user_id: targetUserId.toString(), type: COMP_OFF_TYPES.EARNED, days: 2, remarks: 'grant' },
+            { id: new Types.ObjectId(), role: ROLES.ADMIN }
+        );
+
+        // Grant path has NO `comp_off_balance` predicate — just the
+        // `_id` match. Verifies the asymmetric guard.
+        const [predicate, , opts] = userFindOneAndUpdateMock.mock.calls[0]!;
+        expect(predicate).toEqual({ _id: targetUserId });
+        expect(predicate).not.toHaveProperty('comp_off_balance');
+        expect(userFindOneAndUpdateMock.mock.calls[0]![1]).toEqual({ $inc: { comp_off_balance: 2 } });
+        expect(opts).toEqual({ new: true });
+    });
+
+    it('throws INSUFFICIENT_LEAVE_BALANCE when the CAS gate returns null (loser of race)', async () => {
+        // Pre-state recompute reads a stale "5" but a concurrent consume
+        // already committed; the CAS gate fails because the actual row
+        // now has comp_off_balance < days.
+        compOffLedgerAggregateMock.mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 5 }]);
+        userFindOneAndUpdateMock.mockResolvedValueOnce(null);
+
+        await expect(
+            svc.adjustCompOff(
+                {
+                    user_id: new Types.ObjectId().toString(),
+                    type: COMP_OFF_TYPES.CONSUMED,
+                    days: 3,
+                    remarks: 'race-loser',
+                },
+                { id: new Types.ObjectId(), role: ROLES.ADMIN }
+            )
+        ).rejects.toMatchObject({ statusCode: 409, code: 'INSUFFICIENT_LEAVE_BALANCE' });
+
+        // Loser must NOT insert a ledger row.
+        expect(compOffLedgerCreateMock).not.toHaveBeenCalled();
     });
 });
 
