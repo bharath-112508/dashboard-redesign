@@ -267,24 +267,71 @@ export const buildBillingReport = async (query: BillingReportQuery): Promise<Bil
     // `local_date`, but the simpler "rate-at-window-end" matches what
     // most billing systems report.
     //
-    // Run rate lookups in parallel — with the 1000-row cap and 1-2
-    // sequential `findOne`s per row, doing this serially could mean
-    // 2000 sequential roundtrips on a busy project. Each lookup is an
-    // independent indexed query; `Promise.all` collapses the wall time
-    // to the slowest single call.
-    const rates = await Promise.all(
-        facet.rows.map((r) =>
-            findEffectiveRate({
-                user_id: r._id.user_id,
-                project_id: projectId,
-                // For `group_by=employee` rows the task field is absent;
-                // pass `null` so the lookup skips the task-specific
-                // probe and goes straight to the project-level rate.
-                task_id: r._id.task_id ?? null,
-                date: query.to_date,
-            })
-        )
-    );
+    // H23 — pre-H23 this fired up to 2000 sequential `findOne` round-
+    // trips per report call (1 task-specific + 1 project-level per
+    // row, ×1000 rows cap). Even with `Promise.all` parallelising, the
+    // Mongo connection pool (default 100, now capped at 50 per H20)
+    // serialised in practice and a billing report on a busy project
+    // took seconds-of-wall-time on Mongo I/O alone.
+    //
+    // Now: ONE find that pulls every rate row matching the date
+    // window for the `(user, project)` set used by this report. Pick
+    // task-specific first, fall back to project-level — same logic
+    // as `findEffectiveRate` but resolved in JS against an in-memory
+    // map. Rates are sorted by `effective_from desc` so the first
+    // match wins per `(user, task)` key.
+    const taskIdSet = facet.rows
+        .map((r) => r._id.task_id)
+        .filter((t): t is Types.ObjectId => Boolean(t));
+    const rateRows = await BillingRate.find({
+        user_id: { $in: userIds },
+        project_id: projectId,
+        effective_from: { $lte: query.to_date },
+        $and: [
+            { $or: [{ effective_to: null }, { effective_to: { $gte: query.to_date } }] },
+            {
+                $or: [
+                    ...(taskIdSet.length ? [{ task_id: { $in: taskIdSet } }] : []),
+                    { task_id: null },
+                ],
+            },
+        ],
+    })
+        .select('user_id task_id hourly_rate effective_from')
+        .sort({ effective_from: -1 })
+        .lean<
+            {
+                user_id: Types.ObjectId;
+                task_id: Types.ObjectId | null;
+                hourly_rate: number;
+                effective_from: string;
+            }[]
+        >();
+
+    // Build two maps: task-specific `(user|task) → rate` and
+    // project-level `(user) → rate`. Sort is desc so the first
+    // insertion wins (= latest effective rate at or before the
+    // window end date).
+    const taskRateMap = new Map<string, number>();
+    const projectRateMap = new Map<string, number>();
+    for (const r of rateRows) {
+        if (r.task_id) {
+            const k = `${r.user_id.toString()}|${r.task_id.toString()}`;
+            if (!taskRateMap.has(k)) taskRateMap.set(k, r.hourly_rate);
+        } else {
+            const k = r.user_id.toString();
+            if (!projectRateMap.has(k)) projectRateMap.set(k, r.hourly_rate);
+        }
+    }
+    const rates: (number | null)[] = facet.rows.map((r) => {
+        const userKey = r._id.user_id.toString();
+        if (r._id.task_id) {
+            const taskKey = `${userKey}|${r._id.task_id.toString()}`;
+            const taskRate = taskRateMap.get(taskKey);
+            if (taskRate !== undefined) return taskRate;
+        }
+        return projectRateMap.get(userKey) ?? null;
+    });
 
     let totalBillableAmount = 0;
     const hydratedRows: BillingRow[] = facet.rows.map((r, i) => {

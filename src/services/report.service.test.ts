@@ -26,6 +26,7 @@ import { ROLES } from '../constants/roles.js';
 const {
     timesheetAggregateMock,
     billingRateFindOneMock,
+    billingRateFindMock,
     attendanceAggregateMock,
     leaveBalanceFindMock,
     leaveTypeFindMock,
@@ -37,6 +38,7 @@ const {
 } = vi.hoisted(() => ({
     timesheetAggregateMock: vi.fn(),
     billingRateFindOneMock: vi.fn(),
+    billingRateFindMock: vi.fn(),
     attendanceAggregateMock: vi.fn(),
     leaveBalanceFindMock: vi.fn(),
     leaveTypeFindMock: vi.fn(),
@@ -52,7 +54,22 @@ vi.mock('../models/timesheet-entry.model.js', () => ({
 }));
 
 vi.mock('../models/billing-rate.model.js', () => ({
-    BillingRate: { findOne: billingRateFindOneMock },
+    BillingRate: {
+        findOne: billingRateFindOneMock,
+        // H23 — `buildBillingReport` now uses a single batched
+        // `BillingRate.find({ ... })` instead of per-row findOne.
+        // Tests seed the rate set on `billingRateFindMock`; the
+        // service walks them in `effective_from desc` order, so each
+        // test sorts its fixture rows accordingly. Mock the
+        // `select().sort().lean()` chain.
+        find: (filter: unknown) => ({
+            select: () => ({
+                sort: () => ({
+                    lean: () => Promise.resolve(billingRateFindMock(filter) ?? []),
+                }),
+            }),
+        }),
+    },
 }));
 
 vi.mock('../models/attendance-record.model.js', () => ({
@@ -149,11 +166,25 @@ describe('buildBillingReport', () => {
         userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna' }]));
         taskFindMock.mockReturnValueOnce(queryStub([{ _id: taskId, title: 'Build login' }]));
 
-        // Task-specific rate is tried first and wins. The fallback
-        // lookup must NEVER fire for this row.
-        billingRateFindOneMock
-            .mockReturnValueOnce(queryStub({ hourly_rate: 3000 })) // task-specific hit
-            .mockReturnValueOnce(queryStub(null)); // would be project fallback if reached
+        // H23 — single batched `BillingRate.find` returns ALL relevant
+        // rates pre-sorted by `effective_from desc`. Seed two: a
+        // task-specific row (newer) and a project-level fallback
+        // (older). Task-specific wins on the in-JS first-match
+        // resolution.
+        billingRateFindMock.mockReturnValueOnce([
+            {
+                user_id: userId,
+                task_id: taskId,
+                hourly_rate: 3000,
+                effective_from: '2026-03-01',
+            },
+            {
+                user_id: userId,
+                task_id: null,
+                hourly_rate: 1000,
+                effective_from: '2026-01-01',
+            },
+        ]);
 
         const result = await svc.buildBillingReport(baseQuery({ project_id: projectId.toString() }));
 
@@ -162,8 +193,8 @@ describe('buildBillingReport', () => {
         expect(result.rows[0].billable_amount).toBe(30000); // 10h × 3000
         expect(result.totals.billable_amount).toBe(30000);
 
-        // Only one findOne call — the project-level fallback was skipped.
-        expect(billingRateFindOneMock).toHaveBeenCalledTimes(1);
+        // H23 — one batched query for the whole report, not 1-2 per row.
+        expect(billingRateFindMock).toHaveBeenCalledTimes(1);
     });
 
     it('falls back to the project-level rate when no task-specific row exists', async () => {
@@ -187,15 +218,22 @@ describe('buildBillingReport', () => {
         userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna' }]));
         taskFindMock.mockReturnValueOnce(queryStub([{ _id: taskId, title: 'Triage' }]));
 
-        billingRateFindOneMock
-            .mockReturnValueOnce(queryStub(null)) // task-specific miss
-            .mockReturnValueOnce(queryStub({ hourly_rate: 2000 })); // project-level fallback hit
+        // H23 — only a project-level rate exists; the task-specific
+        // lookup falls through to it.
+        billingRateFindMock.mockReturnValueOnce([
+            {
+                user_id: userId,
+                task_id: null,
+                hourly_rate: 2000,
+                effective_from: '2026-01-01',
+            },
+        ]);
 
         const result = await svc.buildBillingReport(baseQuery({ project_id: projectId.toString() }));
 
         expect(result.rows[0].hourly_rate).toBe(2000);
         expect(result.rows[0].billable_amount).toBe(4000); // 2h × 2000
-        expect(billingRateFindOneMock).toHaveBeenCalledTimes(2);
+        expect(billingRateFindMock).toHaveBeenCalledTimes(1);
     });
 
     it('reports hours but zero amount when no rate matches at all', async () => {
@@ -219,8 +257,8 @@ describe('buildBillingReport', () => {
         userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna' }]));
         taskFindMock.mockReturnValueOnce(queryStub([{ _id: taskId, title: 'Untracked' }]));
 
-        // Both lookups miss.
-        billingRateFindOneMock.mockReturnValueOnce(queryStub(null)).mockReturnValueOnce(queryStub(null));
+        // H23 — no matching rate rows at all.
+        billingRateFindMock.mockReturnValueOnce([]);
 
         const result = await svc.buildBillingReport(baseQuery({ project_id: projectId.toString() }));
 
@@ -262,10 +300,16 @@ describe('buildBillingReport', () => {
         ]);
         userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna' }]));
 
-        // Only one rate lookup expected — the project-level one. If the
-        // service erroneously probed for a task-specific rate first, a
-        // second call would fire and this test would fail.
-        billingRateFindOneMock.mockReturnValueOnce(queryStub({ hourly_rate: 2500 }));
+        // H23 — group_by=employee rows carry no task_id, so the row
+        // resolution falls straight to the project-level rate.
+        billingRateFindMock.mockReturnValueOnce([
+            {
+                user_id: userId,
+                task_id: null,
+                hourly_rate: 2500,
+                effective_from: '2026-01-01',
+            },
+        ]);
 
         const result = await svc.buildBillingReport(
             baseQuery({ project_id: projectId.toString(), group_by: 'employee' })
@@ -275,7 +319,7 @@ describe('buildBillingReport', () => {
         expect(result.rows[0].task).toEqual({ id: null, title: null });
         expect(result.rows[0].hourly_rate).toBe(2500);
         expect(result.rows[0].billable_amount).toBe(37500); // 15h × 2500
-        expect(billingRateFindOneMock).toHaveBeenCalledTimes(1);
+        expect(billingRateFindMock).toHaveBeenCalledTimes(1);
         // Task display batch must be SKIPPED — there are no tasks to hydrate.
         expect(taskFindMock).not.toHaveBeenCalled();
     });
