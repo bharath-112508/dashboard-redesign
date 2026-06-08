@@ -1,13 +1,16 @@
 /**
  * Scheduled-job constants — Step 14 (Plan §8, BUILD_PROGRESS Step 14).
  *
- * Phase 1 ships four jobs, all driven by an in-process `node-cron`
+ * Phase 1 ships these jobs, all driven by an in-process `node-cron`
  * scheduler running in the IST timezone:
  *
  *   14.1 Attendance finalizer       — daily 23:00 IST (closes yesterday)
- *   14.2 Monthly SL forfeiture      — last day 23:55 IST
  *   14.3 Leave-year rollover        — Jan 1 00:05 IST
  *   14.4 Refresh / reset-token gc   — weekly Sunday 02:00 IST
+ *
+ * M15 — 14.2 "Monthly SL forfeiture" was removed; it was structurally
+ * dead under the current LEAVE_TYPE_SEEDS (SL ships `monthly_forfeiture:
+ * false`). See the inline note on `JOB_NAMES` below.
  *
  * Each job has:
  *  - A canonical `name` used both as the audit-log subject and the
@@ -73,7 +76,18 @@ export const JOB_CONSECUTIVE_FAILURE_THRESHOLD = 3;
 
 export const JOB_NAMES = {
     ATTENDANCE_FINALIZER: 'attendance_finalizer',
-    SL_MONTHLY_FORFEITURE: 'sl_monthly_forfeiture',
+    // M15 — `SL_MONTHLY_FORFEITURE` removed. The job was structurally
+    // dead under current policy (LEAVE_TYPE_SEEDS ships SL with
+    // `monthly_forfeiture: false`, so the job's
+    // `findOne({monthly_forfeiture: true})` always returned null and
+    // logged "skipping" once a month). The `SlMonthlyForfeiture` model
+    // + `COLLECTIONS.SL_MONTHLY_FORFEITURES` are deliberately retained
+    // because `leave-balance.service.ts` and `leave-request.service.ts`
+    // still read from the table — those reads gracefully handle the
+    // empty-table case. If SL forfeiture is ever re-enabled, the model
+    // and read paths are ready; the write side has to be a deliberate
+    // re-introduction (not a flag flip) so destructive monthly resets
+    // can't be accidentally activated.
     LEAVE_YEAR_ROLLOVER: 'leave_year_rollover',
     TOKEN_CLEANUP: 'token_cleanup',
     TIMESHEET_REMINDER: 'timesheet_reminder',
@@ -95,15 +109,6 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // Daily 23:00 IST — closes yesterday's open records (we compute "yesterday"
     // inside the job at call time so a manual trigger is also correct).
     [JOB_NAMES.ATTENDANCE_FINALIZER]: '0 23 * * *',
-
-    // Last-day-of-month at 23:55 IST. node-cron does not support "L"
-    // so we fire on days 28-31 only and let the job's
-    // `isLastDayOfMonth` check no-op the non-last days. Combined
-    // with the day-scoped `slMonthlyForfeitureRunKey` (T3 fix), this
-    // closes the lockout where a non-last-day fire on day 1 would
-    // claim a `success` row for `YYYY-MM` and prevent the actual
-    // forfeiture run on day 30/31.
-    [JOB_NAMES.SL_MONTHLY_FORFEITURE]: '55 23 28-31 * *',
 
     // 00:05 IST on Jan 1.
     [JOB_NAMES.LEAVE_YEAR_ROLLOVER]: '5 0 1 1 *',
@@ -166,28 +171,6 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
  */
 export const attendanceFinalizerRunKey = (now: Date = new Date()): string => {
     return dayjs(now).tz(JOB_TIMEZONE).subtract(1, 'day').format('YYYY-MM-DD');
-};
-
-/**
- * SL forfeiture keys off the calendar DAY (not the month — T3 fix).
- *
- * Pre-T3 the runKey was `YYYY-MM`. Combined with daily firing, that
- * meant the very first day of the month claimed the lock + the
- * day-of-month gate skipped + the row was marked `success`. The last
- * day's tick then found a `success` row for the same `YYYY-MM` and
- * `acquired = false` — the actual forfeiture **never executed**.
- *
- * Day-scoped runKey = each daily fire claims its own row. Combined
- * with the cron expression `'55 23 28-31 * *'` (only fires on days
- * 28-31), the inner `isLastDayOfMonth` gate still filters non-last
- * days, but those skips no longer block the actual last-day run.
- *
- * Idempotency on the same day: if ops manually re-runs the cron on
- * the last day, the second invocation collides on the now day-scoped
- * `(name, run_key)` unique index — exactly the behaviour we want.
- */
-export const slMonthlyForfeitureRunKey = (now: Date = new Date()): string => {
-    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
 };
 
 /** Leave-year rollover keys off the target year (the year just begun, IST). */

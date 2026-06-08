@@ -33,10 +33,28 @@ vi.mock('../models/task.model.js', () => ({
 
 const utils = await import('./story-task-queries.js');
 
-/** Build the chained-find return shape the helpers use: `.select(...).lean<T>()`. */
+/**
+ * Legacy chain — `Task.find({...}).select({...}).lean<T>()`.
+ * `detachStoryFromTasks` (two-phase find→updateMany) still uses this
+ * minimal shape.
+ */
 const findChain = (rows: unknown[]) => ({
     select: () => ({
         lean: () => Promise.resolve(rows),
+    }),
+});
+
+/**
+ * M11-capped chain — `Task.find({...}).select({...}).sort({...}).limit(N).lean<T>()`.
+ * `findTasksByStoryId` uses this after M11 (defensive cap + deterministic sort).
+ */
+const findChainCapped = (rows: unknown[]) => ({
+    select: () => ({
+        sort: () => ({
+            limit: () => ({
+                lean: () => Promise.resolve(rows),
+            }),
+        }),
     }),
 });
 
@@ -109,11 +127,15 @@ describe('aggregateStoryDerivedRows', () => {
 // ─── findTasksByStoryId ──────────────────────────────────────────────────
 
 describe('findTasksByStoryId', () => {
-    it('queries with the narrow projection via Task.find().select().lean() (no full-doc leak)', async () => {
+    it('queries with the narrow projection + cap via Task.find().select().sort().limit().lean() (no full-doc leak)', async () => {
         // The story endpoint surfaces only id / title / status /
         // sprint_id / primary_assignee_id. A regression that dropped
         // the projection would leak description / created_by / etc.
-        const selectMock = vi.fn(() => ({ lean: () => Promise.resolve([]) }));
+        // M11 — added `.sort({created_at, _id})` + `.limit(500)`
+        // (defensive cap) on the production chain.
+        const limitMock = vi.fn(() => ({ lean: () => Promise.resolve([]) }));
+        const sortMock = vi.fn(() => ({ limit: limitMock }));
+        const selectMock = vi.fn(() => ({ sort: sortMock }));
         findMock.mockReturnValueOnce({ select: selectMock });
 
         const storyId = new Types.ObjectId();
@@ -127,6 +149,8 @@ describe('findTasksByStoryId', () => {
             sprint_id: 1,
             primary_assignee_id: 1,
         });
+        expect(sortMock).toHaveBeenCalledWith({ created_at: 1, _id: 1 });
+        expect(limitMock).toHaveBeenCalledWith(500);
     });
 
     it('returns the rows verbatim from `.lean()`', async () => {
@@ -139,7 +163,7 @@ describe('findTasksByStoryId', () => {
                 primary_assignee_id: new Types.ObjectId(),
             },
         ];
-        findMock.mockReturnValueOnce(findChain(tasks));
+        findMock.mockReturnValueOnce(findChainCapped(tasks));
 
         const result = await utils.findTasksByStoryId(new Types.ObjectId());
         expect(result).toBe(tasks);

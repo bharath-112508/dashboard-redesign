@@ -28,7 +28,6 @@ const {
     loggerInfoMock,
     loggerWarnMock,
     runAttendanceMock,
-    runSlForfeitureMock,
     runLeaveYearMock,
     runTokenCleanupMock,
     runTimesheetReminderMock,
@@ -45,7 +44,6 @@ const {
     loggerInfoMock: vi.fn(),
     loggerWarnMock: vi.fn(),
     runAttendanceMock: vi.fn(),
-    runSlForfeitureMock: vi.fn(),
     runLeaveYearMock: vi.fn(),
     runTokenCleanupMock: vi.fn(),
     runTimesheetReminderMock: vi.fn(),
@@ -81,9 +79,11 @@ vi.mock('./runner.js', () => ({
 vi.mock('./attendance-finalizer.job.js', () => ({
     runAttendanceFinalizer: runAttendanceMock,
 }));
-vi.mock('./sl-monthly-forfeiture.job.js', () => ({
-    runSlMonthlyForfeiture: runSlForfeitureMock,
-}));
+// M15 — `./sl-monthly-forfeiture.job.js` mock removed (file deleted).
+// The "consecutive-failure isolation" test below was repurposed onto
+// `LEAVE_YEAR_ROLLOVER` since it just needs a second healthy job to
+// run alongside the failing attendance job; the SL job was only ever
+// a fixture, not the subject under test.
 vi.mock('./leave-year-rollover.job.js', () => ({
     runLeaveYearRollover: runLeaveYearMock,
 }));
@@ -140,7 +140,6 @@ beforeEach(() => {
     cronScheduleMock.mockImplementation(() => ({ stop: vi.fn() }));
     // Default: every runner resolves successfully. Tests override.
     runAttendanceMock.mockResolvedValue(undefined);
-    runSlForfeitureMock.mockResolvedValue(undefined);
     runLeaveYearMock.mockResolvedValue(undefined);
     runTokenCleanupMock.mockResolvedValue(undefined);
     runTimesheetReminderMock.mockResolvedValue(undefined);
@@ -240,15 +239,17 @@ describe('startScheduler — L4 consecutive-failure tracker', () => {
         const { startScheduler } = await import('./index.js');
 
         runAttendanceMock.mockRejectedValue(new Error('attendance broken'));
-        // SL forfeiture stays healthy.
-        runSlForfeitureMock.mockResolvedValue(undefined);
+        // Leave-year rollover stays healthy. (M15: was SL forfeiture
+        // pre-deletion; swapped to another known-healthy job since the
+        // test only needs two distinct jobs running side-by-side.)
+        runLeaveYearMock.mockResolvedValue(undefined);
 
         startScheduler();
         const attendanceTick = tickCallbackFor(JOB_NAMES.ATTENDANCE_FINALIZER);
-        const slTick = tickCallbackFor(JOB_NAMES.SL_MONTHLY_FORFEITURE);
+        const healthyTick = tickCallbackFor(JOB_NAMES.LEAVE_YEAR_ROLLOVER);
 
         for (let i = 0; i < JOB_CONSECUTIVE_FAILURE_THRESHOLD; i += 1) {
-            slTick(); // healthy ticks — should never trip
+            healthyTick(); // healthy ticks — should never trip
             attendanceTick(); // failing ticks
             await flush();
         }

@@ -131,10 +131,29 @@ const loadTaskDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, Task
 
 export const buildBillingReport = async (query: BillingReportQuery): Promise<BillingReportResult> => {
     const projectId = new Types.ObjectId(query.project_id);
+    // M14 — `client_id` was previously accepted by the validator but
+    // ignored by the service, so a caller passing it got the same data
+    // as one omitting it. The billing report has no row-level
+    // `client_id` to filter on (clients are external, they don't log
+    // timesheets), so the meaningful interpretation is a gate: assert
+    // the project actually belongs to that client. If not, refuse —
+    // the report is per-client meaningless. The check runs before any
+    // aggregation so an invalid pairing fails fast.
+    const projectSelectFields: string[] = ['_id', 'name'];
+    if (query.client_id) projectSelectFields.push('client_ids');
     const project = await Project.findById(projectId)
-        .select('_id name')
-        .lean<{ _id: Types.ObjectId; name: string } | null>();
+        .select(projectSelectFields.join(' '))
+        .lean<{ _id: Types.ObjectId; name: string; client_ids?: Types.ObjectId[] } | null>();
     if (!project) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    if (query.client_id) {
+        const clientId = new Types.ObjectId(query.client_id);
+        const onProject = (project.client_ids ?? []).some((id) => id.equals(clientId));
+        if (!onProject) {
+            // Same shape as the not-found path — operationally there's
+            // nothing to report for this (project, client) pair.
+            throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+        }
+    }
 
     // `$facet` so the rows + totals share one pipeline + one round-trip.
     // Both branches start from the same `$match` (project + date range +

@@ -20,6 +20,7 @@ import {
     aggregateStoryDerivedRows,
     detachStoryFromTasks,
     findTasksByStoryId,
+    findTasksByStoryIdPaginated,
     type StoryTaskRow,
     type TaskDerivedRow,
 } from '../utils/story-task-queries.js';
@@ -468,15 +469,16 @@ export const listStoryTasks = async (
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const { story } = await loadStoryAndProject(storyId, caller);
 
-    // Pagination is in-memory (the per-story task count is small enough)
-    // so the contract is simple. `findTasksByStoryId` runs a narrow
-    // `Task.find(...).select(...)` — see `utils/story-task-queries.ts`.
-    const rows = await findTasksByStoryId(story._id);
-    const start = (query.page - 1) * query.limit;
-    const slice = rows.slice(start, start + query.limit);
+    // M11 — DB-level pagination (was: fetch-all + in-memory slice).
+    // Pre-M11 a story with N tasks pulled N rows into memory on every
+    // `?page=K` hit; now Mongo handles skip/limit and a parallel
+    // `countDocuments` gives the wire envelope a real total without
+    // materialising the unread rows.
+    const skip = (query.page - 1) * query.limit;
+    const { rows, total } = await findTasksByStoryIdPaginated(story._id, { skip, limit: query.limit });
 
     return {
-        data: slice.map((t) => ({
+        data: rows.map((t) => ({
             id: t._id.toString(),
             story_id: story._id.toString(),
             sprint_id: t.sprint_id ? t.sprint_id.toString() : null,
@@ -487,8 +489,8 @@ export const listStoryTasks = async (
         meta: {
             page: query.page,
             limit: query.limit,
-            total: rows.length,
-            total_pages: Math.max(1, Math.ceil(rows.length / query.limit)),
+            total,
+            total_pages: Math.max(1, Math.ceil(total / query.limit)),
         },
     };
 };

@@ -107,16 +107,63 @@ export const aggregateStoryDerivedRows = async (
 };
 
 /**
+ * Defensive cap on the per-story task fetch. The Story board renders
+ * every task within a story (grouped by sprint), so the read has to
+ * hand back the full set — but a runaway story with thousands of tasks
+ * would pull the entire list into memory and break the board anyway.
+ * 500 is the design ceiling per Story; beyond that the UI is unusable
+ * and operations should split the story.
+ *
+ * M11 — pre-M11 this fetch was unbounded; a corrupt or migrated story
+ * with 50k tasks would have OOM'd the API node before reaching render.
+ */
+const STORY_TASKS_BOARD_CAP = 500;
+
+/**
  * Tasks belonging to a story, projected to the small shape the
- * `GET /stories/:id` and `GET /stories/:id/tasks` endpoints render.
- * The narrow projection is deliberate — these endpoints intentionally
- * surface only the fields the story-board UI renders.
+ * `GET /stories/:id` board render needs. Capped at
+ * `STORY_TASKS_BOARD_CAP` (500). Sort is `created_at: 1` with `_id`
+ * tiebreaker (BUG-033 pattern) so cap-truncation is deterministic and
+ * the first 500 are always the oldest 500 — predictable for the
+ * board.
+ *
+ * For paginated reads use `findTasksByStoryIdPaginated` instead — it
+ * DB-skips/limits rather than slicing in-memory.
  */
 export const findTasksByStoryId = async (storyId: Types.ObjectId): Promise<StoryTaskRow[]> => {
     const rows = await Task.find({ story_id: storyId })
         .select({ _id: 1, title: 1, status: 1, sprint_id: 1, primary_assignee_id: 1 })
+        .sort({ created_at: 1, _id: 1 })
+        .limit(STORY_TASKS_BOARD_CAP)
         .lean<StoryTaskRow[]>();
     return rows;
+};
+
+/**
+ * Paginated variant for `GET /stories/:id/tasks`. Runs the same
+ * narrow projection as `findTasksByStoryId` but at Mongo
+ * `skip/limit/sort` + a parallel `countDocuments` so the wire envelope
+ * gets a real total without materialising every row.
+ *
+ * M11 — pre-M11 the list endpoint loaded the full task set then
+ * `.slice(start, start+limit)` in Node. That made the page size only
+ * affect wire-bytes, not DB cost; a 5k-task story would still pull 5k
+ * rows into memory for each `GET /stories/:id/tasks?page=42` hit.
+ */
+export const findTasksByStoryIdPaginated = async (
+    storyId: Types.ObjectId,
+    opts: { skip: number; limit: number }
+): Promise<{ rows: StoryTaskRow[]; total: number }> => {
+    const [rows, total] = await Promise.all([
+        Task.find({ story_id: storyId })
+            .select({ _id: 1, title: 1, status: 1, sprint_id: 1, primary_assignee_id: 1 })
+            .sort({ created_at: 1, _id: 1 })
+            .skip(opts.skip)
+            .limit(opts.limit)
+            .lean<StoryTaskRow[]>(),
+        Task.countDocuments({ story_id: storyId }),
+    ]);
+    return { rows, total };
 };
 
 /**

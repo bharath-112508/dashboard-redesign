@@ -484,19 +484,26 @@ interface ClientDashboardPayload {
 /** Resolve the set of project IDs visible to this client. Single source of
  *  truth — every card below scopes its query through this list. */
 const resolveClientProjectIds = async (user_id: Types.ObjectId): Promise<Types.ObjectId[]> => {
-    const rows = await Project.find({ client_ids: user_id })
-        .select({ _id: 1 })
-        .lean<{ _id: Types.ObjectId }[]>();
+    const rows = await Project.find({ client_ids: user_id }).select({ _id: 1 }).lean<{ _id: Types.ObjectId }[]>();
     return rows.map((r) => r._id);
 };
 
 /** Per-project rollup → ClientProjectCard for the top-N most recently active.
- *  One aggregation pipeline so we don't N+1 over projects. */
+ *  One aggregation pipeline so we don't N+1 over projects.
+ *
+ *  M10 — accepts the pre-resolved `projectIds` from
+ *  `resolveClientProjectIds` instead of re-running `{ client_ids: user_id }`.
+ *  Pre-M10 the caller resolved the id list once and then this function
+ *  queried with the same predicate again — two index hits, two passes.
+ *  Using `_id: { $in: projectIds }` collapses the second query to a
+ *  fast `_id`-key lookup. Empty `projectIds` is preserved as the
+ *  zero-projects branch (Mongo treats `$in: []` as match-nothing). */
 const computeClientProjectCards = async (
-    user_id: Types.ObjectId,
+    visibleProjectIds: Types.ObjectId[],
     limit: number
 ): Promise<{ total: number; recent: ClientProjectCard[] }> => {
-    const projects = await Project.find({ client_ids: user_id })
+    if (visibleProjectIds.length === 0) return { total: 0, recent: [] };
+    const projects = await Project.find({ _id: { $in: visibleProjectIds } })
         .select({
             _id: 1,
             name: 1,
@@ -573,8 +580,7 @@ const computeClientProjectCards = async (
             status: p.status,
             task_count: rollup?.task_count ?? 0,
             open_task_count,
-            last_activity_at:
-                rollup?.last_activity_at?.toISOString() ?? p.updated_at?.toISOString() ?? null,
+            last_activity_at: rollup?.last_activity_at?.toISOString() ?? p.updated_at?.toISOString() ?? null,
         };
     });
 
@@ -639,7 +645,10 @@ export const buildClientDashboard = async (user_id: Types.ObjectId): Promise<Cli
     const [projects, recent_task_activity, unread_notifications] = await Promise.all([
         safeCard(
             'client.projects',
-            () => computeClientProjectCards(user_id, DASHBOARD_CLIENT_RECENT_PROJECTS),
+            // M10 — pass the resolved projectIds (instead of re-running
+            // `{ client_ids: user_id }`) so the second query is a cheap
+            // `_id`-key lookup instead of a duplicate client-side scan.
+            () => computeClientProjectCards(projectIds, DASHBOARD_CLIENT_RECENT_PROJECTS),
             { total: 0, recent: [] as ClientProjectCard[] }
         ),
         safeCard(

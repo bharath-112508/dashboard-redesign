@@ -3,7 +3,7 @@ import webPush from 'web-push';
 import logger from './logger.js';
 import { isAllowedPushEndpoint } from './push-endpoint-allowlist.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { PushSubscription, type PushSubscriptionDocument } from '../models/push-subscription.model.js';
+import { PushSubscription, type LeanPushSubscription } from '../models/push-subscription.model.js';
 
 /**
  * Web Push client (V2-BE-10).
@@ -62,7 +62,11 @@ export interface PushPayload {
 }
 
 export interface SendPushInput {
-    subscription: PushSubscriptionDocument;
+    // M12 — `LeanPushSubscription` matches what `listSubscriptionsForUser`
+    // actually returns (lean → no Mongoose methods); the dispatcher
+    // only reads fields and deletes by `_id`, both work on the lean
+    // shape.
+    subscription: LeanPushSubscription;
     payload: PushPayload;
     /** Logger context tag — e.g. `'leave-approved-recipient'`. */
     context: string;

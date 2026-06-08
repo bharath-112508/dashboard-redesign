@@ -137,12 +137,12 @@ describe('runJob', () => {
         createMock.mockResolvedValueOnce({});
         const handler = vi.fn().mockRejectedValue(new Error('SL math broke'));
 
-        const result = await runJob(JOB_NAMES.SL_MONTHLY_FORFEITURE, '2026-04', handler);
+        const result = await runJob(JOB_NAMES.LEAVE_YEAR_ROLLOVER, '2026-04', handler);
 
         expect(result.status).toBe('failed');
         expect(result.error).toBe('SL math broke');
         expect(updateOneMock).toHaveBeenCalledWith(
-            { name: JOB_NAMES.SL_MONTHLY_FORFEITURE, run_key: '2026-04' },
+            { name: JOB_NAMES.LEAVE_YEAR_ROLLOVER, run_key: '2026-04' },
             expect.objectContaining({
                 $set: expect.objectContaining({
                     status: JOB_RUN_STATUSES.FAILED,
@@ -190,7 +190,7 @@ describe('runJob', () => {
 
         // Fake timers so the exponential backoff doesn't actually sleep.
         vi.useFakeTimers();
-        const promise = runJob(JOB_NAMES.SL_MONTHLY_FORFEITURE, '2026-04', handler, { maxAttempts: 3 });
+        const promise = runJob(JOB_NAMES.LEAVE_YEAR_ROLLOVER, '2026-04', handler, { maxAttempts: 3 });
         // Drain the two backoff sleeps (1s, 2s).
         await vi.runAllTimersAsync();
         const result = await promise;

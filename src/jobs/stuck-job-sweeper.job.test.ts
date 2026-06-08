@@ -84,8 +84,8 @@ describe('sweepStuckJobs', () => {
         // A row that's been "running" for 90 minutes — past the 30 min stale threshold.
         const stuckRow = {
             _id: new Types.ObjectId(),
-            name: 'sl_monthly_forfeiture',
-            run_key: '2026-04',
+            name: 'leave_year_rollover',
+            run_key: '2026',
             started_at: new Date(now.getTime() - 90 * 60 * 1000),
             host: 'worker-1',
             pid: 4242,
@@ -95,7 +95,7 @@ describe('sweepStuckJobs', () => {
         const result = await sweepStuckJobs(now);
 
         expect(result.swept).toBe(1);
-        expect(result.jobs[0]).toContain('sl_monthly_forfeiture/2026-04');
+        expect(result.jobs[0]).toContain('leave_year_rollover/2026');
         expect(result.jobs[0]).toContain('host=worker-1');
         expect(result.jobs[0]).toContain('pid=4242');
         expect(updateManyMock).toHaveBeenCalledWith(

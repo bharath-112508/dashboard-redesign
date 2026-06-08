@@ -12,7 +12,8 @@ import { JOBS_ENABLED } from '../config/server.config.js';
 import logger from '../utils/logger.js';
 import { getInFlightRunJobs } from './runner.js';
 import { runAttendanceFinalizer } from './attendance-finalizer.job.js';
-import { runSlMonthlyForfeiture } from './sl-monthly-forfeiture.job.js';
+// M15 — `runSlMonthlyForfeiture` import + cron registration removed
+// (job was structurally dead). See `constants/jobs.ts` JOB_NAMES note.
 import { runLeaveYearRollover } from './leave-year-rollover.job.js';
 import { runTokenCleanup } from './token-cleanup.job.js';
 import { runTimesheetReminder } from './timesheet-reminder.job.js';
@@ -64,7 +65,6 @@ type JobRunner = () => Promise<unknown>;
 
 const REGISTRY: Record<JobName, JobRunner> = {
     [JOB_NAMES.ATTENDANCE_FINALIZER]: () => runAttendanceFinalizer(),
-    [JOB_NAMES.SL_MONTHLY_FORFEITURE]: () => runSlMonthlyForfeiture(),
     [JOB_NAMES.LEAVE_YEAR_ROLLOVER]: () => runLeaveYearRollover(),
     [JOB_NAMES.TOKEN_CLEANUP]: () => runTokenCleanup(),
     [JOB_NAMES.TIMESHEET_REMINDER]: () => runTimesheetReminder(),

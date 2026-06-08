@@ -53,6 +53,27 @@ export interface PushSubscriptionDocument extends Document {
     updated_at: Date;
 }
 
+/**
+ * M12 — plain-data shape returned by `.lean()` queries. `lean()` strips
+ * `Document` ancestry (no `.save()`, no `.toJSON()`, no Mongoose
+ * methods); typing the result as `PushSubscriptionDocument[]` is a
+ * lie that a future caller will trip over by trying to call a
+ * Mongoose method. Use this alias at lean call sites and propagate
+ * through callers.
+ */
+export type LeanPushSubscription = Pick<
+    PushSubscriptionDocument,
+    | '_id'
+    | 'user_id'
+    | 'endpoint'
+    | 'keys'
+    | 'user_agent'
+    | 'last_used_at'
+    | 'last_error_at'
+    | 'created_at'
+    | 'updated_at'
+>;
+
 const keysSchema = new Schema<PushSubscriptionKeys>(
     {
         p256dh: { type: String, required: true, trim: true, maxlength: 256 },

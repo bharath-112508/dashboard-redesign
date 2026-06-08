@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 
 import {
     PushSubscription,
+    type LeanPushSubscription,
     type PushSubscriptionDocument,
     type PushSubscriptionKeys,
 } from '../models/push-subscription.model.js';
@@ -130,9 +131,16 @@ export const deleteSubscriptionByEndpoint = async (
  * List active subscriptions for a user. Used by the dispatcher to
  * fan-out per recipient. Read-only — no caller authorisation needed
  * because the dispatcher only ever queries by the recipient's own id.
+ *
+ * M12 — returns `LeanPushSubscription[]` rather than the previous
+ * `PushSubscriptionDocument[]` lie. `.lean()` strips Mongoose
+ * ancestry, so callers that tried `.save()` / `.toJSON()` on the
+ * result would silently fail; the precise type prevents that at
+ * compile time. The dispatcher only reads fields and deletes by
+ * `_id`, which works on the lean shape.
  */
-export const listSubscriptionsForUser = async (user_id: Types.ObjectId): Promise<PushSubscriptionDocument[]> => {
-    return PushSubscription.find({ user_id }).lean<PushSubscriptionDocument[]>();
+export const listSubscriptionsForUser = async (user_id: Types.ObjectId): Promise<LeanPushSubscription[]> => {
+    return PushSubscription.find({ user_id }).lean<LeanPushSubscription[]>();
 };
 
 // ─── C8 follow-through boot migration ────────────────────────────────────
