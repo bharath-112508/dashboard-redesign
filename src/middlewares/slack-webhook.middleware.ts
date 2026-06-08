@@ -23,9 +23,13 @@ import { verifySlackSignature } from '../utils/slack-signature.js';
  *   - `req.body`      — parsed object (JSON or x-www-form-urlencoded)
  *
  * On reject:
- *   - 401  — bad signature
- *   - 503  — SLACK_SIGNING_SECRET unset (interactive routes mounted but
- *            env wasn't configured — operator error, not Slack's fault)
+ *   - 401  — bad signature OR signing secret unset. M6 — these used to
+ *            be distinct (401 vs 503), but the difference let an
+ *            unauthenticated probe distinguish "Slack is not configured"
+ *            from "I sent a bad signature." Collapsed to the same 401 +
+ *            generic body so operators still see the `no_secret` log
+ *            (which is what they need), but the wire response carries
+ *            no config disclosure.
  *   - 400  — malformed JSON body
  *
  * Never logs the body or headers — both contain Slack secrets when
@@ -65,7 +69,11 @@ export const slackWebhookMiddleware: RequestHandler = (req, res, next) => {
                 { code: ERROR_CODES.SLACK_INTERACTIVE_REJECTED, reason: 'no_secret' },
                 'SLACK_SIGNING_SECRET not configured but /slack route hit'
             );
-            res.status(503).json({ message: 'Slack interactive not configured' });
+            // M6 — match the bad-signature response exactly. A probe
+            // can't tell "not configured" from "bad signature" so the
+            // config state of the env is not leaked over the wire.
+            // Operator visibility is preserved via the warn log above.
+            res.status(401).json({ message: 'Unauthorized' });
             return;
         }
 

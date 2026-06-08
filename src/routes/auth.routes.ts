@@ -30,7 +30,11 @@ router.post('/login', authRateLimiter, validate({ body: loginBodySchema }), asyn
 router.post('/refresh', authRateLimiter, validate({ body: refreshBodySchema }), asyncHandler(auth.postRefresh));
 
 // Logout accepts the refresh token in the body — also public, but cheap.
-router.post('/logout', validate({ body: logoutBodySchema }), asyncHandler(auth.postLogout));
+// M5 — every other auth-mutating endpoint carries `authRateLimiter`;
+// logout fell through to the global 120/min/IP. Even though the BE
+// path is cheap, an attacker hitting `/logout` with guessed refresh
+// tokens shouldn't bypass the auth-tier rate budget.
+router.post('/logout', authRateLimiter, validate({ body: logoutBodySchema }), asyncHandler(auth.postLogout));
 
 // ─── Password reset (public) ───────────────────────────────────────────────
 // Both endpoints are rate-limited: forgot to prevent mailbox spam / enumeration

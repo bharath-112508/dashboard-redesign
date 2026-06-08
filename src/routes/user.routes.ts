@@ -2,7 +2,7 @@ import { Router } from 'express';
 
 import * as users from '../controllers/user.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
-import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
+import { authenticate, requirePermission, requirePermissionOrSelf } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import {
@@ -68,8 +68,15 @@ router.delete('/me/profile-photo', asyncHandler(users.deleteProfilePhoto));
 
 router.get('/:id', validate({ params: userIdParamSchema }), asyncHandler(users.getUserById));
 
+// M2 — gate at the route layer in addition to the service-layer guard
+// (`isAdminLike(caller) || isSelf`). Pre-M2 this route had NO
+// `requirePermission`, leaving service-side `isAdmin || isSelf` as the
+// sole defence — fine today, fragile if anyone ever refactors the
+// service and drops that check. `requirePermissionOrSelf` mirrors the
+// same policy at the edge.
 router.patch(
     '/:id',
+    requirePermissionOrSelf(PERMISSIONS.USER_WRITE),
     validate({ params: userIdParamSchema, body: updateUserBodySchema }),
     asyncHandler(users.patchUser)
 );

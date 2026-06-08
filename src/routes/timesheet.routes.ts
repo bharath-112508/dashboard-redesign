@@ -26,20 +26,16 @@ const router = Router();
 router.use(authenticate);
 
 // ─── /me — own entries ──────────────────────────────────────────────────
+//
+// M4 — these were gated on `TIMESHEET_WRITE`, which excluded read-only
+// audit/HR holders of `TIMESHEET_READ`. The service `listMyEntries` /
+// `listMyDay` already pin the filter to the caller's `user_id`, so
+// authenticate-only is the correct policy: any authenticated user can
+// list their own entries (Employee, Team Lead, Manager, Admin all do).
 
-router.get(
-    '/me',
-    requirePermission(PERMISSIONS.TIMESHEET_WRITE),
-    validate({ query: listTimesheetsQuerySchema }),
-    asyncHandler(ctrl.getMyList)
-);
+router.get('/me', validate({ query: listTimesheetsQuerySchema }), asyncHandler(ctrl.getMyList));
 
-router.get(
-    '/me/day/:date',
-    requirePermission(PERMISSIONS.TIMESHEET_WRITE),
-    validate({ params: dayDatePathSchema }),
-    asyncHandler(ctrl.getMyDay)
-);
+router.get('/me/day/:date', validate({ params: dayDatePathSchema }), asyncHandler(ctrl.getMyDay));
 
 // ─── /summary — manager + admin ─────────────────────────────────────────
 
@@ -68,9 +64,14 @@ router.post(
 
 // ─── /:id — read-self-or-privileged; write enforced inside service ──────
 
+// M4 — was gated on `TIMESHEET_WRITE` only, which excluded any
+// read-only role holding `TIMESHEET_READ` (audit/HR). `requirePermission`
+// uses anyOf semantics, so passing both lets either role pass the gate;
+// the row-level self-or-privileged check inside `getEntry` is the
+// actual authorization on the entry (entry owner OR manager/admin).
 router.get(
     '/:id',
-    requirePermission(PERMISSIONS.TIMESHEET_WRITE),
+    requirePermission(PERMISSIONS.TIMESHEET_READ, PERMISSIONS.TIMESHEET_WRITE),
     validate({ params: timesheetIdPathSchema }),
     asyncHandler(ctrl.getById)
 );

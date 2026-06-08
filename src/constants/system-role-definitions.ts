@@ -61,12 +61,17 @@ const EMPLOYEE_BASE: readonly Permission[] = [
     PERMISSIONS.TASK_ATTACHMENT_WRITE,
     PERMISSIONS.TASK_TEMPLATE_READ,
     PERMISSIONS.TIMESHEET_WRITE,
-    PERMISSIONS.ATTENDANCE_READ_OWN,
+    // M3 — `ATTENDANCE_READ_OWN`, `LEAVE_BALANCE_READ_OWN`,
+    // `LEAVE_REQUEST_READ_OWN` were dead: catalogued + assigned, but no
+    // route ever called `requirePermission(...READ_OWN)`. The matching
+    // `/me*` endpoints already owner-scope at the service layer
+    // (Attendance: `getMyAttendance`, LeaveBalance: `getMine`,
+    // LeaveRequest: `listMine`), so adding gates would be no-ops because
+    // every authenticated user held the bits. Removed from the catalog
+    // to clean up the FE Roles UI; route-layer behaviour is unchanged.
     PERMISSIONS.ATTENDANCE_CHECK_IN_OUT,
     PERMISSIONS.ATTENDANCE_CORRECTION_REQUEST,
     PERMISSIONS.LEAVE_TYPE_READ,
-    PERMISSIONS.LEAVE_BALANCE_READ_OWN,
-    PERMISSIONS.LEAVE_REQUEST_READ_OWN,
     PERMISSIONS.LEAVE_REQUEST_WRITE,
     PERMISSIONS.COMP_OFF_READ,
     PERMISSIONS.COMP_OFF_WRITE,

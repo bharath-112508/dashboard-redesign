@@ -79,7 +79,12 @@ export const PERMISSIONS = {
     BILLING_RATE_WRITE: 'billing_rate.write',
 
     // ─── Attendance ────────────────────────────────────────────────────
-    ATTENDANCE_READ_OWN: 'attendance.read_own',
+    //
+    // M3 — `attendance.read_own` was removed. `/attendance/me*` routes
+    // owner-scope at the service layer; nothing ever called
+    // `requirePermission(ATTENDANCE_READ_OWN)`. Re-add if you ever need
+    // to gate self-reads behind a permission (currently they're
+    // authenticate-only).
     ATTENDANCE_READ_TEAM: 'attendance.read_team',
     ATTENDANCE_CHECK_IN_OUT: 'attendance.check_in_out',
     ATTENDANCE_CORRECTION_REQUEST: 'attendance.correction_request',
@@ -88,10 +93,12 @@ export const PERMISSIONS = {
     // ─── Leaves ────────────────────────────────────────────────────────
     LEAVE_TYPE_READ: 'leave_type.read',
     LEAVE_TYPE_WRITE: 'leave_type.write',
-    LEAVE_BALANCE_READ_OWN: 'leave_balance.read_own',
+    // M3 — `leave_balance.read_own` + `leave_request.read_own` removed
+    // (see note above on ATTENDANCE_READ_OWN). `/leave-balance/me` and
+    // `/leave-requests/me` are authenticate-only with owner-scoping in
+    // the service.
     LEAVE_BALANCE_READ_TEAM: 'leave_balance.read_team',
     LEAVE_BALANCE_ADJUST: 'leave_balance.adjust',
-    LEAVE_REQUEST_READ_OWN: 'leave_request.read_own',
     LEAVE_REQUEST_READ_TEAM: 'leave_request.read_team',
     LEAVE_REQUEST_WRITE: 'leave_request.write',
     LEAVE_REQUEST_APPROVE: 'leave_request.approve',

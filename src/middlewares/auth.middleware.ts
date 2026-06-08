@@ -220,6 +220,46 @@ export const requirePermission = (...requiredPermissions: Permission[]) => {
 };
 
 /**
+ * M2 — `requirePermission` variant with an "or self" carve-out. Used by
+ * routes whose primary auth model is "permission X" but where the
+ * subject is also allowed to act on themselves (e.g. `PATCH /users/:id`
+ * — admins update anyone, the user updates themselves). Pre-M2 these
+ * routes had NO `requirePermission` at the route layer — they relied
+ * entirely on the service layer's `isAdmin || isSelf` guard, which is
+ * defence-in-depth but means any refactor that drops the service-side
+ * check silently exposes admin-tier updates.
+ *
+ * Reads `req.params[<paramName>]` to compare with the JWT's user_id.
+ * Defaults to `id` since that's the convention used by the user routes.
+ */
+export const requirePermissionOrSelf = (permission: Permission, options: { paramName?: string } = {}) => {
+    const paramName = options.paramName ?? 'id';
+    return (req: Request, _res: Response, next: NextFunction): void => {
+        if (!req.user) {
+            throw AppError.unauthenticated();
+        }
+        // Self path — match the JWT subject against the path id.
+        const targetId = req.params[paramName];
+        if (targetId && targetId === req.user.user_id) {
+            next();
+            return;
+        }
+        // Otherwise require the permission. Wildcard rules match
+        // `requirePermission` above.
+        const held = req.user.permissions ?? [];
+        if (held.includes(PERMISSIONS.SYSTEM_ADMIN) || isCallerAdmin(req.user)) {
+            next();
+            return;
+        }
+        if (held.includes(permission)) {
+            next();
+            return;
+        }
+        throw AppError.forbidden();
+    };
+};
+
+/**
  * Inline permission probe — same wildcard rules as `requirePermission`
  * but returns a boolean instead of throwing. Used by list controllers
  * that need to *silently* scrub privileged query params (e.g.

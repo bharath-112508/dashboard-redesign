@@ -9,7 +9,7 @@ import { recordAudit } from '../services/audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
-import { ROLES, type RoleType } from '../constants/roles.js';
+import { type RoleType } from '../constants/roles.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { callerHasPermission } from '../middlewares/auth.middleware.js';
 import { buildAuditContext } from '../utils/audit-context.js';
@@ -61,11 +61,18 @@ export const getListUsers = async (req: Request, res: Response): Promise<Respons
 // fetch themself. (BUG-039 — team-lead added to the privileged list so
 // the user-detail page renders for them. The detail page is intentionally
 // read-only for team-lead — see USER_WRITE gates in the FE Roles tab.)
+//
+// M1 — use the RBAC permission catalog instead of comparing `req.user.role`
+// strings. A future custom-role admin (Step 47 RBAC, where role bits come
+// from a per-user role bundle rather than the legacy single `role` column)
+// would have `req.user.role` set to something other than `admin` even
+// though they hold `USER_READ`. `callerHasPermission` resolves against
+// the full permission set (legacy role + role_keys + extra_permissions),
+// matching how every other privileged route in the codebase checks.
 export const getUserById = async (req: Request, res: Response): Promise<Response> => {
     const caller = callerId(req);
     const target = parseTargetId(req);
-    const isPrivileged =
-        req.user?.role === ROLES.ADMIN || req.user?.role === ROLES.MANAGER || req.user?.role === ROLES.TEAM_LEAD;
+    const isPrivileged = callerHasPermission(req, PERMISSIONS.USER_READ);
     if (!isPrivileged && !caller.equals(target)) {
         throw AppError.forbidden();
     }
