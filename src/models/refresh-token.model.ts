@@ -59,6 +59,15 @@ const refreshTokenSchema = new Schema<RefreshTokenDocument>(
 // TTL index — Mongo auto-removes rows where `expires_at` is in the past.
 refreshTokenSchema.index({ expires_at: 1 }, { expireAfterSeconds: 0 });
 
+// L6 — `enforceSessionCap` runs
+// `RefreshToken.find({user_id, _id: $ne, revoked_at: null, expires_at: $gt}).sort({created_at: 1})`
+// when a user's login count crosses the cap. Pre-L6 only `user_id` was
+// indexed; the sort + the predicate ran an in-memory shuffle over the
+// matched rows. Burst-login traffic is rare, but this index makes the
+// cap-check a pure index scan: `user_id` narrows, `revoked_at: 1`
+// filters live sessions, `created_at: 1` orders.
+refreshTokenSchema.index({ user_id: 1, revoked_at: 1, created_at: 1 });
+
 export const RefreshToken: Model<RefreshTokenDocument> = model<RefreshTokenDocument>(
     COLLECTIONS.REFRESH_TOKENS,
     refreshTokenSchema

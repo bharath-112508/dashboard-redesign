@@ -96,7 +96,20 @@ export const postExport = async (req: Request, res: Response): Promise<Response>
         }
 
         res.setHeader('Content-Type', mime);
-        res.setHeader('Content-Disposition', `attachment; filename="${fileName.replace(/"/g, '')}"`);
+        // L14 — RFC 5987 / RFC 6266 encoded filename. The pre-L14
+        // header `attachment; filename="<name with quotes stripped>"`
+        // had two latent footguns: (1) CRLF in `fileName` would split
+        // the header, (2) any non-ASCII Unicode (filter labels / future
+        // report shapes) violated RFC 6266 and would render as raw
+        // bytes in browsers. The server controls today's filename so
+        // neither bug fires now, but the encoding makes the header
+        // safe by construction. CR/LF + quote stripping kept as a
+        // belt-and-braces defence before encoding.
+        const safeFileName = fileName.replace(/[\r\n"]/g, '');
+        res.setHeader(
+            'Content-Disposition',
+            `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(safeFileName)}`
+        );
         res.setHeader('Content-Length', String(buffer.length));
         // Signal to the FE that this response is the file itself, not a
         // JSON `{ id, status }` envelope to poll.

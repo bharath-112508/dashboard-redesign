@@ -90,6 +90,18 @@ export const stuckJobSweepsTotal = getOrCreateCounter({
     labelNames: [] as const,
 });
 
+// L2 — unhandled promise rejections. The process-level handler in
+// `index.ts` logs at error but does NOT exit (the Node ≥15 default
+// is to throw → exit, but for this codebase an audit-dispatch
+// rejection shouldn't take down the API). This counter lets ops
+// dashboard the rate so a sudden spike triggers an investigation
+// even though the process keeps running.
+export const unhandledRejectionTotal = getOrCreateCounter({
+    name: 'viljetech_unhandled_rejection_total',
+    help: 'Cumulative count of unhandled promise rejections caught by the process handler.',
+    labelNames: [] as const,
+});
+
 const getOrCreateGauge = <L extends string>(cfg: client.GaugeConfiguration<L>): client.Gauge<L> => {
     const existing = client.register.getSingleMetric(cfg.name);
     return (existing ?? new client.Gauge(cfg)) as client.Gauge<L>;

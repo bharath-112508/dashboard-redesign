@@ -16,7 +16,7 @@ import { generalRateLimiter, healthRateLimiter } from './middlewares/rate-limit.
 import { API_PREFIX, ERROR_CODES } from './constants/index.js';
 import { ok } from './utils/api-response.js';
 import logger from './utils/logger.js';
-import { getMetricsContentType, getMetricsText, recordHttp } from './utils/metrics.js';
+import { getMetricsContentType, getMetricsText, recordHttp, unhandledRejectionTotal } from './utils/metrics.js';
 import { seedDefaultLeaveTypes } from './services/leave-type.service.js';
 // M16 — `migrateAttendanceSegments` (BUG-040 one-time backfill) removed.
 // The backfill landed long enough ago that any unmigrated record would
@@ -349,7 +349,13 @@ const startServer = async () => {
         // dispatch attempts. Idempotent. Never throws.
         await migrateDisallowedPushEndpoints();
 
-        const server = app.listen(PORT, () => {
+        // L3 — bind explicitly to `0.0.0.0` so the host interface is
+        // grep-able + obvious. Defaulting (no host arg) lands on the
+        // same address on Azure App Service / Container Apps / K8s,
+        // but explicit is safer when the deploy target changes — a
+        // future image that boots on localhost-only by default would
+        // silently fail readiness probes.
+        const server = app.listen(PORT, '0.0.0.0', () => {
             logger.info({ port: PORT, env: NODE_ENV, api_prefix: API_PREFIX }, 'Server is running');
             // Start scheduled jobs only after the HTTP server is up so a
             // boot failure can't leave a half-initialized cron registry
@@ -443,7 +449,15 @@ const startServer = async () => {
             shutdown('SIGINT').catch((err) => logger.error({ err }, 'shutdown threw'));
         });
 
+        // L2 — the Node ≥15 default for `unhandledRejection` is throw →
+        // `uncaughtException` → exit. We swallow + log instead: the
+        // most likely sources are best-effort fire-and-forget side
+        // effects (audit dispatch failures, notification dispatch
+        // retries) that shouldn't kill the API. The `unhandledRejectionTotal`
+        // Prometheus counter gives ops a dashboard signal so a spike
+        // is still visible even though the process stays up.
         process.on('unhandledRejection', (reason) => {
+            unhandledRejectionTotal.inc();
             logger.error({ reason }, 'Unhandled promise rejection');
         });
         process.on('uncaughtException', (err) => {
