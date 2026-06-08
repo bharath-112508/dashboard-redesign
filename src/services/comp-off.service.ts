@@ -262,12 +262,23 @@ export const adjustCompOff = async (
             findOpts
         );
         if (!casResult) {
-            // Only the consume path can land here (grant has no
-            // predicate beyond `_id`; target was validated above).
-            throw AppError.conflict('Insufficient comp-off balance', ERROR_CODES.INSUFFICIENT_LEAVE_BALANCE, {
-                available: balanceBefore,
-                requested: body.days,
-            });
+            // C3 follow-through — distinguish the two reasons a CAS
+            // can return null: (a) consume race-loser (predicate
+            // `comp_off_balance: { $gte: days }` failed because the
+            // ledger has been drained); (b) the user was deleted
+            // between the role-check above and the CAS. Pre-fix both
+            // branches threw `INSUFFICIENT_LEAVE_BALANCE`, which on
+            // the grant path is misleading copy ("insufficient
+            // balance" on a +days grant makes no sense to an admin).
+            if (body.type === COMP_OFF_TYPES.CONSUMED) {
+                throw AppError.conflict('Insufficient comp-off balance', ERROR_CODES.INSUFFICIENT_LEAVE_BALANCE, {
+                    available: balanceBefore,
+                    requested: body.days,
+                });
+            }
+            // Grant CAS predicate is just `{ _id }` — null means the
+            // user vanished mid-adjust. Treat as not-found.
+            throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
         }
 
         const createPayload = {

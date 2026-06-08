@@ -5,6 +5,8 @@ import {
     type PushSubscriptionDocument,
     type PushSubscriptionKeys,
 } from '../models/push-subscription.model.js';
+import { isAllowedPushEndpoint } from '../utils/push-endpoint-allowlist.js';
+import logger from '../utils/logger.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 
@@ -131,4 +133,61 @@ export const deleteSubscriptionByEndpoint = async (
  */
 export const listSubscriptionsForUser = async (user_id: Types.ObjectId): Promise<PushSubscriptionDocument[]> => {
     return PushSubscription.find({ user_id }).lean<PushSubscriptionDocument[]>();
+};
+
+// ─── C8 follow-through boot migration ────────────────────────────────────
+
+/**
+ * C8 follow-through — boot-time prune of push-subscription rows whose
+ * `endpoint` doesn't satisfy the post-C8 allowlist. Pre-C8 the
+ * validator accepted any URL, so production may carry rows pointing
+ * at `http://169.254.169.254/...` (IMDS), `http://localhost:6379/`,
+ * or other internal targets. The dispatch-time gate in `utils/push.ts`
+ * also skips these going forward — this migration deletes them
+ * permanently so they don't consume dispatch attempts indefinitely.
+ *
+ * Idempotent — post-deploy rows always pass the gate (the subscribe
+ * validator rejects others), so the next boot reruns this as a no-op.
+ * Never throws — failures log under `PUSH_ENDPOINT_MIGRATION_FAILED`
+ * and boot continues. Returns `{ scanned, deleted, failed }` for the
+ * boot log.
+ */
+export const migrateDisallowedPushEndpoints = async (): Promise<{
+    scanned: number;
+    deleted: number;
+    failed: number;
+}> => {
+    let scanned = 0;
+    let deleted = 0;
+    let failed = 0;
+    try {
+        // Stream via cursor so a million-row prod table doesn't blow
+        // the heap on a single `find()`. Per-row checks are CPU-bound
+        // and tiny; this loop is bounded by row count, not query cost.
+        const cursor = PushSubscription.find({}).select('_id endpoint').cursor();
+        for await (const row of cursor) {
+            scanned += 1;
+            if (isAllowedPushEndpoint(row.endpoint)) continue;
+            try {
+                await PushSubscription.deleteOne({ _id: row._id });
+                deleted += 1;
+            } catch (err) {
+                failed += 1;
+                logger.warn(
+                    {
+                        err,
+                        code: 'PUSH_ENDPOINT_MIGRATION_FAILED',
+                        subscription_id: row._id.toString(),
+                    },
+                    'Failed to delete disallowed push subscription'
+                );
+            }
+        }
+        if (deleted > 0 || failed > 0) {
+            logger.info({ scanned, deleted, failed }, 'Push endpoint allowlist migration complete');
+        }
+    } catch (err) {
+        logger.warn({ err, code: 'PUSH_ENDPOINT_MIGRATION_FAILED' }, 'Push endpoint allowlist migration cursor failed');
+    }
+    return { scanned, deleted, failed };
 };

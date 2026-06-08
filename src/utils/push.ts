@@ -1,6 +1,7 @@
 import webPush from 'web-push';
 
 import logger from './logger.js';
+import { isAllowedPushEndpoint } from './push-endpoint-allowlist.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { PushSubscription, type PushSubscriptionDocument } from '../models/push-subscription.model.js';
 
@@ -72,8 +73,7 @@ interface WebPushError extends Error {
     body?: string;
 }
 
-const isPermanentlyDead = (statusCode: number | undefined): boolean =>
-    statusCode === 404 || statusCode === 410;
+const isPermanentlyDead = (statusCode: number | undefined): boolean => statusCode === 404 || statusCode === 410;
 
 /**
  * Send one push to one subscription. Returns `true` on success, `false`
@@ -90,6 +90,33 @@ export const sendPushNotification = async (input: SendPushInput): Promise<boolea
     }
 
     const { subscription, payload, context } = input;
+
+    // C8 follow-through — re-validate the stored endpoint before
+    // dispatching. C8's validator gate closed the subscribe path, but
+    // rows persisted BEFORE the deploy could still point at internal
+    // targets (IMDS, localhost, RFC1918). Without this check the
+    // dispatcher would keep POSTing to them forever. On a hit we
+    // hard-delete the row + log it as a deliberate prune; the same
+    // row is also targeted by the boot migration, but the
+    // migration is a one-shot — this guard fires on the very next
+    // dispatch even if the migration was skipped.
+    if (!isAllowedPushEndpoint(subscription.endpoint)) {
+        logger.warn(
+            {
+                code: ERROR_CODES.PUSH_DISPATCH_FAILED,
+                subscription_id: subscription._id.toString(),
+                reason: 'endpoint_not_allowlisted',
+                dispatch_event: context,
+            },
+            'Pruning push subscription with non-allowlisted endpoint'
+        );
+        try {
+            await PushSubscription.deleteOne({ _id: subscription._id });
+        } catch {
+            // swallow — the next dispatch will see it again and try again
+        }
+        return false;
+    }
 
     try {
         // H18 — bound the outbound push call. `web-push` uses Node's
@@ -110,10 +137,7 @@ export const sendPushNotification = async (input: SendPushInput): Promise<boolea
         // Best-effort stamp — failure to write the timestamp must not
         // mask a successful send.
         try {
-            await PushSubscription.updateOne(
-                { _id: subscription._id },
-                { $set: { last_used_at: new Date() } }
-            );
+            await PushSubscription.updateOne({ _id: subscription._id }, { $set: { last_used_at: new Date() } });
         } catch {
             // swallow
         }
@@ -141,10 +165,7 @@ export const sendPushNotification = async (input: SendPushInput): Promise<boolea
 
         // Transient failure: stamp + log, leave the row alone.
         try {
-            await PushSubscription.updateOne(
-                { _id: subscription._id },
-                { $set: { last_error_at: new Date() } }
-            );
+            await PushSubscription.updateOne({ _id: subscription._id }, { $set: { last_error_at: new Date() } });
         } catch {
             // swallow
         }

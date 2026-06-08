@@ -22,6 +22,7 @@ import { migrateAttendanceSegments } from './services/attendance.service.js';
 import { bootstrapRolesMigration } from './services/role.service.js';
 import { migratePlaintextSlackBotToken } from './services/slack-settings.service.js';
 import { migrateShareLinkTokensToHashed } from './services/share-link.service.js';
+import { migrateDisallowedPushEndpoints } from './services/push-subscription.service.js';
 import { getScheduledJobCount, startScheduler, stopScheduler } from './jobs/index.js';
 
 const app = express();
@@ -322,6 +323,14 @@ const startServer = async () => {
         // Idempotent — post-migration rows have `token: null` and are
         // skipped. Never throws.
         await migrateShareLinkTokensToHashed();
+
+        // C8 follow-through: prune push-subscription rows whose
+        // `endpoint` was stored pre-C8 (when any URL was accepted) and
+        // doesn't pass the post-C8 hostname allowlist. The dispatcher
+        // also re-checks at send time, but this one-shot migration
+        // permanently deletes the bad rows so they stop consuming
+        // dispatch attempts. Idempotent. Never throws.
+        await migrateDisallowedPushEndpoints();
 
         const server = app.listen(PORT, () => {
             logger.info({ port: PORT, env: NODE_ENV, api_prefix: API_PREFIX }, 'Server is running');
