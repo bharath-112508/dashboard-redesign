@@ -80,9 +80,16 @@ export const postExport = async (req: Request, res: Response): Promise<Response>
         });
 
         if (caller.audit) {
+            // M9 — inline exports don't materialise a `ReportExport` row,
+            // so there's no real ObjectId to reference. We used to mint a
+            // brand-new `new Types.ObjectId()` which made the audit row
+            // look like it pointed somewhere — an investigator following
+            // `target.id` would 404. The schema allows
+            // `target_entity.id = null`; use that instead so the row
+            // honestly says "kind=report_export, no persisted target".
             await recordAudit(caller.audit, {
                 action: AUDIT_ACTIONS.REPORT_EXPORT_CREATE,
-                target: { kind: AUDIT_TARGET_KINDS.REPORT_EXPORT, id: new Types.ObjectId() },
+                target: { kind: AUDIT_TARGET_KINDS.REPORT_EXPORT, id: null },
                 after: { report_name: name, format: body.format, status: 'ready_inline' },
                 metadata: { filters, inline: true, size_bytes: buffer.length },
             });

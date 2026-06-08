@@ -217,9 +217,15 @@ export const adminInitiatePasswordReset = async (targetUserId: Types.ObjectId, a
     // Audit with the admin as actor. The downstream user-consumption
     // row (when they click the link) will record them as the actor on
     // `AUTH_PASSWORD_RESET`.
+    //
+    // M24 — `target_email` removed. The target already carries the
+    // user `_id`; the email was forensically redundant and visible to
+    // `AUDIT_LOG_READ`-only holders (HR/audit staff) who don't hold
+    // `USER_READ`. An auditor who needs the email resolves via
+    // `target.id` — the same gate as any other USER-target row.
     await recordAudit(audit, {
         action: AUDIT_ACTIONS.AUTH_ADMIN_PASSWORD_RESET,
         target: { kind: AUDIT_TARGET_KINDS.USER, id: user._id },
-        metadata: { target_email: user.email },
+        metadata: {},
     });
 };

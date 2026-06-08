@@ -396,10 +396,13 @@ describe('adminInitiatePasswordReset', () => {
         expect(recordAuditMock).toHaveBeenCalledTimes(1);
         const [auditCtxArg, auditPayload] = recordAuditMock.mock.calls[0]!;
         expect(auditCtxArg).toBe(audit);
+        // M24 — `target_email` was dropped from metadata (was PII leak
+        // to AUDIT_LOG_READ-only holders); the audit target's user_id
+        // is the canonical reference.
         expect(auditPayload).toMatchObject({
             action: 'auth.admin_password_reset',
             target: { kind: 'user', id: target._id },
-            metadata: { target_email: target.email },
+            metadata: {},
         });
     });
 

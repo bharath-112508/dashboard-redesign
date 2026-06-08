@@ -1,4 +1,5 @@
 import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 import { JobRun } from '../models/job-run.model.js';
 import { recordSystemAudit } from '../services/audit.service.js';
@@ -98,11 +99,12 @@ const isE11000 = (err: unknown): boolean =>
  * lock and should run, `false` if it's already taken by a healthy run / a
  * completed success.
  */
-const acquireLock = async (name: JobName, run_key: string, startedAt: Date): Promise<boolean> => {
+const acquireLock = async (name: JobName, run_key: string, run_id: string, startedAt: Date): Promise<boolean> => {
     try {
         await JobRun.create({
             name,
             run_key,
+            run_id,
             status: JOB_RUN_STATUSES.RUNNING,
             started_at: startedAt,
             host: HOST,
@@ -115,6 +117,9 @@ const acquireLock = async (name: JobName, run_key: string, startedAt: Date): Pro
 
     // Existing row — either still healthy ("running" within the stale
     // window), already finished, or a stale crash residue we can reclaim.
+    // M27 — on reclaim we overwrite `run_id` with the fresh one so each
+    // re-run gets its own correlation id; the previous run_id is lost
+    // (acceptable — it was crashed/stale anyway).
     const staleBefore = new Date(Date.now() - JOB_LOCK_STALE_MS);
     const reclaimed = await JobRun.findOneAndUpdate(
         {
@@ -126,6 +131,7 @@ const acquireLock = async (name: JobName, run_key: string, startedAt: Date): Pro
         {
             $set: {
                 status: JOB_RUN_STATUSES.RUNNING,
+                run_id,
                 started_at: startedAt,
                 finished_at: null,
                 duration_ms: null,
@@ -190,12 +196,19 @@ const runJobInner = async (
     opts: RunJobOptions = {}
 ): Promise<RunJobResult> => {
     const startedAt = new Date();
-    const childLog = logger.child({ job: name, run_key: runKey });
+    // M27 — `run_key` is the wall-clock window key and is shared by
+    // every retry of the same window; `run_id` is unique per
+    // invocation so log lines, the JobRun row, and the audit metadata
+    // all reference the same correlation token. UUID v4 is built into
+    // Node (no new dep); the review's "ULID" suggestion was about
+    // uniqueness, not lexicographic sort.
+    const runId = randomUUID();
+    const childLog = logger.child({ job: name, run_key: runKey, run_id: runId });
 
     // Step 1 — claim the lock.
     let acquired: boolean;
     try {
-        acquired = await acquireLock(name, runKey, startedAt);
+        acquired = await acquireLock(name, runKey, runId, startedAt);
     } catch (err) {
         childLog.error({ err, code: ERROR_CODES.JOB_RUN_FAILED }, 'Job lock acquisition failed');
         if (opts.throwOnError) throw err;
@@ -276,12 +289,15 @@ const runJobInner = async (
     }
 
     // Audit row (best effort — `recordSystemAudit` itself never throws).
+    // M27 — include `run_id` so the audit row, JobRun row, and pino
+    // log lines share the same correlation token.
     await recordSystemAudit({
         action: AUDIT_ACTIONS.SYSTEM_JOB_RUN,
         target: { kind: AUDIT_TARGET_KINDS.JOB, id: null },
         metadata: {
             job_name: name,
             run_key: runKey,
+            run_id: runId,
             status: finalStatus,
             duration_ms: durationMs,
             host: HOST,

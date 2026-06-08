@@ -34,6 +34,16 @@ export interface JobRunDocument extends Document {
     _id: import('mongoose').Types.ObjectId;
     name: JobName | string;
     run_key: string;
+    /**
+     * M27 — unique per `runJob` invocation (UUID v4). `run_key` is the
+     * wall-clock window key (e.g. `2026-06-08`), which is shared by
+     * every retry of the same window — collisions make log lines from
+     * two retries indistinguishable in App Insights. `run_id` is
+     * minted fresh on each lock-acquire / stale-reclaim, pinned onto
+     * the pino child logger, and persisted here for correlation.
+     * Nullable on pre-M27 rows.
+     */
+    run_id: string | null;
     status: JobRunStatus;
     started_at: Date;
     finished_at: Date | null;
@@ -50,6 +60,7 @@ const jobRunSchema = new Schema<JobRunDocument>(
     {
         name: { type: String, required: true, enum: [...JOB_NAME_VALUES] },
         run_key: { type: String, required: true },
+        run_id: { type: String, default: null },
         status: {
             type: String,
             required: true,

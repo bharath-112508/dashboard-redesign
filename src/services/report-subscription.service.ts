@@ -515,13 +515,15 @@ export const runWeeklyReportSweep = async (now: Date = new Date()): Promise<Swee
                 // → retry tomorrow) at the cost of duplicate-send
                 // risk on the race; the audit makes the trade-off
                 // visible to ops.
+                // M24 — `recipient_email` removed; see the success path
+                // above for the rationale (PII visible to
+                // `AUDIT_LOG_READ`-only holders, resolvable via target).
                 await recordSystemAudit({
                     action: AUDIT_ACTIONS.REPORT_SUBSCRIPTION_SEND,
                     target: { kind: AUDIT_TARGET_KINDS.REPORT_SUBSCRIPTION, id: sub._id },
                     metadata: {
                         report_name: sub.report_name,
                         fire_date: todayIso,
-                        recipient_email: owner.email,
                         delivery: 'duplicate_sent',
                     },
                 });
@@ -529,16 +531,33 @@ export const runWeeklyReportSweep = async (now: Date = new Date()): Promise<Swee
                 continue;
             }
 
+            // M13 — `attachment_filename` + `size_bytes` were dropped from
+            // the success path (failure / fallback already captured the
+            // size in `fallback_detail`). Surface them on send so an ops
+            // walk-back ("which report? how big?") doesn't need to
+            // re-derive from the attachment build step.
+            // M24 — `recipient_email` removed. The audit target already
+            // carries `kind: REPORT_SUBSCRIPTION, id: sub._id` and the
+            // subscription row has `owner_user_id`; an auditor with
+            // `USER_READ` can resolve the email from there. Keeping it
+            // here let `AUDIT_LOG_READ`-only holders pluck PII without
+            // the user-read gate.
+            const attachment = attachments?.[0];
             await recordSystemAudit({
                 action: AUDIT_ACTIONS.REPORT_SUBSCRIPTION_SEND,
                 target: { kind: AUDIT_TARGET_KINDS.REPORT_SUBSCRIPTION, id: sub._id },
                 metadata: {
                     report_name: sub.report_name,
                     fire_date: todayIso,
-                    recipient_email: owner.email,
                     delivery: 'sent',
                     requested_format: sub.output_format,
                     delivered_format: delivery_format,
+                    ...(attachment
+                        ? {
+                              attachment_filename: attachment.filename,
+                              size_bytes: attachment.content.length,
+                          }
+                        : {}),
                     ...(fallback_audit
                         ? {
                               fallback_reason: fallback_audit.reason,
