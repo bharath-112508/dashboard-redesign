@@ -536,6 +536,32 @@ export const applyLeave = async (
         throw err;
     }
 
+    // H2 — close the assertNoOverlap race with a compensating re-check
+    // AFTER the insert. Pre-H2 two concurrent applies could both pass
+    // the initial overlap check (separate Mongo snapshots) and both
+    // commit overlapping rows. Wrapping in `withTransaction` does NOT
+    // close this race in Mongo because the two writes target different
+    // documents and don't trip any unique-index conflict; transactions
+    // only detect document-level write conflicts, not logical overlap.
+    // The right fix is to re-check post-insert (excluding our own row);
+    // if a competing row now exists, we lost the race — delete our
+    // insert + release reservations + throw LEAVE_OVERLAP. Either both
+    // applies see each other and both fail (user retries one), or
+    // exactly one wins. Both outcomes are correct; the pre-H2 silent
+    // double-insert outcome was not.
+    try {
+        await assertNoOverlap({
+            user_id: caller.id,
+            start_date: body.start_date,
+            end_date: body.end_date,
+            excludeId: created._id,
+        });
+    } catch (err) {
+        await LeaveRequest.deleteOne({ _id: created._id });
+        await releaseReservations({ user_id: caller.id, segments });
+        throw err;
+    }
+
     // Notify reviewers in-app + email. The dispatcher never throws — failures
     // are logged as `NOTIFICATION_DISPATCH_FAILED` and the apply still
     // returns 2xx (API_Contract §15.500).
