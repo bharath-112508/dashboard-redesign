@@ -23,6 +23,7 @@ import { runRecurringTaskSweepJob } from './recurring-task.job.js';
 import { runReportSubscriptionSweepJob } from './report-subscription.job.js';
 import { runStuckJobSweeperJob } from './stuck-job-sweeper.job.js';
 import { runAuditLogMirror } from './audit-log-mirror.job.js';
+import { runCompOffReconciliation } from './comp-off-reconciliation.job.js';
 
 /**
  * Job scheduler — wires every Phase-1 cron job to its `node-cron` trigger.
@@ -74,6 +75,7 @@ const REGISTRY: Record<JobName, JobRunner> = {
     [JOB_NAMES.REPORT_SUBSCRIPTION_SWEEP]: () => runReportSubscriptionSweepJob(),
     [JOB_NAMES.STUCK_JOB_SWEEPER]: () => runStuckJobSweeperJob(),
     [JOB_NAMES.AUDIT_LOG_MIRROR]: () => runAuditLogMirror(),
+    [JOB_NAMES.COMP_OFF_RECONCILIATION]: () => runCompOffReconciliation(),
 };
 
 /**

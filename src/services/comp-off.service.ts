@@ -30,7 +30,20 @@ type Filter = Record<string, unknown>;
 
 const toPublic = (doc: CompOffLedgerDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
 
-const recomputeBalance = async (user_id: Types.ObjectId, session?: ClientSession | null): Promise<number> => {
+/**
+ * M42 — aggregate the ledger and overwrite `User.comp_off_balance`.
+ *
+ * Pre-M42 this fired on every `adjustCompOff` (twice — before AND
+ * after the CAS) for partial-failure recovery. The hot path now
+ * trusts the CAS `$inc` for balance maintenance (C3 already does
+ * this), and `recomputeBalance` is reserved for the nightly
+ * reconciliation cron (`jobs/comp-off-reconciliation.job.ts`) that
+ * detects + repairs drift.
+ *
+ * Exported so the cron can call it; the implementation is unchanged
+ * from pre-M42 except for the session-optional behaviour.
+ */
+export const recomputeBalance = async (user_id: Types.ObjectId, session?: ClientSession | null): Promise<number> => {
     // Aggregate must run on the same session when a transaction is
     // active so the read sees in-txn writes (e.g. the just-inserted
     // ledger row from `adjustCompOff`'s post-CAS step). When no
@@ -49,9 +62,6 @@ const recomputeBalance = async (user_id: Types.ObjectId, session?: ClientSession
         if (row._id === COMP_OFF_TYPES.CONSUMED) consumed = row.total;
     }
     const balance = earned - consumed;
-    // Omit `session` entirely when no transaction is active so tests
-    // that strict-match the third arg via `toHaveBeenNthCalledWith`
-    // keep the pre-H5 call shape. Mirrors `releaseReservations` (C2).
     if (session) {
         await User.updateOne({ _id: user_id }, { $set: { comp_off_balance: balance } }, { session });
     } else {
@@ -214,7 +224,11 @@ export const adjustCompOff = async (
     if (!isReviewer(actor.role)) throw AppError.forbidden();
 
     const targetUserId = new Types.ObjectId(body.user_id);
-    const target = await User.findById(targetUserId).select('role');
+    // M42 — fetch `comp_off_balance` alongside `role` in the same
+    // read so the post-CAS audit `before` snapshot doesn't need a
+    // second aggregation over the ledger. CAS maintains the balance;
+    // this read is the snapshot, not the source of truth.
+    const target = await User.findById(targetUserId).select('role comp_off_balance');
     if (!target) {
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
     }
@@ -243,12 +257,11 @@ export const adjustCompOff = async (
     // (with a `$gte: days` predicate on consume) so the loser of any
     // race sees `null` and we throw `INSUFFICIENT_LEAVE_BALANCE`.
     const signedDelta = body.type === COMP_OFF_TYPES.EARNED ? body.days : -body.days;
+    // M42 — balanceBefore comes from the User row we just read (pre-CAS).
+    // The CAS `$inc` mutates `comp_off_balance` atomically; for the audit
+    // diff we want the value BEFORE the increment.
+    const balanceBefore = target.comp_off_balance ?? 0;
     const txnResult = await withTransaction(async (session) => {
-        // Capture the pre-adjust balance for the audit before/after
-        // diff. Runs inside the txn so any concurrent CAS that lost
-        // the race is invisible to this read.
-        const balanceBefore = await recomputeBalance(targetUserId, session);
-
         const casPredicate: Record<string, unknown> = { _id: targetUserId };
         if (body.type === COMP_OFF_TYPES.CONSUMED) {
             // Loser sees null → 409. The race-safe gate.
@@ -294,18 +307,19 @@ export const adjustCompOff = async (
             ? (await CompOffLedger.create([createPayload], { session }))[0]!
             : await CompOffLedger.create(createPayload);
 
-        // Reconciles `User.comp_off_balance` against the ledger sum.
-        // Idempotent — should produce the same value the CAS already
-        // set; runs inside the txn so the read sees the just-inserted
-        // ledger row.
-        const balanceAfter = await recomputeBalance(targetUserId, session);
+        // M42 — `balanceAfter` is the CAS's returned value (the row
+        // post-`$inc`). Pre-M42 we re-aggregated the full ledger here
+        // for "idempotent reconciliation"; the CAS is already
+        // atomically correct, and the nightly comp-off-reconciliation
+        // cron is the safety net for drift.
+        const balanceAfter = casResult.comp_off_balance ?? 0;
 
         // BUG-036 — keep the leave-application read view in sync.
         await syncLeaveBalanceForCompOff(targetUserId, balanceAfter, session);
 
-        return { ledger: ledgerInTxn, balanceBefore, balanceAfter };
+        return { ledger: ledgerInTxn, balanceAfter };
     });
-    const { ledger, balanceBefore, balanceAfter } = txnResult;
+    const { ledger, balanceAfter } = txnResult;
 
     if (audit) {
         // I1 — sensitive admin write: signed delta + operator-supplied

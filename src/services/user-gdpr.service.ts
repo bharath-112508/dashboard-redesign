@@ -170,6 +170,123 @@ export const exportUserData = async (userId: Types.ObjectId): Promise<UserDataEx
     };
 };
 
+// ─── Streaming export (M43) ────────────────────────────────────────────
+
+/**
+ * M43 — stream the GDPR export as newline-delimited JSON instead of
+ * collecting everything into one in-memory object.
+ *
+ * Pre-M43 `exportUserData` ran 12 unbounded `.find().lean()` queries
+ * in parallel and returned the whole tree as a single JS object. For a
+ * 3-year-tenured user that's ~50k audit rows × ~1KB each = ~50 MB
+ * resident before serialisation; a single concurrent export can pin a
+ * worker for seconds and OOM on a 256-MB heap.
+ *
+ * Streaming flow: write one envelope-line per row via a cursor per
+ * collection. The output is JSONL (`application/x-ndjson`) with each
+ * line shaped as:
+ *
+ *     { "kind": "<collection>", "data": { … } }
+ *
+ * Bracketed by `{kind:'meta'}` and `{kind:'meta_end', row_counts: {…}}`
+ * so a consumer can verify completeness. Memory bounded by the
+ * cursor's batch size (Mongoose default 1000) × the size of a single
+ * row.
+ *
+ * `exportUserData` (the JSON-tree variant) is kept as-is for the
+ * existing unit tests + any in-process caller; only the HTTP
+ * controller switches over.
+ */
+
+interface NdjsonWritable {
+    write: (chunk: string) => boolean | unknown;
+}
+
+const writeJsonLine = (stream: NdjsonWritable, payload: Record<string, unknown>): void => {
+    stream.write(JSON.stringify(payload) + '\n');
+};
+
+type LeanRow = Record<string, unknown>;
+const stripRow = (row: LeanRow): LeanRow => {
+    const { __v, ...rest } = row;
+    void __v;
+    return rest;
+};
+
+interface CollectionSpec {
+    kind: string;
+    cursor: () => AsyncIterable<unknown>;
+}
+
+export const exportUserDataNdjson = async (
+    userId: Types.ObjectId,
+    stream: NdjsonWritable
+): Promise<{ row_counts: Record<string, number> }> => {
+    const user = await User.findById(userId).lean<Record<string, unknown> | null>();
+    if (!user) {
+        throw AppError.notFound('User not found', ERROR_CODES.RESOURCE_NOT_FOUND);
+    }
+
+    const safeUser = { ...user };
+    delete safeUser.password_hash;
+    delete safeUser.mfa_secret_encrypted;
+    delete safeUser.mfa_backup_codes_hashed;
+
+    const refreshActive = await RefreshToken.countDocuments({
+        user_id: userId,
+        revoked_at: null,
+        expires_at: { $gt: new Date() },
+    });
+
+    writeJsonLine(stream, {
+        kind: 'meta',
+        exported_at: new Date().toISOString(),
+        user_id: userId.toString(),
+        refresh_tokens_active_count: refreshActive,
+    });
+    writeJsonLine(stream, { kind: 'user', data: safeUser });
+
+    // Each spec produces an async-iterable cursor; we walk it inline and
+    // write one JSONL line per row. Mongoose `.cursor()` defaults to a
+    // 1k batch size — the memory profile is one batch × row size at
+    // any moment, regardless of total row count.
+    const collections: CollectionSpec[] = [
+        { kind: 'attendance_record', cursor: () => AttendanceRecord.find({ user_id: userId }).lean().cursor() },
+        {
+            kind: 'attendance_correction_request',
+            cursor: () => AttendanceCorrectionRequest.find({ user_id: userId }).lean().cursor(),
+        },
+        { kind: 'leave_request', cursor: () => LeaveRequest.find({ user_id: userId }).lean().cursor() },
+        { kind: 'leave_balance', cursor: () => LeaveBalance.find({ user_id: userId }).lean().cursor() },
+        { kind: 'comp_off_ledger', cursor: () => CompOffLedger.find({ user_id: userId }).lean().cursor() },
+        { kind: 'notification', cursor: () => Notification.find({ user_id: userId }).lean().cursor() },
+        { kind: 'task_comment', cursor: () => TaskComment.find({ author_id: userId }).lean().cursor() },
+        { kind: 'task_activity', cursor: () => TaskActivity.find({ actor_id: userId }).lean().cursor() },
+        { kind: 'timesheet_entry', cursor: () => TimesheetEntry.find({ user_id: userId }).lean().cursor() },
+        { kind: 'audit_log_actor', cursor: () => AuditLog.find({ actor_id: userId }).lean().cursor() },
+        {
+            kind: 'audit_log_target',
+            cursor: () => AuditLog.find({ 'target_entity.kind': 'user', 'target_entity.id': userId }).lean().cursor(),
+        },
+        { kind: 'report_preset', cursor: () => ReportPreset.find({ created_by: userId }).lean().cursor() },
+        { kind: 'report_subscription', cursor: () => ReportSubscription.find({ created_by: userId }).lean().cursor() },
+        { kind: 'report_export', cursor: () => ReportExport.find({ requested_by: userId }).lean().cursor() },
+    ];
+
+    const row_counts: Record<string, number> = {};
+    for (const spec of collections) {
+        let count = 0;
+        for await (const row of spec.cursor()) {
+            count += 1;
+            writeJsonLine(stream, { kind: spec.kind, data: stripRow(row as LeanRow) });
+        }
+        row_counts[spec.kind] = count;
+    }
+
+    writeJsonLine(stream, { kind: 'meta_end', row_counts });
+    return { row_counts };
+};
+
 // ─── Erasure ───────────────────────────────────────────────────────────
 
 export interface EraseResult {

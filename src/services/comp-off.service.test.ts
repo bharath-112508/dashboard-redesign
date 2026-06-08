@@ -112,11 +112,16 @@ beforeEach(() => {
     // BUG-037 — default the target's role to `employee` so existing tests
     // (none of which mock the role explicitly) sail through the
     // client-target guard. The client-rejection test overrides this.
-    userFindByIdMock.mockResolvedValue({ role: 'employee' });
+    // M42 — `comp_off_balance` is now the source of the audit
+    // `balanceBefore` snapshot (was: an aggregation of the ledger).
+    // Tests that exercise specific balance values override this.
+    userFindByIdMock.mockResolvedValue({ role: 'employee', comp_off_balance: 0 });
     // C3 — default the CAS gate to "winner" so existing tests (which
     // all describe grant or sufficient-balance consumes) keep working.
     // The "insufficient balance" test overrides to `null` to simulate
     // the loser-of-race / under-balance branch.
+    // M42 — the CAS result's `comp_off_balance` is now the audit
+    // `balanceAfter` value; tests that assert on it override this.
     userFindOneAndUpdateMock.mockResolvedValue({ comp_off_balance: 0 });
     // BUG-036 — the COMP_OFF LeaveBalance sync is opportunistic: if the
     // leave type isn't seeded (or LeaveBalance models aren't mocked
@@ -131,15 +136,12 @@ describe('adjustCompOff — I1 audit shape', () => {
     it('records LEAVE / COMP_OFF audit row with signed positive delta on `earned`', async () => {
         // Pre-state: balance = 4 (5 earned - 1 consumed).
         // Adjust: type=earned, days=2 → balance = 6.
-        compOffLedgerAggregateMock
-            .mockResolvedValueOnce([
-                { _id: COMP_OFF_TYPES.EARNED, total: 5 },
-                { _id: COMP_OFF_TYPES.CONSUMED, total: 1 },
-            ])
-            .mockResolvedValueOnce([
-                { _id: COMP_OFF_TYPES.EARNED, total: 7 },
-                { _id: COMP_OFF_TYPES.CONSUMED, total: 1 },
-            ]);
+        // M42 — `balanceBefore` now reads `User.comp_off_balance` directly
+        // (no ledger aggregation on the hot path); `balanceAfter` is the
+        // CAS's returned doc post-`$inc`. The aggregation mock stays
+        // wired only so the reconciliation cron's tests can use it.
+        userFindByIdMock.mockResolvedValueOnce({ role: 'employee', comp_off_balance: 4 });
+        userFindOneAndUpdateMock.mockResolvedValueOnce({ comp_off_balance: 6 });
         const ledgerId = new Types.ObjectId();
         compOffLedgerCreateMock.mockResolvedValue({
             _id: ledgerId,
@@ -187,12 +189,10 @@ describe('adjustCompOff — I1 audit shape', () => {
 
     it('records signed NEGATIVE delta on `consumed` adjust', async () => {
         // Pre-state: balance = 5 (5 earned - 0 consumed) — enough to consume 3.
-        compOffLedgerAggregateMock
-            .mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 5 }])
-            .mockResolvedValueOnce([
-                { _id: COMP_OFF_TYPES.EARNED, total: 5 },
-                { _id: COMP_OFF_TYPES.CONSUMED, total: 3 },
-            ]);
+        // M42 — see the earned-path test for the rationale on the
+        // new mock shape.
+        userFindByIdMock.mockResolvedValueOnce({ role: 'employee', comp_off_balance: 5 });
+        userFindOneAndUpdateMock.mockResolvedValueOnce({ comp_off_balance: 2 });
         const ledgerId = new Types.ObjectId();
         compOffLedgerCreateMock.mockResolvedValue({
             _id: ledgerId,
@@ -339,10 +339,12 @@ describe('adjustCompOff — C3 atomic CAS race-guard', () => {
     });
 
     it('throws INSUFFICIENT_LEAVE_BALANCE when the CAS gate returns null (loser of race)', async () => {
-        // Pre-state recompute reads a stale "5" but a concurrent consume
-        // already committed; the CAS gate fails because the actual row
-        // now has comp_off_balance < days.
-        compOffLedgerAggregateMock.mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 5 }]);
+        // Pre-state: User.comp_off_balance = 5 (stale snapshot) but a
+        // concurrent consume already committed; the CAS gate fails
+        // because the actual row now has comp_off_balance < days.
+        // M42 — balanceBefore now comes from the User row pre-CAS,
+        // not from a ledger aggregation.
+        userFindByIdMock.mockResolvedValueOnce({ role: 'employee', comp_off_balance: 5 });
         userFindOneAndUpdateMock.mockResolvedValueOnce(null);
 
         await expect(
@@ -365,9 +367,9 @@ describe('adjustCompOff — C3 atomic CAS race-guard', () => {
 describe('adjustCompOff — BUG-036 LeaveBalance sync', () => {
     it('creates a COMP_OFF leave-balance row mirroring the ledger total when none exists yet', async () => {
         // Pre-state: ledger empty (balance 0). Grant 5 → balance 5.
-        compOffLedgerAggregateMock
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 5 }]);
+        // M42 — balanceBefore/After come from the User row + CAS result.
+        userFindByIdMock.mockResolvedValueOnce({ role: 'employee', comp_off_balance: 0 });
+        userFindOneAndUpdateMock.mockResolvedValueOnce({ comp_off_balance: 5 });
         compOffLedgerCreateMock.mockResolvedValue({
             _id: new Types.ObjectId(),
             user_id: new Types.ObjectId(),
@@ -400,9 +402,9 @@ describe('adjustCompOff — BUG-036 LeaveBalance sync', () => {
 
     it('updates an existing COMP_OFF leave-balance row in place, preserving used/pending', async () => {
         // Pre-state: prior grant of 5 (some already used via approved leaves).
-        compOffLedgerAggregateMock
-            .mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 5 }])
-            .mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 7 }]);
+        // M42 — User row carries pre-CAS balance; CAS returns post.
+        userFindByIdMock.mockResolvedValueOnce({ role: 'employee', comp_off_balance: 5 });
+        userFindOneAndUpdateMock.mockResolvedValueOnce({ comp_off_balance: 7 });
         compOffLedgerCreateMock.mockResolvedValue({
             _id: new Types.ObjectId(),
             user_id: new Types.ObjectId(),
@@ -439,9 +441,9 @@ describe('adjustCompOff — BUG-036 LeaveBalance sync', () => {
     });
 
     it('no-ops the sync when COMP_OFF leave type is missing — never blocks the ledger write', async () => {
-        compOffLedgerAggregateMock
-            .mockResolvedValueOnce([])
-            .mockResolvedValueOnce([{ _id: COMP_OFF_TYPES.EARNED, total: 3 }]);
+        // M42 — User pre/post; aggregation no longer fires on the hot path.
+        userFindByIdMock.mockResolvedValueOnce({ role: 'employee', comp_off_balance: 0 });
+        userFindOneAndUpdateMock.mockResolvedValueOnce({ comp_off_balance: 3 });
         compOffLedgerCreateMock.mockResolvedValue({
             _id: new Types.ObjectId(),
             user_id: new Types.ObjectId(),

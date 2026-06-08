@@ -119,6 +119,11 @@ export const AUDIT_ACTIONS = {
     CORRECTION_SUBMIT: 'correction.submit',
     CORRECTION_APPROVE: 'correction.approve',
     CORRECTION_REJECT: 'correction.reject',
+    /** M49 — owner-only withdraw of a pending correction request. Lets
+     *  the employee retract a mistaken proposal so they can submit a
+     *  replacement (the `CORRECTION_REQUEST_ALREADY_PENDING` guard
+     *  would block them otherwise). */
+    CORRECTION_CANCEL: 'correction.cancel',
 
     // Leave-type catalog admin CRUD (I1). The default-allocation, monthly
     // cap, and pro-rata strategy here drive every user's balance seeding,

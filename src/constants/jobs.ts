@@ -97,6 +97,13 @@ export const JOB_NAMES = {
     REPORT_SUBSCRIPTION_SWEEP: 'report_subscription_sweep',
     STUCK_JOB_SWEEPER: 'stuck_job_sweeper',
     AUDIT_LOG_MIRROR: 'audit_log_mirror',
+    // M42 — nightly comp-off balance reconciliation. Walks every user
+    // with non-zero ledger activity, aggregates the ledger, compares
+    // against `User.comp_off_balance`, and repairs any drift with a
+    // warn log per affected user. The grant/consume hot path now
+    // trusts the CAS `$inc` for balance maintenance; this cron is
+    // the safety net.
+    COMP_OFF_RECONCILIATION: 'comp_off_reconciliation',
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -150,6 +157,12 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // WORM Blob container. Defence-in-depth: even a compromised Mongo
     // can't rewrite history that's already been mirrored.
     [JOB_NAMES.AUDIT_LOG_MIRROR]: '7 * * * *',
+
+    // Daily 02:30 IST — comp-off balance reconciliation (M42). Walks
+    // users whose comp-off ledger has any activity, recomputes the
+    // sum, and compares to `User.comp_off_balance`. Off-peak so a
+    // longer-than-expected scan doesn't compete with morning traffic.
+    [JOB_NAMES.COMP_OFF_RECONCILIATION]: '30 2 * * *',
 
     // Every 15 minutes — stuck-job sweeper (BACKEND_AUDIT.md P1-6).
     // Walks `job_runs` for rows still flagged `running` but past the
@@ -248,6 +261,15 @@ export const stuckJobSweeperRunKey = (now: Date = new Date()): string => {
  */
 export const auditLogMirrorRunKey = (now: Date = new Date()): string => {
     return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DDTHH');
+};
+
+/**
+ * Comp-off reconciliation keys off **today** (IST). Same-day re-runs
+ * (manual ops trigger) collide on the `job_runs` unique index — the
+ * runner treats them as already-done. Format: `YYYY-MM-DD`.
+ */
+export const compOffReconciliationRunKey = (now: Date = new Date()): string => {
+    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
 };
 
 // ─── Job-run row lifecycle ───────────────────────────────────────────────

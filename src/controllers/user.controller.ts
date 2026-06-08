@@ -206,25 +206,27 @@ export const adminDeleteProfilePhoto = async (req: Request, res: Response): Prom
 
 export const getUserDataExport = async (req: Request, res: Response): Promise<Response> => {
     const target = parseTargetId(req);
-    const dump = await gdprService.exportUserData(target);
+    // M43 — stream as NDJSON so the export doesn't materialise the
+    // user's full data tree in memory before responding. For a tenured
+    // user this avoided pinning a worker for seconds + OOM risk on a
+    // 256-MB heap. R8 (no `{data}` envelope) is preserved: the
+    // response is raw JSONL, one row per line.
+    res.setHeader('Content-Disposition', `attachment; filename="user-${target.toString()}-data-export.ndjson"`);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    const { row_counts } = await gdprService.exportUserDataNdjson(target, res);
     // Audit the export — the dump itself is sensitive PII, so the act
     // of generating it is recorded against the actor.
     await recordAudit(buildAuditContext(req), {
         action: AUDIT_ACTIONS.USER_DATA_EXPORT,
         target: { kind: AUDIT_TARGET_KINDS.USER, id: target },
         metadata: {
-            collections_count: Object.keys(dump).length - 2, // minus `exported_at` + `user`
+            collections_count: Object.keys(row_counts).length,
+            row_counts,
         },
     });
-    // R8 — return the dump RAW (no `{ data: ... }` envelope). This
-    // endpoint produces a file attachment that gets handed to legal /
-    // the regulator / the data subject; framework artefacts in that
-    // payload would force every downstream consumer to peel `.data`
-    // off. The live-API envelope is for live API consumers, not
-    // file attachments.
-    res.setHeader('Content-Disposition', `attachment; filename="user-${target.toString()}-data-export.json"`);
-    res.setHeader('Content-Type', 'application/json');
-    return res.json(dump);
+    res.end();
+    return res;
 };
 
 export const postUserDataErasure = async (req: Request, res: Response): Promise<Response> => {

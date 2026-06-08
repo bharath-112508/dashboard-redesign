@@ -35,7 +35,13 @@ export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 export const CHECK_METHODS = ['manual', 'qr'] as const;
 export type CheckMethod = (typeof CHECK_METHODS)[number];
 
-export const CORRECTION_REQUEST_STATUSES = ['pending', 'approved', 'rejected'] as const;
+// M49 — `cancelled` joins the lifecycle. The owner (employee) can
+// withdraw a pending request before a reviewer acts on it, so they
+// can submit a replacement without tripping the
+// `CORRECTION_REQUEST_ALREADY_PENDING` guard. Reviewer actions
+// (approve/reject) and cancel are mutually exclusive — once any of
+// them lands, the row is terminal.
+export const CORRECTION_REQUEST_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'] as const;
 export type CorrectionRequestStatus = (typeof CORRECTION_REQUEST_STATUSES)[number];
 
 // ─── Date-range listing caps ──────────────────────────────────────────────

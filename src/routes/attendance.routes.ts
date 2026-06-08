@@ -62,6 +62,15 @@ router.post(
     asyncHandler(ctrl.postRejectCorrection)
 );
 
+// M49 — owner-only withdraw verb. No reviewer permission needed; the
+// service-layer guard restricts to the request's `user_id` so the
+// `authenticate` baseline is enough.
+router.post(
+    '/correction-requests/:id/cancel',
+    validate({ params: correctionRequestIdParamSchema }),
+    asyncHandler(ctrl.postCancelCorrection)
+);
+
 // ─── Manager / admin record routes ───────────────────────────────────────
 
 router.get(

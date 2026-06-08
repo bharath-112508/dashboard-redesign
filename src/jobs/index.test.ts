@@ -37,6 +37,7 @@ const {
     runReportSubMock,
     runStuckJobMock,
     runAuditLogMirrorMock,
+    runCompOffReconciliationMock,
 } = vi.hoisted(() => ({
     cronScheduleMock: vi.fn(),
     loggerErrorMock: vi.fn(),
@@ -53,6 +54,7 @@ const {
     runReportSubMock: vi.fn(),
     runStuckJobMock: vi.fn(),
     runAuditLogMirrorMock: vi.fn(),
+    runCompOffReconciliationMock: vi.fn(),
 }));
 
 vi.mock('node-cron', () => ({
@@ -111,6 +113,13 @@ vi.mock('./stuck-job-sweeper.job.js', () => ({
 vi.mock('./audit-log-mirror.job.js', () => ({
     runAuditLogMirror: runAuditLogMirrorMock,
 }));
+// M42 — the comp-off reconciliation cron registers via `jobs/index.ts`.
+// Without a mock, the test cache reset (`vi.resetModules()`) re-imports
+// the real file → re-registers the `comp_off_ledger` Mongoose model →
+// throws `OverwriteModelError`.
+vi.mock('./comp-off-reconciliation.job.js', () => ({
+    runCompOffReconciliation: runCompOffReconciliationMock,
+}));
 
 import { JOB_NAMES, JOB_CONSECUTIVE_FAILURE_THRESHOLD } from '../constants/jobs.js';
 
@@ -149,6 +158,7 @@ beforeEach(() => {
     runReportSubMock.mockResolvedValue(undefined);
     runStuckJobMock.mockResolvedValue(undefined);
     runAuditLogMirrorMock.mockResolvedValue(undefined);
+    runCompOffReconciliationMock.mockResolvedValue(undefined);
 });
 
 describe('startScheduler — L4 consecutive-failure tracker', () => {

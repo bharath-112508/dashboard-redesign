@@ -883,6 +883,52 @@ export const rejectCorrection = async (
     return reqDoc.toJSON() as unknown as Record<string, unknown>;
 };
 
+// ─── POST /attendance/correction-requests/:id/cancel ─────────────────────
+
+/**
+ * M49 — owner-only withdraw of a pending correction request.
+ *
+ * Pre-M49 there was no cancel verb; an employee who realised their
+ * proposal was wrong was stuck. Re-submitting tripped
+ * `CORRECTION_REQUEST_ALREADY_PENDING` (one pending per record) and
+ * the only paths to clear it were reviewer approve or reject —
+ * neither appropriate.
+ *
+ * Authorization: the request OWNER only. Reviewers don't need this
+ * verb (they have approve/reject); admins shouldn't be cancelling
+ * someone else's request silently. The existence-hiding 404 pattern
+ * used elsewhere applies here too so nobody can probe other people's
+ * requests by id.
+ */
+export const cancelCorrection = async (
+    id: Types.ObjectId,
+    caller: { id: Types.ObjectId; audit?: AuditContext }
+): Promise<Record<string, unknown>> => {
+    const reqDoc = await loadPendingCorrection(id);
+    if (!reqDoc.user_id.equals(caller.id)) {
+        // Hide existence — surface as not-found so cross-user probes
+        // can't enumerate.
+        throw AppError.notFound('Correction request not found', ERROR_CODES.CORRECTION_REQUEST_NOT_FOUND);
+    }
+    reqDoc.status = 'cancelled';
+    reqDoc.acted_at = new Date();
+    await reqDoc.save();
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.CORRECTION_CANCEL,
+            target: { kind: AUDIT_TARGET_KINDS.CORRECTION_REQUEST, id: reqDoc._id },
+            before: { status: 'pending' },
+            after: { status: reqDoc.status },
+            metadata: {
+                attendance_record_id: reqDoc.attendance_record_id.toString(),
+            },
+        });
+    }
+
+    return reqDoc.toJSON() as unknown as Record<string, unknown>;
+};
+
 // M16 — BUG-040 `migrateAttendanceSegments` removed. The one-time
 // backfill (legacy single-`check_in` rows → `segments[]`) ran on
 // every boot even after the DB was long-since migrated. Deleted to

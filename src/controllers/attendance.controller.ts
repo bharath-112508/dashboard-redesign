@@ -137,3 +137,13 @@ export const postRejectCorrection = async (req: Request, res: Response): Promise
     );
     return ok(res, data);
 };
+
+// ─── POST /attendance/correction-requests/:id/cancel (M49) ──────────────
+
+export const postCancelCorrection = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.cancelCorrection(parseTargetId(req), {
+        id: callerId(req),
+        audit: buildAuditContext(req),
+    });
+    return ok(res, data);
+};
