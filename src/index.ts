@@ -21,6 +21,7 @@ import { seedDefaultLeaveTypes } from './services/leave-type.service.js';
 import { migrateAttendanceSegments } from './services/attendance.service.js';
 import { bootstrapRolesMigration } from './services/role.service.js';
 import { migratePlaintextSlackBotToken } from './services/slack-settings.service.js';
+import { migrateShareLinkTokensToHashed } from './services/share-link.service.js';
 import { getScheduledJobCount, startScheduler, stopScheduler } from './jobs/index.js';
 
 const app = express();
@@ -314,6 +315,13 @@ const startServer = async () => {
         // fails (the read path's plaintext fallback keeps the bot
         // operational).
         await migratePlaintextSlackBotToken();
+
+        // C9: hash-at-rest migration for any pre-C9 plaintext share-link
+        // tokens. Walks rows whose `token` field is set, computes
+        // `sha256Hex(token)`, writes it to `token_hash`, clears `token`.
+        // Idempotent — post-migration rows have `token: null` and are
+        // skipped. Never throws.
+        await migrateShareLinkTokensToHashed();
 
         const server = app.listen(PORT, () => {
             logger.info({ port: PORT, env: NODE_ENV, api_prefix: API_PREFIX }, 'Server is running');

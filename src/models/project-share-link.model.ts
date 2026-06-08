@@ -21,15 +21,32 @@ import { SHARE_LINK_REVOKE_REASONS, type ShareLinkRevokeReason } from '../consta
  *    this row.
  *
  * Token (`SHARE_LINK_TOKEN_BYTES = 32`) is generated server-side via
- * `crypto.randomBytes` → base64url, ~256 bits of entropy. The unique
- * index makes collisions a deterministic 11000 retry rather than a
- * silent overwrite.
+ * `crypto.randomBytes` → base64url, ~256 bits of entropy.
+ *
+ * C9 — Pre-fix the raw token was persisted in `token` and queried
+ * directly by `findOne({ token })`. Any read-only DB exposure (backup,
+ * replica access, mongo-express misconfig, BSON dump in a log line)
+ * handed an attacker live ungated read access to every project the
+ * link grants. Post-fix only the SHA-256 hex hash is persisted in
+ * `token_hash`; the raw token is returned ONCE in the create response
+ * and lives in the URL the admin shares — never in the DB. Mirrors the
+ * password-reset + refresh-token pattern. `token` is kept as a
+ * nullable transitional field so the boot-time migration can backfill
+ * legacy plaintext rows; new rows always have `token: null`.
  */
 
 export interface ProjectShareLinkDocument extends Document {
     _id: Types.ObjectId;
     project_id: Types.ObjectId;
-    token: string;
+    /** SHA-256 hex of the raw token. Source of truth for lookups. */
+    token_hash: string;
+    /**
+     * Legacy plaintext token. Pre-C9 rows still carry one; the boot
+     * migration hashes them into `token_hash` and clears this field.
+     * New rows never set this. Will be removed in a follow-up release
+     * once every deployment has booted with the migration at least once.
+     */
+    token: string | null;
     owner_client_id: Types.ObjectId | null;
     created_by: Types.ObjectId;
     expires_at: Date | null;
@@ -49,9 +66,14 @@ const projectShareLinkSchema = new Schema<ProjectShareLinkDocument>(
             required: true,
             index: true,
         },
-        token: {
+        token_hash: {
             type: String,
             required: true,
+            trim: true,
+        },
+        token: {
+            type: String,
+            default: null,
             trim: true,
         },
         owner_client_id: {
@@ -81,8 +103,11 @@ const projectShareLinkSchema = new Schema<ProjectShareLinkDocument>(
 
 // Token uniqueness — birthday risk is astronomical at 256 bits of
 // entropy, but the index is cheap and turns the impossible into a
-// clean retry path.
-projectShareLinkSchema.index({ token: 1 }, { unique: true, name: 'project_share_links_token_unique' });
+// clean retry path. Index moved from `token` to `token_hash` (C9) so
+// the unique constraint applies to the hashed form; the legacy
+// `token` field is now nullable + unindexed (read by the boot
+// migration only).
+projectShareLinkSchema.index({ token_hash: 1 }, { unique: true, name: 'project_share_links_token_hash_unique' });
 
 export const ProjectShareLink: Model<ProjectShareLinkDocument> = model<ProjectShareLinkDocument>(
     'ProjectShareLink',

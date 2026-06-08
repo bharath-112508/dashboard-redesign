@@ -93,7 +93,11 @@ const makeLink = (overrides: Record<string, unknown> = {}) => {
     const l = {
         _id: new Types.ObjectId(),
         project_id: new Types.ObjectId(),
-        token: 'abc123',
+        // C9 — post-fix `token` is always null on newly created rows;
+        // the lookup key is `token_hash`. The plaintext field is kept
+        // as a nullable transitional field for the boot migration.
+        token: null as string | null,
+        token_hash: 'sha256-stub',
         owner_client_id: null as Types.ObjectId | null,
         created_by: new Types.ObjectId(),
         expires_at: null as Date | null,
@@ -109,7 +113,11 @@ const makeLink = (overrides: Record<string, unknown> = {}) => {
     l.toJSON.mockImplementation(() => ({
         id: l._id.toString(),
         project_id: l.project_id.toString(),
+        // toJSON reflects the on-disk shape; the service's `toPublic`
+        // strips both `token` and `token_hash` so neither escapes the
+        // API boundary.
         token: l.token,
+        token_hash: l.token_hash,
         owner_client_id: l.owner_client_id?.toString() ?? null,
         expires_at: l.expires_at,
         revoked_at: l.revoked_at,
@@ -177,10 +185,29 @@ describe('createLink', () => {
             makeCaller()
         );
 
+        // C9 — the create payload MUST set `token: null` and provide a
+        // `token_hash`. The plaintext token never lands in Mongo.
         expect(linkCreateMock).toHaveBeenCalledWith(
-            expect.objectContaining({ owner_client_id: null, expires_at: null, revoked_at: null })
+            expect.objectContaining({
+                owner_client_id: null,
+                expires_at: null,
+                revoked_at: null,
+                token: null,
+                token_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+            })
         );
-        expect((result as { token: string }).token).toBe(created.token);
+        // The raw token is returned to the caller exactly once. It must
+        // be a non-empty base64url string distinct from the stub's
+        // null `token` field.
+        const { token } = result as { token: string };
+        expect(typeof token).toBe('string');
+        expect(token.length).toBeGreaterThan(20);
+        // The returned token's SHA-256 must match the persisted
+        // `token_hash` — establishes the round-trip invariant the
+        // resolve path relies on.
+        const persistedHash = (linkCreateMock.mock.calls[0]![0] as { token_hash: string }).token_hash;
+        const { createHash } = await import('node:crypto');
+        expect(createHash('sha256').update(token).digest('hex')).toBe(persistedHash);
     });
 
     it('retries on a unique-index 11000 collision and succeeds with a fresh token', async () => {
@@ -325,7 +352,7 @@ describe('resolveLink', () => {
         });
         stubProjectChildren();
 
-        const result = await svc.resolveLink(link.token);
+        const result = await svc.resolveLink('any-raw-token');
 
         expect(link.last_accessed_at).toBeInstanceOf(Date);
         expect(link.save).toHaveBeenCalledTimes(1);
@@ -340,7 +367,7 @@ describe('resolveLink', () => {
         linkFindOneMock.mockResolvedValueOnce(link);
         stubProjectFindById(null);
 
-        await expect(svc.resolveLink(link.token)).rejects.toMatchObject({
+        await expect(svc.resolveLink('any-raw-token')).rejects.toMatchObject({
             code: ERROR_CODES.SHARE_LINK_NOT_FOUND,
         });
     });
@@ -386,7 +413,7 @@ describe('resolveLink', () => {
             },
         });
 
-        await svc.resolveLink(link.token);
+        await svc.resolveLink('any-raw-token');
 
         expect(projectSelectArgs[0]).toContain('-member_ids');
         expect(projectSelectArgs[0]).toContain('-client_ids');
@@ -469,5 +496,97 @@ describe('revokeLinksForDeactivatedClient', () => {
         // a's save threw → not counted; b's save succeeded → counted.
         expect(result.revoked_count).toBe(1);
         expect(b.revoke_reason).toBe('client_deactivated');
+    });
+});
+
+// ─── C9 — token hashing invariants ────────────────────────────────────────
+
+describe('resolveLink — C9 hashed-token lookup', () => {
+    it('looks up by sha256(token), never by raw plaintext', async () => {
+        // Find returns null (token doesn't exist); we only care about
+        // the QUERY shape passed to findOne.
+        linkFindOneMock.mockResolvedValueOnce(null);
+        await expect(svc.resolveLink('public-share-token-abc')).rejects.toMatchObject({
+            code: ERROR_CODES.SHARE_LINK_NOT_FOUND,
+        });
+
+        const { createHash } = await import('node:crypto');
+        const expected = createHash('sha256').update('public-share-token-abc').digest('hex');
+        expect(linkFindOneMock).toHaveBeenCalledWith({ token_hash: expected });
+        // Confirm the raw token NEVER appears in the query — defence
+        // against an accidental dual-read regression.
+        const queryArg = linkFindOneMock.mock.calls[0]![0] as Record<string, unknown>;
+        expect(queryArg).not.toHaveProperty('token');
+    });
+});
+
+describe('migrateShareLinkTokensToHashed — C9 boot migration', () => {
+    it('hashes every legacy plaintext token in place and clears the plaintext field', async () => {
+        const row = {
+            _id: new Types.ObjectId(),
+            token: 'pre-c9-raw-token-xyz',
+            token_hash: '',
+            save: vi.fn(),
+        };
+        row.save.mockImplementation(async () => row);
+        // Find().select() chain.
+        linkFindMock.mockReturnValueOnce({ select: () => Promise.resolve([row]) });
+
+        const { migrated, failed } = await svc.migrateShareLinkTokensToHashed();
+
+        const { createHash } = await import('node:crypto');
+        const expected = createHash('sha256').update('pre-c9-raw-token-xyz').digest('hex');
+        expect(row.token_hash).toBe(expected);
+        expect(row.token).toBeNull();
+        expect(row.save).toHaveBeenCalledTimes(1);
+        expect(migrated).toBe(1);
+        expect(failed).toBe(0);
+    });
+
+    it('is a no-op on already-hashed rows (idempotent — token field already null)', async () => {
+        // Find filters to `{ token: { $type: 'string', $ne: null } }`,
+        // so post-migration rows (token: null) never reach the loop.
+        // Verify the filter shape: it must NOT pick up null-token rows.
+        linkFindMock.mockReturnValueOnce({ select: () => Promise.resolve([]) });
+
+        const result = await svc.migrateShareLinkTokensToHashed();
+
+        expect(result).toEqual({ migrated: 0, failed: 0 });
+        expect(linkFindMock).toHaveBeenCalledWith({
+            token: { $type: 'string', $ne: null },
+        });
+    });
+
+    it('continues past a per-row save failure (counts the success, logs the failure)', async () => {
+        const ok = {
+            _id: new Types.ObjectId(),
+            token: 'ok-token',
+            token_hash: '',
+            save: vi.fn(),
+        };
+        ok.save.mockImplementation(async () => ok);
+        const bad = {
+            _id: new Types.ObjectId(),
+            token: 'bad-token',
+            token_hash: '',
+            save: vi.fn().mockRejectedValueOnce(new Error('save failed')),
+        };
+        linkFindMock.mockReturnValueOnce({ select: () => Promise.resolve([bad, ok]) });
+
+        const { migrated, failed } = await svc.migrateShareLinkTokensToHashed();
+
+        expect(migrated).toBe(1);
+        expect(failed).toBe(1);
+        expect(ok.token).toBeNull();
+    });
+
+    it('never throws — a cursor failure returns counts of 0', async () => {
+        linkFindMock.mockReturnValueOnce({
+            select: () => Promise.reject(new Error('mongo down')),
+        });
+        await expect(svc.migrateShareLinkTokensToHashed()).resolves.toEqual({
+            migrated: 0,
+            failed: 0,
+        });
     });
 });

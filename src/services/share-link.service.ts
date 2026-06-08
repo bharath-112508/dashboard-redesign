@@ -20,6 +20,7 @@ import {
     type ShareLinkRevokeReason,
 } from '../constants/share-link.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
+import { sha256Hex } from '../utils/token-hash.js';
 import logger from '../utils/logger.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { CreateShareLinkBody, ListShareLinksQuery } from '../validators/share-link.validator.js';
@@ -57,7 +58,19 @@ export interface ShareLinkCaller {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-const toPublic = (doc: ProjectShareLinkDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
+/**
+ * C9 — Public projection. Strips both `token` (legacy plaintext that
+ * the boot migration nulls out) and `token_hash` (the on-disk digest)
+ * because neither is useful to API consumers and the hash being on
+ * the wire is gratuitous. The raw token is only ever surfaced at
+ * create time via `createLink` returning `{...toPublic(doc), token}`.
+ */
+const toPublic = (doc: ProjectShareLinkDocument): Record<string, unknown> => {
+    const json = doc.toJSON() as Record<string, unknown>;
+    delete json.token;
+    delete json.token_hash;
+    return json;
+};
 
 const generateToken = (): string => randomBytes(SHARE_LINK_TOKEN_BYTES).toString('base64url');
 
@@ -146,14 +159,20 @@ export const createLink = async (
 
     // Retry loop on the (vanishingly improbable) token collision. Each
     // attempt regenerates the token; the unique index turns a duplicate
-    // into a deterministic E11000 we can catch.
+    // into a deterministic E11000 we can catch. Post-C9 the uniqueness
+    // is on `token_hash`, not `token`.
     let created: ProjectShareLinkDocument | null = null;
+    let rawToken = '';
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < SHARE_LINK_TOKEN_MAX_ATTEMPTS; attempt += 1) {
+        const candidate = generateToken();
         try {
             created = await ProjectShareLink.create({
                 project_id: projectId,
-                token: generateToken(),
+                // C9 — persist only the hash; the raw token is returned
+                // to the caller below and is never stored.
+                token_hash: sha256Hex(candidate),
+                token: null,
                 owner_client_id: ownerClientId,
                 created_by: caller.id,
                 expires_at: input.expires_at ?? null,
@@ -162,6 +181,7 @@ export const createLink = async (
                 revoke_reason: null,
                 last_accessed_at: null,
             });
+            rawToken = candidate;
             break;
         } catch (err) {
             lastErr = err;
@@ -181,6 +201,9 @@ export const createLink = async (
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.SHARE_LINK_CREATE,
             target: { kind: AUDIT_TARGET_KINDS.SHARE_LINK, id: created._id },
+            // The audit row carries `toPublic` shape (no token, no
+            // token_hash) so a forensic read of audit_logs doesn't
+            // leak the credential either.
             after: toPublic(created),
             metadata: {
                 project_id: projectId.toString(),
@@ -190,7 +213,11 @@ export const createLink = async (
         });
     }
 
-    return toPublic(created);
+    // C9 — the raw token is returned EXACTLY ONCE on create. The admin
+    // copies the URL out of the dialog; the FE list view never gets it
+    // back (token_hash is one-way). If they lose the URL: revoke +
+    // create new.
+    return { ...toPublic(created), token: rawToken };
 };
 
 // ─── POST /share-links/:id/revoke ────────────────────────────────────────
@@ -253,7 +280,11 @@ const docsToJson = <T extends { toJSON: () => unknown }>(rows: T[]): Record<stri
     rows.map((r) => r.toJSON() as Record<string, unknown>);
 
 export const resolveLink = async (token: string): Promise<ResolvedShareLinkPayload> => {
-    const link = await ProjectShareLink.findOne({ token });
+    // C9 — look up by hash. The raw token from the URL is never compared
+    // against a stored plaintext; we hash it (deterministic, fast) and
+    // find the matching `token_hash`. Mirrors the password-reset
+    // verification path.
+    const link = await ProjectShareLink.findOne({ token_hash: sha256Hex(token) });
     if (!link) throw AppError.notFound('Share link not found', ERROR_CODES.SHARE_LINK_NOT_FOUND);
 
     const now = new Date();
@@ -333,6 +364,58 @@ export const resolveLink = async (token: string): Promise<ResolvedShareLinkPaylo
  *    deactivated. Failures log under `SHARE_LINK_AUTO_REVOKE_FAILED`
  *    so an operator can grep for stuck rows and re-run.
  */
+// ─── C9 boot migration: hash legacy plaintext tokens in place ────────────
+
+/**
+ * One-time migration invoked from `src/index.ts` on boot. Walks every
+ * row whose legacy `token` field is set, computes `sha256Hex(token)`,
+ * writes it to `token_hash`, and clears `token` to null. Idempotent —
+ * a row with `token: null` (post-migration) is left alone, so reruns
+ * are no-ops. Never throws — failures log under
+ * `SHARE_LINK_TOKEN_MIGRATION_FAILED` so boot continues; the next
+ * resolve against a still-plaintext row simply returns 404 (the
+ * authentic in-DB hash won't match).
+ *
+ * Returns `{ migrated, failed }` for the boot log.
+ */
+export const migrateShareLinkTokensToHashed = async (): Promise<{
+    migrated: number;
+    failed: number;
+}> => {
+    let migrated = 0;
+    let failed = 0;
+    try {
+        const legacy = await ProjectShareLink.find({
+            token: { $type: 'string', $ne: null },
+        }).select('_id token');
+        for (const row of legacy) {
+            try {
+                if (!row.token) continue;
+                row.token_hash = sha256Hex(row.token);
+                row.token = null;
+                await row.save();
+                migrated += 1;
+            } catch (err) {
+                failed += 1;
+                logger.warn(
+                    {
+                        err,
+                        code: 'SHARE_LINK_TOKEN_MIGRATION_FAILED',
+                        link_id: row._id.toString(),
+                    },
+                    'Failed to hash a legacy share-link token'
+                );
+            }
+        }
+        if (migrated > 0 || failed > 0) {
+            logger.info({ migrated, failed }, 'Share-link token migration complete');
+        }
+    } catch (err) {
+        logger.warn({ err, code: 'SHARE_LINK_TOKEN_MIGRATION_FAILED' }, 'Share-link token migration cursor failed');
+    }
+    return { migrated, failed };
+};
+
 export const revokeLinksForDeactivatedClient = async (input: {
     client_id: Types.ObjectId;
     revoked_by: Types.ObjectId;
