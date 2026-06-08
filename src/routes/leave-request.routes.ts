@@ -28,7 +28,18 @@ router.post(
     asyncHandler(ctrl.postPreview)
 );
 
-router.get('/calendar', validate({ query: calendarLeavesQuerySchema }), asyncHandler(ctrl.getCalendar));
+// C5 — calendar shows every approved leave across the org. Pre-fix
+// this route had only `authenticate`; a CLIENT or rank-and-file employee
+// could enumerate every employee's name + leave window. Gating on
+// `LEAVE_REQUEST_READ_TEAM` matches the existing reviewer model and
+// the FE-side calendar tab is filtered identically so legit users
+// don't see the tab they're not entitled to.
+router.get(
+    '/calendar',
+    requirePermission(PERMISSIONS.LEAVE_REQUEST_READ_TEAM),
+    validate({ query: calendarLeavesQuerySchema }),
+    asyncHandler(ctrl.getCalendar)
+);
 
 router.get('/', validate({ query: listLeavesQuerySchema }), asyncHandler(ctrl.getList));
 
