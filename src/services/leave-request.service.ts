@@ -305,7 +305,14 @@ export const previewSplit = async (
               sl_type_id: sl._id,
               yearsTouched: span,
               workingDays: ctx.workingDays,
-              holidays: ctx.holidayDates,
+              // C4 follow-through — DO NOT pass `ctx.holidayDates`.
+              // `loadApplyContext` scopes holidays to THIS leave's
+              // date range, but `buildSlMonthUsedMap` enumerates the
+              // working days of every historical SL request whose
+              // dates may fall outside that span. Letting the helper
+              // self-load holidays (via the `params.holidays`-
+              // undefined branch) gives it the full year boundary
+              // window it needs for correct working-day exclusion.
           })
         : new Map();
 
@@ -461,7 +468,10 @@ export const applyLeave = async (
                   sl_type_id: sl._id,
                   yearsTouched,
                   workingDays: ctx.workingDays,
-                  holidays: ctx.holidayDates,
+                  // C4 follow-through — see preview-split for the
+                  // explanation; let the helper self-load holidays
+                  // across the full year span of historical SL
+                  // requests, not just THIS leave's date range.
               })
             : Promise.resolve(new Map()),
         loadAvailableMap({

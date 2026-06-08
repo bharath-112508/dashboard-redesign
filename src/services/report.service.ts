@@ -103,55 +103,6 @@ export interface BillingReportResult {
     totals: BillingTotals;
 }
 
-/**
- * Resolve the effective hourly rate for a `(user, project, task, date)`
- * tuple. Per Data_Model §6.2 the lookup order is:
- *   1. `(user_id, project_id, task_id)` — task-specific rate
- *   2. `(user_id, project_id, task_id: null)` — project-level fallback
- *
- * Both candidates must satisfy `effective_from <= date <=
- * (effective_to OR +∞)`. Returns null when neither exists, in which
- * case the entry's hours are still reported but its dollar amount is
- * counted as zero (and surfaced via `billable_amount = 0` so the FE
- * can render a dim row).
- *
- * The lookup runs once per unique tuple, not once per timesheet entry —
- * the caller batches.
- */
-const findEffectiveRate = async (input: {
-    user_id: Types.ObjectId;
-    project_id: Types.ObjectId;
-    task_id: Types.ObjectId | null;
-    date: string;
-}): Promise<number | null> => {
-    const dateRangeFilter = {
-        effective_from: { $lte: input.date },
-        $or: [{ effective_to: null }, { effective_to: { $gte: input.date } }],
-    };
-    // Task-specific first.
-    if (input.task_id) {
-        const taskRate = await BillingRate.findOne({
-            user_id: input.user_id,
-            project_id: input.project_id,
-            task_id: input.task_id,
-            ...dateRangeFilter,
-        })
-            .select('hourly_rate')
-            .lean<{ hourly_rate: number } | null>();
-        if (taskRate) return taskRate.hourly_rate;
-    }
-    // Project-level fallback.
-    const projectRate = await BillingRate.findOne({
-        user_id: input.user_id,
-        project_id: input.project_id,
-        task_id: null,
-        ...dateRangeFilter,
-    })
-        .select('hourly_rate')
-        .lean<{ hourly_rate: number } | null>();
-    return projectRate?.hourly_rate ?? null;
-};
-
 interface UserDisplay {
     id: string;
     full_name: string;
@@ -280,9 +231,7 @@ export const buildBillingReport = async (query: BillingReportQuery): Promise<Bil
     // as `findEffectiveRate` but resolved in JS against an in-memory
     // map. Rates are sorted by `effective_from desc` so the first
     // match wins per `(user, task)` key.
-    const taskIdSet = facet.rows
-        .map((r) => r._id.task_id)
-        .filter((t): t is Types.ObjectId => Boolean(t));
+    const taskIdSet = facet.rows.map((r) => r._id.task_id).filter((t): t is Types.ObjectId => Boolean(t));
     const rateRows = await BillingRate.find({
         user_id: { $in: userIds },
         project_id: projectId,
@@ -290,15 +239,20 @@ export const buildBillingReport = async (query: BillingReportQuery): Promise<Bil
         $and: [
             { $or: [{ effective_to: null }, { effective_to: { $gte: query.to_date } }] },
             {
-                $or: [
-                    ...(taskIdSet.length ? [{ task_id: { $in: taskIdSet } }] : []),
-                    { task_id: null },
-                ],
+                $or: [...(taskIdSet.length ? [{ task_id: { $in: taskIdSet } }] : []), { task_id: null }],
             },
         ],
     })
         .select('user_id task_id hourly_rate effective_from')
-        .sort({ effective_from: -1 })
+        // H23 follow-through — secondary `_id: -1` makes the sort
+        // deterministic when two rates share the same `effective_from`
+        // (legitimate: a project + task rate effective on the same day,
+        // or two task rates inserted on the same day). Without it,
+        // Mongo's order on ties is implementation-defined and the
+        // first-write-wins map population could pick different rates
+        // on different report runs. Pre-H23 `findOne` had the same
+        // risk; this hardens the new batched query.
+        .sort({ effective_from: -1, _id: -1 })
         .lean<
             {
                 user_id: Types.ObjectId;
@@ -629,10 +583,7 @@ export const buildLeaveReport = async (query: LeaveReportQuery): Promise<LeaveRe
         .select('_id code name')
         .lean<{ _id: Types.ObjectId; code: string; name: string }[]>();
     const leaveTypeById = new Map(
-        leaveTypeRows.map((lt) => [
-            lt._id.toString(),
-            { id: lt._id.toString(), key: lt.code, label: lt.name },
-        ])
+        leaveTypeRows.map((lt) => [lt._id.toString(), { id: lt._id.toString(), key: lt.code, label: lt.name }])
     );
 
     const balancesByUser = new Map<string, typeof balances>();
