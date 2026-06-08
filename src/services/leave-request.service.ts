@@ -409,7 +409,7 @@ const assertNoOverlap = async (params: {
 
 export const applyLeave = async (
     body: ApplyLeaveBody,
-    caller: { id: Types.ObjectId; role: RoleType }
+    caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
     const ctx = await loadApplyContext(body.start_date, body.end_date);
     const requestedType = ctx.typesById.get(body.leave_type_id);
@@ -560,6 +560,31 @@ export const applyLeave = async (
         await LeaveRequest.deleteOne({ _id: created._id });
         await releaseReservations({ user_id: caller.id, segments });
         throw err;
+    }
+
+    // H4 — audit the initial submission. Pre-H4 the lifecycle audits
+    // only fired on approve/reject/cancel; the CREATION of the row
+    // was invisible to the forensic trail. Mirrors the
+    // approve/reject/cancel audit shape.
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.LEAVE_APPLY,
+            target: { kind: AUDIT_TARGET_KINDS.LEAVE_REQUEST, id: created._id },
+            after: {
+                status: created.status,
+                start_date: created.start_date,
+                end_date: created.end_date,
+                total_days: created.total_days,
+                requires_additional_approval: created.requires_additional_approval,
+            },
+            metadata: {
+                user_id: created.user_id.toString(),
+                requested_leave_type_id: created.requested_leave_type_id.toString(),
+                is_half_day: created.is_half_day,
+                half_day_slot: created.half_day_slot,
+                segments_count: created.leave_segments.length,
+            },
+        });
     }
 
     // Notify reviewers in-app + email. The dispatcher never throws — failures

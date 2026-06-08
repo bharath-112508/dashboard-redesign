@@ -65,6 +65,11 @@ export const AUDIT_ACTIONS = {
     SETTINGS_UPDATE: 'settings.update',
 
     // Leave lifecycle (Company_Management_Plan §2.4 — note on negative-CL approval)
+    // H4 — `LEAVE_APPLY` audits the initial submission. Pre-H4 only
+    // approve/reject/cancel emitted audit rows; the row's CREATION was
+    // invisible to the forensic trail, so a dispute over "did this
+    // person actually apply for this leave?" couldn't be answered.
+    LEAVE_APPLY: 'leave.apply',
     LEAVE_APPROVE: 'leave.approve',
     LEAVE_REJECT: 'leave.reject',
     LEAVE_CANCEL: 'leave.cancel',

@@ -42,7 +42,10 @@ export const postPreview = async (req: Request, res: Response): Promise<Response
 // ─── POST /leaves ─────────────────────────────────────────────────────────
 
 export const postApply = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.applyLeave(req.body as ApplyLeaveBody, caller(req));
+    // H4 — use the auditing caller so `applyLeave` emits a
+    // `leave.apply` row alongside the request creation. Pre-H4 only
+    // approve/reject/cancel were audited.
+    const data = await service.applyLeave(req.body as ApplyLeaveBody, auditingCaller(req));
     return created(res, data);
 };
 
