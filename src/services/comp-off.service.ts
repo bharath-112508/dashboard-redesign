@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 
+import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import { CompOffLedger, type CompOffLedgerDocument } from '../models/comp-off-ledger.model.js';
 import { LeaveBalance, recomputeAvailable } from '../models/leave-balance.model.js';
 import { LeaveType } from '../models/leave-type.model.js';
@@ -59,7 +60,12 @@ const recomputeBalance = async (user_id: Types.ObjectId): Promise<number> => {
 const syncLeaveBalanceForCompOff = async (user_id: Types.ObjectId, balance: number): Promise<void> => {
     const compOffType = await LeaveType.findOne({ code: LEAVE_CODES.COMP_OFF, is_active: true });
     if (!compOffType) return;
-    const year = new Date().getFullYear();
+    // H3 — `new Date().getFullYear()` uses UTC. An IST-midnight comp-off
+    // grant (between 18:30-23:59 UTC on Dec 31) lands in the wrong
+    // year's `LeaveBalance` row and the apply-leave engine can't see
+    // it. `leave-balance.service.ts` fixed this same bug; comp-off was
+    // never updated. Use the canonical IST-aware helper.
+    const year = dayjs().tz(DEFAULT_TIMEZONE).year();
     const existing = await LeaveBalance.findOne({
         user_id,
         leave_type_id: compOffType._id,
