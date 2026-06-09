@@ -296,7 +296,7 @@ describe('initializeBalancesForUserYear', () => {
         );
     });
 
-    it('returns 0 when the user has no date_of_joining (logged warning, not an error)', async () => {
+    it('falls back to the start of the target year when the user has no date_of_joining (so apply-leave still works)', async () => {
         userFindByIdMock.mockReturnValueOnce({
             select: () =>
                 Promise.resolve({
@@ -305,14 +305,26 @@ describe('initializeBalancesForUserYear', () => {
                     internal_profile: { date_of_joining: null },
                 }),
         });
+        const types = [fullType({ code: 'CL', default_allocation_days: 12 })];
+        leaveTypeFindMock.mockResolvedValueOnce(types);
+        leaveBalanceUpdateOneMock.mockResolvedValueOnce({ upsertedCount: 1 });
 
         const inserted = await svc.initializeBalancesForUserYear({
             user_id: new Types.ObjectId(),
             year: 2026,
         });
 
-        expect(inserted).toBe(0);
-        expect(leaveBalanceUpdateOneMock).not.toHaveBeenCalled();
+        // No longer returns 0 — it seeds rows so the user (e.g. a seeded admin
+        // with no internal_profile) can apply leave. Joined at the start of the
+        // target year → full allocation.
+        expect(inserted).toBe(1);
+        expect(leaveBalanceUpdateOneMock).toHaveBeenCalledWith(
+            expect.objectContaining({ leave_type_id: types[0]._id, year: 2026 }),
+            expect.objectContaining({
+                $setOnInsert: expect.objectContaining({ allocated: 12, available: 12 }),
+            }),
+            { upsert: true }
+        );
     });
 
     it('returns 0 when the user is not found', async () => {

@@ -130,15 +130,23 @@ export const initializeBalancesForUserYear = async (params: {
         if (u.role === ROLES.CLIENT) return 0;
         const doj = u.internal_profile?.date_of_joining;
         if (!doj) {
+            // No joining date on file (e.g. seeded admin accounts that never
+            // had an internal_profile). Returning 0 here used to leave the user
+            // with zero balance rows, so apply-leave then failed with a
+            // confusing "Failed to initialise leave balance row" 500 from
+            // `findOrInitBalance`. Fall back to the start of the target year so
+            // they get a full-year allocation and can apply leave.
             logger.warn(
-                { user_id: params.user_id.toString() },
-                'Cannot init leave balances — user has no date_of_joining'
+                { user_id: params.user_id.toString(), year: params.year },
+                'Leave balance init — user has no date_of_joining; defaulting to start of target year'
             );
-            return 0;
+            joining_year = params.year;
+            joining_month = 1;
+        } else {
+            const parsed = parseJoiningDate(doj);
+            joining_year = parsed.year;
+            joining_month = parsed.month;
         }
-        const parsed = parseJoiningDate(doj);
-        joining_year = parsed.year;
-        joining_month = parsed.month;
     }
 
     const typeQuery = LeaveType.find({ is_active: true });
