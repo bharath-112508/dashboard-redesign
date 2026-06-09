@@ -152,7 +152,7 @@ export const createLink = async (
     if (ownerClientId) await ensureClientExists(ownerClientId);
 
     if (input.expires_at !== null && input.expires_at !== undefined && input.expires_at <= new Date()) {
-        throw AppError.unprocessable('expires_at must be in the future', ERROR_CODES.VALIDATION_ERROR, {
+        throw AppError.unprocessable('The expiry date must be in the future.', ERROR_CODES.VALIDATION_ERROR, {
             expires_at: input.expires_at,
         });
     }

@@ -104,7 +104,7 @@ const attendanceRecordSchema = new Schema<AttendanceRecordDocument>(
             required: true,
             validate: {
                 validator: (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v),
-                message: 'local_date must be ISO date (YYYY-MM-DD)',
+                message: 'Enter the date as a valid calendar date.',
             },
         },
         segments: { type: [segmentSchema], default: [] },

@@ -360,7 +360,7 @@ export const finalizeAttachment = async (
         // 500.
         const e = err as { code?: number; keyPattern?: Record<string, unknown> };
         if (e?.code === 11000 && e.keyPattern?.blob_key) {
-            throw AppError.conflict('An attachment with this blob_key already exists', ERROR_CODES.DUPLICATE_RESOURCE, {
+            throw AppError.conflict('This file has already been attached.', ERROR_CODES.DUPLICATE_RESOURCE, {
                 blob_key: input.blob_key,
             });
         }

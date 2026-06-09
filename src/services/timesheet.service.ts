@@ -102,7 +102,7 @@ const loadPolicy = async (): Promise<PolicyContext> => {
  */
 const assertNotFuture = (localDate: string): void => {
     if (localDate > todayLocal()) {
-        throw AppError.unprocessable('local_date cannot be in the future', ERROR_CODES.TIMESHEET_FUTURE_DATE, {
+        throw AppError.unprocessable("You can't log time for a future date.", ERROR_CODES.TIMESHEET_FUTURE_DATE, {
             local_date: localDate,
             today: todayLocal(),
         });

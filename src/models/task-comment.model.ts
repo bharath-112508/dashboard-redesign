@@ -65,7 +65,7 @@ const taskCommentSchema = new Schema<TaskCommentDocument>(
             default: [],
             validate: {
                 validator: (arr: Types.ObjectId[]) => arr.length <= COMMENT_MENTIONS_MAX,
-                message: `mentioned_user_ids cannot exceed ${COMMENT_MENTIONS_MAX} entries`,
+                message: `You can mention at most ${COMMENT_MENTIONS_MAX} people in a comment.`,
             },
         },
         is_edited: { type: Boolean, required: true, default: false },

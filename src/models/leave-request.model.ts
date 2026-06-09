@@ -130,7 +130,7 @@ const leaveRequestSchema = new Schema<LeaveRequestDocument>(
             required: true,
             validate: {
                 validator: (v: LeaveSegment[]) => Array.isArray(v) && v.length > 0,
-                message: 'leave_segments must contain at least one entry',
+                message: 'Add at least one day to your leave request.',
             },
         },
         reason: { type: String, required: true, trim: true },

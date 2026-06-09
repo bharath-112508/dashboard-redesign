@@ -91,7 +91,7 @@ const roleSchema = new Schema<RoleDocument>(
                     const allowed = new Set<string>(PERMISSION_VALUES);
                     return v.every((p) => allowed.has(p));
                 },
-                message: 'permissions must be drawn from PERMISSION_VALUES',
+                message: 'Some of these permissions are no longer available. Remove them and try again.',
             },
         },
         is_system: { type: Boolean, required: true, default: false },

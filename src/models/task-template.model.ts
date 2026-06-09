@@ -89,7 +89,7 @@ const recurrenceSchema = new Schema<RecurrenceRule>(
             default: [],
             validate: {
                 validator: (v: number[]) => v.every((n) => Number.isInteger(n) && n >= 0 && n <= 6),
-                message: 'weekdays must be integers in [0, 6]',
+                message: 'Choose valid days of the week.',
             },
         },
         day_of_month: {

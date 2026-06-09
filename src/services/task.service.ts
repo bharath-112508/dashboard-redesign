@@ -154,7 +154,7 @@ const assertActiveInternalUsers = async (
     for (const u of found) if (INTERNAL_ROLES.includes(u.role)) ok.add(String(u._id));
     const bad = ids.filter((id) => !ok.has(String(id))).map((id) => id.toString());
     if (bad.length > 0) {
-        throw AppError.unprocessable('One or more user_ids are not active internal users', code, {
+        throw AppError.unprocessable("One or more of the selected people aren't active team members.", code, {
             invalid_user_ids: bad,
         });
     }
@@ -198,7 +198,7 @@ const assertParentTaskUsable = async (parentId: Types.ObjectId, projectId: Types
     if (parent.parent_task_id !== null && TASK_MAX_SUBTASK_DEPTH === 1) {
         // Adding a child to a task that itself has a parent would create a
         // depth-2 subtask. Reject to keep the activity feed + UI simple.
-        throw AppError.unprocessable('Subtask depth cannot exceed 1', ERROR_CODES.TASK_SUBTASK_DEPTH_EXCEEDED);
+        throw AppError.unprocessable('Subtasks can only go one level deep.', ERROR_CODES.TASK_SUBTASK_DEPTH_EXCEEDED);
     }
     return parent;
 };

@@ -200,7 +200,7 @@ const userSchema = new Schema<UserDocument>(
                     const allowed = new Set<string>(PERMISSION_VALUES);
                     return v.every((p) => allowed.has(p));
                 },
-                message: 'extra_permissions must be drawn from PERMISSION_VALUES',
+                message: 'Some of these permissions are no longer available. Remove them and try again.',
             },
         },
         status: {

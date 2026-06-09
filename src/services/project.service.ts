@@ -125,7 +125,7 @@ const validateMemberCandidates = async (ids: Types.ObjectId[]): Promise<void> =>
     const bad = ids.filter((id) => !okIds.has(String(id))).map((id) => id.toString());
     if (bad.length > 0) {
         throw AppError.unprocessable(
-            'One or more user_ids are not active internal users',
+            "One or more of the selected people aren't active team members.",
             ERROR_CODES.INVALID_PROJECT_MEMBER_ROLE,
             { invalid_user_ids: bad }
         );
@@ -321,7 +321,7 @@ export const updateProject = async (
     // where only one of the dates is present in the patch — the validator
     // can't know the persisted "other" date.
     if (doc.end_date !== null && doc.end_date < doc.start_date) {
-        throw AppError.unprocessable('end_date must be on or after start_date', ERROR_CODES.PROJECT_DATE_INVALID);
+        throw AppError.unprocessable("The end date can't be before the start date.", ERROR_CODES.PROJECT_DATE_INVALID);
     }
 
     await doc.save();

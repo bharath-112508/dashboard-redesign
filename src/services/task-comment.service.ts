@@ -222,7 +222,7 @@ export const createComment = async (
         // Sanitisation reduced the body to whitespace (e.g. "<script>x</script>"
         // alone). Treat as an empty body even though the validator's
         // length check passed against the raw input.
-        throw AppError.validation('Comment body is empty after sanitisation');
+        throw AppError.validation("Your comment can't be empty.");
     }
 
     const rawMentions = (input.mentioned_user_ids ?? []).map((id) => new Types.ObjectId(id));
@@ -326,7 +326,7 @@ export const updateComment = async (
     if (patch.body !== undefined) {
         const { text: cleanBody } = sanitiseCommentBody(patch.body);
         if (cleanBody.length === 0) {
-            throw AppError.validation('Comment body is empty after sanitisation');
+            throw AppError.validation("Your comment can't be empty.");
         }
         comment.body = cleanBody;
     }

@@ -38,7 +38,7 @@ const assertWithinProjectWindow = (project: ProjectDocument, start: string, end:
         );
     }
     if (project.end_date !== null && end > project.end_date) {
-        throw AppError.unprocessable('Sprint end_date is after the project end_date', ERROR_CODES.SPRINT_DATE_INVALID, {
+        throw AppError.unprocessable("The sprint can't end after the project ends.", ERROR_CODES.SPRINT_DATE_INVALID, {
             project_end_date: project.end_date,
             sprint_end_date: end,
         });
@@ -160,7 +160,7 @@ export const updateSprint = async (
     if (patch.status !== undefined) sprint.status = patch.status as SprintStatus;
 
     if (sprint.end_date < sprint.start_date) {
-        throw AppError.unprocessable('end_date must be on or after start_date', ERROR_CODES.SPRINT_DATE_INVALID);
+        throw AppError.unprocessable("The end date can't be before the start date.", ERROR_CODES.SPRINT_DATE_INVALID);
     }
     assertWithinProjectWindow(project, sprint.start_date, sprint.end_date);
 

@@ -351,16 +351,16 @@ export const updateUser = async (input: {
         }
 
         if (Object.keys(patch).length === 0) {
-            throw AppError.forbidden('No fields in this patch are editable by the caller');
+            throw AppError.forbidden("You don't have permission to edit any of these fields.");
         }
     }
 
     // Role consistency: can't add internal_profile to a client or vice versa.
     if (patch.internal_profile && target.role === ROLES.CLIENT) {
-        throw AppError.validation('internal_profile is not valid for a client user');
+        throw AppError.validation("An internal profile doesn't apply to client accounts.");
     }
     if (patch.client_profile && target.role !== ROLES.CLIENT) {
-        throw AppError.validation('client_profile is only valid for a client user');
+        throw AppError.validation('A client profile only applies to client accounts.');
     }
 
     // Apply shallow merges for sub-docs so unset fields remain. The validator
@@ -419,7 +419,14 @@ export const deactivateUser = async (input: {
 
     target.status = USER_STATUSES.DEACTIVATED;
     target.deactivated_at = new Date();
-    await target.save();
+    // `validateModifiedOnly` — deactivation only flips `status` /
+    // `deactivated_at`. Without this, Mongoose re-validates the WHOLE
+    // document, so a user carrying a legacy `extra_permissions` entry no
+    // longer in `PERMISSION_VALUES` (catalog churn, pre-migration data)
+    // makes the save throw a VALIDATION_ERROR about a field we never
+    // touched — surfacing a baffling "Validation failed" toast to the
+    // admin. Validate only what changed.
+    await target.save({ validateModifiedOnly: true });
 
     await revokeAllRefreshTokens(target._id);
 
@@ -479,7 +486,9 @@ export const reactivateUser = async (
     target.status = USER_STATUSES.ACTIVE;
     target.deactivated_at = null;
     try {
-        await target.save();
+        // Symmetric with deactivate — validate only the changed status
+        // fields so a stale `extra_permissions` entry can't block the flip.
+        await target.save({ validateModifiedOnly: true });
     } catch (err) {
         if (isOneActiveAdminViolation(err)) {
             // R6 — concurrent reactivation racing into the admin slot.

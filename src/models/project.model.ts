@@ -152,7 +152,7 @@ const projectSchema = new Schema<ProjectDocument>(
             default: null,
             validate: {
                 validator: (v: string | null) => v === null || ISO_DATE_REGEX.test(v),
-                message: 'end_date must be YYYY-MM-DD or null',
+                message: 'Enter the end date as a valid calendar date.',
             },
         },
         status: {
@@ -171,7 +171,7 @@ const projectSchema = new Schema<ProjectDocument>(
                 // probably want a project group / department feature, not
                 // a bigger array.
                 validator: (v: Types.ObjectId[]) => v.length <= PROJECT_MEMBERS_MAX,
-                message: `member_ids cannot exceed ${PROJECT_MEMBERS_MAX} entries`,
+                message: `You can add at most ${PROJECT_MEMBERS_MAX} members to a project.`,
             },
         },
         client_ids: {
@@ -179,7 +179,7 @@ const projectSchema = new Schema<ProjectDocument>(
             default: [],
             validate: {
                 validator: (v: Types.ObjectId[]) => v.length <= PROJECT_CLIENTS_MAX,
-                message: `client_ids cannot exceed ${PROJECT_CLIENTS_MAX} entries`,
+                message: `You can add at most ${PROJECT_CLIENTS_MAX} clients to a project.`,
             },
         },
         custom_task_statuses: {
@@ -187,7 +187,7 @@ const projectSchema = new Schema<ProjectDocument>(
             default: [],
             validate: {
                 validator: (v: CustomTaskStatus[]) => v.length <= CUSTOM_STATUSES_PER_PROJECT_MAX,
-                message: `custom_task_statuses cannot exceed ${CUSTOM_STATUSES_PER_PROJECT_MAX} entries`,
+                message: `You can add at most ${CUSTOM_STATUSES_PER_PROJECT_MAX} custom statuses to a project.`,
             },
         },
         // Project-scoped ordering of the four built-in statuses. Seeded
@@ -215,7 +215,7 @@ const projectSchema = new Schema<ProjectDocument>(
                     }
                     return true;
                 },
-                message: 'default_status_orders must contain each of the four built-in keys exactly once',
+                message: 'Each built-in status must appear exactly once in the order.',
             },
         },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
