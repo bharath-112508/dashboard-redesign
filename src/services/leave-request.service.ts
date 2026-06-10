@@ -115,13 +115,13 @@ interface ApplyContext {
 }
 
 const loadApplyContext = async (spanFrom: string, spanTo: string): Promise<ApplyContext> => {
-    const settings = await getOrInitSettings();
-    const workingDays = settings.work_schedule?.working_days ?? [1, 2, 3, 4, 5];
-
-    const [holidays, types] = await Promise.all([
+    // Settings doesn't gate the other two queries — one round trip, not two.
+    const [settings, holidays, types] = await Promise.all([
+        getOrInitSettings(),
         Holiday.find({ date: { $gte: spanFrom, $lte: spanTo } }).select({ date: 1, _id: 0 }),
         LeaveType.find({ is_active: true }),
     ]);
+    const workingDays = settings.work_schedule?.working_days ?? [1, 2, 3, 4, 5];
 
     return {
         workingDays,
@@ -171,26 +171,33 @@ export const buildSlMonthUsedMap = async (params: {
 
     // Hydrate holidays for the full year boundaries if not pre-loaded —
     // historical requests may extend beyond the apply context's span.
-    let holidays = params.holidays;
-    if (!holidays) {
-        const minYear = Math.min(...params.yearsTouched);
-        const maxYear = Math.max(...params.yearsTouched);
-        const holidayDocs = await Holiday.find({
-            date: { $gte: `${minYear}-01-01`, $lte: `${maxYear}-12-31` },
-        }).select({ date: 1, _id: 0 });
-        holidays = new Set(holidayDocs.map((h) => h.date));
-    }
-
-    // Chronological order so the replay mirrors the engine's allocation
-    // at each request's actual apply time. Without this, an earlier
-    // request's SL slot would be attributed to a later request that
-    // happened to be inserted into Mongo first by happenstance.
-    const reqs = await LeaveRequest.find({
-        user_id: params.user_id,
-        status: { $in: [LEAVE_REQUEST_STATUSES.PENDING, LEAVE_REQUEST_STATUSES.APPROVED] },
-        'leave_segments.leave_type_id': params.sl_type_id,
-        'leave_segments.year': { $in: params.yearsTouched },
-    }).sort({ created_at: 1 });
+    // The holiday hydration, the historical-request list, and the
+    // forfeiture rows (consumed after the replay loop) are mutually
+    // independent — load all three in one round trip.
+    const minYear = Math.min(...params.yearsTouched);
+    const maxYear = Math.max(...params.yearsTouched);
+    const [loadedHolidays, reqs, fft] = await Promise.all([
+        params.holidays
+            ? Promise.resolve(null)
+            : Holiday.find({
+                  date: { $gte: `${minYear}-01-01`, $lte: `${maxYear}-12-31` },
+              }).select({ date: 1, _id: 0 }),
+        // Chronological order so the replay mirrors the engine's allocation
+        // at each request's actual apply time. Without this, an earlier
+        // request's SL slot would be attributed to a later request that
+        // happened to be inserted into Mongo first by happenstance.
+        LeaveRequest.find({
+            user_id: params.user_id,
+            status: { $in: [LEAVE_REQUEST_STATUSES.PENDING, LEAVE_REQUEST_STATUSES.APPROVED] },
+            'leave_segments.leave_type_id': params.sl_type_id,
+            'leave_segments.year': { $in: params.yearsTouched },
+        }).sort({ created_at: 1 }),
+        SlMonthlyForfeiture.find({
+            user_id: params.user_id,
+            year: { $in: params.yearsTouched },
+        }),
+    ]);
+    const holidays = params.holidays ?? new Set((loadedHolidays ?? []).map((h) => h.date));
 
     for (const r of reqs) {
         // Aggregate this request's SL days by year (engine emits at most
@@ -245,10 +252,6 @@ export const buildSlMonthUsedMap = async (params: {
     }
 
     // Forfeitures carry `{year, month}` on the row — additive.
-    const fft = await SlMonthlyForfeiture.find({
-        user_id: params.user_id,
-        year: { $in: params.yearsTouched },
-    });
     for (const f of fft) {
         const key = `${f.year}-${f.month}`;
         out.set(key, (out.get(key) ?? 0) + (f.forfeited_days || 0));
@@ -297,31 +300,34 @@ export const previewSplit = async (
     }
     const sl = ctx.typesByCode.get(LEAVE_CODES.SL);
 
-    // Enumerate years touched for the SL "already used" probe.
+    // Enumerate years touched for the SL "already used" probe. The SL
+    // replay and the balance snapshot are independent — run them
+    // concurrently (same shape as `apply`).
     const span = enumerateYears(body.start_date, body.end_date);
-    const slMonthUsed = sl
-        ? await buildSlMonthUsedMap({
-              user_id: caller.id,
-              sl_type_id: sl._id,
-              yearsTouched: span,
-              workingDays: ctx.workingDays,
-              // C4 follow-through — DO NOT pass `ctx.holidayDates`.
-              // `loadApplyContext` scopes holidays to THIS leave's
-              // date range, but `buildSlMonthUsedMap` enumerates the
-              // working days of every historical SL request whose
-              // dates may fall outside that span. Letting the helper
-              // self-load holidays (via the `params.holidays`-
-              // undefined branch) gives it the full year boundary
-              // window it needs for correct working-day exclusion.
-          })
-        : new Map();
-
-    // Available snapshot — only hydrate years/types we'll touch.
-    const availableMap = await loadAvailableMap({
-        user_id: caller.id,
-        years: span,
-        types: ctx.activeTypes,
-    });
+    const [slMonthUsed, availableMap] = await Promise.all([
+        sl
+            ? buildSlMonthUsedMap({
+                  user_id: caller.id,
+                  sl_type_id: sl._id,
+                  yearsTouched: span,
+                  workingDays: ctx.workingDays,
+                  // C4 follow-through — DO NOT pass `ctx.holidayDates`.
+                  // `loadApplyContext` scopes holidays to THIS leave's
+                  // date range, but `buildSlMonthUsedMap` enumerates the
+                  // working days of every historical SL request whose
+                  // dates may fall outside that span. Letting the helper
+                  // self-load holidays (via the `params.holidays`-
+                  // undefined branch) gives it the full year boundary
+                  // window it needs for correct working-day exclusion.
+              })
+            : Promise.resolve(new Map<string, number>()),
+        // Available snapshot — only hydrate years/types we'll touch.
+        loadAvailableMap({
+            user_id: caller.id,
+            years: span,
+            types: ctx.activeTypes,
+        }),
+    ]);
 
     const engine = generateSegments({
         requested_code: requestedType.code as LeaveCode,
@@ -372,11 +378,29 @@ const loadAvailableMap = async (params: {
     // latency. The year initialisations are independent (each writes
     // its own (user_id, year) row), so `Promise.all` collapses them
     // into a single tick of network latency.
-    await Promise.all(params.years.map((y) => initializeBalancesForUserYear({ user_id: params.user_id, year: y })));
-    const rows = await LeaveBalance.find({
+    //
+    // Fast path: the init is `$setOnInsert`-only — it never mutates an
+    // existing row — so when every (year × active type) row is already
+    // present it is a guaranteed no-op. Read first and only heal when a
+    // row is actually missing (new user / new year / newly added type);
+    // this turns the hot preview/apply path into a single round trip.
+    let rows = await LeaveBalance.find({
         user_id: params.user_id,
         year: { $in: params.years },
     });
+    const have = new Set(rows.map((r) => `${r.leave_type_id.toString()}|${r.year}`));
+    const missing = params.years.some((y) =>
+        params.types.some((t) => !have.has(`${t._id.toString()}|${y}`))
+    );
+    if (missing) {
+        await Promise.all(
+            params.years.map((y) => initializeBalancesForUserYear({ user_id: params.user_id, year: y }))
+        );
+        rows = await LeaveBalance.find({
+            user_id: params.user_id,
+            year: { $in: params.years },
+        });
+    }
     const out = new Map<string, number>();
     const idToCode = new Map(params.types.map((t) => [t._id.toString(), t.code]));
     for (const r of rows) {
