@@ -43,6 +43,28 @@ interface BlockActionPayload {
 
 const ephemeral = (text: string) => ({ response_type: 'ephemeral' as const, text });
 
+/**
+ * Block Kit button clicks IGNORE the HTTP ack body — Slack only renders
+ * feedback POSTed to the payload's `response_url` (unlike slash
+ * commands, where the response body IS the message). Without this,
+ * every error ephemeral below is invisible: the user clicks
+ * Approve/Reject and nothing appears to happen.
+ *
+ * Fire-and-forget: failures log at warn and never delay the 3-second
+ * ack window.
+ */
+const postEphemeralToResponseUrl = (responseUrl: string | undefined, text: string): void => {
+    if (!responseUrl) return;
+    void fetch(responseUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response_type: 'ephemeral', replace_original: false, text }),
+        signal: AbortSignal.timeout(2500),
+    }).catch((err: unknown) => {
+        logger.warn({ err }, 'Slack response_url ephemeral dispatch failed');
+    });
+};
+
 // Reviewer roles can approve / reject — matches `isReviewer` in
 // leave-request.service.ts. Phase 1 reuses that gate so Slack
 // approvals follow the same auth model as the web app's
@@ -101,13 +123,19 @@ export const handleInteractive: RequestHandler = async (req, res) => {
     const isApprove = action.action_id.startsWith('approve_leave_');
     const isReject = action.action_id.startsWith('reject_leave_');
 
+    // Dual-channel feedback: the JSON body keeps the existing (test-
+    // pinned) contract, while the response_url POST is what Slack
+    // actually shows to the clicker for block_actions.
+    const respond = (text: string) => {
+        postEphemeralToResponseUrl(payload.response_url, text);
+        res.status(200).json(ephemeral(text));
+    };
+
     if (isApprove || isReject) {
         const user = await resolveCaller(payload.user.id);
         if (!user) {
-            res.status(200).json(
-                ephemeral(
-                    "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin."
-                )
+            respond(
+                "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin."
             );
             return;
         }
@@ -122,14 +150,14 @@ export const handleInteractive: RequestHandler = async (req, res) => {
                 },
                 'Slack interactive: caller lacks reviewer role'
             );
-            res.status(200).json(ephemeral("You don't have permission to review leave requests."));
+            respond("You don't have permission to review leave requests.");
             return;
         }
 
         const prefix = isApprove ? 'approve_leave_' : 'reject_leave_';
         const leaveIdStr = action.action_id.slice(prefix.length);
         if (!Types.ObjectId.isValid(leaveIdStr)) {
-            res.status(200).json(ephemeral('Bad leave reference.'));
+            respond('Bad leave reference.');
             return;
         }
         const leaveId = new Types.ObjectId(leaveIdStr);
@@ -176,14 +204,23 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             // both). Slack retries on >3s response timeouts, so this
             // path also covers idempotent double-clicks.
             if (code === ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING) {
-                res.status(200).json(ephemeral('This leave was already decided.'));
+                respond('This leave was already decided.');
                 return;
             }
             if (code === ERROR_CODES.ADDITIONAL_APPROVAL_REASON_REQUIRED) {
-                res.status(200).json(
-                    ephemeral(
-                        'This request needs an explicit override reason (balance would go negative). Approve from the web app to add one.'
-                    )
+                respond(
+                    'This request needs an explicit override reason (balance would go negative). Approve from the web app to add one.'
+                );
+                return;
+            }
+            // The reviewer-role gate already passed above, so FORBIDDEN
+            // from the service means the self-review guard fired: the
+            // clicker authored this leave. Pre-fix this fell into the
+            // generic branch and (worse) never reached Slack at all, so
+            // an admin rejecting their own request saw nothing happen.
+            if (code === ERROR_CODES.FORBIDDEN) {
+                respond(
+                    "You can't approve or reject your own leave request — another admin or manager has to action it."
                 );
                 return;
             }
@@ -196,12 +233,12 @@ export const handleInteractive: RequestHandler = async (req, res) => {
                 },
                 'Slack interactive: leave service threw'
             );
-            res.status(200).json(ephemeral('Sorry, something went wrong.'));
+            respond('Sorry, something went wrong.');
             return;
         }
     }
 
-    res.status(200).json(ephemeral(`Unknown action: ${action.action_id}`));
+    respond(`Unknown action: ${action.action_id}`);
 };
 
 /**

@@ -88,9 +88,7 @@ describe('handleInteractive — skeleton', () => {
     });
 
     it('responds 200 + ephemeral when payload is not valid JSON', async () => {
-        const res = await request(buildApp())
-            .post('/slack/interactive')
-            .send({ payload: '{this is not json' });
+        const res = await request(buildApp()).post('/slack/interactive').send({ payload: '{this is not json' });
         expect(res.status).toBe(200);
         expect(res.body.response_type).toBe('ephemeral');
     });
@@ -113,9 +111,7 @@ describe('handleSlashCommand — skeleton', () => {
             role: 'employee',
         });
 
-        const res = await request(buildApp())
-            .post('/slack/commands/unknown_cmd')
-            .send('user_id=U_TEST');
+        const res = await request(buildApp()).post('/slack/commands/unknown_cmd').send('user_id=U_TEST');
         expect(res.status).toBe(200);
         expect(res.body.response_type).toBe('ephemeral');
         expect(res.body.text).toMatch(/not implemented/i);
@@ -217,6 +213,55 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
         const [id] = rejectLeaveMock.mock.calls[0];
         expect(String(id)).toBe(leaveId);
     });
+
+    it('responds with a self-review message when the service throws FORBIDDEN (author clicked their own request)', async () => {
+        const callerId = new Types.ObjectId();
+        const leaveId = new Types.ObjectId().toString();
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
+        // ensureCanReviewRequest throws FORBIDDEN when caller === author;
+        // the role gate already passed, so FORBIDDEN here means self-review.
+        rejectLeaveMock.mockRejectedValueOnce({ code: 'FORBIDDEN' });
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({
+                payload: JSON.stringify({
+                    type: 'block_actions',
+                    user: { id: 'U_ADMIN' },
+                    actions: [{ action_id: `reject_leave_${leaveId}` }],
+                }),
+            });
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/own leave request/i);
+    });
+
+    it('POSTs error feedback to payload.response_url (block_actions ignore the ack body)', async () => {
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('ok'));
+        try {
+            const callerId = new Types.ObjectId();
+            const leaveId = new Types.ObjectId().toString();
+            resolveSlackUserMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
+            rejectLeaveMock.mockRejectedValueOnce({ code: 'FORBIDDEN' });
+            await request(buildApp())
+                .post('/slack/interactive')
+                .send({
+                    payload: JSON.stringify({
+                        type: 'block_actions',
+                        user: { id: 'U_ADMIN' },
+                        actions: [{ action_id: `reject_leave_${leaveId}` }],
+                        response_url: 'https://hooks.slack.com/actions/T1/123/abc',
+                    }),
+                });
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+            const [url, init] = fetchSpy.mock.calls[0];
+            expect(url).toBe('https://hooks.slack.com/actions/T1/123/abc');
+            const body = JSON.parse((init as RequestInit).body as string);
+            expect(body.response_type).toBe('ephemeral');
+            expect(body.replace_original).toBe(false);
+            expect(body.text).toMatch(/own leave request/i);
+        } finally {
+            fetchSpy.mockRestore();
+        }
+    });
 });
 
 // ─── Phase 2: /checkin /checkout /status ────────────────────────────────
@@ -237,9 +282,7 @@ describe('handleSlashCommand — Phase 2', () => {
 
     it('/checkin: rejects ephemeral when caller is unidentified', async () => {
         resolveSlackUserMock.mockResolvedValueOnce(null);
-        const res = await request(buildApp())
-            .post('/slack/commands/checkin')
-            .send('user_id=U_TEST');
+        const res = await request(buildApp()).post('/slack/commands/checkin').send('user_id=U_TEST');
         expect(res.body.response_type).toBe('ephemeral');
         expect(res.body.text).toMatch(/identify your Viljetech account/i);
         expect(checkInMock).not.toHaveBeenCalled();
@@ -256,18 +299,12 @@ describe('handleSlashCommand — Phase 2', () => {
             check_in: { time: inAt, method: 'manual', location_id: null, ip: '' },
             segments: [{ check_in: { time: inAt }, check_out: null }],
         });
-        const res = await request(buildApp())
-            .post('/slack/commands/checkin')
-            .send('user_id=U_TEST');
+        const res = await request(buildApp()).post('/slack/commands/checkin').send('user_id=U_TEST');
         expect(res.status).toBe(200);
         expect(res.body.response_type).toBe('ephemeral');
         expect(res.body.text).toMatch(/Checked in at 09:42/);
         // Service called with body { method: 'manual' } + the resolved user id.
-        expect(checkInMock).toHaveBeenCalledWith(
-            { method: 'manual' },
-            userId,
-            ''
-        );
+        expect(checkInMock).toHaveBeenCalledWith({ method: 'manual' }, userId, '');
     });
 
     it('/checkin: ALREADY_CHECKED_IN → ephemeral "already checked in"', async () => {
@@ -276,9 +313,7 @@ describe('handleSlashCommand — Phase 2', () => {
             role: 'employee',
         });
         checkInMock.mockRejectedValueOnce({ code: 'ALREADY_CHECKED_IN' });
-        const res = await request(buildApp())
-            .post('/slack/commands/checkin')
-            .send('user_id=U_TEST');
+        const res = await request(buildApp()).post('/slack/commands/checkin').send('user_id=U_TEST');
         expect(res.body.text).toMatch(/already checked in/i);
     });
 
@@ -299,9 +334,7 @@ describe('handleSlashCommand — Phase 2', () => {
             ],
             total_worked_minutes: 8 * 60 + 33,
         });
-        const res = await request(buildApp())
-            .post('/slack/commands/checkout')
-            .send('user_id=U_TEST');
+        const res = await request(buildApp()).post('/slack/commands/checkout').send('user_id=U_TEST');
         expect(res.status).toBe(200);
         expect(res.body.text).toMatch(/Checked out at 17:33/);
         expect(res.body.text).toMatch(/8h 33m/);
@@ -314,13 +347,11 @@ describe('handleSlashCommand — Phase 2', () => {
             role: 'employee',
         });
         checkOutMock.mockRejectedValueOnce({ code: 'NOT_CHECKED_IN' });
-        const res = await request(buildApp())
-            .post('/slack/commands/checkout')
-            .send('user_id=U_TEST');
+        const res = await request(buildApp()).post('/slack/commands/checkout').send('user_id=U_TEST');
         expect(res.body.text).toMatch(/not currently checked in/i);
     });
 
-    it('/status: lists today\'s segments + total worked', async () => {
+    it("/status: lists today's segments + total worked", async () => {
         resolveSlackUserMock.mockResolvedValueOnce({
             _id: new Types.ObjectId(),
             role: 'employee',
@@ -340,9 +371,7 @@ describe('handleSlashCommand — Phase 2', () => {
             ],
             total_worked_minutes: 4 * 60,
         });
-        const res = await request(buildApp())
-            .post('/slack/commands/status')
-            .send('user_id=U_TEST');
+        const res = await request(buildApp()).post('/slack/commands/status').send('user_id=U_TEST');
         expect(res.status).toBe(200);
         expect(res.body.text).toMatch(/09:00.*13:00/);
         expect(res.body.text).toMatch(/14:00.*now/);
@@ -355,9 +384,7 @@ describe('handleSlashCommand — Phase 2', () => {
             role: 'employee',
         });
         getMyTodayMock.mockResolvedValueOnce(null);
-        const res = await request(buildApp())
-            .post('/slack/commands/status')
-            .send('user_id=U_TEST');
+        const res = await request(buildApp()).post('/slack/commands/status').send('user_id=U_TEST');
         expect(res.body.text).toMatch(/no segments today/i);
     });
 });
