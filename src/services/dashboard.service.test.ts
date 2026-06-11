@@ -280,10 +280,9 @@ describe('buildManagerDashboard', () => {
         leaveFindMock.mockReturnValueOnce(queryStub([]));
         userCountMock.mockResolvedValueOnce(42);
 
-        const result = await dashboard.buildManagerDashboard(
-            { id: new Types.ObjectId(), role: ROLES.ADMIN },
-            ['system.admin']
-        );
+        const result = await dashboard.buildManagerDashboard({ id: new Types.ObjectId(), role: ROLES.ADMIN }, [
+            'system.admin',
+        ]);
 
         expect(result.scope).toBe('org');
         expect(result.team_size).toBe(42);
@@ -300,10 +299,9 @@ describe('buildManagerDashboard', () => {
         leaveCountMock.mockResolvedValueOnce(3).mockResolvedValueOnce(0);
         leaveFindMock.mockReturnValueOnce(queryStub([]));
 
-        const result = await dashboard.buildManagerDashboard(
-            { id: managerId, role: ROLES.MANAGER },
-            ['leave_request.approve']
-        );
+        const result = await dashboard.buildManagerDashboard({ id: managerId, role: ROLES.MANAGER }, [
+            'leave_request.approve',
+        ]);
 
         expect(result.scope).toBe('team');
         expect(result.team_size).toBe(2);
@@ -322,10 +320,9 @@ describe('buildManagerDashboard', () => {
     it('managers with no direct reports short-circuit to a zero card', async () => {
         userFindMock.mockReturnValueOnce(queryStub([])); // no reports
 
-        const result = await dashboard.buildManagerDashboard(
-            { id: new Types.ObjectId(), role: ROLES.MANAGER },
-            ['leave_request.approve']
-        );
+        const result = await dashboard.buildManagerDashboard({ id: new Types.ObjectId(), role: ROLES.MANAGER }, [
+            'leave_request.approve',
+        ]);
 
         expect(result.scope).toBe('team');
         expect(result.team_size).toBe(0);
@@ -449,9 +446,7 @@ describe('buildClientDashboard', () => {
 
         // Both `resolveClientProjectIds` and `computeClientProjectCards`
         // call `Project.find({ client_ids })`. Both get an empty list.
-        projectFindMock
-            .mockReturnValueOnce(queryStub([]))
-            .mockReturnValueOnce(queryStub([]));
+        projectFindMock.mockReturnValueOnce(queryStub([])).mockReturnValueOnce(queryStub([]));
         notificationCountMock.mockResolvedValueOnce(0);
 
         const result = await dashboard.buildClientDashboard(userId);
@@ -476,9 +471,7 @@ describe('buildClientDashboard', () => {
         const t2 = new Types.ObjectId();
 
         // `resolveClientProjectIds` — returns the two ids.
-        projectFindMock.mockReturnValueOnce(
-            queryStub([{ _id: p1 }, { _id: p2 }])
-        );
+        projectFindMock.mockReturnValueOnce(queryStub([{ _id: p1 }, { _id: p2 }]));
         // `computeClientProjectCards` — full project docs (second
         // `Project.find` call).
         projectFindMock.mockReturnValueOnce(
