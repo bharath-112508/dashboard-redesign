@@ -223,12 +223,6 @@ describe('GET /api/v1/dashboard/employee/analytics', () => {
 // ─── GET /dashboard/client/analytics ──────────────────────────────────────
 
 describe('GET /api/v1/dashboard/client/analytics', () => {
-    const clientToken = issueToken({
-        role: 'client',
-        permissions: ['dashboard.client', 'project.read', 'task.read'],
-        role_keys: ['client'],
-    });
-
     it('200 — passes caller id + held permissions + range to buildClientAnalytics', async () => {
         const userId = new Types.ObjectId();
         const token = issueToken({
@@ -250,7 +244,7 @@ describe('GET /api/v1/dashboard/client/analytics', () => {
     it('403 for a caller without dashboard.client', async () => {
         const res = await request(app)
             .get('/api/v1/dashboard/client/analytics')
-            .set(authHeader(clientToken.replace(clientToken, issueToken({ role: 'employee', permissions: [] }))));
+            .set(authHeader(issueToken({ role: 'employee', permissions: [] })));
 
         expect(res.status).toBe(403);
     });

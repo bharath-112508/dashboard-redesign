@@ -313,6 +313,9 @@ describe('buildClientAnalytics — zero-project scope', () => {
         const userId = new Types.ObjectId();
         const out = await buildClientAnalytics(userId, ['project.read', 'task.read'], 'month');
 
+        // Project.find must be called with the tenant-isolation filter.
+        expect(vi.mocked(Project.find)).toHaveBeenCalledWith({ client_ids: userId });
+
         // Task.aggregate must NOT be called (no projects → no task query).
         expect(vi.mocked(Task.aggregate)).not.toHaveBeenCalled();
 
@@ -337,27 +340,32 @@ describe('buildEmployeeAnalytics — self-scope in aggregation pipelines', () =>
             'month'
         );
 
-        // All TimesheetEntry.aggregate calls should include user_id: {$in: [userId]}
+        // Every TimesheetEntry.aggregate call whose first $match stage carries user_id
+        // must scope to exactly {$in: [userId]}.  We also assert at least one such
+        // scoped call exists — so removing the userMatch() spread from the service
+        // causes scopedCallCount to be 0 and the test fails.
+        let timesheetScopedCount = 0;
         for (const call of vi.mocked(TimesheetEntry.aggregate).mock.calls) {
             const pipeline = call[0] as unknown as Record<string, unknown>[];
             const matchStage = pipeline[0] as { $match?: { user_id?: { $in: Types.ObjectId[] } } } | undefined;
             if (matchStage?.$match?.user_id) {
-                expect(matchStage.$match.user_id.$in.map((id: Types.ObjectId) => id.toString())).toContain(
-                    userId.toString()
-                );
+                timesheetScopedCount++;
+                expect(matchStage.$match.user_id).toEqual({ $in: [userId] });
             }
         }
+        expect(timesheetScopedCount).toBeGreaterThan(0);
 
-        // AttendanceRecord.aggregate calls should include user_id: {$in: [userId]}
+        // Same invariant for AttendanceRecord.aggregate.
+        let attendanceScopedCount = 0;
         for (const call of vi.mocked(AttendanceRecord.aggregate).mock.calls) {
             const pipeline = call[0] as unknown as Record<string, unknown>[];
             const matchStage = pipeline[0] as { $match?: { user_id?: { $in: Types.ObjectId[] } } } | undefined;
             if (matchStage?.$match?.user_id) {
-                expect(matchStage.$match.user_id.$in.map((id: Types.ObjectId) => id.toString())).toContain(
-                    userId.toString()
-                );
+                attendanceScopedCount++;
+                expect(matchStage.$match.user_id).toEqual({ $in: [userId] });
             }
         }
+        expect(attendanceScopedCount).toBeGreaterThan(0);
     });
 });
 
