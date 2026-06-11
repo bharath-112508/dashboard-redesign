@@ -53,6 +53,8 @@ DEFAULT_SMOKES=(
     # Phase-4 Step 49 — Cmd-K command-palette action catalog.
     # Read-only; no state mutation, safe to run anywhere in the order.
     smoke-command-palette.sh
+    # Task 10 — dashboard analytics endpoints (admin/employee RBAC + validator).
+    smoke-dashboard-analytics.sh
 )
 
 if [[ ${#ARGS[@]} -gt 0 ]]; then
