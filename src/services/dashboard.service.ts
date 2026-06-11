@@ -13,6 +13,8 @@ import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { isAdminLike } from '../utils/role-check.js';
+import { callerCan } from '../utils/caller-permissions.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
@@ -186,48 +188,77 @@ const computeHolidaysThisMonth = async (): Promise<number> => {
 
 interface AdminDashboardPayload {
     generated_at: string;
-    headcount: AdminHeadcount;
-    attendance_today: AttendanceTodayCard;
-    pending_leave_approvals: PendingLeaveCard;
-    holidays_this_month: number;
+    headcount?: AdminHeadcount;
+    attendance_today?: AttendanceTodayCard;
+    pending_leave_approvals?: PendingLeaveCard;
+    holidays_this_month?: number;
 }
 
-export const buildAdminDashboard = async (): Promise<AdminDashboardPayload> => {
-    const [headcount, attendance_today, pending_leave_approvals, holidays_this_month] = await Promise.all([
-        safeCard('admin.headcount', computeHeadcount, {
-            active: 0,
-            deactivated: 0,
-            by_role: {
-                [ROLES.ADMIN]: 0,
-                [ROLES.MANAGER]: 0,
-                [ROLES.TEAM_LEAD]: 0,
-                [ROLES.EMPLOYEE]: 0,
-                [ROLES.CLIENT]: 0,
-            },
-        } satisfies AdminHeadcount),
-        safeCard('admin.attendance_today', computeAttendanceToday, {
-            date: todayLocalDate(),
-            present: 0,
-            on_leave: 0,
-            incomplete: 0,
-            flagged_for_correction: 0,
-            total_internal_active: 0,
-        } satisfies AttendanceTodayCard),
-        safeCard('admin.pending_leaves', () => computePendingLeaves({}), {
-            count: 0,
-            requires_additional_approval: 0,
-            recent: [],
-        } satisfies PendingLeaveCard),
-        safeCard('admin.holidays_this_month', computeHolidaysThisMonth, 0),
-    ]);
+const EMPTY_HEADCOUNT: AdminHeadcount = {
+    active: 0,
+    deactivated: 0,
+    by_role: {
+        [ROLES.ADMIN]: 0,
+        [ROLES.MANAGER]: 0,
+        [ROLES.TEAM_LEAD]: 0,
+        [ROLES.EMPLOYEE]: 0,
+        [ROLES.CLIENT]: 0,
+    },
+};
 
-    return {
-        generated_at: new Date().toISOString(),
-        headcount,
-        attendance_today,
-        pending_leave_approvals,
-        holidays_this_month,
-    };
+const EMPTY_ATTENDANCE: AttendanceTodayCard = {
+    date: '',
+    present: 0,
+    on_leave: 0,
+    incomplete: 0,
+    flagged_for_correction: 0,
+    total_internal_active: 0,
+};
+
+const EMPTY_PENDING: PendingLeaveCard = {
+    count: 0,
+    requires_additional_approval: 0,
+    recent: [],
+};
+
+export const buildAdminDashboard = async (held: readonly string[] | undefined): Promise<AdminDashboardPayload> => {
+    const payload: AdminDashboardPayload = { generated_at: new Date().toISOString() };
+    const jobs: Promise<void>[] = [];
+
+    if (callerCan(held, PERMISSIONS.USER_READ)) {
+        jobs.push(
+            safeCard('admin.headcount', computeHeadcount, EMPTY_HEADCOUNT).then((v) => {
+                payload.headcount = v;
+            })
+        );
+    }
+    if (callerCan(held, PERMISSIONS.ATTENDANCE_READ_TEAM)) {
+        jobs.push(
+            safeCard('admin.attendance_today', computeAttendanceToday, {
+                ...EMPTY_ATTENDANCE,
+                date: todayLocalDate(),
+            }).then((v) => {
+                payload.attendance_today = v;
+            })
+        );
+    }
+    if (callerCan(held, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
+        jobs.push(
+            safeCard('admin.pending_leaves', () => computePendingLeaves({}), EMPTY_PENDING).then((v) => {
+                payload.pending_leave_approvals = v;
+            })
+        );
+    }
+    if (callerCan(held, PERMISSIONS.HOLIDAY_READ)) {
+        jobs.push(
+            safeCard('admin.holidays_this_month', computeHolidaysThisMonth, 0).then((v) => {
+                payload.holidays_this_month = v;
+            })
+        );
+    }
+
+    await Promise.all(jobs);
+    return payload;
 };
 
 // ─── Manager dashboard ────────────────────────────────────────────────────
@@ -236,7 +267,7 @@ interface ManagerDashboardPayload {
     generated_at: string;
     scope: 'team' | 'org';
     team_size: number;
-    pending_leave_approvals: PendingLeaveCard;
+    pending_leave_approvals?: PendingLeaveCard;
 }
 
 /**
@@ -254,18 +285,16 @@ const resolveDirectReportIds = async (manager_id: Types.ObjectId): Promise<Types
     return reports.map((u) => u._id);
 };
 
-export const buildManagerDashboard = async (caller: {
-    id: Types.ObjectId;
-    role: RoleType;
-    /** Step-47 RBAC signal (BACKEND_AUDIT.md R4). */
-    role_keys?: readonly string[];
-}): Promise<ManagerDashboardPayload> => {
+export const buildManagerDashboard = async (
+    caller: {
+        id: Types.ObjectId;
+        role: RoleType;
+        /** Step-47 RBAC signal (BACKEND_AUDIT.md R4). */
+        role_keys?: readonly string[];
+    },
+    held: readonly string[] | undefined
+): Promise<ManagerDashboardPayload> => {
     if (isAdminLike(caller)) {
-        const pending = await safeCard('manager.pending_leaves', () => computePendingLeaves({}), {
-            count: 0,
-            requires_additional_approval: 0,
-            recent: [],
-        } satisfies PendingLeaveCard);
         const team_size = await safeCard(
             'manager.team_size',
             () =>
@@ -275,12 +304,19 @@ export const buildManagerDashboard = async (caller: {
                 }),
             0
         );
-        return {
+        const payload: ManagerDashboardPayload = {
             generated_at: new Date().toISOString(),
             scope: 'org',
             team_size,
-            pending_leave_approvals: pending,
         };
+        if (callerCan(held, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
+            payload.pending_leave_approvals = await safeCard(
+                'manager.pending_leaves',
+                () => computePendingLeaves({}),
+                EMPTY_PENDING
+            );
+        }
+        return payload;
     }
 
     const reports = await safeCard(
@@ -289,25 +325,28 @@ export const buildManagerDashboard = async (caller: {
         [] as Types.ObjectId[]
     );
 
-    const pending_leave_approvals = await safeCard(
-        'manager.pending_leaves',
-        () =>
-            reports.length === 0
-                ? Promise.resolve({
-                      count: 0,
-                      requires_additional_approval: 0,
-                      recent: [] as Record<string, unknown>[],
-                  } satisfies PendingLeaveCard)
-                : computePendingLeaves({ user_id: { $in: reports } }),
-        { count: 0, requires_additional_approval: 0, recent: [] } satisfies PendingLeaveCard
-    );
-
-    return {
+    const payload: ManagerDashboardPayload = {
         generated_at: new Date().toISOString(),
         scope: 'team',
         team_size: reports.length,
-        pending_leave_approvals,
     };
+
+    if (callerCan(held, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
+        payload.pending_leave_approvals = await safeCard(
+            'manager.pending_leaves',
+            () =>
+                reports.length === 0
+                    ? Promise.resolve({
+                          count: 0,
+                          requires_additional_approval: 0,
+                          recent: [] as Record<string, unknown>[],
+                      } satisfies PendingLeaveCard)
+                    : computePendingLeaves({ user_id: { $in: reports } }),
+            EMPTY_PENDING
+        );
+    }
+
+    return payload;
 };
 
 // ─── Employee dashboard ───────────────────────────────────────────────────

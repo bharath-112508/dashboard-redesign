@@ -19,21 +19,24 @@ const callerRole = (req: Request) => {
 
 // ─── GET /dashboard/admin ─────────────────────────────────────────────────
 
-export const getAdmin = async (_req: Request, res: Response): Promise<Response> => {
-    const data = await service.buildAdminDashboard();
+export const getAdmin = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.buildAdminDashboard(req.user?.permissions);
     return ok(res, data);
 };
 
 // ─── GET /dashboard/manager ───────────────────────────────────────────────
 
 export const getManager = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.buildManagerDashboard({
-        id: callerId(req),
-        role: callerRole(req),
-        // R4 — Step-47 RBAC signal so a multi-role admin gets the
-        // admin-scoped dashboard branch.
-        role_keys: req.user!.role_keys,
-    });
+    const data = await service.buildManagerDashboard(
+        {
+            id: callerId(req),
+            role: callerRole(req),
+            // R4 — Step-47 RBAC signal so a multi-role admin gets the
+            // admin-scoped dashboard branch.
+            role_keys: req.user!.role_keys,
+        },
+        req.user?.permissions
+    );
     return ok(res, data);
 };
 

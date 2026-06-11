@@ -199,23 +199,23 @@ describe('buildAdminDashboard', () => {
         leaveFindMock.mockReturnValueOnce(queryStub([])); // pending recent
         holidayCountMock.mockResolvedValueOnce(2);
 
-        const result = await dashboard.buildAdminDashboard();
+        const result = await dashboard.buildAdminDashboard(['system.admin']);
 
-        expect(result.headcount.active).toBe(20);
-        expect(result.headcount.deactivated).toBe(2);
-        expect(result.headcount.by_role.admin).toBe(1);
-        expect(result.headcount.by_role.manager).toBe(3);
-        expect(result.headcount.by_role.employee).toBe(12);
-        expect(result.headcount.by_role.client).toBe(4);
+        expect(result.headcount!.active).toBe(20);
+        expect(result.headcount!.deactivated).toBe(2);
+        expect(result.headcount!.by_role.admin).toBe(1);
+        expect(result.headcount!.by_role.manager).toBe(3);
+        expect(result.headcount!.by_role.employee).toBe(12);
+        expect(result.headcount!.by_role.client).toBe(4);
 
-        expect(result.attendance_today.present).toBe(9);
-        expect(result.attendance_today.on_leave).toBe(2);
-        expect(result.attendance_today.incomplete).toBe(1);
-        expect(result.attendance_today.flagged_for_correction).toBe(1);
-        expect(result.attendance_today.total_internal_active).toBe(16);
+        expect(result.attendance_today!.present).toBe(9);
+        expect(result.attendance_today!.on_leave).toBe(2);
+        expect(result.attendance_today!.incomplete).toBe(1);
+        expect(result.attendance_today!.flagged_for_correction).toBe(1);
+        expect(result.attendance_today!.total_internal_active).toBe(16);
 
-        expect(result.pending_leave_approvals.count).toBe(4);
-        expect(result.pending_leave_approvals.requires_additional_approval).toBe(1);
+        expect(result.pending_leave_approvals!.count).toBe(4);
+        expect(result.pending_leave_approvals!.requires_additional_approval).toBe(1);
         expect(result.holidays_this_month).toBe(2);
         expect(typeof result.generated_at).toBe('string');
     });
@@ -229,15 +229,46 @@ describe('buildAdminDashboard', () => {
         leaveFindMock.mockReturnValueOnce(queryStub([]));
         holidayCountMock.mockResolvedValueOnce(0);
 
-        const result = await dashboard.buildAdminDashboard();
+        const result = await dashboard.buildAdminDashboard(['system.admin']);
 
-        expect(result.headcount.active).toBe(0);
-        expect(result.headcount.deactivated).toBe(0);
-        expect(result.headcount.by_role.admin).toBe(0);
+        expect(result.headcount!.active).toBe(0);
+        expect(result.headcount!.deactivated).toBe(0);
+        expect(result.headcount!.by_role.admin).toBe(0);
         expect(loggerWarnMock).toHaveBeenCalledWith(
             expect.objectContaining({ card: 'admin.headcount' }),
             'Dashboard card aggregation failed'
         );
+    });
+
+    it('omits sections the caller lacks perms for', async () => {
+        // Only attendance.read_team held — no user.read, no leave_request.approve, no holiday.read
+        attendanceAggregateMock.mockResolvedValueOnce([]);
+        attendanceCountMock.mockResolvedValueOnce(0);
+        userCountMock.mockResolvedValueOnce(0);
+
+        const out = await dashboard.buildAdminDashboard(['attendance.read_team']);
+
+        expect(out.headcount).toBeUndefined();
+        expect(out.pending_leave_approvals).toBeUndefined();
+        expect(out.holidays_this_month).toBeUndefined();
+        expect(out.attendance_today).toBeDefined();
+    });
+
+    it('system.admin keeps the full payload', async () => {
+        userAggregateMock.mockResolvedValueOnce([]);
+        attendanceAggregateMock.mockResolvedValueOnce([]);
+        attendanceCountMock.mockResolvedValueOnce(0);
+        userCountMock.mockResolvedValueOnce(0);
+        leaveCountMock.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+        leaveFindMock.mockReturnValueOnce(queryStub([]));
+        holidayCountMock.mockResolvedValueOnce(0);
+
+        const out = await dashboard.buildAdminDashboard(['system.admin']);
+
+        expect(out.headcount).toBeDefined();
+        expect(out.pending_leave_approvals).toBeDefined();
+        expect(out.attendance_today).toBeDefined();
+        expect(out.holidays_this_month).toBeDefined();
     });
 });
 
@@ -249,15 +280,15 @@ describe('buildManagerDashboard', () => {
         leaveFindMock.mockReturnValueOnce(queryStub([]));
         userCountMock.mockResolvedValueOnce(42);
 
-        const result = await dashboard.buildManagerDashboard({
-            id: new Types.ObjectId(),
-            role: ROLES.ADMIN,
-        });
+        const result = await dashboard.buildManagerDashboard(
+            { id: new Types.ObjectId(), role: ROLES.ADMIN },
+            ['system.admin']
+        );
 
         expect(result.scope).toBe('org');
         expect(result.team_size).toBe(42);
-        expect(result.pending_leave_approvals.count).toBe(7);
-        expect(result.pending_leave_approvals.requires_additional_approval).toBe(2);
+        expect(result.pending_leave_approvals!.count).toBe(7);
+        expect(result.pending_leave_approvals!.requires_additional_approval).toBe(2);
     });
 
     it('managers see only direct reports — pending count is filtered by team', async () => {
@@ -269,11 +300,14 @@ describe('buildManagerDashboard', () => {
         leaveCountMock.mockResolvedValueOnce(3).mockResolvedValueOnce(0);
         leaveFindMock.mockReturnValueOnce(queryStub([]));
 
-        const result = await dashboard.buildManagerDashboard({ id: managerId, role: ROLES.MANAGER });
+        const result = await dashboard.buildManagerDashboard(
+            { id: managerId, role: ROLES.MANAGER },
+            ['leave_request.approve']
+        );
 
         expect(result.scope).toBe('team');
         expect(result.team_size).toBe(2);
-        expect(result.pending_leave_approvals.count).toBe(3);
+        expect(result.pending_leave_approvals!.count).toBe(3);
 
         // The pending-count call must be passed a `user_id: { $in: [...] }`
         // filter that includes both reports — i.e. the team scope is real.
@@ -288,16 +322,32 @@ describe('buildManagerDashboard', () => {
     it('managers with no direct reports short-circuit to a zero card', async () => {
         userFindMock.mockReturnValueOnce(queryStub([])); // no reports
 
-        const result = await dashboard.buildManagerDashboard({
-            id: new Types.ObjectId(),
-            role: ROLES.MANAGER,
-        });
+        const result = await dashboard.buildManagerDashboard(
+            { id: new Types.ObjectId(), role: ROLES.MANAGER },
+            ['leave_request.approve']
+        );
 
         expect(result.scope).toBe('team');
         expect(result.team_size).toBe(0);
-        expect(result.pending_leave_approvals.count).toBe(0);
-        expect(result.pending_leave_approvals.recent).toEqual([]);
+        expect(result.pending_leave_approvals!.count).toBe(0);
+        expect(result.pending_leave_approvals!.recent).toEqual([]);
         // No DB count call should have been issued for a 0-report manager.
+        expect(leaveCountMock).not.toHaveBeenCalled();
+    });
+
+    it('without LEAVE_REQUEST_APPROVE, pending_leave_approvals is absent but team_size is present', async () => {
+        const managerId = new Types.ObjectId();
+        const reportA = { _id: new Types.ObjectId() };
+        userFindMock.mockReturnValueOnce(queryStub([reportA]));
+
+        const result = await dashboard.buildManagerDashboard(
+            { id: managerId, role: ROLES.MANAGER },
+            ['dashboard.manager'] // no leave_request.approve
+        );
+
+        expect(result.scope).toBe('team');
+        expect(result.team_size).toBe(1);
+        expect(result.pending_leave_approvals).toBeUndefined();
         expect(leaveCountMock).not.toHaveBeenCalled();
     });
 });
