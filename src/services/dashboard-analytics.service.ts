@@ -12,9 +12,19 @@ import { Task } from '../models/task.model.js';
 import { BillingRate } from '../models/billing-rate.model.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
+import { USER_STATUSES } from '../constants/user-statuses.js';
+import { ROLES } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import { callerCan } from '../utils/caller-permissions.js';
+import {
+    resolveDashboardRange,
+    enumerateDates,
+    type DashboardRangeKey,
+    type ResolvedRange,
+} from '../utils/dashboard-range.js';
+import { isAdminLike } from '../utils/role-check.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
-import { enumerateDates, type ResolvedRange } from '../utils/dashboard-range.js';
 import {
     buildDelta,
     type SectionDelta,
@@ -564,4 +574,210 @@ export const computeProjectProgress = async (projectIds: Types.ObjectId[]): Prom
     const done = data.reduce((a, p) => a + p.done, 0);
     const total = data.reduce((a, p) => a + p.total, 0);
     return { insight: projectProgressInsight(data.length, done, total), delta: null, data };
+};
+
+// ─── Scope assemblers (spec §7) ───────────────────────────────────────────
+
+export interface AnalyticsPayload {
+    generated_at: string;
+    range: ResolvedRange;
+    sections: Record<string, unknown>;
+}
+
+type Held = readonly string[] | undefined;
+
+/** Collects permission-gated sections concurrently. */
+const sectionCollector = (held: Held) => {
+    const sections: Record<string, unknown> = {};
+    const jobs: Promise<void>[] = [];
+    const add = (key: string, perm: Parameters<typeof callerCan>[1] | null, fn: () => Promise<unknown>) => {
+        if (perm !== null && !callerCan(held, perm)) return;
+        jobs.push(
+            safeSection(key, fn).then((v) => {
+                sections[key] = v;
+            })
+        );
+    };
+    const settle = async () => {
+        await Promise.all(jobs);
+        return sections;
+    };
+    return { add, settle };
+};
+
+const activeInternalCount = (): Promise<number> =>
+    User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } });
+
+/** Shared: upcoming 5 holidays from today. Used by admin + employee assemblers. */
+const computeUpcomingHolidays = async (): Promise<{ data: { id: string; date: string; name: string }[] }> => {
+    const today = dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
+    const rows = await Holiday.find({ date: { $gte: today } })
+        .sort({ date: 1 })
+        .limit(5)
+        .lean<{ _id: Types.ObjectId; date: string; name: string }[]>();
+    return { data: rows.map((h) => ({ id: h._id.toString(), date: h.date, name: h.name })) };
+};
+
+export const buildAdminAnalytics = async (held: Held, rangeKey: DashboardRangeKey): Promise<AnalyticsPayload> => {
+    const range = resolveDashboardRange(rangeKey);
+    const heads = await safeSection('admin.headcount_total', activeInternalCount);
+    const totalHeads = typeof heads === 'number' ? heads : 0;
+
+    const { add, settle } = sectionCollector(held);
+
+    // KPI strip — assembled as one section so the FE can render the row together.
+    add('kpi', null, async () => {
+        const kpi: Record<string, unknown> = {};
+        const kpiJobs: Promise<void>[] = [];
+        const put = (key: string, perm: Parameters<typeof callerCan>[1], fn: () => Promise<unknown>) => {
+            if (!callerCan(held, perm)) return;
+            kpiJobs.push(
+                safeSection(`kpi.${key}`, fn).then((v) => {
+                    kpi[key] = v;
+                })
+            );
+        };
+        put('headcount', PERMISSIONS.USER_READ, async () => {
+            const rows = await User.aggregate<{ _id: { role: string; status: string }; count: number }>([
+                { $group: { _id: { role: '$role', status: '$status' }, count: { $sum: 1 } } },
+            ]);
+            const by_role: Record<string, number> = {};
+            let active = 0;
+            let deactivated = 0;
+            for (const r of rows) {
+                if (r._id.status === USER_STATUSES.ACTIVE) {
+                    active += r.count;
+                    by_role[r._id.role] = (by_role[r._id.role] ?? 0) + r.count;
+                } else if (r._id.status === USER_STATUSES.DEACTIVATED) {
+                    deactivated += r.count;
+                }
+            }
+            return { value: active, deactivated, by_role };
+        });
+        put('active_projects', PERMISSIONS.PROJECT_READ, async () => ({
+            value: await Project.countDocuments({ status: 'active' }),
+        }));
+        put('hours_logged', PERMISSIONS.TIMESHEET_READ, async () => {
+            const [cur, prev] = await Promise.all([
+                sumMinutes(null, range.from, range.to),
+                sumMinutes(null, range.prev_from, range.prev_to),
+            ]);
+            return { value_minutes: cur, delta: buildDelta(cur, prev, range.prev_label, 'neutral') };
+        });
+        put('billable_value', PERMISSIONS.BILLING_RATE_READ, () => computeBillableValue(null, range));
+        await Promise.all(kpiJobs);
+        return kpi;
+    });
+
+    add('attendance_trend', PERMISSIONS.ATTENDANCE_READ_TEAM, () => computeAttendanceTrend(null, range, totalHeads));
+    add('leave_mix', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveMix(null, range));
+    add('upcoming_leaves', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeUpcomingLeaves(null));
+    add('hours_by_project', PERMISSIONS.TIMESHEET_READ, () => computeHoursByProject(null, range));
+    add('utilization', PERMISSIONS.TIMESHEET_READ, () => computeUtilization(null, range, totalHeads));
+    add('tasks_by_status', PERMISSIONS.TASK_READ, () => computeTasksByStatus({}, range));
+    add('throughput', PERMISSIONS.TASK_READ, () => computeThroughput({}, range));
+    add('holidays', PERMISSIONS.HOLIDAY_READ, computeUpcomingHolidays);
+
+    return { generated_at: new Date().toISOString(), range, sections: await settle() };
+};
+
+export const buildManagerAnalytics = async (
+    caller: { id: Types.ObjectId; role: string; role_keys?: readonly string[] },
+    held: Held,
+    rangeKey: DashboardRangeKey
+): Promise<AnalyticsPayload> => {
+    const range = resolveDashboardRange(rangeKey);
+
+    const orgWide = isAdminLike(caller);
+    const teamIds = orgWide
+        ? null
+        : await User.find({
+              status: USER_STATUSES.ACTIVE,
+              role: { $ne: ROLES.CLIENT },
+              'internal_profile.reporting_manager_id': caller.id,
+          })
+              .select('_id')
+              .lean<{ _id: Types.ObjectId }[]>()
+              .then((rows) => rows.map((r) => r._id));
+    const headcount = orgWide ? await activeInternalCount().catch(() => 0) : (teamIds?.length ?? 0);
+    const taskScope = teamIds === null ? {} : { primary_assignee_id: { $in: teamIds } };
+
+    const { add, settle } = sectionCollector(held);
+
+    add('kpi', null, async () => {
+        const kpi: Record<string, unknown> = { team_size: { value: headcount } };
+        if (callerCan(held, PERMISSIONS.TIMESHEET_READ)) {
+            const [cur, prev] = await Promise.all([
+                sumMinutes(teamIds, range.from, range.to),
+                sumMinutes(teamIds, range.prev_from, range.prev_to),
+            ]);
+            kpi.hours_logged = { value_minutes: cur, delta: buildDelta(cur, prev, range.prev_label, 'neutral') };
+        }
+        if (callerCan(held, PERMISSIONS.BILLING_RATE_READ)) {
+            kpi.billable_value = await safeSection('kpi.billable_value', () => computeBillableValue(teamIds, range));
+        }
+        return kpi;
+    });
+    add('attendance_trend', PERMISSIONS.ATTENDANCE_READ_TEAM, () => computeAttendanceTrend(teamIds, range, headcount));
+    add('leave_mix', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveMix(teamIds, range));
+    add('upcoming_leaves', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeUpcomingLeaves(teamIds));
+    add('hours_by_project', PERMISSIONS.TIMESHEET_READ, () => computeHoursByProject(teamIds, range));
+    add('utilization', PERMISSIONS.TIMESHEET_READ, () => computeUtilization(teamIds, range, headcount));
+    add('tasks_by_status', PERMISSIONS.TASK_READ, () => computeTasksByStatus(taskScope, range));
+    add('throughput', PERMISSIONS.TASK_READ, () => computeThroughput(taskScope, range));
+
+    return { generated_at: new Date().toISOString(), range, sections: await settle() };
+};
+
+export const buildEmployeeAnalytics = async (
+    userId: Types.ObjectId,
+    held: Held,
+    rangeKey: DashboardRangeKey
+): Promise<AnalyticsPayload> => {
+    const range = resolveDashboardRange(rangeKey);
+    const self = [userId];
+    const { add, settle } = sectionCollector(held);
+
+    // Own data: gated on the behavioural perms the role bundles already
+    // grant (spec §5) — timesheet.write for own hours, leave_request.write
+    // for own leave views, attendance.check_in_out for own attendance.
+    add('hours_trend', PERMISSIONS.TIMESHEET_WRITE, () => computeHoursTrend(self, range));
+    add('hours_by_project', PERMISSIONS.TIMESHEET_WRITE, () => computeHoursByProject(self, range));
+    add('attendance_trend', PERMISSIONS.ATTENDANCE_CHECK_IN_OUT, () => computeAttendanceTrend(self, range, 1));
+    add('leave_mix', PERMISSIONS.LEAVE_REQUEST_WRITE, () => computeLeaveMix(self, range));
+    add('tasks_by_status', PERMISSIONS.TASK_READ, () => computeTasksByStatus({ primary_assignee_id: userId }, range));
+    add('holidays', PERMISSIONS.HOLIDAY_READ, computeUpcomingHolidays);
+    // leave_balances / my_leaves / comp-off stay on the snapshot endpoint
+    // (range-independent, already built there).
+
+    return { generated_at: new Date().toISOString(), range, sections: await settle() };
+};
+
+export const buildClientAnalytics = async (
+    userId: Types.ObjectId,
+    held: Held,
+    rangeKey: DashboardRangeKey
+): Promise<AnalyticsPayload> => {
+    const range = resolveDashboardRange(rangeKey);
+    const projectRows = await Project.find({ client_ids: userId })
+        .select({ _id: 1 })
+        .lean<{ _id: Types.ObjectId }[]>()
+        .catch(() => [] as { _id: Types.ObjectId }[]);
+    const projectIds = projectRows.map((r) => r._id);
+    const taskScope = { project_id: { $in: projectIds } };
+
+    const { add, settle } = sectionCollector(held);
+    add('project_progress', PERMISSIONS.PROJECT_READ, () => computeProjectProgress(projectIds));
+    add('tasks_by_status', PERMISSIONS.TASK_READ, () =>
+        projectIds.length === 0
+            ? Promise.resolve({ insight: 'No tasks in scope yet.', delta: null, total: 0, data: [] })
+            : computeTasksByStatus(taskScope, range)
+    );
+    add('throughput', PERMISSIONS.TASK_READ, () =>
+        projectIds.length === 0
+            ? Promise.resolve({ insight: throughputInsight(0, range.label), delta: null, data: [] })
+            : computeThroughput(taskScope, range)
+    );
+
+    return { generated_at: new Date().toISOString(), range, sections: await settle() };
 };

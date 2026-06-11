@@ -10,13 +10,21 @@ vi.mock('../models/leave-type.model.js', () => ({ LeaveType: { find: vi.fn() } }
 vi.mock('../models/timesheet-entry.model.js', () => ({ TimesheetEntry: { aggregate: vi.fn() } }));
 vi.mock('../models/holiday.model.js', () => ({ Holiday: { find: vi.fn(), countDocuments: vi.fn() } }));
 vi.mock('../models/user.model.js', () => ({ User: { find: vi.fn(), countDocuments: vi.fn(), aggregate: vi.fn() } }));
-vi.mock('../models/project.model.js', () => ({ Project: { find: vi.fn() } }));
+vi.mock('../models/project.model.js', () => ({
+    Project: { find: vi.fn(), countDocuments: vi.fn() },
+}));
 vi.mock('../models/task.model.js', () => ({ Task: { aggregate: vi.fn(), find: vi.fn(), countDocuments: vi.fn() } }));
 vi.mock('../models/billing-rate.model.js', () => ({ BillingRate: { find: vi.fn() } }));
 
 import { AttendanceRecord } from '../models/attendance-record.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { TimesheetEntry } from '../models/timesheet-entry.model.js';
+import { LeaveRequest } from '../models/leave-request.model.js';
+import { LeaveType } from '../models/leave-type.model.js';
+import { User } from '../models/user.model.js';
+import { Project } from '../models/project.model.js';
+import { Task } from '../models/task.model.js';
+import { BillingRate } from '../models/billing-rate.model.js';
 import {
     computeAttendanceTrend,
     computeHoursByProject,
@@ -24,6 +32,10 @@ import {
     computeHoursTrend,
     computeBillableValue,
     countWorkingDays,
+    computeTasksByStatus,
+    computeThroughput,
+    computeProjectProgress,
+    buildAdminAnalytics,
 } from './dashboard-analytics.service.js';
 
 const RANGE = {
@@ -44,6 +56,26 @@ const queryStub = (rows: unknown) => {
     }
     (q as { then: unknown }).then = (resolve: (v: unknown) => void) => resolve(rows);
     return q;
+};
+
+/**
+ * Stubs every mocked model method to empty/zero results so a test
+ * only needs to override the subset it actually cares about.
+ */
+const stubEmptyModels = () => {
+    vi.mocked(AttendanceRecord.aggregate).mockResolvedValue([] as never);
+    vi.mocked(TimesheetEntry.aggregate).mockResolvedValue([] as never);
+    vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+    vi.mocked(LeaveRequest.aggregate).mockResolvedValue([] as never);
+    vi.mocked(LeaveRequest.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(LeaveType.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(User.countDocuments).mockResolvedValue(0 as never);
+    vi.mocked(User.aggregate).mockResolvedValue([] as never);
+    vi.mocked(User.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(Project.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(Project.countDocuments).mockResolvedValue(0 as never);
+    vi.mocked(Holiday.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(BillingRate.find).mockReturnValue(queryStub([]) as never);
 };
 
 beforeEach(() => {
@@ -103,7 +135,6 @@ describe('computeHoursByProject', () => {
                 { _id: p2, minutes: 290 * 60 },
             ] as never)
             .mockResolvedValueOnce([{ _id: null, minutes: 600 * 60 }] as never); // prev total
-        const { Project } = await import('../models/project.model.js');
         vi.mocked(Project.find).mockReturnValue(
             queryStub([
                 { _id: p1, name: 'Platform', code: 'PLT' },
@@ -154,7 +185,6 @@ describe('computeBillableValue', () => {
         vi.mocked(TimesheetEntry.aggregate)
             .mockResolvedValueOnce([{ _id: { user: u, project: p, date: '2026-06-02' }, billable: 120 }] as never)
             .mockResolvedValueOnce([] as never); // prev window
-        const { BillingRate } = await import('../models/billing-rate.model.js');
         vi.mocked(BillingRate.find).mockReturnValue(
             queryStub([
                 {
@@ -171,9 +201,6 @@ describe('computeBillableValue', () => {
         expect(out.value).toBe(100); // 2h x 50
     });
 });
-
-import { Task } from '../models/task.model.js';
-import { computeTasksByStatus, computeThroughput, computeProjectProgress } from './dashboard-analytics.service.js';
 
 describe('computeTasksByStatus', () => {
     it('groups by status with done-first ordering', async () => {
@@ -207,7 +234,6 @@ describe('computeThroughput', () => {
 describe('computeProjectProgress', () => {
     it('done vs total per project', async () => {
         const p = new Types.ObjectId();
-        const { Project } = await import('../models/project.model.js');
         vi.mocked(Project.find).mockReturnValue(
             queryStub([{ _id: p, name: 'Platform', code: 'PLT', status: 'active', custom_task_statuses: [] }]) as never
         );
@@ -217,5 +243,44 @@ describe('computeProjectProgress', () => {
         ] as never);
         const out = await computeProjectProgress([p]);
         expect(out.data[0]).toMatchObject({ name: 'Platform', done: 30, total: 40 });
+    });
+});
+
+describe('buildAdminAnalytics — permission filtering', () => {
+    it('system.admin gets every section', async () => {
+        stubEmptyModels();
+
+        const out = await buildAdminAnalytics(['system.admin'], 'month');
+        expect(Object.keys(out.sections)).toEqual(
+            expect.arrayContaining([
+                'kpi',
+                'attendance_trend',
+                'leave_mix',
+                'upcoming_leaves',
+                'hours_by_project',
+                'utilization',
+                'tasks_by_status',
+                'throughput',
+            ])
+        );
+        expect(out.range.key).toBe('month');
+    });
+
+    it('a caller without timesheet.read gets no hours/utilization sections', async () => {
+        stubEmptyModels();
+
+        const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
+        expect(out.sections.hours_by_project).toBeUndefined();
+        expect(out.sections.utilization).toBeUndefined();
+        expect(out.sections.attendance_trend).toBeDefined();
+    });
+
+    it('a failing section yields {error:true} without killing the payload', async () => {
+        stubEmptyModels();
+        // Override attendance to throw
+        vi.mocked(AttendanceRecord.aggregate).mockRejectedValue(new Error('boom') as never);
+
+        const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
+        expect(out.sections.attendance_trend).toEqual({ error: true });
     });
 });
