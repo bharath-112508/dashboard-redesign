@@ -30,43 +30,63 @@ export const resolveDashboardRange = (key: DashboardRangeKey): ResolvedRange => 
     switch (key) {
         case 'today':
             return {
-                key, label: 'Today', prev_label: 'yesterday',
-                from: f(now), to: f(now),
-                prev_from: f(now.subtract(1, 'day')), prev_to: f(now.subtract(1, 'day')),
+                key,
+                label: 'Today',
+                prev_label: 'yesterday',
+                from: f(now),
+                to: f(now),
+                prev_from: f(now.subtract(1, 'day')),
+                prev_to: f(now.subtract(1, 'day')),
             };
         case 'week': {
             // dayjs weeks start Sunday; the platform week starts Monday.
             const dow = (now.day() + 6) % 7; // 0 = Monday
             const start = now.subtract(dow, 'day');
             return {
-                key, label: 'This week', prev_label: 'last week',
-                from: f(start), to: f(now),
-                prev_from: f(start.subtract(7, 'day')), prev_to: f(start.subtract(1, 'day')),
+                key,
+                label: 'This week',
+                prev_label: 'last week',
+                from: f(start),
+                to: f(now),
+                prev_from: f(start.subtract(7, 'day')),
+                prev_to: f(start.subtract(1, 'day')),
             };
         }
         case 'month': {
             const start = now.startOf('month');
             return {
-                key, label: 'This month', prev_label: 'last month',
-                from: f(start), to: f(now),
-                prev_from: f(start.subtract(1, 'month')), prev_to: f(start.subtract(1, 'day')),
+                key,
+                label: 'This month',
+                prev_label: 'last month',
+                from: f(start),
+                to: f(now),
+                prev_from: f(start.subtract(1, 'month')),
+                prev_to: f(start.subtract(1, 'day')),
             };
         }
         case '30d': {
             const start = now.subtract(29, 'day');
             return {
-                key, label: 'Last 30 days', prev_label: 'the previous 30 days',
-                from: f(start), to: f(now),
-                prev_from: f(start.subtract(30, 'day')), prev_to: f(start.subtract(1, 'day')),
+                key,
+                label: 'Last 30 days',
+                prev_label: 'the previous 30 days',
+                from: f(start),
+                to: f(now),
+                prev_from: f(start.subtract(30, 'day')),
+                prev_to: f(start.subtract(1, 'day')),
             };
         }
         case 'quarter': {
             const qStartMonth = Math.floor(now.month() / 3) * 3;
             const start = now.month(qStartMonth).startOf('month');
             return {
-                key, label: 'This quarter', prev_label: 'last quarter',
-                from: f(start), to: f(now),
-                prev_from: f(start.subtract(3, 'month')), prev_to: f(start.subtract(1, 'day')),
+                key,
+                label: 'This quarter',
+                prev_label: 'last quarter',
+                from: f(start),
+                to: f(now),
+                prev_from: f(start.subtract(3, 'month')),
+                prev_to: f(start.subtract(1, 'day')),
             };
         }
     }

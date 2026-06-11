@@ -14,8 +14,12 @@ describe('resolveDashboardRange', () => {
     it('today = single IST day, prev = yesterday', () => {
         const r = resolveDashboardRange('today');
         expect(r).toMatchObject({
-            key: 'today', from: '2026-06-11', to: '2026-06-11',
-            prev_from: '2026-06-10', prev_to: '2026-06-10', label: 'Today',
+            key: 'today',
+            from: '2026-06-11',
+            to: '2026-06-11',
+            prev_from: '2026-06-10',
+            prev_to: '2026-06-10',
+            label: 'Today',
         });
     });
 
@@ -30,8 +34,10 @@ describe('resolveDashboardRange', () => {
     it('month = month-start..today, prev = full previous month', () => {
         const r = resolveDashboardRange('month');
         expect(r).toMatchObject({
-            from: '2026-06-01', to: '2026-06-11',
-            prev_from: '2026-05-01', prev_to: '2026-05-31',
+            from: '2026-06-01',
+            to: '2026-06-11',
+            prev_from: '2026-05-01',
+            prev_to: '2026-05-31',
         });
     });
 
@@ -57,8 +63,10 @@ describe('resolveDashboardRange', () => {
 
 describe('enumerateDates', () => {
     it('inclusive list', () => {
-        expect(enumerateDates('2026-06-09', '2026-06-11')).toEqual([
-            '2026-06-09', '2026-06-10', '2026-06-11',
-        ]);
+        expect(enumerateDates('2026-06-09', '2026-06-11')).toEqual(['2026-06-09', '2026-06-10', '2026-06-11']);
+    });
+
+    it('returns [] when from > to', () => {
+        expect(enumerateDates('2026-06-11', '2026-06-09')).toEqual([]);
     });
 });
