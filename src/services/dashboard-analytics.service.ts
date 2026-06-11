@@ -8,8 +8,10 @@ import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { User } from '../models/user.model.js';
 import { Project } from '../models/project.model.js';
+import { Task } from '../models/task.model.js';
 import { BillingRate } from '../models/billing-rate.model.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
+import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { enumerateDates, type ResolvedRange } from '../utils/dashboard-range.js';
@@ -22,6 +24,9 @@ import {
     hoursByProjectInsight,
     hoursLoggedInsight,
     utilizationInsight,
+    tasksByStatusInsight,
+    throughputInsight,
+    projectProgressInsight,
 } from './dashboard-insights.js';
 
 /**
@@ -424,4 +429,139 @@ export const computeBillableValue = async (userIds: UserScope, range: ResolvedRa
         billableWindowValue(userIds, range.prev_from, range.prev_to),
     ]);
     return { value, delta: buildDelta(value, prev, range.prev_label, 'up') };
+};
+
+// ─── tasks_by_status ──────────────────────────────────────────────────────
+//
+// `taskMatch` carries the scope: {} org-wide; { primary_assignee_id: {$in} }
+// for team/self; { project_id: {$in} } for clients. v1 counts the default
+// 'done' key only as terminal (custom terminal statuses are handled in
+// computeProjectProgress where the project doc is in hand).
+
+export interface TasksByStatusSection {
+    insight: string;
+    delta: SectionDelta | null;
+    total: number;
+    data: { status: string; count: number }[];
+}
+
+export const computeTasksByStatus = async (
+    taskMatch: Record<string, unknown>,
+    range: ResolvedRange
+): Promise<TasksByStatusSection> => {
+    const rows = await Task.aggregate<{ _id: string; count: number }>([
+        ...(Object.keys(taskMatch).length ? [{ $match: taskMatch }] : []),
+        { $group: { _id: '$status', count: { $sum: 1 } } },
+    ]);
+    const data = rows
+        .map((r) => ({ status: r._id, count: r.count }))
+        .sort((a, b) =>
+            a.status === DEFAULT_DONE_TASK_STATUS_KEY
+                ? -1
+                : b.status === DEFAULT_DONE_TASK_STATUS_KEY
+                  ? 1
+                  : b.count - a.count
+        );
+    const total = data.reduce((a, r) => a + r.count, 0);
+    const done = data.find((r) => r.status === DEFAULT_DONE_TASK_STATUS_KEY)?.count ?? 0;
+    return { insight: tasksByStatusInsight(done, total, range.label), delta: null, total, data };
+};
+
+// ─── throughput (done tasks per day, approximated by updated_at) ─────────
+
+export interface ThroughputSection {
+    insight: string;
+    delta: SectionDelta | null;
+    data: { date: string; count: number }[];
+}
+
+const istDayExpr = {
+    $dateToString: { format: '%Y-%m-%d', date: '$updated_at', timezone: DEFAULT_TIMEZONE },
+};
+
+export const computeThroughput = async (
+    taskMatch: Record<string, unknown>,
+    range: ResolvedRange
+): Promise<ThroughputSection> => {
+    const winFrom =
+        range.key === 'today'
+            ? dayjs.tz(range.to, DEFAULT_TIMEZONE).subtract(6, 'day').format(DATE_FORMAT)
+            : range.from;
+    const toDate = (d: string, endOfDay: boolean) =>
+        endOfDay
+            ? dayjs.tz(d, DEFAULT_TIMEZONE).endOf('day').toDate()
+            : dayjs.tz(d, DEFAULT_TIMEZONE).startOf('day').toDate();
+
+    const doneMatch = (from: string, to: string) => ({
+        ...taskMatch,
+        status: DEFAULT_DONE_TASK_STATUS_KEY,
+        updated_at: { $gte: toDate(from, false), $lte: toDate(to, true) },
+    });
+
+    const [rows, prev] = await Promise.all([
+        Task.aggregate<{ _id: string; count: number }>([
+            { $match: doneMatch(winFrom, range.to) },
+            { $group: { _id: istDayExpr, count: { $sum: 1 } } },
+        ]),
+        Task.aggregate<{ _id: null; count: number }>([
+            { $match: doneMatch(range.prev_from, range.prev_to) },
+            { $group: { _id: null, count: { $sum: 1 } } },
+        ]),
+    ]);
+
+    const byDate = new Map(rows.map((r) => [r._id, r.count]));
+    const data = enumerateDates(winFrom, range.to).map((date) => ({ date, count: byDate.get(date) ?? 0 }));
+    const completed = data.reduce((a, d) => a + d.count, 0);
+    return {
+        insight: throughputInsight(completed, range.label),
+        delta: buildDelta(completed, prev[0]?.count ?? 0, range.prev_label, 'up'),
+        data,
+    };
+};
+
+// ─── project_progress (client scope) ──────────────────────────────────────
+
+export interface ProjectProgressSection {
+    insight: string;
+    delta: SectionDelta | null;
+    data: { id: string; name: string; code: string; status: string; done: number; total: number }[];
+}
+
+export const computeProjectProgress = async (projectIds: Types.ObjectId[]): Promise<ProjectProgressSection> => {
+    if (projectIds.length === 0) {
+        return { insight: projectProgressInsight(0, 0, 0), delta: null, data: [] };
+    }
+    const projects = await Project.find({ _id: { $in: projectIds } })
+        .select({ name: 1, code: 1, status: 1, custom_task_statuses: 1 })
+        .lean<
+            {
+                _id: Types.ObjectId;
+                name: string;
+                code: string;
+                status: string;
+                custom_task_statuses: { key: string; is_terminal: boolean }[];
+            }[]
+        >();
+
+    const rows = await Task.aggregate<{ _id: { project: Types.ObjectId; status: string }; count: number }>([
+        { $match: { project_id: { $in: projectIds } } },
+        { $group: { _id: { project: '$project_id', status: '$status' }, count: { $sum: 1 } } },
+    ]);
+
+    const data = projects.map((p) => {
+        const terminal = new Set<string>([DEFAULT_DONE_TASK_STATUS_KEY]);
+        for (const s of p.custom_task_statuses ?? []) if (s.is_terminal) terminal.add(s.key);
+        let done = 0;
+        let total = 0;
+        for (const r of rows) {
+            if (r._id.project.toString() !== p._id.toString()) continue;
+            total += r.count;
+            if (terminal.has(r._id.status)) done += r.count;
+        }
+        return { id: p._id.toString(), name: p.name, code: p.code, status: p.status, done, total };
+    });
+
+    const done = data.reduce((a, p) => a + p.done, 0);
+    const total = data.reduce((a, p) => a + p.total, 0);
+    return { insight: projectProgressInsight(data.length, done, total), delta: null, data };
 };

@@ -171,3 +171,51 @@ describe('computeBillableValue', () => {
         expect(out.value).toBe(100); // 2h x 50
     });
 });
+
+import { Task } from '../models/task.model.js';
+import { computeTasksByStatus, computeThroughput, computeProjectProgress } from './dashboard-analytics.service.js';
+
+describe('computeTasksByStatus', () => {
+    it('groups by status with done-first ordering', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([
+            { _id: 'in_progress', count: 91 },
+            { _id: 'done', count: 128 },
+            { _id: 'todo', count: 50 },
+        ] as never);
+        const out = await computeTasksByStatus({}, RANGE);
+        expect(out.data[0]).toEqual({ status: 'done', count: 128 });
+        expect(out.total).toBe(269);
+        expect(out.insight).toContain('128 of 269');
+    });
+});
+
+describe('computeThroughput', () => {
+    it('buckets done tasks per day for short ranges', async () => {
+        vi.mocked(Task.aggregate)
+            .mockResolvedValueOnce([{ _id: '2026-06-02', count: 5 }] as never)
+            .mockResolvedValueOnce([{ _id: null, count: 3 }] as never);
+        const out = await computeThroughput({}, RANGE);
+        expect(out.data).toEqual([
+            { date: '2026-06-01', count: 0 },
+            { date: '2026-06-02', count: 5 },
+            { date: '2026-06-03', count: 0 },
+        ]);
+        expect(out.delta?.pct).toBe(67); // 5 vs 3
+    });
+});
+
+describe('computeProjectProgress', () => {
+    it('done vs total per project', async () => {
+        const p = new Types.ObjectId();
+        const { Project } = await import('../models/project.model.js');
+        vi.mocked(Project.find).mockReturnValue(
+            queryStub([{ _id: p, name: 'Platform', code: 'PLT', status: 'active', custom_task_statuses: [] }]) as never
+        );
+        vi.mocked(Task.aggregate).mockResolvedValue([
+            { _id: { project: p, status: 'done' }, count: 30 },
+            { _id: { project: p, status: 'todo' }, count: 10 },
+        ] as never);
+        const out = await computeProjectProgress([p]);
+        expect(out.data[0]).toMatchObject({ name: 'Platform', done: 30, total: 40 });
+    });
+});
