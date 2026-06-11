@@ -678,7 +678,18 @@ export const buildAdminAnalytics = async (held: Held, rangeKey: DashboardRangeKe
     add('throughput', PERMISSIONS.TASK_READ, () => computeThroughput({}, range));
     add('holidays', PERMISSIONS.HOLIDAY_READ, computeUpcomingHolidays);
 
-    return { generated_at: new Date().toISOString(), range, sections: await settle() };
+    const sections = await settle();
+    // Drop the kpi key entirely when the caller holds no kpi-level permissions
+    // (prevents the FE from rendering an empty KPI row).
+    if (
+        'kpi' in sections &&
+        typeof sections.kpi === 'object' &&
+        sections.kpi !== null &&
+        Object.keys(sections.kpi).length === 0
+    ) {
+        delete sections.kpi;
+    }
+    return { generated_at: new Date().toISOString(), range, sections };
 };
 
 export const buildManagerAnalytics = async (
@@ -707,11 +718,13 @@ export const buildManagerAnalytics = async (
     add('kpi', null, async () => {
         const kpi: Record<string, unknown> = { team_size: { value: headcount } };
         if (callerCan(held, PERMISSIONS.TIMESHEET_READ)) {
-            const [cur, prev] = await Promise.all([
-                sumMinutes(teamIds, range.from, range.to),
-                sumMinutes(teamIds, range.prev_from, range.prev_to),
-            ]);
-            kpi.hours_logged = { value_minutes: cur, delta: buildDelta(cur, prev, range.prev_label, 'neutral') };
+            kpi.hours_logged = await safeSection('kpi.hours_logged', async () => {
+                const [cur, prev] = await Promise.all([
+                    sumMinutes(teamIds, range.from, range.to),
+                    sumMinutes(teamIds, range.prev_from, range.prev_to),
+                ]);
+                return { value_minutes: cur, delta: buildDelta(cur, prev, range.prev_label, 'neutral') };
+            });
         }
         if (callerCan(held, PERMISSIONS.BILLING_RATE_READ)) {
             kpi.billable_value = await safeSection('kpi.billable_value', () => computeBillableValue(teamIds, range));
@@ -762,7 +775,10 @@ export const buildClientAnalytics = async (
     const projectRows = await Project.find({ client_ids: userId })
         .select({ _id: 1 })
         .lean<{ _id: Types.ObjectId }[]>()
-        .catch(() => [] as { _id: Types.ObjectId }[]);
+        .catch((err: unknown) => {
+            logger.warn({ err }, 'Dashboard analytics client project resolution failed');
+            return [] as { _id: Types.ObjectId }[];
+        });
     const projectIds = projectRows.map((r) => r._id);
     const taskScope = { project_id: { $in: projectIds } };
 

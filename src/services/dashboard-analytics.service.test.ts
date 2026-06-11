@@ -36,6 +36,9 @@ import {
     computeThroughput,
     computeProjectProgress,
     buildAdminAnalytics,
+    buildManagerAnalytics,
+    buildEmployeeAnalytics,
+    buildClientAnalytics,
 } from './dashboard-analytics.service.js';
 
 const RANGE = {
@@ -282,5 +285,132 @@ describe('buildAdminAnalytics — permission filtering', () => {
 
         const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
         expect(out.sections.attendance_trend).toEqual({ error: true });
+    });
+});
+
+// ─── Scope-isolation security invariants ─────────────────────────────────
+
+describe('buildAdminAnalytics — empty kpi is omitted', () => {
+    it('omits sections.kpi entirely when caller holds no kpi-level permissions', async () => {
+        stubEmptyModels();
+        // Only attendance.read_team — no user.read / project.read / timesheet.read / billing_rate.read.
+        const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
+        expect(out.sections.kpi).toBeUndefined();
+        expect(out.sections.attendance_trend).toBeDefined();
+    });
+});
+
+describe('buildClientAnalytics — zero-project scope', () => {
+    it('returns empty stubs and never calls Task.aggregate when client has zero projects', async () => {
+        stubEmptyModels();
+        // Project.find for client scope: needs a real promise chain so .lean().catch() works.
+        const projectFindStub = {
+            select: vi.fn().mockReturnThis(),
+            lean: vi.fn().mockResolvedValue([]),
+        };
+        vi.mocked(Project.find).mockReturnValue(projectFindStub as never);
+
+        const userId = new Types.ObjectId();
+        const out = await buildClientAnalytics(userId, ['project.read', 'task.read'], 'month');
+
+        // Task.aggregate must NOT be called (no projects → no task query).
+        expect(vi.mocked(Task.aggregate)).not.toHaveBeenCalled();
+
+        // Sections should be present but empty/stub shapes.
+        expect(out.sections.project_progress).toBeDefined();
+        expect((out.sections.project_progress as { data: unknown[] }).data).toEqual([]);
+        expect(out.sections.tasks_by_status).toBeDefined();
+        expect((out.sections.tasks_by_status as { total: number }).total).toBe(0);
+        expect(out.sections.throughput).toBeDefined();
+        expect((out.sections.throughput as { data: unknown[] }).data).toEqual([]);
+    });
+});
+
+describe('buildEmployeeAnalytics — self-scope in aggregation pipelines', () => {
+    it('timesheet and attendance pipelines carry the self user_id scope', async () => {
+        stubEmptyModels();
+        const userId = new Types.ObjectId();
+
+        await buildEmployeeAnalytics(
+            userId,
+            ['timesheet.write', 'attendance.check_in_out', 'leave_request.write', 'task.read', 'holiday.read'],
+            'month'
+        );
+
+        // All TimesheetEntry.aggregate calls should include user_id: {$in: [userId]}
+        for (const call of vi.mocked(TimesheetEntry.aggregate).mock.calls) {
+            const pipeline = call[0] as unknown as Record<string, unknown>[];
+            const matchStage = pipeline[0] as { $match?: { user_id?: { $in: Types.ObjectId[] } } } | undefined;
+            if (matchStage?.$match?.user_id) {
+                expect(matchStage.$match.user_id.$in.map((id: Types.ObjectId) => id.toString())).toContain(
+                    userId.toString()
+                );
+            }
+        }
+
+        // AttendanceRecord.aggregate calls should include user_id: {$in: [userId]}
+        for (const call of vi.mocked(AttendanceRecord.aggregate).mock.calls) {
+            const pipeline = call[0] as unknown as Record<string, unknown>[];
+            const matchStage = pipeline[0] as { $match?: { user_id?: { $in: Types.ObjectId[] } } } | undefined;
+            if (matchStage?.$match?.user_id) {
+                expect(matchStage.$match.user_id.$in.map((id: Types.ObjectId) => id.toString())).toContain(
+                    userId.toString()
+                );
+            }
+        }
+    });
+});
+
+describe('buildManagerAnalytics — team scope via reporting_manager_id', () => {
+    it('non-admin-like manager: User.find is called with reporting_manager_id filter', async () => {
+        stubEmptyModels();
+        const managerId = new Types.ObjectId();
+
+        // Simulate User.find for team members returning a list stub.
+        // The manager service calls: User.find({ ..., 'internal_profile.reporting_manager_id': caller.id })
+        //   .select('_id').lean()  — which our queryStub handles via the `.then()` resolver.
+        vi.mocked(User.find).mockReturnValue(queryStub([]) as never);
+
+        await buildManagerAnalytics(
+            { id: managerId, role: 'manager', role_keys: ['manager'] },
+            ['dashboard.manager', 'attendance.read_team', 'task.read'],
+            'month'
+        );
+
+        // Verify at least one User.find call includes the reporting_manager_id filter.
+        const calls = vi.mocked(User.find).mock.calls;
+        const hasManagerFilter = calls.some((args) => {
+            const filter = args[0] as unknown as Record<string, unknown>;
+            return (
+                Object.prototype.hasOwnProperty.call(filter, 'internal_profile.reporting_manager_id') &&
+                (filter['internal_profile.reporting_manager_id'] as { toString(): string })?.toString() ===
+                    managerId.toString()
+            );
+        });
+        expect(hasManagerFilter).toBe(true);
+    });
+});
+
+describe('buildManagerAnalytics — kpi.hours_logged safeSection isolation', () => {
+    it('a sumMinutes failure does not kill the entire kpi section', async () => {
+        stubEmptyModels();
+        const managerId = new Types.ObjectId();
+        vi.mocked(User.find).mockReturnValue(queryStub([]) as never);
+
+        // Make TimesheetEntry.aggregate throw so sumMinutes inside kpi.hours_logged fails.
+        vi.mocked(TimesheetEntry.aggregate).mockRejectedValue(new Error('db error') as never);
+
+        const out = await buildManagerAnalytics(
+            { id: managerId, role: 'manager', role_keys: ['manager'] },
+            ['dashboard.manager', 'timesheet.read'],
+            'month'
+        );
+
+        // kpi section should still exist (team_size is always present).
+        expect(out.sections.kpi).toBeDefined();
+        const kpi = out.sections.kpi as Record<string, unknown>;
+        expect(kpi.team_size).toBeDefined();
+        // hours_logged should be the error sentinel from safeSection.
+        expect(kpi.hours_logged).toEqual({ error: true });
     });
 });
