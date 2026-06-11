@@ -17,7 +17,14 @@ vi.mock('../models/billing-rate.model.js', () => ({ BillingRate: { find: vi.fn()
 import { AttendanceRecord } from '../models/attendance-record.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { TimesheetEntry } from '../models/timesheet-entry.model.js';
-import { computeAttendanceTrend, computeHoursByProject, countWorkingDays } from './dashboard-analytics.service.js';
+import {
+    computeAttendanceTrend,
+    computeHoursByProject,
+    computeUtilization,
+    computeHoursTrend,
+    computeBillableValue,
+    countWorkingDays,
+} from './dashboard-analytics.service.js';
 
 const RANGE = {
     key: 'month' as const,
@@ -108,5 +115,59 @@ describe('computeHoursByProject', () => {
         expect(out.data[0]).toMatchObject({ project_name: 'Platform', minutes: 412 * 60 });
         expect(out.insight).toContain('Platform took the most time');
         expect(out.delta?.label).toContain('vs last month');
+    });
+});
+
+describe('computeUtilization', () => {
+    it('actual vs expected from working days x heads x 480', async () => {
+        vi.mocked(TimesheetEntry.aggregate)
+            .mockResolvedValueOnce([{ _id: null, minutes: 2 * 480 * 2 }] as never) // current
+            .mockResolvedValueOnce([{ _id: null, minutes: 480 }] as never); // prev
+        vi.mocked(Holiday.find).mockReturnValue(queryStub([]) as never);
+        // RANGE = Jun 1 (Mon) .. Jun 3 (Wed) → 3 working days; 2 heads
+        const out = await computeUtilization(null, RANGE, 2);
+        expect(out.expected_minutes).toBe(3 * 480 * 2);
+        expect(out.pct).toBe(Math.round(((2 * 480 * 2) / (3 * 480 * 2)) * 100));
+        expect(out.insight).toContain('% of expected hours');
+    });
+});
+
+describe('computeHoursTrend', () => {
+    it('one bar per day, zero-filled', async () => {
+        vi.mocked(TimesheetEntry.aggregate)
+            .mockResolvedValueOnce([{ _id: '2026-06-02', minutes: 300 }] as never)
+            .mockResolvedValueOnce([{ _id: null, minutes: 0 }] as never);
+        const uid = new Types.ObjectId();
+        const out = await computeHoursTrend([uid], RANGE);
+        expect(out.data).toEqual([
+            { date: '2026-06-01', minutes: 0 },
+            { date: '2026-06-02', minutes: 300 },
+            { date: '2026-06-03', minutes: 0 },
+        ]);
+    });
+});
+
+describe('computeBillableValue', () => {
+    it('joins billable minutes to the rate effective on the entry date', async () => {
+        const u = new Types.ObjectId();
+        const p = new Types.ObjectId();
+        vi.mocked(TimesheetEntry.aggregate)
+            .mockResolvedValueOnce([{ _id: { user: u, project: p, date: '2026-06-02' }, billable: 120 }] as never)
+            .mockResolvedValueOnce([] as never); // prev window
+        const { BillingRate } = await import('../models/billing-rate.model.js');
+        vi.mocked(BillingRate.find).mockReturnValue(
+            queryStub([
+                {
+                    user_id: u,
+                    project_id: p,
+                    task_id: null,
+                    hourly_rate: 50,
+                    effective_from: '2026-01-01',
+                    effective_to: null,
+                },
+            ]) as never
+        );
+        const out = await computeBillableValue(null, RANGE);
+        expect(out.value).toBe(100); // 2h x 50
     });
 });

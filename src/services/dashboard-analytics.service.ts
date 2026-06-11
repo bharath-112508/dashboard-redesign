@@ -8,6 +8,7 @@ import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { User } from '../models/user.model.js';
 import { Project } from '../models/project.model.js';
+import { BillingRate } from '../models/billing-rate.model.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
@@ -20,6 +21,7 @@ import {
     leaveMixInsight,
     hoursByProjectInsight,
     hoursLoggedInsight,
+    utilizationInsight,
 } from './dashboard-insights.js';
 
 /**
@@ -277,7 +279,149 @@ export const computeHoursByProject = async (
     };
 };
 
-// Suppress unused-import lint warnings for constants used by Tasks 5–7 (imported then).
-// Tasks 5–7 will add their own imports as needed; this file intentionally omits them
-// until those tasks ship (YAGNI).
-void WORK_MINUTES_PER_DAY; // referenced in Task 5 computeUtilization
+// ─── utilization ──────────────────────────────────────────────────────────
+
+export interface UtilizationSection {
+    insight: string;
+    delta: SectionDelta | null;
+    pct: number;
+    actual_minutes: number;
+    expected_minutes: number;
+}
+
+const sumMinutes = async (userIds: UserScope, from: string, to: string): Promise<number> => {
+    const rows = await TimesheetEntry.aggregate<{ _id: null; minutes: number }>([
+        { $match: { local_date: { $gte: from, $lte: to }, ...userMatch(userIds) } },
+        { $group: { _id: null, minutes: { $sum: '$total_minutes' } } },
+    ]);
+    return rows[0]?.minutes ?? 0;
+};
+
+export const computeUtilization = async (
+    userIds: UserScope,
+    range: ResolvedRange,
+    headcount: number
+): Promise<UtilizationSection> => {
+    const [actual_minutes, prevActual, workingDays] = await Promise.all([
+        sumMinutes(userIds, range.from, range.to),
+        sumMinutes(userIds, range.prev_from, range.prev_to),
+        countWorkingDays(range.from, range.to),
+    ]);
+    const expected_minutes = workingDays * WORK_MINUTES_PER_DAY * Math.max(headcount, 0);
+    const pct = expected_minutes === 0 ? 0 : Math.round((actual_minutes / expected_minutes) * 100);
+    return {
+        insight: utilizationInsight(pct, range.label),
+        delta: buildDelta(actual_minutes, prevActual, range.prev_label, 'up'),
+        pct,
+        actual_minutes,
+        expected_minutes,
+    };
+};
+
+// ─── hours_trend (employee: my minutes per day) ───────────────────────────
+
+export interface HoursTrendSection {
+    insight: string;
+    delta: SectionDelta | null;
+    data: { date: string; minutes: number }[];
+}
+
+export const computeHoursTrend = async (userIds: UserScope, range: ResolvedRange): Promise<HoursTrendSection> => {
+    const winFrom =
+        range.key === 'today'
+            ? dayjs.tz(range.to, DEFAULT_TIMEZONE).subtract(6, 'day').format(DATE_FORMAT)
+            : range.from;
+    const [rows, prev] = await Promise.all([
+        TimesheetEntry.aggregate<{ _id: string; minutes: number }>([
+            { $match: { local_date: { $gte: winFrom, $lte: range.to }, ...userMatch(userIds) } },
+            { $group: { _id: '$local_date', minutes: { $sum: '$total_minutes' } } },
+        ]),
+        TimesheetEntry.aggregate<{ _id: null; minutes: number }>([
+            { $match: { local_date: { $gte: range.prev_from, $lte: range.prev_to }, ...userMatch(userIds) } },
+            { $group: { _id: null, minutes: { $sum: '$total_minutes' } } },
+        ]),
+    ]);
+    const byDate = new Map(rows.map((r) => [r._id, r.minutes]));
+    const data = enumerateDates(winFrom, range.to).map((date) => ({ date, minutes: byDate.get(date) ?? 0 }));
+    const total = data.reduce((a, d) => a + d.minutes, 0);
+    return {
+        insight: hoursLoggedInsight(total, range.label),
+        delta: buildDelta(total, prev[0]?.minutes ?? 0, range.prev_label, 'neutral'),
+        data,
+    };
+};
+
+// ─── billable value (KPI) ─────────────────────────────────────────────────
+
+export interface BillableValueKpi {
+    /** Σ billable minutes x hourly rate, rounded to whole currency units. */
+    value: number;
+    delta: SectionDelta | null;
+}
+
+interface RateRow {
+    user_id: Types.ObjectId;
+    project_id: Types.ObjectId;
+    task_id: Types.ObjectId | null;
+    hourly_rate: number;
+    effective_from: string;
+    effective_to: string | null;
+}
+
+/** Project-level rate effective on `date` (task-level rates are a billing-
+ *  report concern; the dashboard KPI uses the project fallback only). */
+const rateFor = (rates: RateRow[], user: string, project: string, date: string): number | null => {
+    let best: RateRow | null = null;
+    for (const r of rates) {
+        if (r.task_id !== null) continue;
+        if (r.user_id.toString() !== user || r.project_id.toString() !== project) continue;
+        if (r.effective_from > date) continue;
+        if (r.effective_to !== null && r.effective_to < date) continue;
+        if (!best || r.effective_from > best.effective_from) best = r;
+    }
+    return best?.hourly_rate ?? null;
+};
+
+const billableWindowValue = async (userIds: UserScope, from: string, to: string): Promise<number> => {
+    const rows = await TimesheetEntry.aggregate<{
+        _id: { user: Types.ObjectId; project: Types.ObjectId | null; date: string };
+        billable: number;
+    }>([
+        {
+            $match: {
+                local_date: { $gte: from, $lte: to },
+                billable_total_minutes: { $gt: 0 },
+                project_id: { $ne: null },
+                ...userMatch(userIds),
+            },
+        },
+        {
+            $group: {
+                _id: { user: '$user_id', project: '$project_id', date: '$local_date' },
+                billable: { $sum: '$billable_total_minutes' },
+            },
+        },
+    ]);
+    if (rows.length === 0) return 0;
+
+    const userSet = [...new Set(rows.map((r) => r._id.user.toString()))].map((s) => new Types.ObjectId(s));
+    const projectSet = [...new Set(rows.map((r) => r._id.project!.toString()))].map((s) => new Types.ObjectId(s));
+    const rates = await BillingRate.find({ user_id: { $in: userSet }, project_id: { $in: projectSet } }).lean<
+        RateRow[]
+    >();
+
+    let value = 0;
+    for (const r of rows) {
+        const rate = rateFor(rates, r._id.user.toString(), r._id.project!.toString(), r._id.date);
+        if (rate !== null) value += (r.billable / 60) * rate;
+    }
+    return Math.round(value);
+};
+
+export const computeBillableValue = async (userIds: UserScope, range: ResolvedRange): Promise<BillableValueKpi> => {
+    const [value, prev] = await Promise.all([
+        billableWindowValue(userIds, range.from, range.to),
+        billableWindowValue(userIds, range.prev_from, range.prev_to),
+    ]);
+    return { value, delta: buildDelta(value, prev, range.prev_label, 'up') };
+};
