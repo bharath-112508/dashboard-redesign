@@ -11,7 +11,7 @@
  *
  * Run:  npx tsx scripts/demo-seed.ts
  *
- * All seeded users share the password `Vilje@2026!`.
+ * All users (incl. admin) share the password `Vilje@1234`.
  */
 import mongoose from 'mongoose';
 
@@ -20,8 +20,8 @@ import { COLLECTIONS } from '../src/constants/collections.js';
 
 const API = 'http://localhost:3001/api/v1';
 const ADMIN_EMAIL = 'admin@viljetech.com';
-const ADMIN_PASSWORD = 'Admin@1234';
-const DEMO_PASSWORD = 'Vilje@2026!'; // 11 chars — policy is 10–12
+const ADMIN_PASSWORD = 'Vilje@1234';
+const DEMO_PASSWORD = 'Vilje@1234'; // 10 chars — policy is 10–12
 
 // ─── Tiny HTTP helper ──────────────────────────────────────────────────────
 
@@ -160,7 +160,7 @@ interface UserSpec {
 const USERS: UserSpec[] = [
     {
         key: 'priya',
-        email: 'priya.sharma@viljetech.com',
+        email: 'priya@viljetech.com',
         full_name: 'Priya Sharma',
         role: 'manager',
         employee_id: 'VT-001',
@@ -170,7 +170,7 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'arjun',
-        email: 'arjun.mehta@viljetech.com',
+        email: 'arjun@viljetech.com',
         full_name: 'Arjun Mehta',
         role: 'manager',
         employee_id: 'VT-002',
@@ -180,7 +180,7 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'kavya',
-        email: 'kavya.reddy@viljetech.com',
+        email: 'kavya@viljetech.com',
         full_name: 'Kavya Reddy',
         role: 'team_lead',
         employee_id: 'VT-003',
@@ -191,7 +191,7 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'rohan',
-        email: 'rohan.iyer@viljetech.com',
+        email: 'rohan@viljetech.com',
         full_name: 'Rohan Iyer',
         role: 'team_lead',
         employee_id: 'VT-004',
@@ -202,7 +202,7 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'ananya',
-        email: 'ananya.krishnan@viljetech.com',
+        email: 'ananya@viljetech.com',
         full_name: 'Ananya Krishnan',
         role: 'employee',
         employee_id: 'VT-005',
@@ -213,7 +213,7 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'vikram',
-        email: 'vikram.nair@viljetech.com',
+        email: 'vikram@viljetech.com',
         full_name: 'Vikram Nair',
         role: 'employee',
         employee_id: 'VT-006',
@@ -224,7 +224,7 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'sneha',
-        email: 'sneha.patil@viljetech.com',
+        email: 'sneha@viljetech.com',
         full_name: 'Sneha Patil',
         role: 'employee',
         employee_id: 'VT-007',
@@ -235,7 +235,7 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'aditya',
-        email: 'aditya.kulkarni@viljetech.com',
+        email: 'aditya@viljetech.com',
         full_name: 'Aditya Kulkarni',
         role: 'employee',
         employee_id: 'VT-008',
@@ -246,7 +246,7 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'ishita',
-        email: 'ishita.banerjee@viljetech.com',
+        email: 'ishita@viljetech.com',
         full_name: 'Ishita Banerjee',
         role: 'employee',
         employee_id: 'VT-009',
@@ -257,7 +257,7 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'karthik',
-        email: 'karthik.menon@viljetech.com',
+        email: 'karthik@viljetech.com',
         full_name: 'Karthik Menon',
         role: 'employee',
         employee_id: 'VT-010',
@@ -268,14 +268,14 @@ const USERS: UserSpec[] = [
     },
     {
         key: 'henrik',
-        email: 'henrik.larsen@nordmark.io',
+        email: 'henrik@viljetech.com',
         full_name: 'Henrik Larsen',
         role: 'client',
         company_name: 'Nordmark Logistics AS',
     },
     {
         key: 'emma',
-        email: 'emma.lindqvist@aurorafoods.se',
+        email: 'emma@viljetech.com',
         full_name: 'Emma Lindqvist',
         role: 'client',
         company_name: 'Aurora Foods AB',
