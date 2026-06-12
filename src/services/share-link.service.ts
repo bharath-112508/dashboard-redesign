@@ -21,6 +21,7 @@ import {
 } from '../constants/share-link.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { sha256Hex } from '../utils/token-hash.js';
+import { encryptSecret, decryptSecret } from '../utils/crypto-aes.js';
 import logger from '../utils/logger.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { CreateShareLinkBody, ListShareLinksQuery } from '../validators/share-link.validator.js';
@@ -59,17 +60,49 @@ export interface ShareLinkCaller {
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
 /**
- * C9 — Public projection. Strips both `token` (legacy plaintext that
- * the boot migration nulls out) and `token_hash` (the on-disk digest)
- * because neither is useful to API consumers and the hash being on
- * the wire is gratuitous. The raw token is only ever surfaced at
- * create time via `createLink` returning `{...toPublic(doc), token}`.
+ * C9 — Public projection. Strips `token` (legacy plaintext), `token_hash`
+ * (the on-disk digest), and `token_encrypted` (AES ciphertext) because
+ * none of these are useful to API consumers. The raw token is only ever
+ * surfaced at create time (once) and by the authed list via
+ * `toPublicWithToken`. Never write ciphertext to audit_logs.
  */
 const toPublic = (doc: ProjectShareLinkDocument): Record<string, unknown> => {
     const json = doc.toJSON() as Record<string, unknown>;
     delete json.token;
     delete json.token_hash;
+    delete json.token_encrypted;
     return json;
+};
+
+/**
+ * Like `toPublic` but also decrypts `token_encrypted` and attaches the
+ * raw token as `token`. Used ONLY in `listLinks` (route-gated on
+ * `share_link.write`) so authed admins can copy the share URL.
+ *
+ * Failure behaviour: a decrypt error (key rotation, truncated blob) logs
+ * a warning under `SHARE_LINK_TOKEN_DECRYPT_FAILED` and returns
+ * `token: null` so the list still renders — the Copy button simply stays
+ * hidden for that row. Never throws.
+ *
+ * Legacy rows (created before `token_encrypted` was added) have
+ * `token_encrypted: null`; those return `token: null` without any
+ * decrypt attempt.
+ */
+const toPublicWithToken = (doc: ProjectShareLinkDocument): Record<string, unknown> => {
+    const base = toPublic(doc);
+    if (!doc.token_encrypted) {
+        return { ...base, token: null };
+    }
+    try {
+        const raw = decryptSecret(doc.token_encrypted);
+        return { ...base, token: raw };
+    } catch (err) {
+        logger.warn(
+            { err, code: 'SHARE_LINK_TOKEN_DECRYPT_FAILED', link_id: doc._id.toString() },
+            'Failed to decrypt share-link token — returning null for this row'
+        );
+        return { ...base, token: null };
+    }
 };
 
 const generateToken = (): string => randomBytes(SHARE_LINK_TOKEN_BYTES).toString('base64url');
@@ -129,7 +162,10 @@ export const listLinks = async (
     ]);
 
     return {
-        data: rows.map(toPublic),
+        // toPublicWithToken decrypts token_encrypted so authed admins
+        // can use the per-row Copy URL button. Decrypt failures surface
+        // as token: null (never 500 the list).
+        data: rows.map(toPublicWithToken),
         meta: {
             page: query.page,
             limit: query.limit,
@@ -170,8 +206,13 @@ export const createLink = async (
             created = await ProjectShareLink.create({
                 project_id: projectId,
                 // C9 — persist only the hash; the raw token is returned
-                // to the caller below and is never stored.
+                // to the caller below and is never stored in plaintext.
                 token_hash: sha256Hex(candidate),
+                // AES-256-GCM encrypted copy so authed admins can
+                // recover the raw token for the Copy-URL action without
+                // ever storing plaintext. Consistent with how the Slack
+                // bot token is stored (same MFA_ENCRYPTION_KEY).
+                token_encrypted: encryptSecret(candidate),
                 token: null,
                 owner_client_id: ownerClientId,
                 created_by: caller.id,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { Types } from 'mongoose';
 
 /**
@@ -32,6 +32,8 @@ const {
     taskFindMock,
     userExistsMock,
     recordAuditMock,
+    encryptSecretMock,
+    decryptSecretMock,
 } = vi.hoisted(() => ({
     linkCreateMock: vi.fn(),
     linkFindByIdMock: vi.fn(),
@@ -45,6 +47,8 @@ const {
     taskFindMock: vi.fn(),
     userExistsMock: vi.fn(),
     recordAuditMock: vi.fn(),
+    encryptSecretMock: vi.fn((plain: string) => `enc:${plain}`),
+    decryptSecretMock: vi.fn((blob: string) => blob.replace(/^enc:/, '')),
 }));
 
 vi.mock('../models/project-share-link.model.js', () => ({
@@ -82,6 +86,11 @@ vi.mock('./audit.service.js', () => ({
     recordSystemAudit: vi.fn(),
 }));
 
+vi.mock('../utils/crypto-aes.js', () => ({
+    encryptSecret: encryptSecretMock,
+    decryptSecret: decryptSecretMock,
+}));
+
 const svc = await import('./share-link.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
 
@@ -98,6 +107,8 @@ const makeLink = (overrides: Record<string, unknown> = {}) => {
         // as a nullable transitional field for the boot migration.
         token: null as string | null,
         token_hash: 'sha256-stub',
+        // AES-encrypted token; null for legacy rows.
+        token_encrypted: null as string | null,
         owner_client_id: null as Types.ObjectId | null,
         created_by: new Types.ObjectId(),
         expires_at: null as Date | null,
@@ -114,10 +125,12 @@ const makeLink = (overrides: Record<string, unknown> = {}) => {
         id: l._id.toString(),
         project_id: l.project_id.toString(),
         // toJSON reflects the on-disk shape; the service's `toPublic`
-        // strips both `token` and `token_hash` so neither escapes the
-        // API boundary.
+        // strips `token`, `token_hash`, and `token_encrypted` so none
+        // escape the API boundary. `toPublicWithToken` re-attaches the
+        // decrypted raw token for the authed list endpoint.
         token: l.token,
         token_hash: l.token_hash,
+        token_encrypted: l.token_encrypted,
         owner_client_id: l.owner_client_id?.toString() ?? null,
         expires_at: l.expires_at,
         revoked_at: l.revoked_at,
@@ -125,6 +138,12 @@ const makeLink = (overrides: Record<string, unknown> = {}) => {
     }));
     return l;
 };
+
+// Reset mock implementations to defaults before each test.
+afterEach(() => {
+    encryptSecretMock.mockImplementation((plain: string) => `enc:${plain}`);
+    decryptSecretMock.mockImplementation((blob: string) => blob.replace(/^enc:/, ''));
+});
 
 const stubFindForList = (rows: ReturnType<typeof makeLink>[]): void => {
     linkFindMock.mockReturnValueOnce({
@@ -187,6 +206,7 @@ describe('createLink', () => {
 
         // C9 — the create payload MUST set `token: null` and provide a
         // `token_hash`. The plaintext token never lands in Mongo.
+        // It also sets `token_encrypted` (AES) for the Copy-URL feature.
         expect(linkCreateMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 owner_client_id: null,
@@ -194,6 +214,7 @@ describe('createLink', () => {
                 revoked_at: null,
                 token: null,
                 token_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+                token_encrypted: expect.stringMatching(/^enc:/),
             })
         );
         // The raw token is returned to the caller exactly once. It must
@@ -553,6 +574,91 @@ describe('resolveLink — C9 hashed-token lookup', () => {
         // against an accidental dual-read regression.
         const queryArg = linkFindOneMock.mock.calls[0]![0] as Record<string, unknown>;
         expect(queryArg).not.toHaveProperty('token');
+    });
+});
+
+// ─── Encrypted-at-rest token (Copy-URL feature) ───────────────────────────
+
+describe('createLink — token_encrypted round-trip', () => {
+    it('(a) persists a non-null token_encrypted that decrypts back to the returned raw token', async () => {
+        const created = makeLink();
+        linkCreateMock.mockResolvedValueOnce(created);
+
+        const result = await svc.createLink(
+            new Types.ObjectId(),
+            { owner_client_id: null, expires_at: null },
+            makeCaller()
+        );
+
+        const { token } = result as { token: string };
+        expect(typeof token).toBe('string');
+        expect(token.length).toBeGreaterThan(20);
+
+        // encryptSecret was called with the raw token.
+        expect(encryptSecretMock).toHaveBeenCalledWith(token);
+
+        // The encrypted value passed to create should decrypt back to
+        // the raw token via our stubbed decryptSecret.
+        const persistedEncrypted = (linkCreateMock.mock.calls[0]![0] as { token_encrypted: string }).token_encrypted;
+        expect(persistedEncrypted).toBe(`enc:${token}`);
+        expect(decryptSecretMock(persistedEncrypted)).toBe(token);
+    });
+});
+
+describe('listLinks — token decryption', () => {
+    it('(b) returns token equal to the original raw token for an encrypted row', async () => {
+        const rawToken = 'original-raw-token-xyz';
+        const link = makeLink({ token_encrypted: `enc:${rawToken}` });
+        stubFindForList([link]);
+
+        const result = await svc.listLinks(new Types.ObjectId(), { page: 1, limit: 20, active_only: false });
+
+        const row = result.data[0] as { token: string | null };
+        expect(row.token).toBe(rawToken);
+    });
+
+    it('(c) a row with token_encrypted: null (legacy) lists with token: null', async () => {
+        // token_encrypted is null by default in makeLink — simulate a
+        // pre-feature legacy row.
+        const link = makeLink({ token_encrypted: null });
+        stubFindForList([link]);
+
+        const result = await svc.listLinks(new Types.ObjectId(), { page: 1, limit: 20, active_only: false });
+
+        const row = result.data[0] as { token: string | null };
+        expect(row.token).toBeNull();
+        // decryptSecret must NOT be called for null-encrypted rows.
+        expect(decryptSecretMock).not.toHaveBeenCalled();
+    });
+
+    it("(d) a decrypt failure lists with token: null and doesn't throw", async () => {
+        const link = makeLink({ token_encrypted: 'corrupted-blob' });
+        stubFindForList([link]);
+        // Simulate a decrypt error (e.g. authentication tag mismatch).
+        decryptSecretMock.mockImplementationOnce(() => {
+            throw new Error('Unsupported state or unable to authenticate data');
+        });
+
+        const result = await svc.listLinks(new Types.ObjectId(), { page: 1, limit: 20, active_only: false });
+
+        const row = result.data[0] as { token: string | null };
+        expect(row.token).toBeNull();
+    });
+
+    it('(e) resolve path is unchanged — still matches by hash (token_encrypted not consulted)', async () => {
+        // resolveLink uses findOne({ token_hash: sha256(token) }) — the
+        // encrypted field plays no role in resolution.
+        linkFindOneMock.mockResolvedValueOnce(null);
+        await expect(svc.resolveLink('some-public-token')).rejects.toMatchObject({
+            code: ERROR_CODES.SHARE_LINK_NOT_FOUND,
+        });
+
+        const { createHash } = await import('node:crypto');
+        const expected = createHash('sha256').update('some-public-token').digest('hex');
+        expect(linkFindOneMock).toHaveBeenCalledWith({ token_hash: expected });
+
+        // decryptSecret is never called during resolve.
+        expect(decryptSecretMock).not.toHaveBeenCalled();
     });
 });
 

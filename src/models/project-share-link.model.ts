@@ -41,6 +41,15 @@ export interface ProjectShareLinkDocument extends Document {
     /** SHA-256 hex of the raw token. Source of truth for lookups. */
     token_hash: string;
     /**
+     * AES-256-GCM encrypted form of the raw token (same key as the
+     * Slack bot_token). Allows authed admins (`share_link.write`) to
+     * recover the raw token for the Copy-URL action. Old rows that were
+     * created before this field was added will have null here; the list
+     * endpoint surfaces `token: null` for those rows so the Copy button
+     * is hidden. Never sent to public resolve / audit paths.
+     */
+    token_encrypted: string | null;
+    /**
      * Legacy plaintext token. Pre-C9 rows still carry one; the boot
      * migration hashes them into `token_hash` and clears this field.
      * New rows never set this. Will be removed in a follow-up release
@@ -70,6 +79,11 @@ const projectShareLinkSchema = new Schema<ProjectShareLinkDocument>(
             type: String,
             required: true,
             trim: true,
+        },
+        token_encrypted: {
+            type: String,
+            default: null,
+            // NOT indexed — ciphertext is opaque; lookups always use token_hash.
         },
         token: {
             type: String,
