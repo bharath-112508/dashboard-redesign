@@ -416,10 +416,17 @@ export const listTasks = async (
 
     // Project scoping: when query.project_id is supplied, validate caller
     // can read it (404 → 403). Otherwise scope to all visible projects.
+    //
+    // Read scope must mirror project.service's buildVisibilityFilter: only
+    // admins and managers see every project. `isManagerOrAdmin` is a WRITE-
+    // authority helper that includes TEAM_LEAD — reusing it here let team
+    // leads list tasks from projects they aren't members of, which the task
+    // DETAIL endpoint then 403'd ("Unknown project" rows on the FE).
+    const seesAllProjects = isAdminLike(caller) || caller.role === ROLES.MANAGER;
     if (query.project_id) {
         const project = await loadProjectForCaller(new Types.ObjectId(query.project_id), caller);
         filter.project_id = project._id;
-    } else if (!isManagerOrAdmin(caller)) {
+    } else if (!seesAllProjects) {
         const visible = buildProjectVisibilityFilter(caller);
         // Resolve to project IDs once so the task query stays simple. The
         // project list is small in practice (low hundreds at most for any

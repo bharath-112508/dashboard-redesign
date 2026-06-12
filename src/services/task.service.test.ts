@@ -723,3 +723,51 @@ describe('project visibility', () => {
         expect(loadProjectForCallerMock).not.toHaveBeenCalled();
     });
 });
+
+// ─── listTasks — read-visibility scoping ─────────────────────────────────
+//
+// Regression: `listTasks` reused the write-authority helper
+// (`isManagerOrAdmin`, which includes TEAM_LEAD) to decide read scope, so
+// team leads saw every task org-wide while the task DETAIL (which funnels
+// through `loadProjectForCaller`) correctly 403'd on non-member projects —
+// the FE rendered "Unknown project" rows that errored on click. Read scope
+// must mirror project.service's buildVisibilityFilter: only admin/manager
+// see all projects.
+describe('listTasks read-visibility scoping', () => {
+    const listQuery = { page: 1, limit: 20 } as never;
+
+    const chainList = (rows: unknown[]) => ({
+        sort: () => ({ skip: () => ({ limit: () => Promise.resolve(rows) }) }),
+    });
+
+    it('team lead without project_id is scoped to their visible projects', async () => {
+        // beforeEach runs vi.resetAllMocks(), wiping the module factory's
+        // Project.find chain — re-stub it for the scoped branch.
+        const { Project } = await import('../models/project.model.js');
+        vi.mocked(Project.find).mockReturnValue({
+            select: () => ({ limit: () => ({ lean: () => Promise.resolve([]) }) }),
+        } as never);
+        buildProjectVisibilityFilterMock.mockReturnValueOnce({ member_ids: 'tl' });
+        taskFindMock.mockReturnValueOnce(chainList([]) as never);
+        taskCountDocumentsMock.mockResolvedValueOnce(0 as never);
+
+        const caller = { id: new Types.ObjectId(), role: ROLES.TEAM_LEAD, audit: undefined };
+        await svc.listTasks(listQuery, caller as never);
+
+        expect(buildProjectVisibilityFilterMock).toHaveBeenCalledTimes(1);
+        const filter = taskFindMock.mock.calls.at(-1)![0] as Record<string, unknown>;
+        // Project.find mock resolves [] → scoped to an empty id set, never unscoped.
+        expect(filter.project_id).toEqual({ $in: [] });
+    });
+
+    it('manager without project_id stays unscoped (sees all projects)', async () => {
+        taskFindMock.mockReturnValueOnce(chainList([]) as never);
+        taskCountDocumentsMock.mockResolvedValueOnce(0 as never);
+
+        await svc.listTasks(listQuery, managerCaller() as never);
+
+        expect(buildProjectVisibilityFilterMock).not.toHaveBeenCalled();
+        const filter = taskFindMock.mock.calls.at(-1)![0] as Record<string, unknown>;
+        expect(filter.project_id).toBeUndefined();
+    });
+});
