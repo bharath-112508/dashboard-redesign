@@ -15,9 +15,11 @@ import {
     PROJECT_MEMBER_SCOPED_ROLES,
     type ProjectStatus,
 } from '../constants/project.js';
+import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { withTransaction } from '../utils/with-transaction.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
+import logger from '../utils/logger.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     CreateCustomStatusBody,
@@ -258,8 +260,64 @@ export const listProjects = async (
         Project.countDocuments(filter),
     ]);
 
+    // ─── Task completion rollup ─────────────────────────────────────────
+    // One aggregate over the page's project IDs: group by (project_id, status)
+    // so we can compute total tasks and done (terminal) tasks per project.
+    // Wrapped in try/catch so a DB hiccup never 500s the list — the rollup
+    // is supplemental, not load-bearing.
+
+    /** Map of project id → { task_count, done_task_count } */
+    const rollupById = new Map<string, { task_count: number; done_task_count: number }>();
+
+    if (rows.length > 0) {
+        const projectIds = rows.map((r) => r._id);
+
+        // Build per-project terminal-status sets: default 'done' + any custom
+        // status flagged is_terminal: true.
+        const terminalByProject = new Map<string, Set<string>>();
+        for (const r of rows) {
+            const set = new Set<string>([DEFAULT_DONE_TASK_STATUS_KEY]);
+            for (const s of r.custom_task_statuses ?? []) {
+                if (s.is_terminal) set.add(s.key);
+            }
+            terminalByProject.set(r._id.toString(), set);
+        }
+
+        try {
+            const perStatusBuckets = await Task.aggregate<{
+                _id: { project: Types.ObjectId; status: string };
+                count: number;
+            }>([
+                { $match: { project_id: { $in: projectIds } } },
+                { $group: { _id: { project: '$project_id', status: '$status' }, count: { $sum: 1 } } },
+            ]);
+
+            // Accumulate counts per project.
+            for (const b of perStatusBuckets) {
+                const pid = b._id.project.toString();
+                const existing = rollupById.get(pid) ?? { task_count: 0, done_task_count: 0 };
+                existing.task_count += b.count;
+                const terminal = terminalByProject.get(pid) ?? new Set([DEFAULT_DONE_TASK_STATUS_KEY]);
+                if (terminal.has(b._id.status)) {
+                    existing.done_task_count += b.count;
+                }
+                rollupById.set(pid, existing);
+            }
+        } catch (err) {
+            logger.warn({ err }, 'project.listProjects: task rollup failed — defaulting to 0/0');
+            // rollupById stays empty; rows get 0/0 below.
+        }
+    }
+
     return {
-        data: rows.map(toPublic),
+        data: rows.map((r) => {
+            const counts = rollupById.get(r._id.toString()) ?? { task_count: 0, done_task_count: 0 };
+            return {
+                ...toPublic(r),
+                task_count: counts.task_count,
+                done_task_count: counts.done_task_count,
+            };
+        }),
         meta: {
             page: query.page,
             limit: query.limit,

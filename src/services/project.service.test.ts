@@ -34,6 +34,7 @@ const {
     sprintCountDocumentsMock,
     storyCountDocumentsMock,
     taskCountDocumentsMock,
+    taskAggregateMock,
     projectUpdateOneMock,
 } = vi.hoisted(() => ({
     projectCreateMock: vi.fn(),
@@ -46,6 +47,7 @@ const {
     sprintCountDocumentsMock: vi.fn(),
     storyCountDocumentsMock: vi.fn(),
     taskCountDocumentsMock: vi.fn(),
+    taskAggregateMock: vi.fn(),
     projectUpdateOneMock: vi.fn(),
 }));
 
@@ -71,7 +73,7 @@ vi.mock('../models/story.model.js', () => ({
     Story: { countDocuments: storyCountDocumentsMock },
 }));
 vi.mock('../models/task.model.js', () => ({
-    Task: { countDocuments: taskCountDocumentsMock },
+    Task: { countDocuments: taskCountDocumentsMock, aggregate: taskAggregateMock },
 }));
 
 vi.mock('./audit.service.js', () => ({
@@ -207,6 +209,8 @@ beforeEach(() => {
     sprintCountDocumentsMock.mockResolvedValue(0);
     storyCountDocumentsMock.mockResolvedValue(0);
     taskCountDocumentsMock.mockResolvedValue(0);
+    // Task.aggregate used by listProjects rollup — default to empty (no tasks).
+    taskAggregateMock.mockResolvedValue([]);
 });
 
 // ─── createProject ────────────────────────────────────────────────────────
@@ -633,6 +637,110 @@ describe('custom statuses', () => {
         // Sub-doc must still be intact + project not saved.
         expect(proj.custom_task_statuses.length).toBe(1);
         expect(proj.save).not.toHaveBeenCalled();
+    });
+});
+
+// ─── listProjects — task-completion rollup ───────────────────────────────
+
+describe('listProjects — task-completion rollup', () => {
+    /** Minimal Mongoose doc fake: toPublic/toJSON returns the plain object. */
+    const makeRowDoc = (
+        overrides: Partial<{
+            _id: Types.ObjectId;
+            custom_task_statuses: { key: string; is_terminal: boolean }[];
+        }> = {}
+    ) => {
+        const id = overrides._id ?? new Types.ObjectId();
+        const cts = overrides.custom_task_statuses ?? [];
+        return {
+            _id: id,
+            name: 'P',
+            code: 'P-1',
+            description: '',
+            start_date: '2026-01-01',
+            end_date: null,
+            status: 'active',
+            is_archived: false,
+            member_ids: [],
+            client_ids: [],
+            custom_task_statuses: cts,
+            toJSON() {
+                return {
+                    id: this._id.toString(),
+                    name: this.name,
+                    code: this.code,
+                    custom_task_statuses: cts,
+                    task_count: (this as Record<string, unknown>).task_count ?? 0,
+                    done_task_count: (this as Record<string, unknown>).done_task_count ?? 0,
+                };
+            },
+        };
+    };
+
+    const stubFindWithRows = (rows: ReturnType<typeof makeRowDoc>[]) => {
+        projectFindMock.mockReturnValueOnce({
+            sort: () => ({
+                skip: () => ({
+                    limit: () => Promise.resolve(rows),
+                }),
+            }),
+        });
+        projectCountDocumentsMock.mockResolvedValueOnce(rows.length);
+    };
+
+    it('attaches task_count and done_task_count from Task.aggregate rollup', async () => {
+        const projId = new Types.ObjectId();
+        const row = makeRowDoc({ _id: projId });
+        stubFindWithRows([row]);
+
+        // Aggregate returns per-status buckets: 5 total, 3 in 'done' (terminal)
+        taskAggregateMock.mockResolvedValueOnce([
+            { _id: { project: projId, status: 'done' }, count: 3 },
+            { _id: { project: projId, status: 'in_progress' }, count: 2 },
+        ]);
+
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+        expect(result.data[0]).toMatchObject({ task_count: 5, done_task_count: 3 });
+    });
+
+    it('honours custom is_terminal statuses for done_task_count', async () => {
+        const projId = new Types.ObjectId();
+        const row = makeRowDoc({
+            _id: projId,
+            custom_task_statuses: [{ key: 'shipped', is_terminal: true }],
+        });
+        stubFindWithRows([row]);
+
+        // 4 total: 2 'done' (default terminal) + 1 'shipped' (custom terminal) + 1 'in_progress'
+        taskAggregateMock.mockResolvedValueOnce([
+            { _id: { project: projId, status: 'done' }, count: 2 },
+            { _id: { project: projId, status: 'shipped' }, count: 1 },
+            { _id: { project: projId, status: 'in_progress' }, count: 1 },
+        ]);
+
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+        expect(result.data[0]).toMatchObject({ task_count: 4, done_task_count: 3 });
+    });
+
+    it('returns 0/0 for a zero-task project', async () => {
+        const projId = new Types.ObjectId();
+        const row = makeRowDoc({ _id: projId });
+        stubFindWithRows([row]);
+        // taskAggregateMock already defaults to [] in beforeEach
+
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+        expect(result.data[0]).toMatchObject({ task_count: 0, done_task_count: 0 });
+    });
+
+    it('falls back to 0/0 for all rows when Task.aggregate throws', async () => {
+        const projId = new Types.ObjectId();
+        const row = makeRowDoc({ _id: projId });
+        stubFindWithRows([row]);
+        taskAggregateMock.mockRejectedValueOnce(new Error('DB timeout'));
+
+        // Should NOT throw — failure-isolation wraps the rollup
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+        expect(result.data[0]).toMatchObject({ task_count: 0, done_task_count: 0 });
     });
 });
 
