@@ -59,10 +59,18 @@ export const projectShareLinksNestedRouter = (): Router => {
 
 export const shareLinksRouter = (): Router => {
     const router = Router();
-    router.use(authenticate);
 
+    // `authenticate` is applied PER-ROUTE, not via `router.use()`. A
+    // router-level `.use(authenticate)` runs for every path under the
+    // `/share-links` mount — and because `authenticate` throws 401 on a
+    // missing token (never calls next()), it intercepts the public
+    // `GET /share-links/resolve/:token` before the request can fall
+    // through to `publicShareLinksRouter` mounted after this one. That
+    // broke the anonymous public viewer entirely. Gate only the routes
+    // that actually need auth.
     router.post(
         '/:id/revoke',
+        authenticate,
         requirePermission(PERMISSIONS.SHARE_LINK_WRITE),
         validate({ params: shareLinkIdPathSchema }),
         asyncHandler(ctrl.postRevoke)

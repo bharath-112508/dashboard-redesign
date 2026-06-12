@@ -423,12 +423,44 @@ export const resolveLink = async (token: string): Promise<ResolvedShareLinkPaylo
  *
  * Returns `{ migrated, failed }` for the boot log.
  */
+/**
+ * Pre-C9 databases carry a non-sparse `unique` index on the legacy
+ * `token` field. After C9 every new row persists `token: null`, and a
+ * plain unique index permits only ONE null collection-wide — so the
+ * second share link ever created collides on the stale index, gets
+ * mistaken for a token collision, exhausts the retry loop, and 500s
+ * ("Failed to generate a unique share-link token"). The C9 schema moved
+ * uniqueness to `token_hash` but Mongoose never drops the old index, so
+ * we drop it explicitly here. Idempotent + never-throw: a fresh DB that
+ * never had the index, or a rerun, is a no-op.
+ */
+const LEGACY_TOKEN_INDEX = 'project_share_links_token_unique';
+
+const dropLegacyTokenIndex = async (): Promise<boolean> => {
+    try {
+        const indexes = await ProjectShareLink.collection.indexes();
+        if (!indexes.some((ix) => ix.name === LEGACY_TOKEN_INDEX)) return false;
+        await ProjectShareLink.collection.dropIndex(LEGACY_TOKEN_INDEX);
+        logger.info({ index: LEGACY_TOKEN_INDEX }, 'Dropped stale share-link token unique index (C9)');
+        return true;
+    } catch (err) {
+        logger.warn(
+            { err, code: 'SHARE_LINK_LEGACY_INDEX_DROP_FAILED', index: LEGACY_TOKEN_INDEX },
+            'Failed to drop stale share-link token unique index'
+        );
+        return false;
+    }
+};
+
 export const migrateShareLinkTokensToHashed = async (): Promise<{
     migrated: number;
     failed: number;
 }> => {
     let migrated = 0;
     let failed = 0;
+    // Drop the stale `{ token: 1 }` unique index before touching rows so
+    // the null-token writes below (and all future creates) don't collide.
+    await dropLegacyTokenIndex();
     try {
         const legacy = await ProjectShareLink.find({
             token: { $type: 'string', $ne: null },
