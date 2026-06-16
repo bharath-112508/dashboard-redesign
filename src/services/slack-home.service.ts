@@ -30,6 +30,9 @@ export interface HomeDashboardData {
     whos_out: Record<string, unknown>[] | null;
     team_attendance: TodayAttendanceSummary | null;
     pending_leaves: Record<string, unknown>[] | null;
+    /** True total pending count (the fetched list is capped at PENDING_CAP+1
+     *  for overflow detection, so the builder uses this for the header + "+N more"). */
+    pending_total: number | null;
 }
 
 /** Per-list caps (Block Kit 100-block ceiling). */
@@ -58,7 +61,7 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
     const perms = (await safe('perms', () => resolvePermissionsForUser(user._id)))?.permissions ?? [];
     const canReadTeamAttendance = callerCan(perms, PERMISSIONS.ATTENDANCE_READ_TEAM);
 
-    const [my_today, my_balances, my_pending, whos_out, team_attendance, pending_leaves] = await Promise.all([
+    const [my_today, my_balances, my_pending, whos_out, team_attendance, pending_result] = await Promise.all([
         safe('my_today', () => getMyToday(user._id)),
         safe('my_balances', () => listOwnBalances(user._id)),
         safe('my_pending', () =>
@@ -80,10 +83,26 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
                   listLeaves(
                       { status: 'pending', page: 1, limit: PENDING_CAP + 1 } as Parameters<typeof listLeaves>[0],
                       { id: user._id, role: user.role }
-                  ).then((r) => r.data)
+                  )
               )
             : Promise.resolve(null),
     ]);
 
-    return { user, my_today, my_balances, my_pending, whos_out, team_attendance, pending_leaves };
+    // The pending fetch is capped at PENDING_CAP+1 for overflow detection; keep
+    // the capped rows for rendering but surface the true total from `meta` so
+    // the header count and "+N more" reflect the real backlog, not the cap.
+    const pending_leaves = (pending_result?.data ?? null) as Record<string, unknown>[] | null;
+    const pending_total =
+        (pending_result?.meta as { total?: number } | undefined)?.total ?? pending_leaves?.length ?? null;
+
+    return {
+        user,
+        my_today,
+        my_balances,
+        my_pending,
+        whos_out,
+        team_attendance,
+        pending_leaves,
+        pending_total,
+    };
 };

@@ -90,7 +90,10 @@ const teamAttendanceBlocks = (data: HomeDashboardData): Array<Record<string, unk
 const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
     const pending = data.pending_leaves;
     if (!pending) return [];
-    const blocks: Array<Record<string, unknown>> = [section(`*Pending approvals (${pending.length})*`)];
+    // `pending` is capped at PENDING_CAP+1; `pending_total` is the real backlog
+    // size for the header count and the "+N more" line.
+    const total = data.pending_total ?? pending.length;
+    const blocks: Array<Record<string, unknown>> = [section(`*Pending approvals (${total})*`)];
     if (pending.length === 0) {
         blocks.push(section('_Nothing waiting on you._'));
         return blocks;
@@ -120,7 +123,7 @@ const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, un
             ],
         });
     }
-    blocks.push(...moreLine(pending.length, PENDING_CAP));
+    blocks.push(...moreLine(total, PENDING_CAP));
     blocks.push(linkButton('Open leave approvals →', `${APP_BASE_URL}/leaves`));
     return blocks;
 };

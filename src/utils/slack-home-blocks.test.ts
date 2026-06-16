@@ -12,6 +12,7 @@ const base = (over: Partial<HomeDashboardData>): HomeDashboardData => ({
     whos_out: [],
     team_attendance: null,
     pending_leaves: null,
+    pending_total: null,
     ...over,
 });
 
@@ -85,5 +86,26 @@ describe('buildHomeDashboardView', () => {
         };
         const text = JSON.stringify(view);
         expect(text).toMatch(/\+2 more/);
+    });
+
+    it('uses pending_total (real backlog) for the header count and "+N more", not the capped array', () => {
+        const reviewer: DashboardUser = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' };
+        // List is capped at PENDING_CAP+1 (11) by the aggregator, but the true total is 30.
+        const capped = Array.from({ length: 11 }, (_, i) => ({
+            id: `L${i}`,
+            status: 'pending',
+            start_date: '2026-06-18',
+            end_date: '2026-06-18',
+            total_days: 1,
+            requested_leave_type: { code: 'CL' },
+            user: { full_name: `U${i}` },
+        }));
+        const view = buildHomeDashboardView(
+            base({ user: reviewer, pending_leaves: capped, pending_total: 30 }),
+            reviewer
+        ) as { blocks: Array<Record<string, unknown>> };
+        const text = JSON.stringify(view);
+        expect(text).toMatch(/Pending approvals \(30\)/);
+        expect(text).toMatch(/\+20 more/);
     });
 });

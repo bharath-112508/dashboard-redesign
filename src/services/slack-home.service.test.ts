@@ -45,11 +45,13 @@ describe('buildHomeDashboardData', () => {
         });
         (listLeaves as ReturnType<typeof vi.fn>).mockResolvedValue({
             data: [{ id: 'L1', status: 'pending' }],
-            meta: {},
+            meta: { total: 7 },
         });
         const data = await buildHomeDashboardData(admin);
         expect(data.team_attendance).not.toBeNull();
         expect(data.pending_leaves).toEqual([{ id: 'L1', status: 'pending' }]);
+        // True backlog total comes from meta, not the capped array length.
+        expect(data.pending_total).toBe(7);
     });
 
     it('a failing section degrades to null, others still populate', async () => {
