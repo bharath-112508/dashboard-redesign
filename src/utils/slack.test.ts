@@ -1,6 +1,12 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { isSlackConfigured, postOrUpdateSlackMessage, postSlackMessage, slackContextFrom } from './slack.js';
+import {
+    isSlackConfigured,
+    postOrUpdateSlackMessage,
+    postSlackMessage,
+    publishHomeView,
+    slackContextFrom,
+} from './slack.js';
 import type { SlackSettings } from '../models/system-settings.model.js';
 
 /**
@@ -118,10 +124,10 @@ describe('postSlackMessage', () => {
         // Phase 1 prereq — the caller needs `ts` + `channel` from this call so
         // a subsequent decision can `chat.update` the same message in place.
         fetchMock.mockResolvedValueOnce(
-            new Response(
-                JSON.stringify({ ok: true, ts: '1717573200.012345', channel: 'C123ABC' }),
-                { status: 200, headers: { 'content-type': 'application/json' } },
-            ),
+            new Response(JSON.stringify({ ok: true, ts: '1717573200.012345', channel: 'C123ABC' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            })
         );
         const result = await postSlackMessage(ctx, {
             channel: '#leaves',
@@ -177,10 +183,10 @@ describe('postOrUpdateSlackMessage', () => {
 
     it('calls chat.postMessage when `existing` is null', async () => {
         fetchMock.mockResolvedValueOnce(
-            new Response(
-                JSON.stringify({ ok: true, ts: '1.1', channel: 'C123' }),
-                { status: 200, headers: { 'content-type': 'application/json' } },
-            ),
+            new Response(JSON.stringify({ ok: true, ts: '1.1', channel: 'C123' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            })
         );
         const result = await postOrUpdateSlackMessage(ctx, {
             channel: '#leaves',
@@ -195,10 +201,10 @@ describe('postOrUpdateSlackMessage', () => {
 
     it('calls chat.update when `existing` has channel + ts', async () => {
         fetchMock.mockResolvedValueOnce(
-            new Response(
-                JSON.stringify({ ok: true, ts: '1.1', channel: 'C123' }),
-                { status: 200, headers: { 'content-type': 'application/json' } },
-            ),
+            new Response(JSON.stringify({ ok: true, ts: '1.1', channel: 'C123' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            })
         );
         const result = await postOrUpdateSlackMessage(ctx, {
             channel: '#leaves',
@@ -218,7 +224,7 @@ describe('postOrUpdateSlackMessage', () => {
             new Response(JSON.stringify({ ok: false, error: 'message_not_found' }), {
                 status: 200,
                 headers: { 'content-type': 'application/json' },
-            }),
+            })
         );
         const result = await postOrUpdateSlackMessage(ctx, {
             channel: '#leaves',
@@ -238,5 +244,43 @@ describe('postOrUpdateSlackMessage', () => {
             context: 'unit-test',
         });
         expect(result).toEqual({ success: false });
+    });
+});
+
+// ─── publishHomeView ─────────────────────────────────────────────────────
+
+describe('publishHomeView', () => {
+    const ctx = { enabled: true, botToken: 'xoxb-test' } as const;
+
+    it('POSTs the view to views.publish and returns success on ok=true', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(JSON.stringify({ ok: true }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            })
+        );
+        const view = { type: 'home', blocks: [] };
+        const result = await publishHomeView(ctx, 'U123', view, 'attendance-home');
+        expect(result).toBe(true);
+        const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+        expect(String(url)).toContain('views.publish');
+        expect(JSON.parse(init.body as string)).toEqual({ user_id: 'U123', view });
+    });
+
+    it('returns false (never throws) on ok=false', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(JSON.stringify({ ok: false, error: 'invalid_arguments' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            })
+        );
+        const result = await publishHomeView(ctx, 'U123', { type: 'home', blocks: [] }, 'attendance-home');
+        expect(result).toBe(false);
+    });
+
+    it('returns false on network throw', async () => {
+        fetchMock.mockRejectedValueOnce(new Error('boom'));
+        const result = await publishHomeView(ctx, 'U123', { type: 'home', blocks: [] }, 'attendance-home');
+        expect(result).toBe(false);
     });
 });

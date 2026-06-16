@@ -2,6 +2,7 @@ import logger from './logger.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import {
     SLACK_API_POST_MESSAGE,
+    SLACK_API_PUBLISH_VIEW,
     SLACK_API_UPDATE_MESSAGE,
     SLACK_REQUEST_TIMEOUT_MS,
     SLACK_TEXT_MAX,
@@ -187,10 +188,7 @@ export interface SlackPostResult {
  * `{ok: false, error}`) — we treat both `!response.ok` and
  * `body.ok === false` as a fail-and-log.
  */
-export const postSlackMessage = async (
-    ctx: SlackContext,
-    input: PostSlackMessageInput,
-): Promise<SlackPostResult> => {
+export const postSlackMessage = async (ctx: SlackContext, input: PostSlackMessageInput): Promise<SlackPostResult> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
 
@@ -257,6 +255,58 @@ export const postSlackMessage = async (
 };
 
 /**
+ * App Home — publish (or refresh) a user's Home tab via `views.publish`.
+ * Non-throwing, same dispatch policy as `postSlackMessage`: logs
+ * `SLACK_DISPATCH_FAILED` at warn and returns a boolean. `views.publish`
+ * is idempotent (latest view wins) so a retry / double-tick is harmless.
+ */
+export const publishHomeView = async (
+    ctx: SlackContext,
+    slackUserId: string,
+    view: unknown,
+    context: string
+): Promise<boolean> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
+    try {
+        const response = await fetch(SLACK_API_PUBLISH_VIEW, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                Authorization: `Bearer ${ctx.botToken}`,
+            },
+            body: JSON.stringify({ user_id: slackUserId, view }),
+            signal: controller.signal,
+        });
+        if (!response.ok) {
+            logger.warn(
+                { code: ERROR_CODES.SLACK_DISPATCH_FAILED, dispatch_event: context, http_status: response.status },
+                'Slack views.publish returned a non-2xx status'
+            );
+            return false;
+        }
+        const body = (await response.json()) as { ok: boolean; error?: string };
+        if (!body.ok) {
+            logger.warn(
+                { code: ERROR_CODES.SLACK_DISPATCH_FAILED, dispatch_event: context, slack_error: body.error },
+                'Slack views.publish rejected the view'
+            );
+            return false;
+        }
+        return true;
+    } catch (err) {
+        const isAbort = (err as { name?: string })?.name === 'AbortError';
+        logger.warn(
+            { err, code: ERROR_CODES.SLACK_DISPATCH_FAILED, dispatch_event: context, timed_out: isAbort },
+            isAbort ? 'Slack views.publish timed out' : 'Slack views.publish threw'
+        );
+        return false;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+};
+
+/**
  * Phase 1 — Post a NEW Slack message OR update an existing one, based
  * on `input.existing`. Same auth + timeout + non-throwing contract as
  * `postSlackMessage`.
@@ -278,7 +328,7 @@ export const postSlackMessage = async (
  */
 export const postOrUpdateSlackMessage = async (
     ctx: SlackContext,
-    input: PostOrUpdateInput,
+    input: PostOrUpdateInput
 ): Promise<SlackPostResult> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
@@ -318,7 +368,7 @@ export const postOrUpdateSlackMessage = async (
                     is_update: isUpdate,
                     http_status: response.status,
                 },
-                `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} returned a non-2xx status`,
+                `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} returned a non-2xx status`
             );
             return { success: false };
         }
@@ -333,7 +383,7 @@ export const postOrUpdateSlackMessage = async (
                     is_update: isUpdate,
                     slack_error: parsed.error,
                 },
-                `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} rejected the message`,
+                `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} rejected the message`
             );
             return { success: false };
         }
@@ -351,7 +401,7 @@ export const postOrUpdateSlackMessage = async (
             },
             isAbort
                 ? `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} timed out`
-                : `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} threw`,
+                : `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} threw`
         );
         return { success: false };
     } finally {
