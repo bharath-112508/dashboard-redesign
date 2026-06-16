@@ -387,4 +387,24 @@ describe('handleSlashCommand — Phase 2', () => {
         const res = await request(buildApp()).post('/slack/commands/status').send('user_id=U_TEST');
         expect(res.body.text).toMatch(/no segments today/i);
     });
+
+    it('/mystatus: aliases /status (Slack reserves /status)', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce({
+            _id: new Types.ObjectId(),
+            role: 'employee',
+        });
+        getMyTodayMock.mockResolvedValueOnce({
+            segments: [
+                {
+                    check_in: { time: new Date('2026-06-05T03:30:00.000Z') }, // 09:00 IST
+                    check_out: { time: new Date('2026-06-05T07:30:00.000Z') }, // 13:00 IST
+                },
+            ],
+            total_worked_minutes: 4 * 60,
+        });
+        const res = await request(buildApp()).post('/slack/commands/mystatus').send('user_id=U_TEST');
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/09:00.*13:00/);
+        expect(res.body.text).toMatch(/4h 0m/);
+    });
 });

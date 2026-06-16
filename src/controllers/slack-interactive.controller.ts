@@ -381,7 +381,11 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
             res.status(200).json(ephemeral(`✅ Checked out at ${formatTimeIST(outAt)} (${h}h ${m}m worked).`));
             return;
         }
-        if (command === 'status') {
+        // Slack reserves `/status` as a built-in command, so workspaces
+        // register this as `/mystatus` (or similar) instead. The handler keys
+        // off the URL path segment, so accept both `…/commands/status` and
+        // `…/commands/mystatus` — same today's-segments response either way.
+        if (command === 'status' || command === 'mystatus') {
             const record = (await getMyToday(user._id)) as {
                 segments?: Array<{
                     check_in?: { time?: Date | string } | null;
