@@ -6,8 +6,10 @@ import {
     JOB_SCHEDULER_DRAIN_TIMEOUT_MS,
     JOB_SCHEDULES,
     JOB_TIMEZONE,
+    hhmmToCron,
     type JobName,
 } from '../constants/jobs.js';
+import { getOrInitSettings } from '../services/settings.service.js';
 import { JOBS_ENABLED } from '../config/server.config.js';
 import logger from '../utils/logger.js';
 import { getInFlightRunJobs } from './runner.js';
@@ -24,6 +26,7 @@ import { runReportSubscriptionSweepJob } from './report-subscription.job.js';
 import { runStuckJobSweeperJob } from './stuck-job-sweeper.job.js';
 import { runAuditLogMirror } from './audit-log-mirror.job.js';
 import { runCompOffReconciliation } from './comp-off-reconciliation.job.js';
+import { runAttendanceCheckinNudge, runAttendanceCheckoutReminder } from './attendance-slack-nudge.job.js';
 
 /**
  * Job scheduler — wires every Phase-1 cron job to its `node-cron` trigger.
@@ -76,6 +79,8 @@ const REGISTRY: Record<JobName, JobRunner> = {
     [JOB_NAMES.STUCK_JOB_SWEEPER]: () => runStuckJobSweeperJob(),
     [JOB_NAMES.AUDIT_LOG_MIRROR]: () => runAuditLogMirror(),
     [JOB_NAMES.COMP_OFF_RECONCILIATION]: () => runCompOffReconciliation(),
+    [JOB_NAMES.ATTENDANCE_CHECKIN_NUDGE]: () => runAttendanceCheckinNudge(),
+    [JOB_NAMES.ATTENDANCE_CHECKOUT_REMINDER]: () => runAttendanceCheckoutReminder(),
 };
 
 /**
@@ -101,7 +106,7 @@ const REGISTRY: Record<JobName, JobRunner> = {
  * and survive instance-0 dying. Deferred — single-instance is
  * adequate today and the env-flag contract is operationally simple.
  */
-export const startScheduler = (): void => {
+export const startScheduler = async (): Promise<void> => {
     if (!JOBS_ENABLED) {
         logger.info('Job scheduler disabled via JOBS_ENABLED=false');
         return;
@@ -112,8 +117,29 @@ export const startScheduler = (): void => {
         return;
     }
 
+    // Nudge fire-times are admin-configurable; read them once at boot and
+    // override the static JOB_SCHEDULES defaults. A change takes effect on
+    // the next process restart.
+    const schedules: Record<JobName, string> = { ...JOB_SCHEDULES };
+    try {
+        const settings = await getOrInitSettings();
+        const nudges = settings.slack?.attendance_nudges;
+        if (nudges) {
+            schedules[JOB_NAMES.ATTENDANCE_CHECKIN_NUDGE] = hhmmToCron(
+                nudges.check_in_time,
+                JOB_SCHEDULES[JOB_NAMES.ATTENDANCE_CHECKIN_NUDGE]
+            );
+            schedules[JOB_NAMES.ATTENDANCE_CHECKOUT_REMINDER] = hhmmToCron(
+                nudges.checkout_reminder_time,
+                JOB_SCHEDULES[JOB_NAMES.ATTENDANCE_CHECKOUT_REMINDER]
+            );
+        }
+    } catch (err) {
+        logger.warn({ err }, 'Could not read nudge schedule from settings — using defaults');
+    }
+
     for (const [name, runner] of Object.entries(REGISTRY) as [JobName, JobRunner][]) {
-        const expression = JOB_SCHEDULES[name];
+        const expression = schedules[name];
         try {
             const task = cron.schedule(
                 expression,

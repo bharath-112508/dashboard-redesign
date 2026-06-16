@@ -104,6 +104,12 @@ export const JOB_NAMES = {
     // trusts the CAS `$inc` for balance maintenance; this cron is
     // the safety net.
     COMP_OFF_RECONCILIATION: 'comp_off_reconciliation',
+    // Slack attendance nudges — DM eligible employees a check-in button in
+    // the morning and a "forgot to check out" reminder in the evening.
+    // Fire times come from `settings.slack.attendance_nudges` (read at
+    // scheduler boot); the JOB_SCHEDULES entries below are fallback defaults.
+    ATTENDANCE_CHECKIN_NUDGE: 'attendance_checkin_nudge',
+    ATTENDANCE_CHECKOUT_REMINDER: 'attendance_checkout_reminder',
 } as const;
 
 export type JobName = (typeof JOB_NAMES)[keyof typeof JOB_NAMES];
@@ -174,6 +180,10 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // run path; this proactive sweep makes stuck jobs observable
     // in real time.
     [JOB_NAMES.STUCK_JOB_SWEEPER]: '*/15 * * * *',
+
+    // Defaults — overridden at boot from settings.slack.attendance_nudges.
+    [JOB_NAMES.ATTENDANCE_CHECKIN_NUDGE]: '0 11 * * *',
+    [JOB_NAMES.ATTENDANCE_CHECKOUT_REMINDER]: '0 20 * * *',
 };
 
 // ─── Per-run idempotency key derivation ──────────────────────────────────
@@ -270,6 +280,24 @@ export const auditLogMirrorRunKey = (now: Date = new Date()): string => {
  */
 export const compOffReconciliationRunKey = (now: Date = new Date()): string => {
     return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
+};
+
+/** Both attendance nudge jobs key off **today** (IST) — one fire per day. */
+export const attendanceCheckinNudgeRunKey = (now: Date = new Date()): string =>
+    dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
+export const attendanceCheckoutReminderRunKey = (now: Date = new Date()): string =>
+    dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
+
+/**
+ * Convert an "HH:MM" wall-clock string into a daily 5-field cron
+ * expression (`m h * * *`). Falls back to the supplied default when the
+ * value isn't a valid HH:MM, so a malformed setting can never crash the
+ * scheduler.
+ */
+export const hhmmToCron = (hhmm: string, fallback: string): string => {
+    const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hhmm);
+    if (!m) return fallback;
+    return `${Number(m[2])} ${Number(m[1])} * * *`;
 };
 
 // ─── Job-run row lifecycle ───────────────────────────────────────────────

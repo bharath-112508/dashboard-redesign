@@ -38,6 +38,9 @@ const {
     runStuckJobMock,
     runAuditLogMirrorMock,
     runCompOffReconciliationMock,
+    runCheckinNudgeMock,
+    runCheckoutReminderMock,
+    getOrInitSettingsMock,
 } = vi.hoisted(() => ({
     cronScheduleMock: vi.fn(),
     loggerErrorMock: vi.fn(),
@@ -55,6 +58,9 @@ const {
     runStuckJobMock: vi.fn(),
     runAuditLogMirrorMock: vi.fn(),
     runCompOffReconciliationMock: vi.fn(),
+    runCheckinNudgeMock: vi.fn(),
+    runCheckoutReminderMock: vi.fn(),
+    getOrInitSettingsMock: vi.fn(),
 }));
 
 vi.mock('node-cron', () => ({
@@ -120,6 +126,16 @@ vi.mock('./audit-log-mirror.job.js', () => ({
 vi.mock('./comp-off-reconciliation.job.js', () => ({
     runCompOffReconciliation: runCompOffReconciliationMock,
 }));
+vi.mock('./attendance-slack-nudge.job.js', () => ({
+    runAttendanceCheckinNudge: runCheckinNudgeMock,
+    runAttendanceCheckoutReminder: runCheckoutReminderMock,
+}));
+// `startScheduler` reads nudge fire-times from settings at boot; stub the
+// service so the test doesn't touch a real settings collection / Mongoose
+// model. Default resolves to undefined → scheduler falls back to defaults.
+vi.mock('../services/settings.service.js', () => ({
+    getOrInitSettings: getOrInitSettingsMock,
+}));
 
 import { JOB_NAMES, JOB_CONSECUTIVE_FAILURE_THRESHOLD } from '../constants/jobs.js';
 
@@ -159,6 +175,10 @@ beforeEach(() => {
     runStuckJobMock.mockResolvedValue(undefined);
     runAuditLogMirrorMock.mockResolvedValue(undefined);
     runCompOffReconciliationMock.mockResolvedValue(undefined);
+    runCheckinNudgeMock.mockResolvedValue(undefined);
+    runCheckoutReminderMock.mockResolvedValue(undefined);
+    // No nudge override → scheduler uses the static JOB_SCHEDULES defaults.
+    getOrInitSettingsMock.mockResolvedValue({});
 });
 
 describe('startScheduler — L4 consecutive-failure tracker', () => {
@@ -169,7 +189,7 @@ describe('startScheduler — L4 consecutive-failure tracker', () => {
         const { startScheduler } = await import('./index.js');
 
         runAttendanceMock.mockRejectedValue(new Error('attendance broke'));
-        startScheduler();
+        await startScheduler();
         const tick = tickCallbackFor(JOB_NAMES.ATTENDANCE_FINALIZER);
 
         // Three consecutive failures should cross the threshold (3) on
@@ -198,7 +218,7 @@ describe('startScheduler — L4 consecutive-failure tracker', () => {
         const { startScheduler } = await import('./index.js');
 
         runAttendanceMock.mockRejectedValue(new Error('still broken'));
-        startScheduler();
+        await startScheduler();
         const tick = tickCallbackFor(JOB_NAMES.ATTENDANCE_FINALIZER);
 
         // Drive 5 consecutive failures (threshold + 2 extra).
@@ -219,7 +239,7 @@ describe('startScheduler — L4 consecutive-failure tracker', () => {
         vi.resetModules();
         const { startScheduler } = await import('./index.js');
 
-        startScheduler();
+        await startScheduler();
         const tick = tickCallbackFor(JOB_NAMES.ATTENDANCE_FINALIZER);
 
         // Two failures, then a success, then one failure. Total
@@ -254,7 +274,7 @@ describe('startScheduler — L4 consecutive-failure tracker', () => {
         // test only needs two distinct jobs running side-by-side.)
         runLeaveYearMock.mockResolvedValue(undefined);
 
-        startScheduler();
+        await startScheduler();
         const attendanceTick = tickCallbackFor(JOB_NAMES.ATTENDANCE_FINALIZER);
         const healthyTick = tickCallbackFor(JOB_NAMES.LEAVE_YEAR_ROLLOVER);
 

@@ -361,7 +361,11 @@ const startServer = async () => {
             // boot failure can't leave a half-initialized cron registry
             // running against a half-initialized DB connection. Disabled
             // automatically when JOBS_ENABLED=false (tests + smoke).
-            startScheduler();
+            // `startScheduler` is async (reads nudge fire-times from
+            // settings); a failure must never crash the listen callback.
+            void startScheduler().catch((err: unknown) => {
+                logger.error({ err }, 'Failed to start job scheduler');
+            });
         });
 
         // H16 — HTTP server timeouts. Node 18+ defaults are 300 s
