@@ -10,7 +10,8 @@ vi.mock('../models/user.model.js', () => ({
     },
 }));
 
-const { resolveSlackUser, resolveSlackIdByEmail } = await import('./slack-user-mapping.service.js');
+const { resolveSlackUser, resolveSlackIdByEmail, fetchSlackAvatarUrl } =
+    await import('./slack-user-mapping.service.js');
 
 /**
  * Phase 0 — Slack-user → Viljetech-user resolution.
@@ -57,9 +58,7 @@ describe('resolveSlackUser', () => {
         findOneMock.mockResolvedValueOnce(fakeUser({ slack_user_id: null }));
         findByIdAndUpdateMock.mockResolvedValueOnce(fakeUser());
 
-        const fetchUserInfo = vi
-            .fn()
-            .mockResolvedValueOnce({ email: 'alice@example.com' });
+        const fetchUserInfo = vi.fn().mockResolvedValueOnce({ email: 'alice@example.com' });
 
         const result = await resolveSlackUser('U999NEW', {
             botToken: 'xoxb',
@@ -76,9 +75,7 @@ describe('resolveSlackUser', () => {
     it('returns null when users.info returns an email with no matching user', async () => {
         findOneMock.mockResolvedValueOnce(null);
         findOneMock.mockResolvedValueOnce(null);
-        const fetchUserInfo = vi
-            .fn()
-            .mockResolvedValueOnce({ email: 'unknown@example.com' });
+        const fetchUserInfo = vi.fn().mockResolvedValueOnce({ email: 'unknown@example.com' });
 
         const result = await resolveSlackUser('U999NEW', { botToken: 'xoxb', fetchUserInfo });
         expect(result).toBeNull();
@@ -97,22 +94,46 @@ describe('resolveSlackUser', () => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('resolveSlackIdByEmail', () => {
-    it('returns the Slack user id on ok=true', async () => {
+    it('returns {slackId, avatarUrl} on ok=true', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({ ok: true, user: { id: 'U777', profile: { image_72: 'https://a/x.png' } } }), {
+                status: 200,
+            })
+        );
+        await expect(resolveSlackIdByEmail('a@b.com', 'xoxb-x')).resolves.toEqual({
+            slackId: 'U777',
+            avatarUrl: 'https://a/x.png',
+        });
+    });
+    it('returns avatarUrl null when profile has no image', async () => {
         vi.spyOn(globalThis, 'fetch').mockResolvedValue(
             new Response(JSON.stringify({ ok: true, user: { id: 'U777' } }), { status: 200 })
         );
-        await expect(resolveSlackIdByEmail('a@b.com', 'xoxb-x')).resolves.toBe('U777');
+        await expect(resolveSlackIdByEmail('a@b.com', 'xoxb-x')).resolves.toEqual({ slackId: 'U777', avatarUrl: null });
     });
-
-    it('returns null on ok=false (e.g. users_not_found)', async () => {
+    it('returns null on ok=false', async () => {
         vi.spyOn(globalThis, 'fetch').mockResolvedValue(
             new Response(JSON.stringify({ ok: false, error: 'users_not_found' }), { status: 200 })
         );
         await expect(resolveSlackIdByEmail('a@b.com', 'xoxb-x')).resolves.toBeNull();
     });
-
     it('returns null and never throws on network error', async () => {
         vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('boom'));
         await expect(resolveSlackIdByEmail('a@b.com', 'xoxb-x')).resolves.toBeNull();
+    });
+});
+
+describe('fetchSlackAvatarUrl', () => {
+    it('returns image_72 on ok=true', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({ ok: true, user: { profile: { image_72: 'https://a/y.png' } } }), {
+                status: 200,
+            })
+        );
+        await expect(fetchSlackAvatarUrl('U1', 'xoxb-x')).resolves.toBe('https://a/y.png');
+    });
+    it('returns null on ok=false', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ ok: false }), { status: 200 }));
+        await expect(fetchSlackAvatarUrl('U1', 'xoxb-x')).resolves.toBeNull();
     });
 });

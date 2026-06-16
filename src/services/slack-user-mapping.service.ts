@@ -20,6 +20,7 @@ import logger from '../utils/logger.js';
 
 export interface SlackUserInfo {
     email: string;
+    avatar_url: string | null;
 }
 
 export interface ResolverContext {
@@ -57,8 +58,11 @@ export const resolveSlackUser = async (slackUserId: string, ctx: ResolverContext
         return null;
     }
 
-    // Persist back so step 1 catches it next time.
-    await User.findByIdAndUpdate(byEmail._id, { slack_user_id: slackUserId });
+    // Persist back so step 1 catches it next time (+ cache the avatar).
+    await User.findByIdAndUpdate(byEmail._id, {
+        slack_user_id: slackUserId,
+        ...(info.avatar_url ? { slack_avatar_url: info.avatar_url } : {}),
+    });
     return byEmail;
 };
 
@@ -83,11 +87,11 @@ export const fetchSlackUserInfo = async (slackUserId: string, botToken: string):
         if (!res.ok) return null;
         const body = (await res.json()) as {
             ok: boolean;
-            user?: { profile?: { email?: string } };
+            user?: { profile?: { email?: string; image_72?: string } };
         };
         if (!body.ok) return null;
         const email = body.user?.profile?.email;
-        return email ? { email } : null;
+        return email ? { email, avatar_url: body.user?.profile?.image_72 ?? null } : null;
     } catch (err) {
         if ((err as { name?: string })?.name === 'AbortError') {
             logger.warn({ slack_user_id: slackUserId, code: 'SLACK_USERS_INFO_TIMEOUT' }, 'Slack users.info timed out');
@@ -107,7 +111,10 @@ export const fetchSlackUserInfo = async (slackUserId: string, botToken: string):
  *
  * https://api.slack.com/methods/users.lookupByEmail
  */
-export const resolveSlackIdByEmail = async (email: string, botToken: string): Promise<string | null> => {
+export const resolveSlackIdByEmail = async (
+    email: string,
+    botToken: string
+): Promise<{ slackId: string; avatarUrl: string | null } | null> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
     try {
@@ -116,13 +123,38 @@ export const resolveSlackIdByEmail = async (email: string, botToken: string): Pr
             signal: controller.signal,
         });
         if (!res.ok) return null;
-        const body = (await res.json()) as { ok: boolean; user?: { id?: string } };
+        const body = (await res.json()) as { ok: boolean; user?: { id?: string; profile?: { image_72?: string } } };
         if (!body.ok || !body.user?.id) return null;
-        return body.user.id;
+        return { slackId: body.user.id, avatarUrl: body.user.profile?.image_72 ?? null };
     } catch (err) {
         if ((err as { name?: string })?.name === 'AbortError') {
             logger.warn({ code: 'SLACK_LOOKUP_BY_EMAIL_TIMEOUT' }, 'Slack users.lookupByEmail timed out');
         }
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+};
+
+/**
+ * Backfill helper — fetch just the avatar (`profile.image_72`) for an
+ * already-mapped Slack user via `users.info`. Non-throwing; null on any
+ * failure. Used by the nudge cron to warm avatars for users mapped before
+ * the avatar cache existed.
+ */
+export const fetchSlackAvatarUrl = async (slackUserId: string, botToken: string): Promise<string | null> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
+    try {
+        const res = await fetch(`https://slack.com/api/users.info?user=${encodeURIComponent(slackUserId)}`, {
+            headers: { Authorization: `Bearer ${botToken}` },
+            signal: controller.signal,
+        });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { ok: boolean; user?: { profile?: { image_72?: string } } };
+        if (!body.ok) return null;
+        return body.user?.profile?.image_72 ?? null;
+    } catch {
         return null;
     } finally {
         clearTimeout(timer);
