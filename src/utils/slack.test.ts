@@ -44,6 +44,11 @@ const makeSettings = (overrides: Partial<SlackSettings> = {}): SlackSettings => 
         general: '#general',
     },
     bot_token: 'xoxb-test-token',
+    attendance_nudges: {
+        enabled: false,
+        check_in_time: '11:00',
+        checkout_reminder_time: '20:00',
+    },
     ...overrides,
 });
 

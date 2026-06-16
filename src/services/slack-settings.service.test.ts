@@ -30,6 +30,11 @@ interface MockSlack {
         timesheet: string;
         general: string;
     };
+    attendance_nudges: {
+        enabled: boolean;
+        check_in_time: string;
+        checkout_reminder_time: string;
+    };
 }
 interface MockSettings {
     slack: MockSlack;
@@ -66,6 +71,11 @@ const { settingsMock, recordAuditMock, postSlackMessageMock } = vi.hoisted(() =>
                 timesheet: string;
                 general: string;
             };
+            attendance_nudges: {
+                enabled: boolean;
+                check_in_time: string;
+                checkout_reminder_time: string;
+            };
         };
         _id: unknown;
         updated_by: unknown;
@@ -80,6 +90,11 @@ const { settingsMock, recordAuditMock, postSlackMessageMock } = vi.hoisted(() =>
                 projects: '#projects',
                 timesheet: '#timesheet',
                 general: '#general',
+            },
+            attendance_nudges: {
+                enabled: false,
+                check_in_time: '11:00',
+                checkout_reminder_time: '20:00',
             },
         },
         _id: null,
@@ -132,6 +147,11 @@ beforeEach(() => {
             projects: '#projects',
             timesheet: '#timesheet',
             general: '#general',
+        },
+        attendance_nudges: {
+            enabled: false,
+            check_in_time: '11:00',
+            checkout_reminder_time: '20:00',
         },
     };
     settingsMock._id = new Types.ObjectId();
@@ -189,6 +209,16 @@ describe('patchSlackSettings', () => {
         expect(looksEncrypted(stored as string)).toBe(true);
         // Round-trip: decrypt the stored blob and confirm we get back the input.
         expect(decryptSecret(stored as string)).toBe('xoxb-new');
+    });
+
+    it('patchSlackSettings updates attendance_nudges and surfaces them', async () => {
+        const result = await svc.patchSlackSettings(
+            { attendance_nudges: { enabled: true, check_in_time: '10:30' } },
+            { id: new Types.ObjectId() }
+        );
+        expect(result.attendance_nudges.enabled).toBe(true);
+        expect(result.attendance_nudges.check_in_time).toBe('10:30');
+        expect(result.attendance_nudges.checkout_reminder_time).toBe('20:00');
     });
 
     it('merges a partial channels update without clobbering siblings', async () => {

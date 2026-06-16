@@ -21,6 +21,16 @@ const slackChannelsPatchSchema = z
     })
     .partial();
 
+const HHMM_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+const attendanceNudgesPatchSchema = z
+    .object({
+        enabled: z.boolean().optional(),
+        check_in_time: z.string().regex(HHMM_REGEX, 'Must be HH:MM (24-hour)').optional(),
+        checkout_reminder_time: z.string().regex(HHMM_REGEX, 'Must be HH:MM (24-hour)').optional(),
+    })
+    .partial();
+
 export const patchSlackSettingsBodySchema = z
     .object({
         enabled: z.boolean().optional(),
@@ -31,6 +41,7 @@ export const patchSlackSettingsBodySchema = z
         // right to introduce new token shapes — the workspace either
         // accepts the token at send time or doesn't.
         bot_token: z.string().max(SLACK_BOT_TOKEN_MAX).nullable().optional(),
+        attendance_nudges: attendanceNudgesPatchSchema.optional(),
     })
     .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be supplied' });
 export type PatchSlackSettingsBody = z.infer<typeof patchSlackSettingsBodySchema>;

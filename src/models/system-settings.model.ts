@@ -95,6 +95,15 @@ export interface SlackChannelMap {
     general: string;
 }
 
+export interface AttendanceNudgeSettings {
+    /** Master switch for the morning/evening attendance nudge crons. */
+    enabled: boolean;
+    /** "HH:MM" 24h IST — morning check-in nudge fire time. */
+    check_in_time: string;
+    /** "HH:MM" 24h IST — evening "forgot to check out" reminder fire time. */
+    checkout_reminder_time: string;
+}
+
 export interface SlackSettings {
     enabled: boolean;
     channels: SlackChannelMap;
@@ -111,6 +120,8 @@ export interface SlackSettings {
      *    audit-log reader can never extract a historical secret.
      */
     bot_token: string | null;
+    /** Slack-driven attendance check-in/out nudges (App Home + DM buttons). */
+    attendance_nudges: AttendanceNudgeSettings;
 }
 
 export interface EmailSettings {
@@ -248,11 +259,25 @@ const slackChannelsSchema = new Schema<SlackChannelMap>(
     { _id: false }
 );
 
+const attendanceNudgeSchema = new Schema<AttendanceNudgeSettings>(
+    {
+        enabled: { type: Boolean, required: true, default: false },
+        check_in_time: { type: String, required: true, default: '11:00' },
+        checkout_reminder_time: { type: String, required: true, default: '20:00' },
+    },
+    { _id: false }
+);
+
 const slackSchema = new Schema<SlackSettings>(
     {
         enabled: { type: Boolean, required: true, default: false },
         channels: { type: slackChannelsSchema, required: true },
         bot_token: { type: String, default: null },
+        attendance_nudges: {
+            type: attendanceNudgeSchema,
+            required: true,
+            default: () => ({ enabled: false, check_in_time: '11:00', checkout_reminder_time: '20:00' }),
+        },
     },
     { _id: false }
 );

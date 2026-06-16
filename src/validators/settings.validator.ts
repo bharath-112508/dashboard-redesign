@@ -133,6 +133,13 @@ const slackSchema = z
         // with the dedicated `/settings/slack` PATCH so a future bump
         // only happens in one place.
         bot_token: z.string().max(SLACK_BOT_TOKEN_MAX).nullable(),
+        attendance_nudges: z
+            .object({
+                enabled: z.boolean(),
+                check_in_time: hhmm,
+                checkout_reminder_time: hhmm,
+            })
+            .partial(),
     })
     .partial();
 

@@ -95,6 +95,11 @@ export const DEFAULT_SETTINGS = {
             general: '#general',
         },
         bot_token: null as string | null,
+        attendance_nudges: {
+            enabled: false,
+            check_in_time: '11:00',
+            checkout_reminder_time: '20:00',
+        },
     },
 
     email: {

@@ -50,12 +50,14 @@ interface PublicSlackSettings {
     enabled: boolean;
     channels: SlackSettings['channels'];
     has_bot_token: boolean;
+    attendance_nudges: SlackSettings['attendance_nudges'];
 }
 
 const toPublicSlackSettings = (s: SlackSettings): PublicSlackSettings => ({
     enabled: s.enabled,
     channels: { ...s.channels },
     has_bot_token: Boolean(s.bot_token),
+    attendance_nudges: { ...s.attendance_nudges },
 });
 
 /**
@@ -67,6 +69,7 @@ const toAuditSnapshot = (s: SlackSettings): Record<string, unknown> => ({
     enabled: s.enabled,
     channels: { ...s.channels },
     has_bot_token: Boolean(s.bot_token),
+    attendance_nudges: { ...s.attendance_nudges },
 });
 
 // ─── GET /settings/slack ─────────────────────────────────────────────────
@@ -107,6 +110,15 @@ export const patchSlackSettings = async (
         if (patch.channels.projects !== undefined) settings.slack.channels.projects = patch.channels.projects;
         if (patch.channels.timesheet !== undefined) settings.slack.channels.timesheet = patch.channels.timesheet;
         if (patch.channels.general !== undefined) settings.slack.channels.general = patch.channels.general;
+    }
+
+    if (patch.attendance_nudges) {
+        const n = patch.attendance_nudges;
+        if (n.enabled !== undefined) settings.slack.attendance_nudges.enabled = n.enabled;
+        if (n.check_in_time !== undefined) settings.slack.attendance_nudges.check_in_time = n.check_in_time;
+        if (n.checkout_reminder_time !== undefined) {
+            settings.slack.attendance_nudges.checkout_reminder_time = n.checkout_reminder_time;
+        }
     }
 
     settings.updated_by = caller.id;
