@@ -18,7 +18,7 @@ This file is the **quick-reference**. For the per-module deep-dive — data mode
 | [`timesheets-billing.md`](docs/modules/timesheets-billing.md) | Daily entries + weekly view + manager approval + billing rates with forward-extension invariants + reminder cron |
 | [`reports-exports.md`](docs/modules/reports-exports.md) | Sync report reads + async export pipeline (Azure Blob + inline fallback) + presets + subscriptions + cleanup cron |
 | [`audit-compliance.md`](docs/modules/audit-compliance.md) | `audit_logs` + `audit_archives` (daily WORM + SHA-256 chain) + `audit_log_mirrors` (P1-7 hourly) |
-| [`settings-notifications.md`](docs/modules/settings-notifications.md) | System settings + Slack (signed inbound webhooks + slash commands + outbound `chat.update`) + notification dispatcher + in-app + push |
+| [`settings-notifications.md`](docs/modules/settings-notifications.md) | System settings + Slack (signed inbound webhooks + slash commands + Events API / App Home dashboard + attendance nudges + outbound `chat.update`/`views.publish`) + notification dispatcher + in-app + push |
 | [`dashboard-search-palette.md`](docs/modules/dashboard-search-palette.md) | Per-role dashboards + global search + Cmd-K command palette |
 | [`cross-cutting.md`](docs/modules/cross-cutting.md) | Boot order, error envelope, validation, `withTransaction`, logging + metrics, rate limiters, cron scheduler |
 
@@ -222,17 +222,20 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 - **Roles & visibility** — `GET /settings/public` is **unauthenticated** (login-page branding only). `GET /settings` is authed; admin sections are redacted server-side for non-admin callers. Writes need `SETTINGS_WRITE` (or `SETTINGS_SLACK_WRITE` for the Slack sub-section).
 - **Routes** — [`routes/settings.routes.ts`](src/routes/settings.routes.ts). Public branding → authed merged read → admin PATCH. Slack subsurface: `GET|PATCH /settings/slack`, `POST /settings/slack/test-message`.
 - **Service** — [`services/settings.service.ts`](src/services/settings.service.ts), [`services/slack-settings.service.ts`](src/services/slack-settings.service.ts) · **Model** — [`models/system-settings.model.ts`](src/models/system-settings.model.ts)
-- **Gotchas** — public route declared **before** `authenticate` so Express matches it first. Slack `bot_token` is AES-256-GCM encrypted at rest (reuses `MFA_ENCRYPTION_KEY`) and redacted to `has_bot_token: bool` on reads. Audit metadata snapshots the presence flag only — never the token.
+- **Gotchas** — public route declared **before** `authenticate` so Express matches it first. Slack `bot_token` is AES-256-GCM encrypted at rest (reuses `MFA_ENCRYPTION_KEY`) and redacted to `has_bot_token: bool` on reads — redaction now uses **explicit field-picking** (a prior subdoc spread leaked the encrypted token + Mongoose internals `$__parent`/`_doc`). Audit metadata snapshots the presence flag only — never the token. The Slack section also carries `attendance_nudges {enabled, check_in_time, checkout_reminder_time}` for the App Home nudge crons.
 
 ### Slack integration
 
-- **Purpose** — Inbound interactive webhooks + slash commands; outbound non-throwing dispatch
-- **Routes** — [`routes/slack.routes.ts`](src/routes/slack.routes.ts) mounted at `/api/v1/slack` in [`index.ts`](src/index.ts) **before** body parsers. `POST /slack/interactive` (Block Kit button clicks — leave approve/reject), `POST /slack/commands/:command` (`/checkin`, `/checkout`, `/status`).
+- **Purpose** — Inbound interactive webhooks + slash commands + Events API (App Home); outbound non-throwing dispatch
+- **Routes** — [`routes/slack.routes.ts`](src/routes/slack.routes.ts) mounted at `/api/v1/slack` in [`index.ts`](src/index.ts) **before** body parsers. `POST /slack/interactive` (Block Kit button clicks — leave approve/reject, attendance check-in/out, home refresh), `POST /slack/commands/:command` (`/checkin`, `/checkout`, `/status`, `/mystatus`), `POST /slack/events` (Events API — `url_verification` challenge + `app_home_opened` → publishes the App Home dashboard).
+- **App Home dashboard** — a role-scoped Home tab: own check-in/out header (Check In / Check Out buttons), my day, my leaves, who's out, today's attendance summary (`attendance.read_team`), pending leave approvals with inline Approve/Reject (reviewers), `home_refresh`. Aggregator [`services/slack-home.service.ts`](src/services/slack-home.service.ts) + pure builder [`utils/slack-home-blocks.ts`](src/utils/slack-home-blocks.ts); attendance/nudge Block Kit in [`utils/slack-attendance-blocks.ts`](src/utils/slack-attendance-blocks.ts). Who's-out is shown to all employees (Slack-only relaxation of `leave_request.read_team`); `read_team` is org-wide today (per-team scoping is future work).
+- **Attendance nudge crons** — [`jobs/attendance-slack-nudge.job.ts`](src/jobs/attendance-slack-nudge.job.ts): `attendance_checkin_nudge` (11:00 IST) and `attendance_checkout_reminder` (20:00 IST). Gated by `JOBS_ENABLED` && `slack.enabled` && `slack.attendance_nudges.enabled`. Unmapped users eager-resolved via `users.lookupByEmail` (`resolveSlackIdByEmail`), caching `slack_user_id`. Fire-times read at scheduler boot (`startScheduler()` is now async). Setup: [`docs/runbooks/slack-attendance-setup.md`](../docs/runbooks/slack-attendance-setup.md).
 - **Controller** — [`controllers/slack-interactive.controller.ts`](src/controllers/slack-interactive.controller.ts)
-- **Outbound utilities** — [`utils/slack.ts`](src/utils/slack.ts) (`postSlackMessage`, `postOrUpdateSlackMessage`).
+- **Outbound utilities** — [`utils/slack.ts`](src/utils/slack.ts) (`postSlackMessage`, `postOrUpdateSlackMessage`, `publishHomeView`).
 - **Signature verification** — [`middlewares/slack-webhook.middleware.ts`](src/middlewares/slack-webhook.middleware.ts) captures raw bytes before any parser touches them, then [`utils/slack-signature.ts`](src/utils/slack-signature.ts) verifies HMAC-SHA256 `v0:<ts>:<body>` with a 5-min replay window. **Don't move the route's mount position** in `index.ts` — parsing first kills verification.
-- **Outbound dispatch** — non-throwing. Failures log `SLACK_DISPATCH_FAILED` at warn and never block business writes. Leave messages mutate **in-place** via `chat.update` against the persisted `LeaveRequest.slack_message {channel, ts}` so the same DM walks the lifecycle (pending → approved/rejected).
-- **User mapping** — `User.slack_user_id` is cached on the user doc; fallback to `users.info` email lookup.
+- **Outbound dispatch** — non-throwing. Failures log `SLACK_DISPATCH_FAILED` at warn and never block business writes. Leave messages mutate **in-place** via `chat.update` against the persisted `LeaveRequest.slack_message {channel, ts}` so the same DM walks the lifecycle (pending → approved/rejected). App Home publishes/re-publishes via `views.publish`.
+- **Bot scopes** — `chat:write`, `im:write`, `users:read.email` (App Home + nudges) in addition to `commands` / `users:read` / `users:info`.
+- **User mapping** — `User.slack_user_id` is cached on the user doc; reactive fallback to `users.info` email lookup (inbound), eager `users.lookupByEmail` for nudges.
 
 ### Push notifications
 
@@ -275,11 +278,13 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 - **Rate limiters** — [`middlewares/rate-limit.middleware.ts`](src/middlewares/rate-limit.middleware.ts). Per-IP general (120/min, env `GENERAL_RATE_LIMIT_MAX`), per-IP auth (10/15min, env `AUTH_RATE_LIMIT_MAX`), per-IP health (600/min), per-IP Slack webhook (30/min, before signature verify), per-user report-read (60/min), per-user export (10/15min), per-user search (60/min), per-user palette (60/min, separate bucket). In-memory per instance — multi-instance fleets see `instances × limit` effective ceiling.
 - **Helmet / CSP** — [`index.ts:57-97`](src/index.ts#L57-L97). API-only `default-src 'none'`, `frame-ancestors 'none'`, `form-action 'none'`. Rationale: this is a JSON API, not a browser context.
 - **Body-parser ordering** — Slack router mounted in [`index.ts:143`](src/index.ts#L143) **before** `compression` (line 150) and `express.json()` (line 152). Auth-body limit is 4 KB; global is 1 MB. **Don't reorder.**
-- **Cron jobs** — [`jobs/index.ts`](src/jobs/index.ts) registers 11 jobs (IST):
+- **Cron jobs** — [`jobs/index.ts`](src/jobs/index.ts) registers 13 jobs (IST):
 
   | Job | Schedule | Idempotency |
   |---|---|---|
   | `attendance_finalizer` | Daily 23:00 | Per-day |
+  | `attendance_checkin_nudge` | Daily 11:00 | Per-day |
+  | `attendance_checkout_reminder` | Daily 20:00 | Per-day |
   | `leave_year_rollover` | Jan 1 00:05 | Per-year |
   | `token_cleanup` | Sun 02:00 | Per-ISO-week |
   | `timesheet_reminder` | Daily 20:00 | Per-day |
@@ -309,7 +314,7 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 | Error code | [`src/constants/error-codes.ts`](src/constants/error-codes.ts) — keep in sync with [FE `error-codes.ts`](../viljetech-platform-frontend/src/lib/error-codes.ts) |
 | Audit action | [`src/constants/audit.ts`](src/constants/audit.ts) (`AUDIT_ACTIONS`, `AUDIT_TARGET_KINDS`) |
 | New env var | Document in [`.env.example`](.env.example), read it in [`config/server.config.ts`](src/config/server.config.ts), never `process.env.X` directly in services |
-| Slack inbound handler | Branch inside [`controllers/slack-interactive.controller.ts`](src/controllers/slack-interactive.controller.ts) — **do not** add new routes (Slack only knows the two signed URLs) |
+| Slack inbound handler | Branch inside [`controllers/slack-interactive.controller.ts`](src/controllers/slack-interactive.controller.ts) — **do not** add new routes (Slack knows the signed URLs `/interactive`, `/commands/:command`, and `/events` (App Home)) |
 | Slack outbound message | Use [`utils/slack.ts`](src/utils/slack.ts) — never throw on dispatch failure |
 | Notification fan-out | [`services/notification-dispatcher.service.ts`](src/services/notification-dispatcher.service.ts) — one entry point for in-app + Slack + push |
 

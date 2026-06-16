@@ -4,6 +4,7 @@ The **Attendance** module owns daily check-in / check-out (multi-segment per day
 
 Cross-module dependencies:
 - **Leave Management** owns `comp_off_ledger`. Attendance computes `overtime_minutes` on the record; the Leave module reads it when posting `attendance_overtime` rows. See [`leave-management.md`](./leave-management.md).
+- **Slack** offers check-in/out without leaving Slack — App Home **Check In / Check Out** buttons and the `/checkin` / `/checkout` slash commands both flow through the same `checkIn` / `checkOut` services as the web app, with `method: 'manual'`. `getTodayAttendanceSummary` (this service) powers the Slack Home dashboard's today's-attendance section. See the Slack subsystem in [`settings-notifications.md`](./settings-notifications.md).
 - **Holidays** + **Settings** (`work_schedule.working_days`, `work_schedule.daily_expected_hours`, `attendance.geofence`, `attendance.wifi_restriction`) drive finalizer + check-in gating. See [`holidays-locations.md`](./holidays-locations.md) (next module) and the Settings catalog in the Settings module.
 - **Office Locations** owns `office_locations` + QR tokens (the resolver here calls `OfficeLocation.findOne({qr_code_token, is_active})`).
 

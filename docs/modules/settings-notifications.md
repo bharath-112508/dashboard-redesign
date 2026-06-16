@@ -4,7 +4,7 @@ Three sub-modules paired here because they share the dispatch substrate every bu
 
 1. **Settings** — singleton `system_settings` doc + admin-only PATCH + role-redacted reads + dedicated `/settings/slack` surface (J1 AES-encrypted bot token).
 2. **Notifications** — owner-scoped in-app inbox + the `notification-dispatcher` that fans every business event out to in-app + email + Slack DM + push, never-throwing.
-3. **Slack subsystem** — inbound webhooks (signature-verified, raw-body capture before parsers), outbound `chat.postMessage`/`chat.update` (best-effort, non-throwing), Slack-user → Viljetech-user resolver with `users.info` email-match fallback.
+3. **Slack subsystem** — inbound webhooks + Events API (signature-verified, raw-body capture before parsers), the **App Home role-scoped dashboard** (check-in/out buttons, leave approve/reject, daily nudge crons), outbound `chat.postMessage`/`chat.update`/`views.publish` (best-effort, non-throwing), Slack-user → Viljetech-user resolver with `users.info`/`users.lookupByEmail` email-match fallback.
 4. **Push** — Web Push subscription registry + VAPID dispatch + endpoint allowlist (SSRF defense).
 
 Cross-references:
@@ -20,10 +20,10 @@ Cross-references:
 |---|---|---|
 | **Settings** | `GET /settings/public`, `GET /settings`, `PATCH /settings` | Singleton; role-redacted reads; deep-merge PATCH |
 | **Slack settings** | `GET /settings/slack`, `PATCH /settings/slack`, `POST /settings/slack/test-message` | J1 AES-GCM at rest; redacted to `has_bot_token` |
-| **Slack webhooks** | `POST /slack/interactive`, `POST /slack/commands/:command` | HMAC-SHA256 signature; raw-body capture |
+| **Slack webhooks** | `POST /slack/interactive`, `POST /slack/commands/:command`, `POST /slack/events` | HMAC-SHA256 signature; raw-body capture. `/events` = App Home (`app_home_opened`) + `url_verification` challenge |
 | **Notifications** | `GET /notifications`, `/unread-count`, `POST /:id/read`, `/read-all`, `DELETE /:id` | Owner-scoped, anti-enumeration 404 |
 | **Push** | `POST /push/subscribe`, `POST /push/unsubscribe` (+ legacy `DELETE /push/subscribe` alias) | M21 — POST-canonical; VAPID public key NOT exposed (FE-bundled) |
-| **Crons** | Day-of-week timesheet reminder + report subscriptions | Documented in their parent modules |
+| **Crons** | Day-of-week timesheet reminder + report subscriptions + Slack attendance nudges | Timesheet/report crons documented in their parent modules; Slack nudges below |
 
 ---
 
@@ -35,7 +35,7 @@ Cross-references:
 | `GET /settings` | authenticated | Non-admin gets `ADMIN_ONLY_SECTIONS` stripped: `security`, `email`, `slack` |
 | `PATCH /settings` | `settings.write` | Admin |
 | `GET /settings/slack`, `PATCH /settings/slack`, `POST /settings/slack/test-message` | `settings.slack.write` | Admin |
-| `POST /slack/interactive`, `POST /slack/commands/*` | none — HMAC-signature verified | Slack workspace |
+| `POST /slack/interactive`, `POST /slack/commands/*`, `POST /slack/events` | none — HMAC-signature verified | Slack workspace |
 | `GET /notifications*`, `POST /:id/read`, `/read-all`, `DELETE /:id` | authenticated (service narrows to caller) | Everyone |
 | `POST /push/subscribe`, `POST /push/unsubscribe` | authenticated | Everyone |
 
@@ -57,7 +57,7 @@ Singleton via unique `singleton_key: 'system'` index. Concurrent first-boot inse
 | `attendance` | geofence {enabled, center_lat, center_lon, radius_meters}, wifi_restriction {enabled, allowed_ssids, allowed_ip_ranges}, forgot_checkout_flag_time | No |
 | `security` | password policy fields (min/max length, require_upper/lower/number/special), failed_login_threshold, lockout_duration_minutes, access_token_ttl_minutes (480 = 8h default), refresh_token_ttl_days (5), password_reset_ttl_minutes (60), `require_mfa_for_admins` (Step 28, default false) | **YES** — `ADMIN_ONLY_SECTIONS` |
 | `uploads` | max_file_size_mb, allowed_mime_types, sas_token_ttl_minutes (15) | No |
-| `slack` | enabled, channels {leaves, attendance, projects, timesheet, general}, bot_token (J1 AES-encrypted at rest) | **YES** |
+| `slack` | enabled, channels {leaves, attendance, projects, timesheet, general}, bot_token (J1 AES-encrypted at rest), `attendance_nudges {enabled (default false), check_in_time ("11:00"), checkout_reminder_time ("20:00")}` | **YES** |
 | `email` | from_address, reply_to_address | **YES** |
 | `reminders` | timesheet_reminder_time, task_due_reminder_run_interval_hours | No |
 | `company` | name, logo_blob_key, primary_color, login_page_tagline | No |
@@ -115,6 +115,8 @@ patchSlackSettings({bot_token: 'xoxb-...'}, caller):
 
 Both projections strip `bot_token` and emit `has_bot_token: Boolean(s.bot_token)`. Admin reads of `/settings/slack` and audit `before/after` blocks BOTH go through these — no path exposes the live or historical token. Even the admin who just PATCHed the token doesn't get it echoed back on the response.
 
+**Bot-token-leak fix** — these projections previously **spread the Mongoose subdoc** (`{...s.toObject(), bot_token: undefined}`-style), which leaked the encrypted `bot_token` plus Mongoose internals (`$__parent`, `_doc`) into the `GET /settings/slack` response and audit snapshots. Fixed by **explicit field-picking** — the projections enumerate the exact fields to emit (`enabled`, `channels`, `has_bot_token`, `attendance_nudges`) rather than spreading. `has_bot_token` redaction is intact; the subdoc internals no longer escape.
+
 ### Test message (`POST /settings/slack/test-message`)
 
 ```ts
@@ -141,8 +143,9 @@ Inbound HMAC-signed webhooks mounted at `/api/v1/slack/*`. **Mounted BEFORE glob
 1. slackWebhookRateLimiter     — 30 req/min/IP (cheap reject before crypto)
 2. slackWebhookMiddleware      — capture raw body buffer → verify HMAC → re-parse JSON/urlencoded
 3. routes:
-   POST /interactive           — Block Kit button clicks (Approve/Reject leave)
-   POST /commands/:command     — /checkin, /checkout, /status
+   POST /interactive           — Block Kit button clicks (leave approve/reject, attendance check-in/out, home refresh)
+   POST /commands/:command     — /checkin, /checkout, /status, /mystatus
+   POST /events                — Slack Events API: url_verification challenge + app_home_opened (App Home)
 ```
 
 ### Signature verification ([`utils/slack-signature.ts`](../../src/utils/slack-signature.ts))
@@ -197,11 +200,44 @@ if action_id starts with 'approve_leave_' or 'reject_leave_':
 
 **Response contract: ALWAYS 200 within Slack's 3-second window.** Errors and permission denials use `response_type: 'ephemeral'` (visible to the clicker only). The channel `chat.update` happens asynchronously via `notifyLeaveDecided` → same message in place, no new post.
 
-#### Slash commands `/checkin`, `/checkout`, `/status`
+#### Slash commands `/checkin`, `/checkout`, `/status`, `/mystatus`
 
-Slack carries no client IP, no geolocation, no WiFi info. If org has geofence/wifi enforcement enabled, `checkIn`/`checkOut` throw `LOCATION_NOT_ALLOWED` → ephemeral "Slack check-in isn't available from your location — please use the web app or the office QR code."
+Slack carries no client IP, no geolocation, no WiFi info. If org has geofence/wifi enforcement enabled, `checkIn`/`checkOut` throw `LOCATION_NOT_ALLOWED` → ephemeral "Slack check-in isn't available from your location — please use the web app or the office QR code." Both go through the existing `checkIn`/`checkOut` attendance services with `method: 'manual'`.
 
 `/status` reads `getMyToday(user._id)` → renders each segment as `• HH:MM → HH:MM` (or "now" if open) + total worked.
+
+**`/mystatus` is an alias for `/status`** — Slack reserves the built-in `/status` slash command, so the workspace exposes `/mystatus` instead. The handler keys off the URL path `/commands/:command`, so `/commands/mystatus` runs the same status branch as `/commands/status`. No new controller branch — just an additional command registered in the Slack app.
+
+#### App Home check-in/out buttons
+
+The App Home tab (see below) renders **Check In / Check Out** buttons. Tapping posts a `block_actions` payload to the existing `POST /slack/interactive` with action ids `attendance_check_in` / `attendance_check_out` (`SLACK_ACTION_ATTENDANCE_CHECK_IN` / `_CHECK_OUT`). The handler calls the same `checkIn` / `checkOut` services (`method: 'manual'`). **Stale taps are safe no-ops** — a double check-in surfaces `ALREADY_CHECKED_IN`, a check-out with no open segment surfaces `NOT_CHECKED_IN`; both render an ephemeral note rather than erroring. After the action the Home tab is **re-published** (`views.publish`); DM-origin taps (nudge buttons) update via the payload's `response_url`.
+
+### Slack Events API + App Home ([`POST /slack/events`])
+
+Mounted on the same signature-verified `/slack` router. Two event shapes:
+
+- **`url_verification`** — Slack's one-time Request-URL handshake. The endpoint echoes back the `challenge` field so Slack marks the URL verified.
+- **`app_home_opened`** — fired when a user opens the bot's Home tab. Handled **only when `event.tab === 'home'`** (Slack also fires it for the Messages tab). The handler resolves the Slack user → Viljetech user, builds the dashboard, and publishes it via `views.publish` (`SLACK_API_PUBLISH_VIEW`).
+
+#### Role-scoped Home dashboard ([`slack-home.service.ts`](../../src/services/slack-home.service.ts) + [`utils/slack-home-blocks.ts`](../../src/utils/slack-home-blocks.ts))
+
+`buildHomeDashboardData` (aggregator, `slack-home.service`) fetches the data; `buildHomeDashboardView` (pure Block Kit builder, `slack-home-blocks`) renders it. Sections, top to bottom:
+
+| # | Section | Gate |
+|---|---|---|
+| 1 | Own check-in/out header (with Check In / Check Out buttons) | everyone |
+| 2 | My day (today's segments + total) | everyone |
+| 3 | My leaves (balances + own pending) | everyone |
+| 4 | Who's out (today + this week) | everyone (**deliberate relaxation** — see below) |
+| 5 | Today's attendance summary | `attendance.read_team` |
+| 6 | Pending leave approvals (inline **Approve / Reject** buttons) | reviewers (admin / manager / team_lead) |
+| 7 | Footer with a **`home_refresh`** button | everyone |
+
+- **Role scoping** uses `resolvePermissionsForUser` + `callerCan(PERMISSIONS.ATTENDANCE_READ_TEAM)` and `isReviewer`. Section 6's Approve/Reject reuse the existing `approve_leave_*` / `reject_leave_*` interactive handlers.
+- **Caps** — `ATT_ROSTER_CAP=10`, `PENDING_CAP=10`, `WHOSOUT_CAP=15`, each with a "+N more" line + a web deep-link to the full list.
+- **Fault-tolerant** — each section is fetched **independently**; one failure renders a "couldn't load" note for that section rather than breaking the whole tab.
+- **Deliberate relaxation** — the who's-out roster (section 4) is shown to **all employees**, a Slack-only relaxation of the `leave_request.read_team` calendar gate that the web app enforces (C5). **Limitation**: `read_team` is **org-wide today** — Team Lead / Manager / Admin all see the org-wide roster; true per-team scoping is future work.
+- Tapping a Home-tab Approve/Reject (or **`home_refresh`**) **re-publishes** the dashboard so the tab reflects the new state.
 
 ### Slack-user mapping ([`slack-user-mapping.service.ts`](../../src/services/slack-user-mapping.service.ts))
 
@@ -215,6 +251,8 @@ resolveSlackUser(slackUserId, ctx):
 ```
 
 `fetchSlackUserInfo` wraps `users.info` with `SLACK_REQUEST_TIMEOUT_MS = 5000ms` (Slack's interactive 3s window + buffer) via AbortController. Returns null on any failure — caller's resolveSlackUser falls through to step 3.
+
+**Eager mapping for nudges (`resolveSlackIdByEmail`)** — the inbound resolver above is **reactive** (a Slack interaction arrives carrying a `slack_user_id`). The nudge crons need the reverse: given a Viljetech `User` with no `slack_user_id` yet, find their Slack id. `resolveSlackIdByEmail(email, ctx)` calls Slack `users.lookupByEmail` (`SLACK_API_LOOKUP_BY_EMAIL`, requires the `users:read.email` bot scope) and **caches the resolved id** back onto `User.slack_user_id`. This is why unmapped employees still receive nudges without ever having interacted with the bot first.
 
 ---
 
@@ -239,9 +277,62 @@ Used by `notifyLeaveSubmitted` (initial post — persists `ts + channel` to `Lea
 
 `chat.update` failure mode `message_not_found` (bot kicked, message deleted, ts mismatch) → log + `{success: false}`. BE state change still succeeds; channel just shows the stale message.
 
+### `publishHomeView(ctx, {user_id, view, context})`
+
+`POST views.publish` (`SLACK_API_PUBLISH_VIEW`). Publishes the App Home dashboard for a single Slack user. Same **non-throwing** policy as the other senders — failures log `SLACK_DISPATCH_FAILED` at warn and never block the surrounding flow (an Events-API ack, an interactive ack, or a cron tick). Used by the `app_home_opened` handler, the post-action re-publish in the interactive controller, and the `home_refresh` button.
+
+Pure Block Kit builders live in [`utils/slack-attendance-blocks.ts`](../../src/utils/slack-attendance-blocks.ts) (check-in/out panels + nudge messages, incl. `attendanceHeaderBlocks`) and [`utils/slack-home-blocks.ts`](../../src/utils/slack-home-blocks.ts) (the full dashboard view). Keeping the builders pure (data → Block Kit JSON, no I/O) makes them unit-testable without Slack.
+
 ### `isSlackConfigured` + `slackContextFrom`
 
 Caller-side gates: `enabled === true && Boolean(bot_token)`. `slackContextFrom` returns `{enabled, botToken}` resolved via `resolveBotTokenPlaintext` (J1 envelope-aware), or `null` when unconfigured.
+
+### Required bot scopes
+
+App Home + nudges need, in addition to the existing `commands` / `users:read` / `users:info`:
+
+- `chat:write` — post nudge DMs + check-in/out confirmations
+- `im:write` — open the DM channel to nudge a user
+- `users:read.email` — `users.lookupByEmail` for eager nudge mapping
+
+Plus, in the Slack app config: **App Home → Home Tab enabled**, and **Event Subscriptions enabled** with the `app_home_opened` bot event and Request URL `…/api/v1/slack/events`. Full step-by-step in the runbook: [`docs/runbooks/slack-attendance-setup.md`](../../../docs/runbooks/slack-attendance-setup.md).
+
+### New Slack API constants
+
+| Constant | Slack method |
+|---|---|
+| `SLACK_API_PUBLISH_VIEW` | `views.publish` (App Home) |
+| `SLACK_API_LOOKUP_BY_EMAIL` | `users.lookupByEmail` (eager nudge mapping) |
+| `SLACK_ACTION_ATTENDANCE_CHECK_IN` / `_CHECK_OUT` | action ids for the Home/nudge buttons |
+
+---
+
+## Slack attendance nudge crons ([`jobs/attendance-slack-nudge.job.ts`](../../src/jobs/attendance-slack-nudge.job.ts))
+
+Two daily DM nudges, both gated by `JOBS_ENABLED` && `slack.enabled` && `slack.attendance_nudges.enabled`:
+
+| Job | Default time (IST) | Behavior |
+|---|---|---|
+| `attendance_checkin_nudge` | 11:00 | DMs eligible employees a **Check In** button |
+| `attendance_checkout_reminder` | 20:00 | DMs anyone still checked-in a **Check Out** button |
+
+**Eligibility** (per user, recomputed each tick): active internal user (not client), working day (not weekend, not a holiday), not on approved leave, and — for the morning check-in nudge — **no check-in yet today**. The checkout reminder targets users with an open segment.
+
+**Eager mapping** — an unmapped user (`slack_user_id` null) is resolved by email via `resolveSlackIdByEmail` (`users.lookupByEmail`) and the id cached, so a brand-new hire receives nudges without ever having clicked a Slack button.
+
+**Settings** — `SystemSettings.slack.attendance_nudges = { enabled (default false), check_in_time (default "11:00"), checkout_reminder_time (default "20:00") }`, editable via `PATCH /settings/slack` (and the merged `PATCH /settings`). **The two fire-times are read at scheduler boot** — `startScheduler()` is now **async** and reads them from settings when registering the cron expressions. **Changing a time in settings takes effect on the next process restart**, not immediately.
+
+Each nudge DM carries the same `attendance_check_in` / `attendance_check_out` action ids as the App Home buttons; tapping the DM button updates the message in place via `response_url`.
+
+---
+
+### Web deep links + `APP_BASE_URL`
+
+The Slack Home dashboard's "+N more" lines and section links are web deep-links (`/leaves`, `/attendance`, `/leaves/calendar`) built through an `appUrl()` helper that **strips trailing slashes** before joining the path.
+
+> **Operational gotcha** — `APP_BASE_URL` (backend env) MUST point at the **frontend** app URL (where `/leaves`, `/attendance`, `/leaves/calendar` render), **NOT** the API host. It is shared with password-reset, QR check-in, and email links — pointing it at the API host breaks all of those deep-links, not just Slack.
+
+The today's-attendance section (dashboard section 5) is powered by the attendance service's `getTodayAttendanceSummary` (see [`attendance.md`](./attendance.md)).
 
 ---
 
@@ -561,3 +652,12 @@ Notifications themselves are NOT audited — high-volume routine events with no 
 | 50 | Push 410/404 → hard-delete subscription; transient error → stamp `last_error_at` | Smart-prune semantics |
 | 51 | VAPID public key NOT exposed via API — baked into FE bundle | Saves one round-trip on first subscribe |
 | 52 | Notification metadata target.kind is one of `leave_request, attendance_correction_request, user, task` | Free-form string accepted; this list documents emitted kinds |
+| 53 | `/slack/events` handles `url_verification` (echo `challenge`) + `app_home_opened` (only `tab === 'home'`) | Slack fires `app_home_opened` for both Messages and Home tabs |
+| 54 | App Home dashboard sections are fetched independently; one failure renders "couldn't load" | Fault-tolerant — a broken section doesn't break the tab |
+| 55 | Who's-out roster shown to ALL employees (Slack-only relaxation of `leave_request.read_team`) | UX over the web calendar's C5 gate; `read_team` is org-wide today so all reviewers see org-wide |
+| 56 | `/mystatus` aliases `/status` because Slack reserves `/status` | Handler keys off URL path `/commands/:command` — `/commands/mystatus` runs the status branch |
+| 57 | Attendance check-in/out from Slack (Home buttons + slash cmds) uses `method: 'manual'` | Same `checkIn`/`checkOut` services as web; stale taps → `ALREADY_CHECKED_IN`/`NOT_CHECKED_IN` ephemeral |
+| 58 | Nudge fire-times read at `startScheduler()` boot (now async); settings change needs a restart | Cron expressions registered once at boot from settings |
+| 59 | Nudges eager-map unmapped users via `users.lookupByEmail` (`resolveSlackIdByEmail`), caching `slack_user_id` | New hires get nudged without ever clicking a Slack button first |
+| 60 | `GET /settings/slack` redaction uses explicit field-picking (not subdoc spread) | Pre-fix it leaked the encrypted `bot_token` + Mongoose internals (`$__parent`, `_doc`) |
+| 61 | `APP_BASE_URL` must point at the FRONTEND app URL, NOT the API host | Shared with Slack deep-links, password-reset, QR check-in, email links |
