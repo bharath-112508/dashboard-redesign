@@ -6,6 +6,17 @@ vi.mock('../services/attendance.service.js', () => ({
     checkIn: vi.fn(),
     checkOut: vi.fn(),
     getMyToday: vi.fn(),
+    getTodayAttendanceSummary: vi.fn(),
+}));
+vi.mock('../services/slack-home.service.js', () => ({
+    buildHomeDashboardData: vi.fn(async () => ({ user: {}, my_today: null })),
+    ATT_ROSTER_CAP: 10,
+    PENDING_CAP: 10,
+    WHOSOUT_CAP: 15,
+}));
+vi.mock('../utils/slack-home-blocks.js', () => ({
+    buildHomeDashboardView: vi.fn(() => ({ type: 'home', blocks: [] })),
+    SLACK_ACTION_HOME_REFRESH: 'home_refresh',
 }));
 vi.mock('../services/settings.service.js', () => ({ getOrInitSettings: vi.fn() }));
 vi.mock('../services/slack-user-mapping.service.js', () => ({
@@ -22,6 +33,8 @@ import { checkIn, getMyToday } from '../services/attendance.service.js';
 import { getOrInitSettings } from '../services/settings.service.js';
 import { resolveSlackUser } from '../services/slack-user-mapping.service.js';
 import { publishHomeView } from '../utils/slack.js';
+import { buildHomeDashboardData } from '../services/slack-home.service.js';
+import { buildHomeDashboardView } from '../utils/slack-home-blocks.js';
 import {
     handleSlackEvents as handleSlackEventsRaw,
     handleInteractive as handleInteractiveRaw,
@@ -113,6 +126,50 @@ describe('handleInteractive — attendance actions', () => {
         await handleInteractive(homePayload('attendance_check_in'), res);
         expect(checkIn).toHaveBeenCalledOnce();
         await new Promise((r) => setImmediate(r));
+        expect(publishHomeView).toHaveBeenCalled();
+    });
+});
+
+describe('Home dashboard wiring', () => {
+    it('app_home_opened publishes the DASHBOARD view', async () => {
+        (getOrInitSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ slack: {} });
+        (resolveSlackUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+            _id: new Types.ObjectId(),
+            role: 'employee',
+            full_name: 'Raj',
+        });
+        const req = {
+            body: { type: 'event_callback', event: { type: 'app_home_opened', user: 'U1', tab: 'home' } },
+        } as never;
+        const res = mockRes();
+        await handleSlackEvents(req, res);
+        await new Promise((r) => setImmediate(r));
+        expect(buildHomeDashboardData).toHaveBeenCalled();
+        expect(buildHomeDashboardView).toHaveBeenCalled();
+        expect(publishHomeView).toHaveBeenCalled();
+    });
+
+    it('home_refresh action re-publishes the dashboard', async () => {
+        (getOrInitSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ slack: {} });
+        (resolveSlackUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+            _id: new Types.ObjectId(),
+            role: 'employee',
+            full_name: 'Raj',
+        });
+        const req = {
+            body: {
+                payload: JSON.stringify({
+                    type: 'block_actions',
+                    user: { id: 'U1' },
+                    actions: [{ action_id: 'home_refresh' }],
+                    view: { type: 'home' },
+                }),
+            },
+        } as never;
+        const res = mockRes();
+        await handleInteractive(req, res);
+        await new Promise((r) => setImmediate(r));
+        expect(buildHomeDashboardView).toHaveBeenCalled();
         expect(publishHomeView).toHaveBeenCalled();
     });
 });

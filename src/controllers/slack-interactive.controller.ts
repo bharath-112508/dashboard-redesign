@@ -9,7 +9,8 @@ import { checkIn, checkOut, getMyToday } from '../services/attendance.service.js
 import { getOrInitSettings } from './../services/settings.service.js';
 import { fetchSlackUserInfo, resolveSlackUser } from '../services/slack-user-mapping.service.js';
 import { slackContextFrom, publishHomeView } from '../utils/slack.js';
-import { buildAttendanceHomeView } from '../utils/slack-attendance-blocks.js';
+import { buildHomeDashboardData } from '../services/slack-home.service.js';
+import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import logger from '../utils/logger.js';
 
@@ -101,13 +102,17 @@ const resolveCaller = async (slackUserId: string) => {
  */
 const renderAttendanceHome = async (
     slackUserId: string,
-    user: { _id: Types.ObjectId; full_name?: string | null }
+    user: { _id: Types.ObjectId; full_name?: string | null; role?: RoleType }
 ): Promise<void> => {
     const settings = await getOrInitSettings();
     const ctx = slackContextFrom(settings.slack);
     if (!ctx) return;
-    const record = await getMyToday(user._id);
-    const view = buildAttendanceHomeView(record as Record<string, unknown> | null, user.full_name ?? 'there');
+    const data = await buildHomeDashboardData({
+        _id: user._id,
+        role: (user.role ?? 'employee') as RoleType,
+        full_name: user.full_name ?? null,
+    });
+    const view = buildHomeDashboardView(data, data.user);
     await publishHomeView(ctx, slackUserId, view, 'attendance-home');
 };
 
@@ -203,6 +208,13 @@ export const handleInteractive: RequestHandler = async (req, res) => {
         return;
     }
 
+    if (action.action_id === SLACK_ACTION_HOME_REFRESH) {
+        const user = await resolveCaller(payload.user.id);
+        res.status(200).json({});
+        if (user) void renderAttendanceHome(payload.user.id, user);
+        return;
+    }
+
     if (isApprove || isReject) {
         const user = await resolveCaller(payload.user.id);
         if (!user) {
@@ -265,7 +277,12 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             }
             // Empty 200 — the channel `chat.update` (fired by the
             // dispatcher's notifyLeaveDecided) is the visible
-            // confirmation.
+            // confirmation. When the tap originated on the Home tab,
+            // also re-publish the dashboard so the actioned request
+            // drops off the pending list.
+            if (payload.view?.type === 'home') {
+                void renderAttendanceHome(payload.user.id, user);
+            }
             res.status(200).json({});
             return;
         } catch (err: unknown) {
