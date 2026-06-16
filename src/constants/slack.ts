@@ -65,6 +65,12 @@ export const SLACK_API_POST_MESSAGE = `${SLACK_API_BASE}/chat.postMessage`;
 // Phase 1 — used to edit the original leave message in-place when a
 // decision lands. Same auth model as chat.postMessage.
 export const SLACK_API_UPDATE_MESSAGE = `${SLACK_API_BASE}/chat.update`;
+// App Home — render/refresh a user's Home tab. Same bot-token auth.
+export const SLACK_API_PUBLISH_VIEW = `${SLACK_API_BASE}/views.publish`;
+// Eager Slack-user mapping for the nudge crons — resolve a Slack user id
+// from a Viljetech account email without an interactive payload to hand us
+// the id. https://api.slack.com/methods/users.lookupByEmail
+export const SLACK_API_LOOKUP_BY_EMAIL = `${SLACK_API_BASE}/users.lookupByEmail`;
 
 /**
  * Network timeout for a single Slack API call. Slack's docs target ~3s
@@ -83,3 +89,11 @@ export const SLACK_REQUEST_TIMEOUT_MS = 5_000;
 
 export const SLACK_TEXT_MAX = 3_000;
 export const SLACK_BOT_TOKEN_MAX = 200;
+
+// ─── Attendance interactive action ids ───────────────────────────────────
+//
+// Block Kit button `action_id`s for the App Home + DM nudge buttons. The
+// interactive controller branches on these. Kept as constants so the block
+// builders and the handler can't drift on the string.
+export const SLACK_ACTION_ATTENDANCE_CHECK_IN = 'attendance_check_in';
+export const SLACK_ACTION_ATTENDANCE_CHECK_OUT = 'attendance_check_out';
