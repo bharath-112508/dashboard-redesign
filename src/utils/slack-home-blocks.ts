@@ -11,6 +11,14 @@ import {
 /** Action ids owned by the dashboard (leave Approve/Reject reuse the existing ids). */
 export const SLACK_ACTION_HOME_REFRESH = 'home_refresh';
 
+/**
+ * Build a web-app deep link. `APP_BASE_URL` is the frontend base; strip any
+ * trailing slash(es) so we never emit `https://host//leaves`. NOTE:
+ * `APP_BASE_URL` must point at the FRONTEND app (where `/leaves` etc. render),
+ * not the API host.
+ */
+const appUrl = (path: string): string => `${APP_BASE_URL.replace(/\/+$/, '')}${path}`;
+
 const section = (text: string) => ({ type: 'section', text: { type: 'mrkdwn', text } });
 const divider = () => ({ type: 'divider' });
 const context = (text: string) => ({ type: 'context', elements: [{ type: 'mrkdwn', text }] });
@@ -49,7 +57,7 @@ const myLeavesBlocks = (data: HomeDashboardData): Array<Record<string, unknown>>
             )
         );
     }
-    blocks.push(linkButton('Open leaves →', `${APP_BASE_URL}/leaves`));
+    blocks.push(linkButton('Open leaves →', appUrl('/leaves')));
     return blocks;
 };
 
@@ -69,7 +77,7 @@ const whosOutBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> 
     return [
         section(`*Who’s out (today + this week)*\n${body}`),
         ...moreLine(rows.length, WHOSOUT_CAP),
-        linkButton('Open calendar →', `${APP_BASE_URL}/leaves/calendar`),
+        linkButton('Open calendar →', appUrl('/leaves/calendar')),
     ];
 };
 
@@ -83,7 +91,7 @@ const teamAttendanceBlocks = (data: HomeDashboardData): Array<Record<string, unk
         ),
         ...(roster ? [section(`Not in: ${roster}`)] : []),
         ...moreLine(t.not_in_count, ATT_ROSTER_CAP),
-        linkButton('View attendance →', `${APP_BASE_URL}/attendance`),
+        linkButton('View attendance →', appUrl('/attendance')),
     ];
 };
 
@@ -124,7 +132,7 @@ const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, un
         });
     }
     blocks.push(...moreLine(total, PENDING_CAP));
-    blocks.push(linkButton('Open leave approvals →', `${APP_BASE_URL}/leaves`));
+    blocks.push(linkButton('Open leave approvals →', appUrl('/leaves')));
     return blocks;
 };
 

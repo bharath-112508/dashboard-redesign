@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
+
+// Force a trailing slash on APP_BASE_URL to prove deep links never double-slash.
+vi.mock('../config/server.config.js', async (orig) => ({
+    ...(await orig<typeof import('../config/server.config.js')>()),
+    APP_BASE_URL: 'https://app.example.com/',
+}));
 
 import { buildHomeDashboardView } from './slack-home-blocks.js';
 import type { DashboardUser, HomeDashboardData } from '../services/slack-home.service.js';
@@ -22,6 +28,19 @@ const allActionIds = (view: { blocks: Array<Record<string, unknown>> }): string[
         .flatMap((b) => (b.elements as Array<{ action_id?: string }>).map((e) => e.action_id ?? ''));
 
 describe('buildHomeDashboardView', () => {
+    it('deep links use a single slash even when APP_BASE_URL has a trailing slash', () => {
+        const view = buildHomeDashboardView(base({}), base({}).user) as { blocks: Array<Record<string, unknown>> };
+        const urls = view.blocks
+            .filter((b) => b.type === 'actions')
+            .flatMap((b) => (b.elements as Array<{ url?: string }>).map((e) => e.url))
+            .filter((u): u is string => Boolean(u));
+        expect(urls.length).toBeGreaterThan(0);
+        for (const u of urls) {
+            expect(u.startsWith('https://app.example.com//')).toBe(false);
+            expect(u).toMatch(/^https:\/\/app\.example\.com\/[a-z]/);
+        }
+    });
+
     it('is a home view with a check-in button and a refresh button for an employee', () => {
         const view = buildHomeDashboardView(base({}), base({}).user) as {
             type: string;
