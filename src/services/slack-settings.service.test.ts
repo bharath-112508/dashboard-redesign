@@ -174,6 +174,30 @@ describe('getSlackSettings', () => {
         const result = await svc.getSlackSettings();
         expect(result.has_bot_token).toBe(false);
     });
+
+    it('does not leak Mongoose subdoc internals or the bot_token via channels/attendance_nudges', async () => {
+        // Simulate the live Mongoose-subdocument shape: spreading these
+        // would copy `$__parent` (which carries the encrypted bot_token)
+        // and `_doc`. The projection must pick scalar fields by name.
+        const leaky = {
+            $__parent: { bot_token: 'xoxb-LEAK', enabled: true },
+            _doc: {},
+            $__: {},
+        };
+        settingsMock.slack.channels = { ...settingsMock.slack.channels, ...leaky } as never;
+        settingsMock.slack.attendance_nudges = { ...settingsMock.slack.attendance_nudges, ...leaky } as never;
+
+        const result = await svc.getSlackSettings();
+
+        expect(Object.keys(result.channels).sort()).toEqual(
+            ['attendance', 'general', 'leaves', 'projects', 'timesheet'].sort()
+        );
+        expect(Object.keys(result.attendance_nudges).sort()).toEqual(
+            ['check_in_time', 'checkout_reminder_time', 'enabled'].sort()
+        );
+        expect(JSON.stringify(result)).not.toContain('xoxb-LEAK');
+        expect(JSON.stringify(result)).not.toContain('$__parent');
+    });
 });
 
 // ─── patchSlackSettings ──────────────────────────────────────────────────

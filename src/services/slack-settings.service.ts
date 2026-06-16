@@ -53,11 +53,31 @@ interface PublicSlackSettings {
     attendance_nudges: SlackSettings['attendance_nudges'];
 }
 
+// Explicit field picks — `s.channels` / `s.attendance_nudges` are Mongoose
+// subdocuments, and object-spreading them (`{ ...s.channels }`) copies
+// internal keys (`$__`, `$__parent`, `_doc`). `$__parent` is the parent
+// `slack` subdoc, so a naive spread would re-expose the (encrypted)
+// `bot_token` that `has_bot_token` is meant to redact. Pick scalar fields
+// by name so neither the secret nor Mongoose internals leak.
+const plainChannels = (c: SlackSettings['channels']): SlackSettings['channels'] => ({
+    leaves: c.leaves,
+    attendance: c.attendance,
+    projects: c.projects,
+    timesheet: c.timesheet,
+    general: c.general,
+});
+
+const plainNudges = (n: SlackSettings['attendance_nudges']): SlackSettings['attendance_nudges'] => ({
+    enabled: n.enabled,
+    check_in_time: n.check_in_time,
+    checkout_reminder_time: n.checkout_reminder_time,
+});
+
 const toPublicSlackSettings = (s: SlackSettings): PublicSlackSettings => ({
     enabled: s.enabled,
-    channels: { ...s.channels },
+    channels: plainChannels(s.channels),
     has_bot_token: Boolean(s.bot_token),
-    attendance_nudges: { ...s.attendance_nudges },
+    attendance_nudges: plainNudges(s.attendance_nudges),
 });
 
 /**
@@ -67,9 +87,9 @@ const toPublicSlackSettings = (s: SlackSettings): PublicSlackSettings => ({
  */
 const toAuditSnapshot = (s: SlackSettings): Record<string, unknown> => ({
     enabled: s.enabled,
-    channels: { ...s.channels },
+    channels: plainChannels(s.channels),
     has_bot_token: Boolean(s.bot_token),
-    attendance_nudges: { ...s.attendance_nudges },
+    attendance_nudges: plainNudges(s.attendance_nudges),
 });
 
 // ─── GET /settings/slack ─────────────────────────────────────────────────
