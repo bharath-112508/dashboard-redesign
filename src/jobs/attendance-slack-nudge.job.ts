@@ -12,7 +12,7 @@ import { JOB_NAMES, attendanceCheckinNudgeRunKey, attendanceCheckoutReminderRunK
 import { runJob, type JobContext, type RunJobOptions, type RunJobResult } from './runner.js';
 import { getOrInitSettings } from '../services/settings.service.js';
 import { slackContextFrom, postOrUpdateSlackMessage, type SlackContext } from '../utils/slack.js';
-import { resolveSlackIdByEmail } from '../services/slack-user-mapping.service.js';
+import { resolveSlackIdByEmail, fetchSlackAvatarUrl } from '../services/slack-user-mapping.service.js';
 import { buildCheckinNudgeMessage, buildCheckoutReminderMessage } from '../utils/slack-attendance-blocks.js';
 
 /**
@@ -57,7 +57,7 @@ const loadInternalUsers = (): Promise<UserDocument[]> =>
     User.find({
         status: USER_STATUSES.ACTIVE,
         role: { $in: [ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE] },
-    }).select('_id email full_name role slack_user_id');
+    }).select('_id email full_name role slack_user_id slack_avatar_url');
 
 const onLeaveUserIds = async (localDate: string): Promise<Set<string>> => {
     const rows = await LeaveRequest.find({
@@ -77,13 +77,25 @@ const checkedInUserIds = async (localDate: string): Promise<Set<string>> => {
 };
 
 const slackIdFor = async (
-    user: { _id: Types.ObjectId; email: string; slack_user_id?: string | null },
+    user: { _id: Types.ObjectId; email: string; slack_user_id?: string | null; slack_avatar_url?: string | null },
     botToken: string
 ): Promise<string | null> => {
-    if (user.slack_user_id) return user.slack_user_id;
+    if (user.slack_user_id) {
+        // Backfill the avatar once for users mapped before the cache existed.
+        if (!user.slack_avatar_url) {
+            const avatarUrl = await fetchSlackAvatarUrl(user.slack_user_id, botToken);
+            if (avatarUrl) await User.findByIdAndUpdate(user._id, { slack_avatar_url: avatarUrl });
+        }
+        return user.slack_user_id;
+    }
     const resolved = await resolveSlackIdByEmail(user.email, botToken);
-    if (resolved) await User.findByIdAndUpdate(user._id, { slack_user_id: resolved });
-    return resolved;
+    if (resolved) {
+        await User.findByIdAndUpdate(user._id, {
+            slack_user_id: resolved.slackId,
+            ...(resolved.avatarUrl ? { slack_avatar_url: resolved.avatarUrl } : {}),
+        });
+    }
+    return resolved?.slackId ?? null;
 };
 
 const loadSlackContext = async (): Promise<SlackContext | null> => {
@@ -190,7 +202,7 @@ export const sendCheckoutReminders = async (now: Date, log: JobContext['log']): 
 
     const userIds = records.map((r) => r.user_id as Types.ObjectId);
     const users = await User.find({ _id: { $in: userIds }, status: USER_STATUSES.ACTIVE }).select(
-        '_id email full_name slack_user_id'
+        '_id email full_name slack_user_id slack_avatar_url'
     );
     const userById = new Map(users.map((u) => [u._id.toString(), u]));
 
