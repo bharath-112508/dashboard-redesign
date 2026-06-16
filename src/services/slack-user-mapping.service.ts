@@ -1,5 +1,5 @@
 import { User } from '../models/user.model.js';
-import { SLACK_REQUEST_TIMEOUT_MS } from '../constants/slack.js';
+import { SLACK_API_LOOKUP_BY_EMAIL, SLACK_REQUEST_TIMEOUT_MS } from '../constants/slack.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -91,6 +91,37 @@ export const fetchSlackUserInfo = async (slackUserId: string, botToken: string):
     } catch (err) {
         if ((err as { name?: string })?.name === 'AbortError') {
             logger.warn({ slack_user_id: slackUserId, code: 'SLACK_USERS_INFO_TIMEOUT' }, 'Slack users.info timed out');
+        }
+        return null;
+    } finally {
+        clearTimeout(timer);
+    }
+};
+
+/**
+ * Eager mapping for the attendance nudge crons. The cron has no
+ * interactive payload to hand us a Slack user id, so resolve it from the
+ * account email via `users.lookupByEmail`. Non-throwing — returns null on
+ * any failure (not found, bad token, network) so one unresolved user
+ * never aborts the nudge batch.
+ *
+ * https://api.slack.com/methods/users.lookupByEmail
+ */
+export const resolveSlackIdByEmail = async (email: string, botToken: string): Promise<string | null> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
+    try {
+        const res = await fetch(`${SLACK_API_LOOKUP_BY_EMAIL}?email=${encodeURIComponent(email)}`, {
+            headers: { Authorization: `Bearer ${botToken}` },
+            signal: controller.signal,
+        });
+        if (!res.ok) return null;
+        const body = (await res.json()) as { ok: boolean; user?: { id?: string } };
+        if (!body.ok || !body.user?.id) return null;
+        return body.user.id;
+    } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') {
+            logger.warn({ code: 'SLACK_LOOKUP_BY_EMAIL_TIMEOUT' }, 'Slack users.lookupByEmail timed out');
         }
         return null;
     } finally {

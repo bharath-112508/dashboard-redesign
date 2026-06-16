@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const findOneMock = vi.fn();
 const findByIdAndUpdateMock = vi.fn();
@@ -10,7 +10,7 @@ vi.mock('../models/user.model.js', () => ({
     },
 }));
 
-const { resolveSlackUser } = await import('./slack-user-mapping.service.js');
+const { resolveSlackUser, resolveSlackIdByEmail } = await import('./slack-user-mapping.service.js');
 
 /**
  * Phase 0 — Slack-user → Viljetech-user resolution.
@@ -91,5 +91,28 @@ describe('resolveSlackUser', () => {
 
         const result = await resolveSlackUser('U999NEW', { botToken: 'xoxb', fetchUserInfo });
         expect(result).toBeNull();
+    });
+});
+
+afterEach(() => vi.restoreAllMocks());
+
+describe('resolveSlackIdByEmail', () => {
+    it('returns the Slack user id on ok=true', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({ ok: true, user: { id: 'U777' } }), { status: 200 })
+        );
+        await expect(resolveSlackIdByEmail('a@b.com', 'xoxb-x')).resolves.toBe('U777');
+    });
+
+    it('returns null on ok=false (e.g. users_not_found)', async () => {
+        vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({ ok: false, error: 'users_not_found' }), { status: 200 })
+        );
+        await expect(resolveSlackIdByEmail('a@b.com', 'xoxb-x')).resolves.toBeNull();
+    });
+
+    it('returns null and never throws on network error', async () => {
+        vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('boom'));
+        await expect(resolveSlackIdByEmail('a@b.com', 'xoxb-x')).resolves.toBeNull();
     });
 });
