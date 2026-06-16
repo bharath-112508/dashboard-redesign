@@ -15,14 +15,19 @@ import { Types } from 'mongoose';
  *     overtime math respects the configured shift length.
  */
 
-const { attendanceRecordCreateMock, attendanceRecordFindOneMock, attendanceRecordFindMock, userFindMock, settingsLoadMock } =
-    vi.hoisted(() => ({
-        attendanceRecordCreateMock: vi.fn(),
-        attendanceRecordFindOneMock: vi.fn(),
-        attendanceRecordFindMock: vi.fn(),
-        userFindMock: vi.fn(),
-        settingsLoadMock: vi.fn(),
-    }));
+const {
+    attendanceRecordCreateMock,
+    attendanceRecordFindOneMock,
+    attendanceRecordFindMock,
+    userFindMock,
+    settingsLoadMock,
+} = vi.hoisted(() => ({
+    attendanceRecordCreateMock: vi.fn(),
+    attendanceRecordFindOneMock: vi.fn(),
+    attendanceRecordFindMock: vi.fn(),
+    userFindMock: vi.fn(),
+    settingsLoadMock: vi.fn(),
+}));
 
 vi.mock('../models/attendance-record.model.js', () => ({
     AttendanceRecord: {
@@ -240,9 +245,7 @@ describe('checkIn', () => {
         // Latest segment open → user has checked in but not out yet.
         attendanceRecordFindOneMock.mockResolvedValueOnce({
             check_in: { time: new Date(), method: 'manual', location_id: null, ip: '' },
-            segments: [
-                { check_in: { time: new Date() }, check_out: null },
-            ],
+            segments: [{ check_in: { time: new Date() }, check_out: null }],
         });
 
         await expect(svc.checkIn(makeBody(), new Types.ObjectId(), '1.1.1.1')).rejects.toMatchObject({
@@ -362,9 +365,7 @@ describe('checkOut', () => {
         attendanceRecordFindOneMock.mockResolvedValueOnce({
             check_in: { time: new Date() },
             check_out: { time: new Date() },
-            segments: [
-                { check_in: { time: new Date() }, check_out: { time: new Date() } },
-            ],
+            segments: [{ check_in: { time: new Date() }, check_out: { time: new Date() } }],
         });
 
         await expect(svc.checkOut(makeBody(), new Types.ObjectId(), '1.1.1.1')).rejects.toMatchObject({
