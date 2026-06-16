@@ -15,19 +15,28 @@ import { Types } from 'mongoose';
  *     overtime math respects the configured shift length.
  */
 
-const { attendanceRecordCreateMock, attendanceRecordFindOneMock, settingsLoadMock } = vi.hoisted(() => ({
-    attendanceRecordCreateMock: vi.fn(),
-    attendanceRecordFindOneMock: vi.fn(),
-    settingsLoadMock: vi.fn(),
-}));
+const { attendanceRecordCreateMock, attendanceRecordFindOneMock, attendanceRecordFindMock, userFindMock, settingsLoadMock } =
+    vi.hoisted(() => ({
+        attendanceRecordCreateMock: vi.fn(),
+        attendanceRecordFindOneMock: vi.fn(),
+        attendanceRecordFindMock: vi.fn(),
+        userFindMock: vi.fn(),
+        settingsLoadMock: vi.fn(),
+    }));
 
 vi.mock('../models/attendance-record.model.js', () => ({
     AttendanceRecord: {
         create: attendanceRecordCreateMock,
         findOne: attendanceRecordFindOneMock,
-        find: vi.fn(),
+        find: attendanceRecordFindMock,
         countDocuments: vi.fn(),
         findById: vi.fn(),
+    },
+}));
+
+vi.mock('../models/user.model.js', () => ({
+    User: {
+        find: userFindMock,
     },
 }));
 
@@ -475,5 +484,40 @@ describe('checkOut', () => {
         expect(record.overtime_minutes).toBe(0);
 
         vi.useRealTimers();
+    });
+});
+
+// ─── getTodayAttendanceSummary ────────────────────────────────────────────
+
+describe('getTodayAttendanceSummary', () => {
+    it('counts present/incomplete and lists who is not in', async () => {
+        const u1 = new Types.ObjectId(); // present
+        const u2 = new Types.ObjectId(); // incomplete
+        const u3 = new Types.ObjectId(); // not in (no record)
+
+        userFindMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([
+                    { _id: u1, full_name: 'Asha' },
+                    { _id: u2, full_name: 'Ravi' },
+                    { _id: u3, full_name: 'Meera' },
+                ]),
+            }),
+        });
+        attendanceRecordFindMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([
+                    { user_id: u1, status: 'present', check_in: { time: new Date() } },
+                    { user_id: u2, status: 'incomplete', check_in: { time: new Date() } },
+                ]),
+            }),
+        });
+
+        const summary = await svc.getTodayAttendanceSummary(10);
+        expect(summary.headcount).toBe(3);
+        expect(summary.present).toBe(1);
+        expect(summary.incomplete).toBe(1);
+        expect(summary.not_in_count).toBe(1);
+        expect(summary.not_in_roster).toEqual([{ id: u3.toString(), full_name: 'Meera' }]);
     });
 });

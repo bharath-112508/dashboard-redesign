@@ -13,6 +13,7 @@ import {
 import { OfficeLocation } from '../models/office-location.model.js';
 import { User } from '../models/user.model.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { USER_STATUSES } from '../constants/user-statuses.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
@@ -936,6 +937,60 @@ export const cancelCorrection = async (
 // backfill again, the function is preserved in git history and
 // should be re-introduced behind a deliberate boot flag rather than
 // running unconditionally.
+
+// ─── Slack Home dashboard — today's attendance snapshot ──────────────────
+
+export interface TodayAttendanceSummary {
+    headcount: number;
+    present: number;
+    incomplete: number;
+    on_leave: number;
+    not_in_count: number;
+    not_in_roster: Array<{ id: string; full_name: string | null }>;
+}
+
+/**
+ * Org-wide snapshot of *today's* attendance for the Slack Home dashboard
+ * (read_team viewers only — the caller gates on the permission).
+ *
+ * Counts come from the AttendanceRecord rows that exist for today; "not in"
+ * is the set of active internal users (role != client) with no row yet. The
+ * on_leave/incomplete counts reflect finalized rows (the EOD finalizer fills
+ * placeholders), so during the day on_leave may read 0 — the dashboard's
+ * separate "Who's out" section is the authoritative leave view.
+ */
+export const getTodayAttendanceSummary = async (rosterCap: number): Promise<TodayAttendanceSummary> => {
+    const local_date = todayLocalDate();
+
+    const [users, rows] = await Promise.all([
+        User.find({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } })
+            .select('_id full_name')
+            .lean<{ _id: Types.ObjectId; full_name: string }[]>(),
+        AttendanceRecord.find({ local_date })
+            .select('user_id status check_in')
+            .lean<{ user_id: Types.ObjectId; status: string; check_in: { time: Date } | null }[]>(),
+    ]);
+
+    const byUser = new Map(rows.map((r) => [r.user_id.toString(), r]));
+    let present = 0;
+    let incomplete = 0;
+    let on_leave = 0;
+    for (const r of rows) {
+        if (r.status === 'incomplete') incomplete += 1;
+        else if (r.status === 'on_leave') on_leave += 1;
+        else if (r.check_in) present += 1;
+    }
+
+    const not_in = users.filter((u) => !byUser.has(u._id.toString()));
+    return {
+        headcount: users.length,
+        present,
+        incomplete,
+        on_leave,
+        not_in_count: not_in.length,
+        not_in_roster: not_in.slice(0, rosterCap).map((u) => ({ id: u._id.toString(), full_name: u.full_name })),
+    };
+};
 
 // Re-exports for the helper callers (test fixtures, future cron).
 export { todayLocalDate };
