@@ -75,6 +75,17 @@ describe('handleSlackEvents', () => {
         await new Promise((r) => setImmediate(r));
         expect(publishHomeView).toHaveBeenCalledOnce();
     });
+
+    it('does NOT publish when a non-Home tab is opened', async () => {
+        const req = {
+            body: { type: 'event_callback', event: { type: 'app_home_opened', user: 'U1', tab: 'messages' } },
+        } as Request;
+        const res = mockRes();
+        await handleSlackEvents(req, res);
+        expect(res.code).toBe(200);
+        await new Promise((r) => setImmediate(r));
+        expect(publishHomeView).not.toHaveBeenCalled();
+    });
 });
 
 describe('handleInteractive — attendance actions', () => {

@@ -477,7 +477,16 @@ export const handleSlackEvents: RequestHandler = async (req, res) => {
         return;
     }
 
-    if (body.type === 'event_callback' && body.event?.type === 'app_home_opened' && body.event.user) {
+    // Slack fires `app_home_opened` for ANY app tab (Home / Messages / About);
+    // only the Home tab needs a `views.publish`. Skip the others to avoid a
+    // wasted Slack call + DB read. Older payloads may omit `tab` — treat a
+    // missing tab as Home so we don't regress those.
+    if (
+        body.type === 'event_callback' &&
+        body.event?.type === 'app_home_opened' &&
+        body.event.user &&
+        (body.event.tab === undefined || body.event.tab === 'home')
+    ) {
         res.status(200).json({});
         const slackUserId = body.event.user;
         try {

@@ -18,6 +18,7 @@ import { Holiday } from '../models/holiday.model.js';
 import { LeaveRequest } from '../models/leave-request.model.js';
 import { getOrInitSettings } from '../services/settings.service.js';
 import { postOrUpdateSlackMessage } from '../utils/slack.js';
+import { resolveSlackIdByEmail } from '../services/slack-user-mapping.service.js';
 import { sendCheckinNudges, sendCheckoutReminders } from './attendance-slack-nudge.job.js';
 
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
@@ -79,6 +80,38 @@ describe('sendCheckinNudges', () => {
         (AttendanceRecord.find as ReturnType<typeof vi.fn>).mockReturnValue(distinctStub([]));
         const summary = await sendCheckinNudges(new Date('2026-06-16T04:00:00Z'), log);
         expect(summary.non_working_day).toBe(true);
+        expect(postOrUpdateSlackMessage).not.toHaveBeenCalled();
+    });
+
+    it('eagerly resolves + persists slack_user_id for an unmapped user, then DMs', async () => {
+        enableSlack();
+        const uid = new Types.ObjectId();
+        (User.find as ReturnType<typeof vi.fn>).mockReturnValue(
+            selectStub([{ _id: uid, email: 'a@b.com', full_name: 'Raj', slack_user_id: null }])
+        );
+        (Holiday.exists as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+        (LeaveRequest.find as ReturnType<typeof vi.fn>).mockReturnValue(distinctStub([]));
+        (AttendanceRecord.find as ReturnType<typeof vi.fn>).mockReturnValue(distinctStub([]));
+        (resolveSlackIdByEmail as ReturnType<typeof vi.fn>).mockResolvedValue('U9');
+        const summary = await sendCheckinNudges(new Date('2026-06-16T04:00:00Z'), log);
+        expect(resolveSlackIdByEmail).toHaveBeenCalledWith('a@b.com', 'xoxb-x');
+        expect(User.findByIdAndUpdate).toHaveBeenCalledWith(uid, { slack_user_id: 'U9' });
+        expect(summary.notified).toBe(1);
+        expect(postOrUpdateSlackMessage).toHaveBeenCalledOnce();
+    });
+
+    it('counts an unresolvable user as unmapped and does not DM', async () => {
+        enableSlack();
+        (User.find as ReturnType<typeof vi.fn>).mockReturnValue(
+            selectStub([{ _id: new Types.ObjectId(), email: 'a@b.com', full_name: 'Raj', slack_user_id: null }])
+        );
+        (Holiday.exists as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+        (LeaveRequest.find as ReturnType<typeof vi.fn>).mockReturnValue(distinctStub([]));
+        (AttendanceRecord.find as ReturnType<typeof vi.fn>).mockReturnValue(distinctStub([]));
+        (resolveSlackIdByEmail as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+        const summary = await sendCheckinNudges(new Date('2026-06-16T04:00:00Z'), log);
+        expect(summary.unmapped).toBe(1);
+        expect(summary.notified).toBe(0);
         expect(postOrUpdateSlackMessage).not.toHaveBeenCalled();
     });
 });
