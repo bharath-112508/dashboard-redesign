@@ -1,5 +1,6 @@
 import { APP_BASE_URL } from '../config/server.config.js';
 import { attendanceHeaderBlocks } from './slack-attendance-blocks.js';
+import dayjs, { DEFAULT_TIMEZONE } from './date.js';
 import {
     ATT_ROSTER_CAP,
     PENDING_CAP,
@@ -27,6 +28,52 @@ const linkButton = (text: string, url: string) => ({
     elements: [{ type: 'button', text: { type: 'plain_text', text }, url }],
 });
 
+const header = (text: string) => ({ type: 'header', text: { type: 'plain_text', text, emoji: true } });
+const fieldsSection = (fields: string[]) => ({
+    type: 'section',
+    fields: fields.map((t) => ({ type: 'mrkdwn', text: t })),
+});
+/** A row with an avatar image accessory, or 👤-prefixed text when none. */
+const avatarRow = (text: string, avatarUrl: string | null | undefined, altText: string) =>
+    avatarUrl
+        ? {
+              type: 'section',
+              text: { type: 'mrkdwn', text },
+              accessory: { type: 'image', image_url: avatarUrl, alt_text: altText },
+          }
+        : { type: 'section', text: { type: 'mrkdwn', text: `👤 ${text}` } };
+/** Mini-avatar context elements: image + name, ~5 people per context block. */
+const avatarContext = (
+    rows: Array<{ avatar_url?: string | null; label: string; alt: string }>
+): Array<Record<string, unknown>> => {
+    const out: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < rows.length; i += 5) {
+        const chunk = rows.slice(i, i + 5);
+        const elements: Array<Record<string, unknown>> = [];
+        for (const r of chunk) {
+            if (r.avatar_url) elements.push({ type: 'image', image_url: r.avatar_url, alt_text: r.alt });
+            elements.push({ type: 'mrkdwn', text: r.avatar_url ? r.label : `👤 ${r.label}` });
+        }
+        out.push({ type: 'context', elements });
+    }
+    return out;
+};
+const istNow = () => dayjs().tz(DEFAULT_TIMEZONE);
+const footerBlocks = (): Array<Record<string, unknown>> => [
+    divider(),
+    {
+        type: 'actions',
+        elements: [
+            {
+                type: 'button',
+                text: { type: 'plain_text', text: '🔄 Refresh', emoji: true },
+                action_id: SLACK_ACTION_HOME_REFRESH,
+            },
+        ],
+    },
+    { type: 'context', elements: [{ type: 'mrkdwn', text: `updated ${istNow().format('HH:mm')}` }] },
+];
+
 const name = (row: { user?: { full_name?: string | null } }): string => row.user?.full_name ?? 'Someone';
 const typeCode = (row: { requested_leave_type?: { code?: string } }): string => row.requested_leave_type?.code ?? '—';
 
@@ -34,15 +81,17 @@ const moreLine = (total: number, cap: number): Array<Record<string, unknown>> =>
     total > cap ? [context(`+${total - cap} more`)] : [];
 
 const myLeavesBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
-    if (data.my_balances === null) return [section('*Your leaves*\n_Couldn’t load right now._')];
+    if (data.my_balances === null) return [header('Your leaves'), section('_Couldn’t load right now._')];
     const bal = data.my_balances
-        .map((b) => {
-            const t = (b as { leave_type?: { code?: string } }).leave_type?.code ?? '?';
-            const a = (b as { available?: number }).available ?? 0;
-            return `${t} ${a}`;
-        })
+        .map(
+            (b) =>
+                `${(b as { leave_type?: { code?: string } }).leave_type?.code ?? '?'} ${(b as { available?: number }).available ?? 0}`
+        )
         .join(' · ');
-    const blocks: Array<Record<string, unknown>> = [section(`*Your leaves* — ${bal || 'no balances'} left`)];
+    const blocks: Array<Record<string, unknown>> = [
+        header('Your leaves'),
+        section(bal ? `${bal} left` : 'No balances'),
+    ];
     const pend = data.my_pending ?? [];
     if (pend.length > 0) {
         blocks.push(
@@ -51,7 +100,7 @@ const myLeavesBlocks = (data: HomeDashboardData): Array<Record<string, unknown>>
                     .slice(0, 5)
                     .map(
                         (p) =>
-                            `• Pending: ${(p as { start_date?: string }).start_date}→${(p as { end_date?: string }).end_date} (${typeCode(p as never)})`
+                            `• Pending ${(p as { start_date?: string }).start_date}→${(p as { end_date?: string }).end_date} (${typeCode(p as never)})`
                     )
                     .join('\n')
             )
@@ -62,20 +111,23 @@ const myLeavesBlocks = (data: HomeDashboardData): Array<Record<string, unknown>>
 };
 
 const whosOutBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
-    if (data.whos_out === null) return [section('*Who’s out*\n_Couldn’t load right now._')];
+    if (data.whos_out === null) return [header("Who's out"), section('_Couldn’t load right now._')];
     const rows = data.whos_out;
-    const body =
-        rows.length === 0
-            ? '_Nobody on leave today or this week._'
-            : rows
-                  .slice(0, WHOSOUT_CAP)
-                  .map(
-                      (r) =>
-                          `• ${name(r as never)} — ${(r as { start_date?: string }).start_date}→${(r as { end_date?: string }).end_date} (${typeCode(r as never)})`
-                  )
-                  .join('\n');
+    if (rows.length === 0) {
+        return [
+            header("Who's out"),
+            section('_Nobody on leave today or this week._'),
+            linkButton('Open calendar →', appUrl('/leaves/calendar')),
+        ];
+    }
+    const mapped = rows.slice(0, WHOSOUT_CAP).map((r) => ({
+        avatar_url: (r as { avatar_url?: string | null }).avatar_url ?? null,
+        alt: name(r as never),
+        label: `*${name(r as never)}* ${(r as { start_date?: string }).start_date}→${(r as { end_date?: string }).end_date} ${typeCode(r as never)}`,
+    }));
     return [
-        section(`*Who’s out (today + this week)*\n${body}`),
+        header("Who's out · today + this week"),
+        ...avatarContext(mapped),
         ...moreLine(rows.length, WHOSOUT_CAP),
         linkButton('Open calendar →', appUrl('/leaves/calendar')),
     ];
@@ -85,14 +137,19 @@ const teamAttendanceBlocks = (data: HomeDashboardData): Array<Record<string, unk
     const t = data.team_attendance;
     if (!t) return [];
     const roster = t.not_in_roster.map((u) => u.full_name ?? 'Someone').join(', ');
-    return [
-        section(
-            `*Today’s attendance* — Present ${t.present} · Not in ${t.not_in_count} · On leave ${t.on_leave} · Incomplete ${t.incomplete}`
-        ),
-        ...(roster ? [section(`Not in: ${roster}`)] : []),
-        ...moreLine(t.not_in_count, ATT_ROSTER_CAP),
-        linkButton('View attendance →', appUrl('/attendance')),
+    const blocks: Array<Record<string, unknown>> = [
+        header('Today'),
+        fieldsSection([
+            `🟢 *Present* ${t.present}`,
+            `🌴 *On leave* ${t.on_leave}`,
+            `⚪ *Not in* ${t.not_in_count}`,
+            `🟡 *Incomplete* ${t.incomplete}`,
+        ]),
     ];
+    if (roster) blocks.push(section(`*Not in:* ${roster}`));
+    blocks.push(...moreLine(t.not_in_count, ATT_ROSTER_CAP));
+    blocks.push(linkButton('View attendance →', appUrl('/attendance')));
+    return blocks;
 };
 
 const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
@@ -101,18 +158,15 @@ const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, un
     // `pending` is capped at PENDING_CAP+1; `pending_total` is the real backlog
     // size for the header count and the "+N more" line.
     const total = data.pending_total ?? pending.length;
-    const blocks: Array<Record<string, unknown>> = [section(`*Pending approvals (${total})*`)];
+    const blocks: Array<Record<string, unknown>> = [header(`Pending approvals · ${total}`)];
     if (pending.length === 0) {
         blocks.push(section('_Nothing waiting on you._'));
         return blocks;
     }
     for (const p of pending.slice(0, PENDING_CAP)) {
         const id = (p as { id: string }).id;
-        blocks.push(
-            section(
-                `• *${name(p as never)}* — ${(p as { start_date?: string }).start_date}→${(p as { end_date?: string }).end_date} (${typeCode(p as never)}, ${(p as { total_days?: number }).total_days ?? '?'}d)`
-            )
-        );
+        const label = `*${name(p as never)}* — ${(p as { start_date?: string }).start_date}→${(p as { end_date?: string }).end_date} · ${typeCode(p as never)} · ${(p as { total_days?: number }).total_days ?? '?'}d`;
+        blocks.push(avatarRow(label, (p as { avatar_url?: string | null }).avatar_url, name(p as never)));
         blocks.push({
             type: 'actions',
             elements: [
@@ -132,23 +186,9 @@ const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, un
         });
     }
     blocks.push(...moreLine(total, PENDING_CAP));
-    blocks.push(linkButton('Open leave approvals →', appUrl('/leaves')));
+    blocks.push(linkButton('Open approvals →', appUrl('/leaves')));
     return blocks;
 };
-
-const refreshBlocks = (): Array<Record<string, unknown>> => [
-    divider(),
-    {
-        type: 'actions',
-        elements: [
-            {
-                type: 'button',
-                text: { type: 'plain_text', text: '🔄 Refresh' },
-                action_id: SLACK_ACTION_HOME_REFRESH,
-            },
-        ],
-    },
-];
 
 /**
  * Compose the full role-scoped Home dashboard. The aggregator only populates
@@ -157,14 +197,15 @@ const refreshBlocks = (): Array<Record<string, unknown>> => [
  */
 export const buildHomeDashboardView = (data: HomeDashboardData, user: DashboardUser): Record<string, unknown> => {
     const blocks: Array<Record<string, unknown>> = [
+        header(`Attendance · ${istNow().format('ddd DD MMM')}`),
         ...attendanceHeaderBlocks(data.my_today as never, user.full_name ?? 'there'),
+        ...teamAttendanceBlocks(data),
         divider(),
         ...myLeavesBlocks(data),
         divider(),
         ...whosOutBlocks(data),
-        ...teamAttendanceBlocks(data),
         ...pendingApprovalBlocks(data),
-        ...refreshBlocks(),
+        ...footerBlocks(),
     ];
     return { type: 'home', blocks: blocks.slice(0, 100) };
 };

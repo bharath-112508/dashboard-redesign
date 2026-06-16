@@ -124,7 +124,114 @@ describe('buildHomeDashboardView', () => {
             reviewer
         ) as { blocks: Array<Record<string, unknown>> };
         const text = JSON.stringify(view);
-        expect(text).toMatch(/Pending approvals \(30\)/);
+        expect(text).toMatch(/Pending approvals/);
+        expect(text).toMatch(/30/);
         expect(text).toMatch(/\+20 more/);
+    });
+});
+
+const blockTypes = (view: { blocks: Array<Record<string, unknown>> }) => view.blocks.map((b) => b.type);
+
+describe('buildHomeDashboardView — redesigned layout', () => {
+    it('uses header blocks for section titles', () => {
+        const reviewer: DashboardUser = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' };
+        const view = buildHomeDashboardView(
+            base({
+                user: reviewer,
+                team_attendance: {
+                    headcount: 3,
+                    present: 1,
+                    incomplete: 0,
+                    on_leave: 0,
+                    not_in_count: 2,
+                    not_in_roster: [],
+                },
+            }),
+            reviewer
+        ) as { blocks: Array<Record<string, unknown>> };
+        expect(blockTypes(view)).toContain('header');
+    });
+
+    it('renders team stats as a 2-column fields section', () => {
+        const reviewer: DashboardUser = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' };
+        const view = buildHomeDashboardView(
+            base({
+                user: reviewer,
+                team_attendance: {
+                    headcount: 22,
+                    present: 18,
+                    incomplete: 1,
+                    on_leave: 3,
+                    not_in_count: 4,
+                    not_in_roster: [],
+                },
+            }),
+            reviewer
+        ) as { blocks: Array<Record<string, unknown>> };
+        const fieldsSection = view.blocks.find(
+            (b) => b.type === 'section' && Array.isArray((b as { fields?: unknown }).fields)
+        );
+        expect(fieldsSection).toBeTruthy();
+        expect(JSON.stringify(fieldsSection)).toMatch(/Present/);
+        expect(JSON.stringify(fieldsSection)).toMatch(/18/);
+    });
+
+    it('pending row uses an image accessory when avatar_url present', () => {
+        const reviewer: DashboardUser = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' };
+        const view = buildHomeDashboardView(
+            base({
+                user: reviewer,
+                pending_total: 1,
+                pending_leaves: [
+                    {
+                        id: 'L1',
+                        start_date: '2026-06-18',
+                        end_date: '2026-06-19',
+                        total_days: 2,
+                        requested_leave_type: { code: 'CL' },
+                        user: { full_name: 'Asha' },
+                        avatar_url: 'https://a/1.png',
+                    },
+                ],
+            }),
+            reviewer
+        ) as { blocks: Array<Record<string, unknown>> };
+        const withImg = view.blocks.find(
+            (b) => b.type === 'section' && (b as { accessory?: { type?: string } }).accessory?.type === 'image'
+        );
+        expect(withImg).toBeTruthy();
+        expect(JSON.stringify(withImg)).toContain('https://a/1.png');
+    });
+
+    it('pending row falls back to 👤 (no image accessory) when avatar_url null, keeps Approve/Reject', () => {
+        const reviewer: DashboardUser = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' };
+        const view = buildHomeDashboardView(
+            base({
+                user: reviewer,
+                pending_total: 1,
+                pending_leaves: [
+                    {
+                        id: 'L1',
+                        start_date: '2026-06-18',
+                        end_date: '2026-06-19',
+                        total_days: 2,
+                        requested_leave_type: { code: 'CL' },
+                        user: { full_name: 'Asha' },
+                        avatar_url: null,
+                    },
+                ],
+            }),
+            reviewer
+        ) as { blocks: Array<Record<string, unknown>> };
+        const imgAccessory = view.blocks.find(
+            (b) => (b as { accessory?: { type?: string } }).accessory?.type === 'image'
+        );
+        expect(imgAccessory).toBeFalsy();
+        expect(JSON.stringify(view)).toContain('👤');
+        const ids = view.blocks
+            .filter((b) => b.type === 'actions')
+            .flatMap((b) => (b as { elements: Array<{ action_id?: string }> }).elements.map((e) => e.action_id ?? ''));
+        expect(ids).toContain('approve_leave_L1');
+        expect(ids).toContain('reject_leave_L1');
     });
 });
