@@ -3,6 +3,7 @@ import { Router } from 'express';
 import {
     handleInteractive,
     handleSlashCommand,
+    handleSlackEvents,
 } from '../controllers/slack-interactive.controller.js';
 import { slackWebhookRateLimiter } from '../middlewares/rate-limit.middleware.js';
 import { slackWebhookMiddleware } from '../middlewares/slack-webhook.middleware.js';
@@ -29,5 +30,6 @@ router.use(slackWebhookMiddleware);
 
 router.post('/interactive', handleInteractive);
 router.post('/commands/:command', handleSlashCommand);
+router.post('/events', handleSlackEvents);
 
 export default router;

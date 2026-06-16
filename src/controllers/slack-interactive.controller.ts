@@ -3,11 +3,13 @@ import { Types } from 'mongoose';
 
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { SLACK_ACTION_ATTENDANCE_CHECK_IN, SLACK_ACTION_ATTENDANCE_CHECK_OUT } from '../constants/slack.js';
 import { approveLeave, rejectLeave } from '../services/leave-request.service.js';
 import { checkIn, checkOut, getMyToday } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
 import { fetchSlackUserInfo, resolveSlackUser } from '../services/slack-user-mapping.service.js';
-import { slackContextFrom } from '../utils/slack.js';
+import { slackContextFrom, publishHomeView } from '../utils/slack.js';
+import { buildAttendanceHomeView } from '../utils/slack-attendance-blocks.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import logger from '../utils/logger.js';
 
@@ -39,6 +41,7 @@ interface BlockActionPayload {
     user: { id: string };
     actions: Array<{ action_id: string; value?: string }>;
     response_url?: string;
+    view?: { type?: string };
 }
 
 const ephemeral = (text: string) => ({ response_type: 'ephemeral' as const, text });
@@ -91,6 +94,25 @@ const resolveCaller = async (slackUserId: string) => {
     });
 };
 
+/**
+ * Re-render a user's App Home tab from their current attendance state.
+ * Fire-and-forget — non-throwing; logs via publishHomeView's own policy.
+ * `displayName` falls back to "there" when the user doc has no name.
+ */
+const renderAttendanceHome = async (
+    slackUserId: string,
+    user: { _id: Types.ObjectId; full_name?: string | null }
+): Promise<void> => {
+    const settings = await getOrInitSettings();
+    const ctx = slackContextFrom(settings.slack);
+    if (!ctx) return;
+    const record = await getMyToday(user._id);
+    const view = buildAttendanceHomeView(record as Record<string, unknown> | null, user.full_name ?? 'there');
+    await publishHomeView(ctx, slackUserId, view, 'attendance-home');
+};
+
+export { renderAttendanceHome };
+
 export const handleInteractive: RequestHandler = async (req, res) => {
     const rawPayload = (req.body as { payload?: unknown })?.payload;
     if (typeof rawPayload !== 'string') {
@@ -130,6 +152,56 @@ export const handleInteractive: RequestHandler = async (req, res) => {
         postEphemeralToResponseUrl(payload.response_url, text);
         res.status(200).json(ephemeral(text));
     };
+
+    const isAttendanceIn = action.action_id === SLACK_ACTION_ATTENDANCE_CHECK_IN;
+    const isAttendanceOut = action.action_id === SLACK_ACTION_ATTENDANCE_CHECK_OUT;
+    if (isAttendanceIn || isAttendanceOut) {
+        const fromHome = payload.view?.type === 'home';
+        const user = await resolveCaller(payload.user.id);
+        if (!user) {
+            respond(
+                "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin."
+            );
+            return;
+        }
+        try {
+            if (isAttendanceIn) {
+                await checkIn({ method: 'manual' }, user._id, '');
+            } else {
+                await checkOut({ method: 'manual' }, user._id, '');
+            }
+        } catch (err: unknown) {
+            const code = (err as { code?: string })?.code;
+            if (code === ERROR_CODES.ALREADY_CHECKED_IN) {
+                respond("You're already checked in. Use Check Out to end your day.");
+                if (fromHome) void renderAttendanceHome(payload.user.id, user);
+                return;
+            }
+            if (code === ERROR_CODES.NOT_CHECKED_IN) {
+                respond("You're not checked in right now. Use Check In first.");
+                if (fromHome) void renderAttendanceHome(payload.user.id, user);
+                return;
+            }
+            logger.warn(
+                {
+                    err,
+                    code: ERROR_CODES.SLACK_INTERACTIVE_REJECTED,
+                    reason: 'attendance_action_threw',
+                    action_id: action.action_id,
+                },
+                'Slack interactive: attendance action threw'
+            );
+            respond('Sorry, something went wrong.');
+            return;
+        }
+        if (fromHome) {
+            res.status(200).json({});
+            void renderAttendanceHome(payload.user.id, user);
+        } else {
+            respond(isAttendanceIn ? '✅ Checked in.' : '✅ Checked out.');
+        }
+        return;
+    }
 
     if (isApprove || isReject) {
         const user = await resolveCaller(payload.user.id);
@@ -375,4 +447,50 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
         );
         res.status(200).json(ephemeral('Sorry, something went wrong.'));
     }
+};
+
+interface SlackEventEnvelope {
+    type?: string;
+    challenge?: string;
+    event?: { type?: string; user?: string; tab?: string };
+}
+
+/**
+ * POST /api/v1/slack/events — Slack Events API.
+ *
+ * Two cases:
+ *   - `url_verification` — echo the `challenge` so Slack can verify the
+ *     request URL when the admin first registers it.
+ *   - `event_callback` → `app_home_opened` — ack 200 immediately, then
+ *     render the user's Home tab asynchronously (Slack publishes the view
+ *     via views.publish, not in the HTTP response). Any other event is a
+ *     200 no-op so future subscriptions don't error.
+ *
+ * Signature verification + raw-body capture happen upstream in
+ * slack-webhook.middleware.ts (content-type application/json).
+ */
+export const handleSlackEvents: RequestHandler = async (req, res) => {
+    const body = (req.body ?? {}) as SlackEventEnvelope;
+
+    if (body.type === 'url_verification') {
+        res.status(200).json({ challenge: body.challenge });
+        return;
+    }
+
+    if (body.type === 'event_callback' && body.event?.type === 'app_home_opened' && body.event.user) {
+        res.status(200).json({});
+        const slackUserId = body.event.user;
+        try {
+            const user = await resolveCaller(slackUserId);
+            if (user) await renderAttendanceHome(slackUserId, user);
+        } catch (err) {
+            logger.warn(
+                { err, code: ERROR_CODES.SLACK_INTERACTIVE_REJECTED, reason: 'app_home_render_failed' },
+                'Slack app_home_opened render failed'
+            );
+        }
+        return;
+    }
+
+    res.status(200).json({});
 };
