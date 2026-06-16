@@ -78,6 +78,10 @@ export interface UserDocument extends Document {
     status: UserStatus;
     timezone: string;
     slack_user_id: string | null;
+    /** Cached Slack profile avatar URL (`profile.image_72`), warmed from
+     *  users.lookupByEmail / users.info. Null until warmed; the Slack Home
+     *  dashboard falls back to an emoji. */
+    slack_avatar_url: string | null;
     /**
      * Step 25 — global Slack DM opt-in. Defaults to `true` so a user
      * who provides their `slack_user_id` automatically receives Slack
@@ -211,6 +215,7 @@ const userSchema = new Schema<UserDocument>(
         },
         timezone: { type: String, default: DEFAULT_TIMEZONE },
         slack_user_id: { type: String, default: null },
+        slack_avatar_url: { type: String, default: null },
         slack_notifications_enabled: { type: Boolean, required: true, default: true },
         push_notifications_enabled: { type: Boolean, required: true, default: true },
         comp_off_balance: { type: Number, default: 0, min: 0 },
