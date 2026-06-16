@@ -650,3 +650,16 @@ export const listAssignable = async (
         job_title: u.internal_profile?.job_title ?? null,
     }));
 };
+
+/**
+ * Batch-read cached Slack avatar URLs for a set of user ids — used by the
+ * Slack Home dashboard to attach avatars to who's-out / pending rows without
+ * any Slack API calls at render time.
+ */
+export const getSlackAvatarUrlsByIds = async (ids: Types.ObjectId[]): Promise<Map<string, string | null>> => {
+    if (ids.length === 0) return new Map();
+    const rows = await User.find({ _id: { $in: ids } })
+        .select('_id slack_avatar_url')
+        .lean<{ _id: Types.ObjectId; slack_avatar_url: string | null }[]>();
+    return new Map(rows.map((r) => [r._id.toString(), r.slack_avatar_url ?? null]));
+};

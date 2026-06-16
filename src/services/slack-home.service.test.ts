@@ -18,10 +18,12 @@ vi.mock('./leave-request.service.js', () => ({
     calendarLeaves: vi.fn(async () => []),
 }));
 vi.mock('./role.service.js', () => ({ resolvePermissionsForUser: vi.fn() }));
+vi.mock('./user.service.js', () => ({ getSlackAvatarUrlsByIds: vi.fn(async () => new Map()) }));
 
 import { getTodayAttendanceSummary } from './attendance.service.js';
 import { listLeaves } from './leave-request.service.js';
 import { resolvePermissionsForUser } from './role.service.js';
+import { getSlackAvatarUrlsByIds } from './user.service.js';
 import { buildHomeDashboardData } from './slack-home.service.js';
 
 const employee = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Raj' } as never;
@@ -52,6 +54,29 @@ describe('buildHomeDashboardData', () => {
         expect(data.pending_leaves).toEqual([{ id: 'L1', status: 'pending' }]);
         // True backlog total comes from meta, not the capped array length.
         expect(data.pending_total).toBe(7);
+    });
+
+    it("attaches avatar_url onto who's-out and pending rows", async () => {
+        (resolvePermissionsForUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+            permissions: ['attendance.read_team'],
+        });
+        const { calendarLeaves } = await import('./leave-request.service.js');
+        (calendarLeaves as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+            { user_id: 'u1', user: { id: 'u1', full_name: 'Asha' } },
+        ]);
+        (listLeaves as ReturnType<typeof vi.fn>).mockResolvedValue({
+            data: [{ id: 'L1', user_id: 'u2', user: { id: 'u2' } }],
+            meta: { total: 1 },
+        });
+        (getSlackAvatarUrlsByIds as ReturnType<typeof vi.fn>).mockResolvedValue(
+            new Map([
+                ['u1', 'https://a/1.png'],
+                ['u2', null],
+            ])
+        );
+        const data = await buildHomeDashboardData(admin);
+        expect((data.whos_out![0] as { avatar_url?: string }).avatar_url).toBe('https://a/1.png');
+        expect((data.pending_leaves![0] as { avatar_url?: string | null }).avatar_url).toBeNull();
     });
 
     it('a failing section degrades to null, others still populate', async () => {

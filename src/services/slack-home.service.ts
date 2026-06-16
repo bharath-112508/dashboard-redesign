@@ -1,9 +1,10 @@
-import type { Types } from 'mongoose';
+import { Types } from 'mongoose';
 
 import { getMyToday, getTodayAttendanceSummary, type TodayAttendanceSummary } from './attendance.service.js';
 import { listOwnBalances } from './leave-balance.service.js';
 import { listLeaves, calendarLeaves } from './leave-request.service.js';
 import { resolvePermissionsForUser } from './role.service.js';
+import { getSlackAvatarUrlsByIds } from './user.service.js';
 import { callerCan } from '../utils/caller-permissions.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
@@ -53,6 +54,32 @@ const safe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> =
     }
 };
 
+/** Extract a row's user id from either `user_id` or `user.id`. */
+const rowUserId = (row: Record<string, unknown>): string | null => {
+    const direct = (row as { user_id?: unknown }).user_id;
+    if (typeof direct === 'string') return direct;
+    const nested = (row as { user?: { id?: unknown } }).user?.id;
+    return typeof nested === 'string' ? nested : null;
+};
+
+/** Mutate the given row lists, attaching `avatar_url` from the cached map. */
+const attachAvatars = async (rowLists: Array<Record<string, unknown>[] | null>): Promise<void> => {
+    const allIds = new Set<string>();
+    for (const rows of rowLists)
+        for (const r of rows ?? []) {
+            const id = rowUserId(r);
+            if (id) allIds.add(id);
+        }
+    if (allIds.size === 0) return;
+    const validIds = [...allIds].filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id));
+    const byId = await getSlackAvatarUrlsByIds(validIds);
+    for (const rows of rowLists)
+        for (const r of rows ?? []) {
+            const id = rowUserId(r);
+            if (id) (r as Record<string, unknown>).avatar_url = byId.get(id) ?? null;
+        }
+};
+
 export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeDashboardData> => {
     const today = dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
     const weekEnd = dayjs().tz(DEFAULT_TIMEZONE).add(7, 'day').format(DATE_FORMAT);
@@ -94,6 +121,8 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
     const pending_leaves = (pending_result?.data ?? null) as Record<string, unknown>[] | null;
     const pending_total =
         (pending_result?.meta as { total?: number } | undefined)?.total ?? pending_leaves?.length ?? null;
+
+    await safe('avatars', () => attachAvatars([whos_out, pending_leaves]));
 
     return {
         user,
