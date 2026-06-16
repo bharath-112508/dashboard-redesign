@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { SLACK_ACTION_ATTENDANCE_CHECK_IN, SLACK_ACTION_ATTENDANCE_CHECK_OUT } from '../constants/slack.js';
 import {
+    attendanceHeaderBlocks,
     buildAttendanceHomeView,
     buildCheckinNudgeMessage,
     buildCheckoutReminderMessage,
@@ -48,6 +49,18 @@ describe('buildAttendanceHomeView', () => {
         };
         const view = buildAttendanceHomeView(record, 'Raj') as { blocks: Array<Record<string, unknown>> };
         expect(actionIds(view)).toEqual([SLACK_ACTION_ATTENDANCE_CHECK_IN]);
+    });
+});
+
+describe('attendanceHeaderBlocks', () => {
+    it('returns header + status + the state-valid button (not a full view)', () => {
+        const blocks = attendanceHeaderBlocks(null, 'Raj');
+        expect(Array.isArray(blocks)).toBe(true);
+        const actions = blocks.filter((b: unknown) => (b as { type?: string }).type === 'actions');
+        const ids = actions.flatMap((b: unknown) =>
+            (b as { elements: Array<{ action_id?: string }> }).elements.map((e) => e.action_id)
+        );
+        expect(ids).toEqual([SLACK_ACTION_ATTENDANCE_CHECK_IN]);
     });
 });
 

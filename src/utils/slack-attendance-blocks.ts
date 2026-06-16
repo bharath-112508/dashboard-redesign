@@ -75,13 +75,14 @@ const segmentLines = (segments: Segment[]): string =>
         .join('\n');
 
 /**
- * App Home tab. Three states, each surfacing only the valid button so the
- * Home UI itself can't trigger an invalid action:
- *   - no open segment & no segments → "Check In"
- *   - latest segment open           → "Check Out"
- *   - all segments closed           → "Check In" (start a new segment)
+ * The header/status/button blocks for the attendance panel — shared by the
+ * standalone Home view and the richer Home dashboard so the check-in/out UI
+ * is defined once.
  */
-export const buildAttendanceHomeView = (record: TodayRecord | null, displayName: string): Record<string, unknown> => {
+export const attendanceHeaderBlocks = (
+    record: TodayRecord | null,
+    displayName: string
+): Array<Record<string, unknown>> => {
     const segs = record?.segments ?? [];
     const lastSeg = segs.length > 0 ? segs[segs.length - 1] : null;
     const isOpen = Boolean(lastSeg && !lastSeg.check_out);
@@ -105,9 +106,20 @@ export const buildAttendanceHomeView = (record: TodayRecord | null, displayName:
         blocks.push(section("You haven't checked in yet today."));
         blocks.push(checkInButton());
     }
-
-    return { type: 'home', blocks };
+    return blocks;
 };
+
+/**
+ * App Home tab. Three states, each surfacing only the valid button so the
+ * Home UI itself can't trigger an invalid action:
+ *   - no open segment & no segments → "Check In"
+ *   - latest segment open           → "Check Out"
+ *   - all segments closed           → "Check In" (start a new segment)
+ */
+export const buildAttendanceHomeView = (record: TodayRecord | null, displayName: string): Record<string, unknown> => ({
+    type: 'home',
+    blocks: attendanceHeaderBlocks(record, displayName),
+});
 
 export interface NudgeMessage {
     text: string;
