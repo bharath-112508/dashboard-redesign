@@ -232,8 +232,13 @@ export const requirePermission = (...requiredPermissions: Permission[]) => {
  * Reads `req.params[<paramName>]` to compare with the JWT's user_id.
  * Defaults to `id` since that's the convention used by the user routes.
  */
-export const requirePermissionOrSelf = (permission: Permission, options: { paramName?: string } = {}) => {
+export const requirePermissionOrSelf = (
+    permission: Permission | readonly Permission[],
+    options: { paramName?: string } = {}
+) => {
     const paramName = options.paramName ?? 'id';
+    // Pass the gate if the caller holds ANY of these (OR semantics).
+    const accepted = Array.isArray(permission) ? permission : [permission as Permission];
     return (req: Request, _res: Response, next: NextFunction): void => {
         if (!req.user) {
             throw AppError.unauthenticated();
@@ -244,14 +249,14 @@ export const requirePermissionOrSelf = (permission: Permission, options: { param
             next();
             return;
         }
-        // Otherwise require the permission. Wildcard rules match
+        // Otherwise require one of the permissions. Wildcard rules match
         // `requirePermission` above.
         const held = req.user.permissions ?? [];
         if (held.includes(PERMISSIONS.SYSTEM_ADMIN) || isCallerAdmin(req.user)) {
             next();
             return;
         }
-        if (held.includes(permission)) {
+        if (accepted.some((p) => held.includes(p))) {
             next();
             return;
         }

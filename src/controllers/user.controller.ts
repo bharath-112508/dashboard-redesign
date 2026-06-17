@@ -90,6 +90,10 @@ export const patchUser = async (req: Request, res: Response): Promise<Response> 
         // whose legacy `role` cache is something else still passes
         // `isAdminLike` in the service layer.
         caller_role_keys: req.user!.role_keys,
+        // Resolved permission set — lets the service tell an
+        // employment-only editor (user.employment_write) apart from a
+        // full editor and restrict the patch accordingly.
+        caller_permissions: req.user!.permissions,
         patch: req.body as UpdateUserBody,
     });
     return ok(res, user);

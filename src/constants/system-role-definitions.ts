@@ -111,6 +111,9 @@ const MANAGER_ADDITIONS: readonly Permission[] = [
     PERMISSIONS.REPORT_EXPORT_WRITE,
     PERMISSIONS.LEAVE_BALANCE_READ_TEAM,
     PERMISSIONS.TIMESHEET_EDIT_OUT_OF_WINDOW,
+    // Maintain team employment records (internal_profile) without full
+    // user.write — name/email/role/status stay admin-only.
+    PERMISSIONS.USER_EMPLOYMENT_WRITE,
 ];
 
 const dedupe = (list: readonly Permission[]): Permission[] => Array.from(new Set(list));

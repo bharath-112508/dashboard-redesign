@@ -40,6 +40,8 @@ export const PERMISSIONS = {
     // ─── User management ───────────────────────────────────────────────
     USER_READ: 'user.read',
     USER_WRITE: 'user.write',
+    /** Edit a user's employment data (internal_profile) only — NOT identity, role, or status. Granted to manager so they can maintain team employment records without full user.write. */
+    USER_EMPLOYMENT_WRITE: 'user.employment_write',
     USER_DEACTIVATE: 'user.deactivate',
     USER_ROLE_CHANGE: 'user.role_change',
     /** GDPR DSAR — bundle a user's PII into a JSON dump for export. (BACKEND_AUDIT.md P1-8) */

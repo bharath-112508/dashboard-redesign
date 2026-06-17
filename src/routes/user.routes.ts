@@ -74,9 +74,12 @@ router.get('/:id', validate({ params: userIdParamSchema }), asyncHandler(users.g
 // sole defence — fine today, fragile if anyone ever refactors the
 // service and drops that check. `requirePermissionOrSelf` mirrors the
 // same policy at the edge.
+// USER_EMPLOYMENT_WRITE lets managers through the gate to edit employment
+// data; the service then restricts an employment-only caller to the
+// internal_profile employment fields (no identity/role/status edits).
 router.patch(
     '/:id',
-    requirePermissionOrSelf(PERMISSIONS.USER_WRITE),
+    requirePermissionOrSelf([PERMISSIONS.USER_WRITE, PERMISSIONS.USER_EMPLOYMENT_WRITE]),
     validate({ params: userIdParamSchema, body: updateUserBodySchema }),
     asyncHandler(users.patchUser)
 );

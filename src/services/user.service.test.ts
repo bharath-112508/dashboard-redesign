@@ -118,6 +118,7 @@ vi.mock('./profile-photo.service.js', () => ({
 const svc = await import('./user.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 
 const sampleUser = (overrides: Record<string, unknown> = {}) => {
     const fields = {
@@ -611,5 +612,91 @@ describe('listAssignable', () => {
             role: ROLES.MANAGER,
             _id: { $in: [member] },
         });
+    });
+});
+
+// ─── updateUser — employment-editor authorization (user.employment_write) ───
+
+describe('updateUser — employment-editor (user.employment_write)', () => {
+    const makeTarget = () =>
+        sampleUser({
+            role: 'employee',
+            internal_profile: {
+                employee_id: 'E-1',
+                job_title: 'Engineer',
+                department: 'Engineering',
+                date_of_joining: '2026-01-01',
+                emergency_contact: { name: 'Kin', phone: '1', relation: 'parent' },
+            },
+        });
+
+    const managerCaller = (target: ReturnType<typeof sampleUser>) => ({
+        target_id: target._id as Types.ObjectId,
+        caller_id: new Types.ObjectId(), // not self
+        caller_role: ROLES.MANAGER,
+        caller_role_keys: [ROLES.MANAGER],
+        caller_permissions: [PERMISSIONS.USER_EMPLOYMENT_WRITE],
+    });
+
+    it('lets a manager edit employment fields on another user (merged onto existing)', async () => {
+        const t = makeTarget();
+        userFindByIdMock.mockResolvedValueOnce(t);
+
+        await svc.updateUser({
+            ...managerCaller(t),
+            patch: { internal_profile: { job_title: 'Senior Engineer', department: 'Platform' } } as never,
+        });
+
+        expect(t.save).toHaveBeenCalled();
+        const ip = t.internal_profile as Record<string, unknown>;
+        expect(ip.job_title).toBe('Senior Engineer');
+        expect(ip.department).toBe('Platform');
+        expect(ip.employee_id).toBe('E-1'); // untouched field preserved
+    });
+
+    it('strips identity + non-employment nested fields from an employment-editor patch', async () => {
+        const t = makeTarget();
+        userFindByIdMock.mockResolvedValueOnce(t);
+
+        await svc.updateUser({
+            ...managerCaller(t),
+            patch: {
+                full_name: 'Hacked Name',
+                internal_profile: { job_title: 'Lead', emergency_contact: { name: 'Evil' } },
+            } as never,
+        });
+
+        expect(t.full_name).toBe('Jane Doe'); // identity not changed
+        const ip = t.internal_profile as Record<string, unknown>;
+        expect(ip.job_title).toBe('Lead');
+        // emergency_contact is not an employment field → editor can't overwrite it
+        expect(ip.emergency_contact).toEqual({ name: 'Kin', phone: '1', relation: 'parent' });
+    });
+
+    it('forbids an employment editor whose patch carries no employment fields', async () => {
+        const t = makeTarget();
+        userFindByIdMock.mockResolvedValueOnce(t);
+
+        await expect(
+            svc.updateUser({ ...managerCaller(t), patch: { full_name: 'Hacked' } as never })
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+        expect(t.save).not.toHaveBeenCalled();
+    });
+
+    it('forbids a caller with neither admin, self, nor employment permission', async () => {
+        const t = makeTarget();
+        userFindByIdMock.mockResolvedValueOnce(t);
+
+        await expect(
+            svc.updateUser({
+                target_id: t._id as Types.ObjectId,
+                caller_id: new Types.ObjectId(),
+                caller_role: ROLES.EMPLOYEE,
+                caller_role_keys: [ROLES.EMPLOYEE],
+                caller_permissions: [],
+                patch: { internal_profile: { job_title: 'X' } } as never,
+            })
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+        expect(t.save).not.toHaveBeenCalled();
     });
 });

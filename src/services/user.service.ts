@@ -12,6 +12,7 @@ import { hashPassword } from '../utils/password.js';
 import { assertPasswordPolicy } from '../utils/password-policy.js';
 import { isAdminLike } from '../utils/role-check.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import type { PaginationMeta } from '../utils/api-response.js';
@@ -52,6 +53,17 @@ const SELF_EDITABLE_FIELDS = new Set([
     'internal_profile',
 ]);
 const SELF_EDITABLE_INTERNAL_PROFILE_FIELDS = new Set(['emergency_contact']);
+
+// internal_profile fields an employment editor (user.employment_write, e.g.
+// manager) may change on OTHER users — employment record only, never identity
+// (name/email), role, status, or someone's own emergency contact.
+const EMPLOYMENT_PROFILE_FIELDS = new Set([
+    'employee_id',
+    'job_title',
+    'department',
+    'date_of_joining',
+    'reporting_manager_id',
+]);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -316,6 +328,8 @@ export const updateUser = async (input: {
      * is still recognised as admin via `role_keys.includes('admin')`.
      */
     caller_role_keys?: readonly string[];
+    /** Resolved permission set of the caller — used to grant employment-only editors. */
+    caller_permissions?: readonly string[];
     patch: UpdateUserBody;
 }): Promise<Record<string, unknown>> => {
     const target = await User.findById(input.target_id);
@@ -325,29 +339,48 @@ export const updateUser = async (input: {
 
     const isAdmin = isAdminLike({ role: input.caller_role, role_keys: input.caller_role_keys });
     const isSelf = input.caller_id.equals(target._id);
+    const callerPerms = input.caller_permissions ?? [];
+    // An "employment editor" (manager) may edit other users' employment data
+    // only. `user.write` holders implicitly qualify (admins go through the
+    // isAdmin fast-path, so this only matters for non-admin user.write).
+    const canEditEmployment =
+        callerPerms.includes(PERMISSIONS.USER_EMPLOYMENT_WRITE) || callerPerms.includes(PERMISSIONS.USER_WRITE);
 
-    if (!isAdmin && !isSelf) {
+    if (!isAdmin && !isSelf && !canEditEmployment) {
         throw AppError.forbidden();
     }
 
-    // Self-scope: strip disallowed top-level fields + disallowed nested fields.
     let patch = { ...input.patch };
     if (!isAdmin) {
-        patch = Object.fromEntries(
-            Object.entries(patch).filter(([k]) => SELF_EDITABLE_FIELDS.has(k))
-        ) as UpdateUserBody;
+        if (isSelf) {
+            // Self-scope: strip disallowed top-level + nested fields.
+            patch = Object.fromEntries(
+                Object.entries(patch).filter(([k]) => SELF_EDITABLE_FIELDS.has(k))
+            ) as UpdateUserBody;
 
-        if (patch.internal_profile) {
-            const filtered = Object.fromEntries(
-                Object.entries(patch.internal_profile).filter(([k]) => SELF_EDITABLE_INTERNAL_PROFILE_FIELDS.has(k))
-            );
-            // If the caller only sent disallowed nested keys, drop the key
-            // entirely so it doesn't count toward "patch non-empty" below.
-            if (Object.keys(filtered).length === 0) {
-                delete patch.internal_profile;
-            } else {
-                patch.internal_profile = filtered;
+            if (patch.internal_profile) {
+                const filtered = Object.fromEntries(
+                    Object.entries(patch.internal_profile).filter(([k]) => SELF_EDITABLE_INTERNAL_PROFILE_FIELDS.has(k))
+                );
+                // If the caller only sent disallowed nested keys, drop the key
+                // entirely so it doesn't count toward "patch non-empty" below.
+                if (Object.keys(filtered).length === 0) {
+                    delete patch.internal_profile;
+                } else {
+                    patch.internal_profile = filtered;
+                }
             }
+        } else {
+            // Employment editor on another user: keep ONLY the internal_profile
+            // employment fields; drop identity/role/status and everything else.
+            const employment = patch.internal_profile
+                ? Object.fromEntries(
+                      Object.entries(patch.internal_profile).filter(([k]) => EMPLOYMENT_PROFILE_FIELDS.has(k))
+                  )
+                : undefined;
+            patch = (
+                employment && Object.keys(employment).length > 0 ? { internal_profile: employment } : {}
+            ) as UpdateUserBody;
         }
 
         if (Object.keys(patch).length === 0) {
