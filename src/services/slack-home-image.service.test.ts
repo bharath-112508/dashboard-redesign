@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -23,8 +23,14 @@ vi.mock('./attendance.service.js', () => ({
         }))
     ),
 }));
+vi.mock('../utils/azure-blob.js', () => ({
+    isAzureConfigured: vi.fn(() => true),
+    putBlob: vi.fn(async () => undefined),
+    mintDownloadSas: vi.fn(() => ({ url: 'https://blob/slack-home/x.png?sig=abc' })),
+}));
 
-import { renderHomeDashboardPng } from './slack-home-image.service.js';
+import { renderHomeDashboardPng, getOrRenderHomeImageUrl, __resetHomeImageCache } from './slack-home-image.service.js';
+import { isAzureConfigured, putBlob, mintDownloadSas } from '../utils/azure-blob.js';
 
 const emp = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Raj Mehta' } as never;
 const reviewer = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Big Boss' } as never;
@@ -91,5 +97,33 @@ describe('renderHomeDashboardPng', () => {
             reviewer
         );
         expect(isPng(png)).toBe(true);
+    });
+});
+
+describe('getOrRenderHomeImageUrl', () => {
+    beforeEach(() => {
+        __resetHomeImageCache();
+        (isAzureConfigured as ReturnType<typeof vi.fn>).mockReturnValue(true);
+        (mintDownloadSas as ReturnType<typeof vi.fn>).mockReturnValue({
+            url: 'https://blob/slack-home/x.png?sig=abc',
+        });
+    });
+    it('returns null when Azure is not configured', async () => {
+        (isAzureConfigured as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
+        expect(await getOrRenderHomeImageUrl(emp, data({}))).toBeNull();
+    });
+    it('renders, uploads, returns a SAS url, and caches within TTL', async () => {
+        const url1 = await getOrRenderHomeImageUrl(emp, data({}));
+        expect(url1).toMatch(/^https:\/\/blob\//);
+        const calls = (putBlob as ReturnType<typeof vi.fn>).mock.calls.length;
+        const url2 = await getOrRenderHomeImageUrl(emp, data({}));
+        expect(url2).toBe(url1);
+        expect((putBlob as ReturnType<typeof vi.fn>).mock.calls.length).toBe(calls); // cached, no re-upload
+    });
+    it('force bypasses the cache (re-uploads)', async () => {
+        await getOrRenderHomeImageUrl(emp, data({}));
+        const calls = (putBlob as ReturnType<typeof vi.fn>).mock.calls.length;
+        await getOrRenderHomeImageUrl(emp, data({}), { force: true });
+        expect((putBlob as ReturnType<typeof vi.fn>).mock.calls.length).toBe(calls + 1);
     });
 });

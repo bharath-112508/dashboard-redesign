@@ -2,10 +2,15 @@ import { Resvg } from '@resvg/resvg-js';
 import type { Types } from 'mongoose';
 import satori from 'satori';
 
+import { ulid } from 'ulid';
+
 import { getAttendanceTrend } from './attendance.service.js';
 import { loadHomeFonts } from './slack-home-fonts.js';
 import type { HomeDashboardData } from './slack-home.service.js';
+import { AZURE_BLOB_TASK_ATTACHMENTS_CONTAINER } from '../config/server.config.js';
+import { isAzureConfigured, putBlob, mintDownloadSas } from '../utils/azure-blob.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
+import logger from '../utils/logger.js';
 
 /**
  * Renders the role-scoped Slack Home dashboard data into a branded PNG using
@@ -312,4 +317,54 @@ export const renderHomeDashboardPng = async (
 
     const svg = await satori(tree as unknown as Parameters<typeof satori>[0], { width: W, fonts });
     return Buffer.from(new Resvg(svg, { fitTo: { mode: 'width', value: W } }).render().asPng());
+};
+
+// ── Hosted-image cache (render → Azure Blob → SAS URL) ───────────────────────
+const CACHE_TTL_MS = 60_000;
+const cache = new Map<string, { url: string; exp: number }>();
+
+/** Test seam: drop the per-user SAS-URL cache. */
+export const __resetHomeImageCache = (): void => cache.clear();
+
+/**
+ * Render → upload to Azure Blob → return a short-lived SAS URL for the Slack
+ * Home dashboard image. Per-user cached for CACHE_TTL_MS unless `force`.
+ * Returns null (never throws) when Azure is unconfigured or any step fails —
+ * the caller then falls back to the native Block Kit dashboard.
+ */
+export const getOrRenderHomeImageUrl = async (
+    user: { _id: Types.ObjectId; role?: string; full_name?: string | null },
+    data: HomeDashboardData,
+    opts: { force?: boolean } = {}
+): Promise<string | null> => {
+    const key = user._id.toString();
+    if (!opts.force) {
+        const hit = cache.get(key);
+        if (hit && hit.exp > Date.now()) return hit.url;
+    }
+    if (!isAzureConfigured()) return null;
+    try {
+        const png = await renderHomeDashboardPng(data, user);
+        const blobKey = `slack-home/${key}/${ulid()}.png`;
+        await putBlob({
+            container: AZURE_BLOB_TASK_ATTACHMENTS_CONTAINER,
+            blobKey,
+            body: png,
+            contentType: 'image/png',
+        });
+        const { url } = mintDownloadSas({
+            container: AZURE_BLOB_TASK_ATTACHMENTS_CONTAINER,
+            blobKey,
+            ttlMinutes: 60,
+            fileName: 'home.png',
+        });
+        cache.set(key, { url, exp: Date.now() + CACHE_TTL_MS });
+        return url;
+    } catch (err) {
+        logger.warn(
+            { err, code: 'SLACK_HOME_IMAGE_FAILED', user_id: key },
+            'Slack Home dashboard image render/upload failed'
+        );
+        return null;
+    }
 };
