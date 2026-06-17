@@ -17,17 +17,20 @@ const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
  */
 export const realtimeEmit = (req: Request, res: Response, next: NextFunction): void => {
     if (MUTATING.has(req.method)) {
-        res.on('finish', () => {
-            try {
-                if (res.statusCode >= 200 && res.statusCode < 300) {
-                    const segment = req.path.split('/').filter(Boolean)[0];
-                    const topic = segment ? PATH_TOPIC_MAP[segment] : undefined;
-                    if (topic) publish([topic]);
+        // Capture the topic NOW — `req.path` is correct at middleware entry. By
+        // the time `res.on('finish')` fires, Express has mutated `req.url` while
+        // descending nested routers, so reading the path then is unreliable.
+        const segment = req.path.split('/').filter(Boolean)[0];
+        const topic = segment ? PATH_TOPIC_MAP[segment] : undefined;
+        if (topic) {
+            res.on('finish', () => {
+                try {
+                    if (res.statusCode >= 200 && res.statusCode < 300) publish([topic]);
+                } catch (err) {
+                    logger.warn({ err, code: 'REALTIME_EMIT_FAILED' }, 'realtime emit middleware failed');
                 }
-            } catch (err) {
-                logger.warn({ err, code: 'REALTIME_EMIT_FAILED' }, 'realtime emit middleware failed');
-            }
-        });
+            });
+        }
     }
     next();
 };
