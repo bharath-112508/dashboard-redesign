@@ -142,9 +142,9 @@ const teamAttendanceBlocks = (data: HomeDashboardData): Array<Record<string, unk
         // collapses, no tabs), so side-by-side stats either crowd (`fields`)
         // or sit ragged. A vertical list is clean and unambiguous.
         section(
-            `🟢 *Present* ${t.present}\n` +
-                `⚪ *Not in* ${t.not_in_count}\n` +
-                `🌴 *On leave* ${t.on_leave}\n` +
+            `🟢 *Present* ${t.present}\n\n` +
+                `⚪ *Not in* ${t.not_in_count}\n\n` +
+                `🌴 *On leave* ${t.on_leave}\n\n` +
                 `🟡 *Incomplete* ${t.incomplete}`
         ),
     ];
