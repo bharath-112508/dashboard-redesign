@@ -138,11 +138,14 @@ const teamAttendanceBlocks = (data: HomeDashboardData): Array<Record<string, unk
     const roster = t.not_in_roster.map((u) => u.full_name ?? 'Someone').join(', ');
     const blocks: Array<Record<string, unknown>> = [
         header('Today'),
-        // Inline two-line summary — Slack's 2-column `fields` crowd these short
-        // stats together; a single section with ` · ` separators reads cleaner.
+        // One stat per line — Slack mrkdwn can't align columns (whitespace
+        // collapses, no tabs), so side-by-side stats either crowd (`fields`)
+        // or sit ragged. A vertical list is clean and unambiguous.
         section(
-            `🟢 *Present* ${t.present}  ·  ⚪ *Not in* ${t.not_in_count}\n` +
-                `🌴 *On leave* ${t.on_leave}  ·  🟡 *Incomplete* ${t.incomplete}`
+            `🟢 *Present* ${t.present}\n` +
+                `⚪ *Not in* ${t.not_in_count}\n` +
+                `🌴 *On leave* ${t.on_leave}\n` +
+                `🟡 *Incomplete* ${t.incomplete}`
         ),
     ];
     if (roster) blocks.push(section(`*Not in:* ${roster}`));
