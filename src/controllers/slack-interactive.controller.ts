@@ -12,6 +12,8 @@ import { slackContextFrom, publishHomeView } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
 import { buildAuditContext } from '../utils/audit-context.js';
+import { publish } from '../services/realtime.service.js';
+import { REALTIME_TOPICS } from '../constants/realtime.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -199,6 +201,10 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             respond('Sorry, something went wrong.');
             return;
         }
+        // Slack actions bypass the HTTP after-write middleware, so emit the
+        // realtime change event explicitly on the success path. Synchronous +
+        // non-throwing.
+        publish([REALTIME_TOPICS.ATTENDANCE]);
         if (fromHome) {
             res.status(200).json({});
             void renderAttendanceHome(payload.user.id, user);
@@ -275,6 +281,10 @@ export const handleInteractive: RequestHandler = async (req, res) => {
                     caller
                 );
             }
+            // Slack actions bypass the HTTP after-write middleware, so emit
+            // the realtime change events explicitly. A leave decision moves
+            // both the request status and the balance (used/pending).
+            publish([REALTIME_TOPICS.LEAVES, REALTIME_TOPICS.LEAVE_BALANCES]);
             // Empty 200 — the channel `chat.update` (fired by the
             // dispatcher's notifyLeaveDecided) is the visible
             // confirmation. When the tap originated on the Home tab,
@@ -373,6 +383,8 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
             };
             const rawTime = result?.check_in?.time;
             const inAt = rawTime instanceof Date ? rawTime : rawTime ? new Date(rawTime) : new Date();
+            // Slack bypasses the HTTP after-write middleware — emit explicitly.
+            publish([REALTIME_TOPICS.ATTENDANCE]);
             res.status(200).json(
                 ephemeral(`✅ Checked in at ${formatTimeIST(inAt)}. Use \`/checkout\` when you're done.`)
             );
@@ -395,6 +407,8 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
             const worked = result?.total_worked_minutes ?? 0;
             const h = Math.floor(worked / 60);
             const m = worked % 60;
+            // Slack bypasses the HTTP after-write middleware — emit explicitly.
+            publish([REALTIME_TOPICS.ATTENDANCE]);
             res.status(200).json(ephemeral(`✅ Checked out at ${formatTimeIST(outAt)} (${h}h ${m}m worked).`));
             return;
         }

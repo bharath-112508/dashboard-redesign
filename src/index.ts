@@ -11,7 +11,9 @@ import { JOBS_ENABLED, PORT, CORS_ORIGINS, NODE_ENV, TRUST_PROXY } from './confi
 import connectDB, { disconnectDB } from './config/database.config.js';
 import appRoutes from './routes/index.js';
 import slackRoutes from './routes/slack.routes.js';
+import eventsRoutes from './routes/events.routes.js';
 import { globalErrorHandler } from './middlewares/error-handler.middleware.js';
+import { realtimeEmit } from './middlewares/realtime-emit.middleware.js';
 import { generalRateLimiter, healthRateLimiter } from './middlewares/rate-limit.middleware.js';
 import { API_PREFIX, ERROR_CODES } from './constants/index.js';
 import { ok } from './utils/api-response.js';
@@ -141,6 +143,10 @@ app.use(cors(corsOptions));
 // `req.body` for the handler. The central `appRoutes` router does
 // not re-mount `/slack` — this early mount is the only one.
 app.use(`${API_PREFIX}/slack`, slackRoutes);
+
+// Real-time SSE stream — mounted BEFORE compression so the long-lived
+// `text/event-stream` response is never buffered. Auth is enforced inside.
+app.use(API_PREFIX, eventsRoutes);
 
 // M28 — `compression` lives AFTER the Slack raw-body mount on purpose
 // (see the long-form comment a few lines above). Today's compression
@@ -299,6 +305,7 @@ app.get('/metrics', healthRateLimiter, async (_req, res, next) => {
     }
 });
 
+app.use(API_PREFIX, realtimeEmit);
 app.use(API_PREFIX, appRoutes);
 
 app.use('/{*path}', (_req, res) => {

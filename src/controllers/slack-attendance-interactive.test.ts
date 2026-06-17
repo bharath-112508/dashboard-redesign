@@ -28,7 +28,10 @@ vi.mock('../utils/slack.js', async (orig) => ({
     slackContextFrom: vi.fn(() => ({ enabled: true, botToken: 'xoxb-x' })),
     publishHomeView: vi.fn(async () => true),
 }));
+const publishMock = vi.fn();
+vi.mock('../services/realtime.service.js', () => ({ publish: (t: string[]) => publishMock(t) }));
 
+import { REALTIME_TOPICS } from '../constants/realtime.js';
 import { checkIn, getMyToday } from '../services/attendance.service.js';
 import { getOrInitSettings } from '../services/settings.service.js';
 import { resolveSlackUser } from '../services/slack-user-mapping.service.js';
@@ -127,6 +130,22 @@ describe('handleInteractive — attendance actions', () => {
         expect(checkIn).toHaveBeenCalledOnce();
         await new Promise((r) => setImmediate(r));
         expect(publishHomeView).toHaveBeenCalled();
+    });
+
+    it('publishes an attendance realtime event after a Slack check-in', async () => {
+        (getOrInitSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ slack: {} });
+        (resolveSlackUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+            _id: new Types.ObjectId(),
+            full_name: 'Raj',
+            role: 'employee',
+        });
+        (checkIn as ReturnType<typeof vi.fn>).mockResolvedValue({});
+        (getMyToday as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+        publishMock.mockReset();
+        const res = mockRes();
+        await handleInteractive(homePayload('attendance_check_in'), res);
+        await new Promise((r) => setImmediate(r));
+        expect(publishMock).toHaveBeenCalledWith([REALTIME_TOPICS.ATTENDANCE]);
     });
 });
 
