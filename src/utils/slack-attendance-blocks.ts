@@ -88,10 +88,7 @@ export const attendanceHeaderBlocks = (
     const isOpen = Boolean(lastSeg && !lastSeg.check_out);
     const worked = record?.total_worked_minutes ?? 0;
 
-    const blocks: Array<Record<string, unknown>> = [
-        section(`*Attendance* — hi ${displayName} :wave:`),
-        { type: 'divider' },
-    ];
+    const blocks: Array<Record<string, unknown>> = [section(`Hi ${displayName} :wave:`), { type: 'divider' }];
 
     if (isOpen) {
         const inT = toDate(lastSeg!.check_in?.time);

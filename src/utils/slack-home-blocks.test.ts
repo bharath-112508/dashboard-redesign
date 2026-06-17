@@ -234,4 +234,29 @@ describe('buildHomeDashboardView — redesigned layout', () => {
         expect(ids).toContain('approve_leave_L1');
         expect(ids).toContain('reject_leave_L1');
     });
+
+    it('hides zero-balance leave types and bolds the codes', () => {
+        const view = buildHomeDashboardView(
+            base({
+                my_balances: [
+                    { leave_type: { code: 'CL' }, available: 15 },
+                    { leave_type: { code: 'WFH' }, available: 0 },
+                    { leave_type: { code: 'COMP_OFF' }, available: 0.5 },
+                ],
+            }),
+            base({}).user
+        ) as { blocks: Array<Record<string, unknown>> };
+        const text = JSON.stringify(view);
+        expect(text).toContain('*CL* 15');
+        expect(text).toContain('*COMP_OFF* 0.5');
+        expect(text).not.toContain('WFH'); // zero-balance type hidden
+    });
+
+    it('shows "No leave balance" when every balance is zero', () => {
+        const view = buildHomeDashboardView(
+            base({ my_balances: [{ leave_type: { code: 'CL' }, available: 0 }] }),
+            base({}).user
+        ) as { blocks: Array<Record<string, unknown>> };
+        expect(JSON.stringify(view)).toContain('No leave balance');
+    });
 });

@@ -82,15 +82,18 @@ const moreLine = (total: number, cap: number): Array<Record<string, unknown>> =>
 
 const myLeavesBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
     if (data.my_balances === null) return [header('Your leaves'), section('_Couldn’t load right now._')];
+    // Hide zero-balance types (they're noise) and bold the codes for scanning.
     const bal = data.my_balances
-        .map(
-            (b) =>
-                `${(b as { leave_type?: { code?: string } }).leave_type?.code ?? '?'} ${(b as { available?: number }).available ?? 0}`
-        )
+        .map((b) => ({
+            code: (b as { leave_type?: { code?: string } }).leave_type?.code ?? '?',
+            available: (b as { available?: number }).available ?? 0,
+        }))
+        .filter((b) => b.available > 0)
+        .map((b) => `*${b.code}* ${b.available}`)
         .join(' · ');
     const blocks: Array<Record<string, unknown>> = [
         header('Your leaves'),
-        section(bal ? `${bal} left` : 'No balances'),
+        section(bal ? `${bal} left` : 'No leave balance'),
     ];
     const pend = data.my_pending ?? [];
     if (pend.length > 0) {
