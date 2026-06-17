@@ -10,7 +10,9 @@ import { getOrInitSettings } from './../services/settings.service.js';
 import { fetchSlackUserInfo, resolveSlackUser } from '../services/slack-user-mapping.service.js';
 import { slackContextFrom, publishHomeView } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
+import { getOrRenderHomeImageUrl } from '../services/slack-home-image.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
+import { buildImageHomeView } from '../utils/slack-home-image-blocks.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import { publish } from '../services/realtime.service.js';
 import { REALTIME_TOPICS } from '../constants/realtime.js';
@@ -100,11 +102,21 @@ const resolveCaller = async (slackUserId: string) => {
 /**
  * Re-render a user's App Home tab from their current attendance state.
  * Fire-and-forget — non-throwing; logs via publishHomeView's own policy.
- * `displayName` falls back to "there" when the user doc has no name.
+ *
+ * Publishes an image-rendered dashboard (branded PNG → Azure Blob SAS URL)
+ * when available, falling back to the native Block Kit view when the image
+ * can't be produced (Azure unconfigured / render failed → `getOrRenderHomeImageUrl`
+ * returns null, never throws — so no try/catch is needed here). The interactive
+ * controls sit BELOW the image either way, so the same handlers fire.
+ *
+ * `force` cache-busts the per-user image cache: passive opens / refreshes pass
+ * `false` (cache OK), but state-changing actions (check-in/out, approve/reject)
+ * pass `true` so the freshly-changed state re-renders immediately.
  */
 const renderAttendanceHome = async (
     slackUserId: string,
-    user: { _id: Types.ObjectId; full_name?: string | null; role?: RoleType }
+    user: { _id: Types.ObjectId; full_name?: string | null; role?: RoleType },
+    opts: { force?: boolean } = {}
 ): Promise<void> => {
     const settings = await getOrInitSettings();
     const ctx = slackContextFrom(settings.slack);
@@ -114,7 +126,8 @@ const renderAttendanceHome = async (
         role: (user.role ?? 'employee') as RoleType,
         full_name: user.full_name ?? null,
     });
-    const view = buildHomeDashboardView(data, data.user);
+    const imageUrl = await getOrRenderHomeImageUrl(data.user, data, { force: opts.force ?? false });
+    const view = imageUrl ? buildImageHomeView(imageUrl, data, data.user) : buildHomeDashboardView(data, data.user);
     await publishHomeView(ctx, slackUserId, view, 'attendance-home');
 };
 
@@ -181,12 +194,12 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             const code = (err as { code?: string })?.code;
             if (code === ERROR_CODES.ALREADY_CHECKED_IN) {
                 respond("You're already checked in. Use Check Out to end your day.");
-                if (fromHome) void renderAttendanceHome(payload.user.id, user);
+                if (fromHome) void renderAttendanceHome(payload.user.id, user, { force: true });
                 return;
             }
             if (code === ERROR_CODES.NOT_CHECKED_IN) {
                 respond("You're not checked in right now. Use Check In first.");
-                if (fromHome) void renderAttendanceHome(payload.user.id, user);
+                if (fromHome) void renderAttendanceHome(payload.user.id, user, { force: true });
                 return;
             }
             logger.warn(
@@ -207,7 +220,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
         publish([REALTIME_TOPICS.ATTENDANCE]);
         if (fromHome) {
             res.status(200).json({});
-            void renderAttendanceHome(payload.user.id, user);
+            void renderAttendanceHome(payload.user.id, user, { force: true });
         } else {
             respond(isAttendanceIn ? '✅ Checked in.' : '✅ Checked out.');
         }
@@ -291,7 +304,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             // also re-publish the dashboard so the actioned request
             // drops off the pending list.
             if (payload.view?.type === 'home') {
-                void renderAttendanceHome(payload.user.id, user);
+                void renderAttendanceHome(payload.user.id, user, { force: true });
             }
             res.status(200).json({});
             return;

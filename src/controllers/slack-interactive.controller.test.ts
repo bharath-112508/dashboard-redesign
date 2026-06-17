@@ -38,15 +38,43 @@ vi.mock('../services/settings.service.js', () => ({
 }));
 
 const slackContextFromMock = vi.fn();
+const publishHomeViewMock = vi.fn();
 vi.mock('../utils/slack.js', async (importOriginal) => {
     const actual = await importOriginal<typeof import('../utils/slack.js')>();
     return {
         ...actual,
         slackContextFrom: (settings: unknown) => slackContextFromMock(settings),
+        publishHomeView: (...args: unknown[]) => publishHomeViewMock(...args),
     };
 });
 
-const { handleInteractive, handleSlashCommand } = await import('./slack-interactive.controller.js');
+const buildHomeDashboardDataMock = vi.fn();
+vi.mock('../services/slack-home.service.js', () => ({
+    buildHomeDashboardData: (...args: unknown[]) => buildHomeDashboardDataMock(...args),
+}));
+
+const buildHomeDashboardViewMock = vi.fn();
+vi.mock('../utils/slack-home-blocks.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../utils/slack-home-blocks.js')>();
+    return {
+        ...actual,
+        buildHomeDashboardView: (...args: unknown[]) => buildHomeDashboardViewMock(...args),
+    };
+});
+
+const getOrRenderHomeImageUrlMock = vi.fn();
+vi.mock('../services/slack-home-image.service.js', () => ({
+    getOrRenderHomeImageUrl: (...args: unknown[]) => getOrRenderHomeImageUrlMock(...args),
+}));
+
+const buildImageHomeViewMock = vi.fn();
+vi.mock('../utils/slack-home-image-blocks.js', () => ({
+    buildImageHomeView: (...args: unknown[]) => buildImageHomeViewMock(...args),
+}));
+
+const { handleInteractive, handleSlashCommand, handleSlackEvents } = await import('./slack-interactive.controller.js');
+const { SLACK_ACTION_HOME_REFRESH } = await import('../utils/slack-home-blocks.js');
+const { SLACK_ACTION_ATTENDANCE_CHECK_IN } = await import('../constants/slack.js');
 
 /**
  * Phase 0 skeleton — the controller branches by `action_id` prefix.
@@ -63,8 +91,13 @@ const buildApp = () => {
     app.use(express.json());
     app.post('/slack/interactive', handleInteractive);
     app.post('/slack/commands/:command', handleSlashCommand);
+    app.post('/slack/events', handleSlackEvents);
     return app;
 };
+
+/** Wait a tick so fire-and-forget Home re-publishes (void renderAttendanceHome)
+ *  settle before assertions. */
+const flush = () => new Promise<void>((r) => setImmediate(r));
 
 describe('handleInteractive — skeleton', () => {
     it('responds 200 with ephemeral text for an unknown action_id', async () => {
@@ -406,5 +439,150 @@ describe('handleSlashCommand — Phase 2', () => {
         expect(res.status).toBe(200);
         expect(res.body.text).toMatch(/09:00.*13:00/);
         expect(res.body.text).toMatch(/4h 0m/);
+    });
+});
+
+// ─── Image Home dashboard publish (image view + Block Kit fallback) ──────
+
+describe('App Home publish — image view with Block Kit fallback', () => {
+    const IMAGE_VIEW = { type: 'home', __image: true };
+    const NATIVE_VIEW = { type: 'home', __native: true };
+
+    beforeEach(() => {
+        resolveSlackUserMock.mockReset();
+        getOrInitSettingsMock.mockReset();
+        slackContextFromMock.mockReset();
+        publishHomeViewMock.mockReset();
+        buildHomeDashboardDataMock.mockReset();
+        buildHomeDashboardViewMock.mockReset();
+        getOrRenderHomeImageUrlMock.mockReset();
+        buildImageHomeViewMock.mockReset();
+        checkInMock.mockReset();
+        approveLeaveMock.mockReset();
+
+        getOrInitSettingsMock.mockResolvedValue({
+            slack: { enabled: true, bot_token: 'xoxb', channels: { leaves: '#leaves' } },
+        });
+        slackContextFromMock.mockReturnValue({ enabled: true, botToken: 'xoxb' });
+        // Aggregator returns a data object whose `.user` is the normalized
+        // DashboardUser the image renderer / image view consume.
+        buildHomeDashboardDataMock.mockImplementation(async (u: { _id: Types.ObjectId; role: string }) => ({
+            user: { _id: u._id, role: u.role, full_name: null },
+            my_today: null,
+            my_balances: null,
+            my_pending: null,
+            whos_out: null,
+            team_attendance: null,
+            pending_leaves: null,
+            pending_total: null,
+        }));
+        buildHomeDashboardViewMock.mockReturnValue(NATIVE_VIEW);
+        buildImageHomeViewMock.mockReturnValue(IMAGE_VIEW);
+    });
+
+    it('app_home_opened: publishes the IMAGE view when a URL renders (force=false)', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), role: 'employee' });
+        getOrRenderHomeImageUrlMock.mockResolvedValueOnce('https://blob/home.png?sas');
+
+        const res = await request(buildApp())
+            .post('/slack/events')
+            .send({ type: 'event_callback', event: { type: 'app_home_opened', user: 'U1', tab: 'home' } });
+        expect(res.status).toBe(200);
+        await flush();
+
+        expect(getOrRenderHomeImageUrlMock).toHaveBeenCalledTimes(1);
+        const [, , opts] = getOrRenderHomeImageUrlMock.mock.calls[0];
+        expect(opts).toEqual({ force: false });
+        expect(buildImageHomeViewMock).toHaveBeenCalledTimes(1);
+        expect(buildImageHomeViewMock.mock.calls[0][0]).toBe('https://blob/home.png?sas');
+        // The published view is the image view, not the native one.
+        expect(buildHomeDashboardViewMock).not.toHaveBeenCalled();
+        const publishedView = publishHomeViewMock.mock.calls[0][2];
+        expect(publishedView).toBe(IMAGE_VIEW);
+    });
+
+    it('app_home_opened: falls back to the NATIVE Block Kit view when the image URL is null', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), role: 'employee' });
+        getOrRenderHomeImageUrlMock.mockResolvedValueOnce(null);
+
+        const res = await request(buildApp())
+            .post('/slack/events')
+            .send({ type: 'event_callback', event: { type: 'app_home_opened', user: 'U1', tab: 'home' } });
+        expect(res.status).toBe(200);
+        await flush();
+
+        expect(getOrRenderHomeImageUrlMock).toHaveBeenCalledTimes(1);
+        expect(buildImageHomeViewMock).not.toHaveBeenCalled();
+        expect(buildHomeDashboardViewMock).toHaveBeenCalledTimes(1);
+        const publishedView = publishHomeViewMock.mock.calls[0][2];
+        expect(publishedView).toBe(NATIVE_VIEW);
+    });
+
+    it('home_refresh action: re-publishes with force=false (passive open, uses cache)', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), role: 'employee' });
+        getOrRenderHomeImageUrlMock.mockResolvedValueOnce('https://blob/home.png?sas');
+
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({
+                payload: JSON.stringify({
+                    type: 'block_actions',
+                    user: { id: 'U1' },
+                    actions: [{ action_id: SLACK_ACTION_HOME_REFRESH }],
+                }),
+            });
+        expect(res.status).toBe(200);
+        await flush();
+
+        expect(getOrRenderHomeImageUrlMock).toHaveBeenCalledTimes(1);
+        const [, , opts] = getOrRenderHomeImageUrlMock.mock.calls[0];
+        expect(opts).toEqual({ force: false });
+    });
+
+    it('check-in from Home: re-publishes with force=true (state-changing action cache-busts)', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), role: 'employee' });
+        checkInMock.mockResolvedValueOnce({});
+        getOrRenderHomeImageUrlMock.mockResolvedValueOnce('https://blob/home.png?sas');
+
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({
+                payload: JSON.stringify({
+                    type: 'block_actions',
+                    user: { id: 'U1' },
+                    actions: [{ action_id: SLACK_ACTION_ATTENDANCE_CHECK_IN }],
+                    view: { type: 'home' },
+                }),
+            });
+        expect(res.status).toBe(200);
+        await flush();
+
+        expect(getOrRenderHomeImageUrlMock).toHaveBeenCalledTimes(1);
+        const [, , opts] = getOrRenderHomeImageUrlMock.mock.calls[0];
+        expect(opts).toEqual({ force: true });
+    });
+
+    it('approve from Home: re-publishes with force=true', async () => {
+        const leaveId = new Types.ObjectId().toString();
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), role: 'manager' });
+        approveLeaveMock.mockResolvedValueOnce({ status: 'approved' });
+        getOrRenderHomeImageUrlMock.mockResolvedValueOnce('https://blob/home.png?sas');
+
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({
+                payload: JSON.stringify({
+                    type: 'block_actions',
+                    user: { id: 'U1' },
+                    actions: [{ action_id: `approve_leave_${leaveId}` }],
+                    view: { type: 'home' },
+                }),
+            });
+        expect(res.status).toBe(200);
+        await flush();
+
+        expect(getOrRenderHomeImageUrlMock).toHaveBeenCalledTimes(1);
+        const [, , opts] = getOrRenderHomeImageUrlMock.mock.calls[0];
+        expect(opts).toEqual({ force: true });
     });
 });
