@@ -152,7 +152,7 @@ describe('buildHomeDashboardView — redesigned layout', () => {
         expect(blockTypes(view)).toContain('header');
     });
 
-    it('renders team stats as a 2-column fields section', () => {
+    it('renders team stats as an inline section with emoji + counts', () => {
         const reviewer: DashboardUser = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' };
         const view = buildHomeDashboardView(
             base({
@@ -168,12 +168,13 @@ describe('buildHomeDashboardView — redesigned layout', () => {
             }),
             reviewer
         ) as { blocks: Array<Record<string, unknown>> };
-        const fieldsSection = view.blocks.find(
-            (b) => b.type === 'section' && Array.isArray((b as { fields?: unknown }).fields)
-        );
-        expect(fieldsSection).toBeTruthy();
-        expect(JSON.stringify(fieldsSection)).toMatch(/Present/);
-        expect(JSON.stringify(fieldsSection)).toMatch(/18/);
+        const text = JSON.stringify(view);
+        expect(text).toMatch(/Present\* 18/);
+        expect(text).toMatch(/Not in\* 4/);
+        expect(text).toMatch(/On leave\* 3/);
+        expect(text).toMatch(/Incomplete\* 1/);
+        // No 2-column `fields` block — stats render inline in a section.
+        expect(view.blocks.some((b) => Array.isArray((b as { fields?: unknown }).fields))).toBe(false);
     });
 
     it('pending row uses an image accessory when avatar_url present', () => {

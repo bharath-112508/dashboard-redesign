@@ -29,10 +29,6 @@ const linkButton = (text: string, url: string) => ({
 });
 
 const header = (text: string) => ({ type: 'header', text: { type: 'plain_text', text, emoji: true } });
-const fieldsSection = (fields: string[]) => ({
-    type: 'section',
-    fields: fields.map((t) => ({ type: 'mrkdwn', text: t })),
-});
 /** A row with an avatar image accessory, or 👤-prefixed text when none. */
 const avatarRow = (text: string, avatarUrl: string | null | undefined, altText: string) =>
     avatarUrl
@@ -142,12 +138,12 @@ const teamAttendanceBlocks = (data: HomeDashboardData): Array<Record<string, unk
     const roster = t.not_in_roster.map((u) => u.full_name ?? 'Someone').join(', ');
     const blocks: Array<Record<string, unknown>> = [
         header('Today'),
-        fieldsSection([
-            `🟢 *Present* ${t.present}`,
-            `🌴 *On leave* ${t.on_leave}`,
-            `⚪ *Not in* ${t.not_in_count}`,
-            `🟡 *Incomplete* ${t.incomplete}`,
-        ]),
+        // Inline two-line summary — Slack's 2-column `fields` crowd these short
+        // stats together; a single section with ` · ` separators reads cleaner.
+        section(
+            `🟢 *Present* ${t.present}  ·  ⚪ *Not in* ${t.not_in_count}\n` +
+                `🌴 *On leave* ${t.on_leave}  ·  🟡 *Incomplete* ${t.incomplete}`
+        ),
     ];
     if (roster) blocks.push(section(`*Not in:* ${roster}`));
     blocks.push(...moreLine(t.not_in_count, ATT_ROSTER_CAP));
