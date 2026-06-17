@@ -19,14 +19,12 @@ const {
     attendanceRecordCreateMock,
     attendanceRecordFindOneMock,
     attendanceRecordFindMock,
-    attendanceRecordAggregateMock,
     userFindMock,
     settingsLoadMock,
 } = vi.hoisted(() => ({
     attendanceRecordCreateMock: vi.fn(),
     attendanceRecordFindOneMock: vi.fn(),
     attendanceRecordFindMock: vi.fn(),
-    attendanceRecordAggregateMock: vi.fn(),
     userFindMock: vi.fn(),
     settingsLoadMock: vi.fn(),
 }));
@@ -36,7 +34,6 @@ vi.mock('../models/attendance-record.model.js', () => ({
         create: attendanceRecordCreateMock,
         findOne: attendanceRecordFindOneMock,
         find: attendanceRecordFindMock,
-        aggregate: attendanceRecordAggregateMock,
         countDocuments: vi.fn(),
         findById: vi.fn(),
     },
@@ -523,24 +520,5 @@ describe('getTodayAttendanceSummary', () => {
         expect(summary.incomplete).toBe(1);
         expect(summary.not_in_count).toBe(1);
         expect(summary.not_in_roster).toEqual([{ id: u3.toString(), full_name: 'Meera' }]);
-    });
-});
-
-// ─── getAttendanceTrend ───────────────────────────────────────────────────
-
-describe('getAttendanceTrend', () => {
-    it('returns one bucket per day with present counts; missing days are 0', async () => {
-        attendanceRecordAggregateMock.mockResolvedValue([
-            { _id: '2026-06-16', present: 8 },
-            { _id: '2026-06-17', present: 2 },
-        ]);
-        const trend = await svc.getAttendanceTrend(12);
-        expect(trend.length).toBe(12);
-        expect(trend[trend.length - 1]).toHaveProperty('date');
-        expect(trend[trend.length - 1]).toHaveProperty('present');
-        expect(trend.find((d) => d.date === '2026-06-17')?.present).toBe(2);
-        expect(trend.find((d) => d.date === '2026-06-16')?.present).toBe(8);
-        // a day not in the aggregate result is padded to 0
-        expect(trend.every((d) => typeof d.present === 'number')).toBe(true);
     });
 });

@@ -18,14 +18,6 @@ vi.mock('../utils/slack-home-blocks.js', () => ({
     buildHomeDashboardView: vi.fn(() => ({ type: 'home', blocks: [] })),
     SLACK_ACTION_HOME_REFRESH: 'home_refresh',
 }));
-// The Home publish path now tries an image-rendered view first; return null so
-// these tests exercise the native Block Kit fallback (the behaviour they assert).
-vi.mock('../services/slack-home-image.service.js', () => ({
-    getOrRenderHomeImageUrl: vi.fn(async () => null),
-}));
-vi.mock('../utils/slack-home-image-blocks.js', () => ({
-    buildImageHomeView: vi.fn(() => ({ type: 'home', __image: true })),
-}));
 vi.mock('../services/settings.service.js', () => ({ getOrInitSettings: vi.fn() }));
 vi.mock('../services/slack-user-mapping.service.js', () => ({
     resolveSlackUser: vi.fn(),

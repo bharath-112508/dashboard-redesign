@@ -154,7 +154,7 @@ const teamAttendanceBlocks = (data: HomeDashboardData): Array<Record<string, unk
     return blocks;
 };
 
-export const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
+const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
     const pending = data.pending_leaves;
     if (!pending) return [];
     // `pending` is capped at PENDING_CAP+1; `pending_total` is the real backlog
@@ -211,22 +211,3 @@ export const buildHomeDashboardView = (data: HomeDashboardData, user: DashboardU
     ];
     return { type: 'home', blocks: blocks.slice(0, 100) };
 };
-
-/**
- * The interactive controls of the Home dashboard — the status-aware Check In /
- * Check Out actions, the per-pending Approve/Reject buttons (reviewers only),
- * the Refresh button, and the web-app deep link — without the data-display
- * sections (my-leaves, who's-out, team stats). Used by the image-rendered Home
- * view (`buildImageHomeView`), where the data lives in the rendered PNG and only
- * the tappable controls need to sit below it as Block Kit. Composed from the
- * SAME fragment builders the native view uses, so action_ids and labels can't
- * drift between the two surfaces.
- */
-export const buildHomeInteractiveBlocks = (
-    data: HomeDashboardData,
-    user: DashboardUser
-): Array<Record<string, unknown>> => [
-    ...attendanceHeaderBlocks(data.my_today as never, user.full_name ?? 'there'),
-    ...pendingApprovalBlocks(data),
-    ...footerBlocks(),
-];

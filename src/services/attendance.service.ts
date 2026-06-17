@@ -992,35 +992,6 @@ export const getTodayAttendanceSummary = async (rosterCap: number): Promise<Toda
     };
 };
 
-// ─── Slack Home dashboard — org-wide attendance trend ────────────────────
-
-export interface AttendanceTrendPoint {
-    date: string; // YYYY-MM-DD (IST)
-    present: number;
-}
-
-/**
- * Org-wide attendance trend for the Slack Home dashboard chart — count of
- * AttendanceRecord rows with a check-in per local_date over the last `days`
- * days (inclusive of today, IST). Missing days are padded to 0. read_team
- * only (the caller gates on the permission).
- */
-export const getAttendanceTrend = async (days: number): Promise<AttendanceTrendPoint[]> => {
-    const today = dayjs().tz(DEFAULT_TIMEZONE);
-    const start = today.subtract(days - 1, 'day').format(DATE_FORMAT);
-    const rows = (await AttendanceRecord.aggregate([
-        { $match: { local_date: { $gte: start }, check_in: { $ne: null } } },
-        { $group: { _id: '$local_date', present: { $sum: 1 } } },
-    ])) as Array<{ _id: string; present: number }>;
-    const byDate = new Map(rows.map((r) => [r._id, r.present]));
-    const out: AttendanceTrendPoint[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-        const date = today.subtract(i, 'day').format(DATE_FORMAT);
-        out.push({ date, present: byDate.get(date) ?? 0 });
-    }
-    return out;
-};
-
 // Re-exports for the helper callers (test fixtures, future cron).
 export { todayLocalDate };
 
