@@ -352,11 +352,14 @@ export const getOrRenderHomeImageUrl = async (
             body: png,
             contentType: 'image/png',
         });
+        // No `fileName` → no `Content-Disposition: attachment`. Slack's image
+        // proxy must render these bytes inline; the upload-pinned
+        // `Content-Type: image/png` governs. An attachment disposition would
+        // tell the proxy to download-not-display and can blank the image block.
         const { url } = mintDownloadSas({
             container: AZURE_BLOB_TASK_ATTACHMENTS_CONTAINER,
             blobKey,
             ttlMinutes: 60,
-            fileName: 'home.png',
         });
         cache.set(key, { url, exp: Date.now() + CACHE_TTL_MS });
         return url;
