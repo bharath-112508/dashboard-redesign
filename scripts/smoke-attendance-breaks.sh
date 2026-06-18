@@ -24,10 +24,10 @@ API=http://localhost:3001/api/v1
 _try_login() {
     local email=$1 pass=$2
     local code
-    code=$(curl -sS -o /tmp/sm_login_probe.json -w '%{http_code}' \
+    code=$(curl -sS -o /tmp/sm_probe_$$.json -w '%{http_code}' \
         -X POST "$API/auth/login" \
         -H 'Content-Type: application/json' \
-        -d "{\"email\":\"$email\",\"password\":\"$pass\"}")
+        -d "{\"email\":\"$email\",\"password\":\"$pass\"}" || true)
     echo "$code"
 }
 
@@ -223,6 +223,8 @@ echo ""
 echo "── break/start {nap} (invalid type) → 400 ─────────────────────"
 code=$(req POST /attendance/break/start '{"break_type":"nap"}' "$EMP_ACCESS")
 check "invalid break_type 400" 400 "$code"
+err=$(jq1 .error.code)
+check "VALIDATION_ERROR" "VALIDATION_ERROR" "$err"
 
 # ─── 9. break/start with missing break_type → 400 ────────────────────────────
 
