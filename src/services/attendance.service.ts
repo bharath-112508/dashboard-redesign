@@ -30,6 +30,7 @@ import {
     ATTENDANCE_REVIEW_ROLES,
     BREAK_TYPES,
     type BreakType,
+    type BreakSource,
 } from '../constants/attendance.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
@@ -330,6 +331,9 @@ export const checkOut = async (
     }
 
     const now = new Date();
+    // Auto-end any open break at the check-out instant so the math is right.
+    const openB = (lastSeg.breaks ?? []).find((b) => !b.end);
+    if (openB) openB.end = { time: now, source: 'app' };
     lastSeg.check_out = {
         time: now,
         method: body.method,
@@ -348,6 +352,68 @@ export const checkOut = async (
     // persists the new check_out.
     record.markModified('segments');
 
+    await record.save();
+    return record.toJSON() as unknown as Record<string, unknown>;
+};
+
+// ─── Shared helper: recompute totals onto a record doc ───────────────────
+
+const persistTotals = async (record: AttendanceRecordDocument): Promise<void> => {
+    const computed = await computeWorkedAcrossSegments(record.segments);
+    record.total_worked_minutes = computed.total_worked_minutes;
+    record.overtime_minutes = computed.overtime_minutes;
+    record.total_break_minutes = computed.total_break_minutes;
+    record.break_minutes_by_type = computed.break_minutes_by_type;
+};
+
+// ─── POST /attendance/break/start ────────────────────────────────────────
+
+export const startBreak = async (
+    user_id: Types.ObjectId,
+    break_type: BreakType,
+    source: BreakSource
+): Promise<Record<string, unknown>> => {
+    const local_date = todayLocalDate();
+    const record = await AttendanceRecord.findOne({ user_id, local_date });
+    const segs = record?.segments ?? [];
+    const lastSeg = segs.length > 0 ? segs[segs.length - 1] : null;
+    if (!record || !lastSeg || lastSeg.check_out) {
+        throw AppError.conflict('Not checked in for today', ERROR_CODES.NOT_CHECKED_IN);
+    }
+    const breaks = lastSeg.breaks ?? [];
+    if (breaks.some((b) => !b.end)) {
+        throw AppError.conflict('Already on a break', ERROR_CODES.ALREADY_ON_BREAK);
+    }
+    lastSeg.breaks = [...breaks, { break_type, start: { time: new Date(), source }, end: null }];
+    record.markModified('segments');
+    await persistTotals(record); // open break → totals unchanged, but keeps fields fresh
+    await record.save();
+    return record.toJSON() as unknown as Record<string, unknown>;
+};
+
+// ─── POST /attendance/break/end ──────────────────────────────────────────
+
+export const endBreak = async (user_id: Types.ObjectId, source: BreakSource): Promise<Record<string, unknown>> => {
+    const local_date = todayLocalDate();
+    const record = await AttendanceRecord.findOne({ user_id, local_date });
+    const segs = record?.segments ?? [];
+    // Find the latest open break across segments (scan from the end).
+    let openBreak: { end: { time: Date; source: BreakSource } | null } | null = null;
+    for (let i = segs.length - 1; i >= 0 && !openBreak; i -= 1) {
+        const bs = segs[i]!.breaks ?? [];
+        for (let j = bs.length - 1; j >= 0; j -= 1) {
+            if (!bs[j]!.end) {
+                openBreak = bs[j]!;
+                break;
+            }
+        }
+    }
+    if (!record || !openBreak) {
+        throw AppError.conflict('Not on a break', ERROR_CODES.NOT_ON_BREAK);
+    }
+    openBreak.end = { time: new Date(), source };
+    record.markModified('segments');
+    await persistTotals(record);
     await record.save();
     return record.toJSON() as unknown as Record<string, unknown>;
 };
