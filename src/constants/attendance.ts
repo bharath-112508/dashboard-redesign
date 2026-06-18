@@ -35,6 +35,15 @@ export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 export const CHECK_METHODS = ['manual', 'qr'] as const;
 export type CheckMethod = (typeof CHECK_METHODS)[number];
 
+export const BREAK_TYPES = ['lunch', 'tea', 'other'] as const;
+export type BreakType = (typeof BREAK_TYPES)[number];
+
+export const BREAK_SOURCES = ['slack', 'app'] as const;
+export type BreakSource = (typeof BREAK_SOURCES)[number];
+
+/** Default soft daily break allowance (minutes). Admin-configurable in settings. */
+export const DEFAULT_BREAK_ALLOWANCE_MINUTES = 60;
+
 // M49 — `cancelled` joins the lifecycle. The owner (employee) can
 // withdraw a pending request before a reviewer acts on it, so they
 // can submit a replacement without tripping the

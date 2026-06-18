@@ -5,8 +5,12 @@ import { COLLECTIONS } from '../constants/collections.js';
 import {
     ATTENDANCE_STATUSES,
     CHECK_METHODS,
+    BREAK_TYPES,
+    BREAK_SOURCES,
     type AttendanceStatus,
     type CheckMethod,
+    type BreakType,
+    type BreakSource,
 } from '../constants/attendance.js';
 
 /**
@@ -36,6 +40,17 @@ export interface AttendancePunch {
     ip: string;
 }
 
+export interface BreakPunch {
+    time: Date;
+    source: BreakSource;
+}
+
+export interface BreakSession {
+    break_type: BreakType;
+    start: BreakPunch;
+    end: BreakPunch | null;
+}
+
 /**
  * BUG-040 — multi-segment attendance. A user can check in and out of
  * the same `local_date` more than once (lunch break that gets logged
@@ -49,6 +64,8 @@ export interface AttendancePunch {
 export interface AttendanceSegment {
     check_in: AttendancePunch;
     check_out: AttendancePunch | null;
+    /** Breaks taken during this work session. Subtracted from worked time. */
+    breaks?: BreakSession[];
 }
 
 export interface AttendanceRecordDocument extends Document {
@@ -63,6 +80,10 @@ export interface AttendanceRecordDocument extends Document {
     check_out: AttendancePunch | null;
     total_worked_minutes: number | null;
     overtime_minutes: number;
+    /** Sum of all CLOSED break durations across segments (minutes). */
+    total_break_minutes: number;
+    /** Closed-break minutes split by type. */
+    break_minutes_by_type: { lunch: number; tea: number; other: number };
     status: AttendanceStatus;
     flagged_for_correction: boolean;
     wfh: boolean;
@@ -87,10 +108,28 @@ const punchSchema = new Schema<AttendancePunch>(
     { _id: false }
 );
 
+const breakPunchSchema = new Schema<BreakPunch>(
+    {
+        time: { type: Date, required: true },
+        source: { type: String, enum: BREAK_SOURCES, required: true },
+    },
+    { _id: false }
+);
+
+const breakSessionSchema = new Schema<BreakSession>(
+    {
+        break_type: { type: String, enum: BREAK_TYPES, required: true },
+        start: { type: breakPunchSchema, required: true },
+        end: { type: breakPunchSchema, default: null },
+    },
+    { _id: false }
+);
+
 const segmentSchema = new Schema<AttendanceSegment>(
     {
         check_in: { type: punchSchema, required: true },
         check_out: { type: punchSchema, default: null },
+        breaks: { type: [breakSessionSchema], default: [] },
     },
     { _id: false }
 );
@@ -112,6 +151,18 @@ const attendanceRecordSchema = new Schema<AttendanceRecordDocument>(
         check_out: { type: punchSchema, default: null },
         total_worked_minutes: { type: Number, default: null },
         overtime_minutes: { type: Number, default: 0, min: 0 },
+        total_break_minutes: { type: Number, default: 0, min: 0 },
+        break_minutes_by_type: {
+            type: new Schema(
+                {
+                    lunch: { type: Number, default: 0, min: 0 },
+                    tea: { type: Number, default: 0, min: 0 },
+                    other: { type: Number, default: 0, min: 0 },
+                },
+                { _id: false }
+            ),
+            default: () => ({ lunch: 0, tea: 0, other: 0 }),
+        },
         status: { type: String, enum: ATTENDANCE_STATUSES, required: true, default: 'present' },
         flagged_for_correction: { type: Boolean, required: true, default: false },
         wfh: { type: Boolean, required: true, default: false },
