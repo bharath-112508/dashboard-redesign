@@ -278,13 +278,20 @@ export const listUsers = async (
     // low-cardinality columns (e.g. `status`) leave rows within a group
     // in arbitrary storage order, which makes the same query return
     // different orderings across page-flips / refresh cycles ("shuffles").
+    // Default is alphabetical by name (case-insensitive via the collation
+    // below) so the directory reads A→Z out of the box.
     const sortSpec: Record<string, 1 | -1> = query.sort
         ? { [query.sort.field]: query.sort.dir === 'asc' ? 1 : -1, _id: 1 }
-        : { created_at: -1, _id: 1 };
+        : { full_name: 1, _id: 1 };
+
+    // `strength: 2` = case-insensitive, accent-sensitive — so "alice" and
+    // "Bob" order naturally instead of all-uppercase-first (Mongo's default
+    // byte sort). Applied to the list query so name/email sorts read right.
+    const collation = { locale: 'en', strength: 2 } as const;
 
     const [rows, total, photoTtl] = await Promise.all([
-        User.find(filter).sort(sortSpec).skip(skip).limit(query.limit),
-        User.countDocuments(filter),
+        User.find(filter).collation(collation).sort(sortSpec).skip(skip).limit(query.limit),
+        User.countDocuments(filter).collation(collation),
         loadPhotoTtlMinutes(),
     ]);
 
