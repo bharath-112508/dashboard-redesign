@@ -97,3 +97,12 @@ export const SLACK_BOT_TOKEN_MAX = 200;
 // builders and the handler can't drift on the string.
 export const SLACK_ACTION_ATTENDANCE_CHECK_IN = 'attendance_check_in';
 export const SLACK_ACTION_ATTENDANCE_CHECK_OUT = 'attendance_check_out';
+
+// ─── Break interactive action ids ────────────────────────────────────────
+//
+// Block Kit button `action_id`s for the App Home break sub-UI. The
+// interactive controller branches on these to call startBreak / endBreak.
+export const SLACK_ACTION_BREAK_START_LUNCH = 'break_start_lunch';
+export const SLACK_ACTION_BREAK_START_TEA = 'break_start_tea';
+export const SLACK_ACTION_BREAK_START_OTHER = 'break_start_other';
+export const SLACK_ACTION_BREAK_END = 'break_end';

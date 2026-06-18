@@ -3,9 +3,16 @@ import { Types } from 'mongoose';
 
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
-import { SLACK_ACTION_ATTENDANCE_CHECK_IN, SLACK_ACTION_ATTENDANCE_CHECK_OUT } from '../constants/slack.js';
+import {
+    SLACK_ACTION_ATTENDANCE_CHECK_IN,
+    SLACK_ACTION_ATTENDANCE_CHECK_OUT,
+    SLACK_ACTION_BREAK_START_LUNCH,
+    SLACK_ACTION_BREAK_START_TEA,
+    SLACK_ACTION_BREAK_START_OTHER,
+    SLACK_ACTION_BREAK_END,
+} from '../constants/slack.js';
 import { approveLeave, rejectLeave } from '../services/leave-request.service.js';
-import { checkIn, checkOut, getMyToday } from '../services/attendance.service.js';
+import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
 import { fetchSlackUserInfo, resolveSlackUser } from '../services/slack-user-mapping.service.js';
 import { slackContextFrom, publishHomeView } from '../utils/slack.js';
@@ -159,6 +166,50 @@ export const handleInteractive: RequestHandler = async (req, res) => {
         postEphemeralToResponseUrl(payload.response_url, text);
         res.status(200).json(ephemeral(text));
     };
+
+    const BREAK_START_BY_ACTION: Record<string, 'lunch' | 'tea' | 'other'> = {
+        [SLACK_ACTION_BREAK_START_LUNCH]: 'lunch',
+        [SLACK_ACTION_BREAK_START_TEA]: 'tea',
+        [SLACK_ACTION_BREAK_START_OTHER]: 'other',
+    };
+    const isBreakStart = action.action_id in BREAK_START_BY_ACTION;
+    const isBreakEnd = action.action_id === SLACK_ACTION_BREAK_END;
+    if (isBreakStart || isBreakEnd) {
+        const fromHome = payload.view?.type === 'home';
+        const user = await resolveCaller(payload.user.id);
+        if (!user) {
+            respond("Couldn't identify your Viljetech account.");
+            return;
+        }
+        try {
+            if (isBreakStart) {
+                await startBreak(user._id, BREAK_START_BY_ACTION[action.action_id]!, 'slack');
+            } else {
+                await endBreak(user._id, 'slack');
+            }
+        } catch (err: unknown) {
+            const code = (err as { code?: string })?.code;
+            const msg =
+                code === ERROR_CODES.NOT_CHECKED_IN
+                    ? 'Check in before starting a break.'
+                    : code === ERROR_CODES.ALREADY_ON_BREAK
+                      ? "You're already on a break."
+                      : code === ERROR_CODES.NOT_ON_BREAK
+                        ? "You're not on a break."
+                        : 'Sorry, something went wrong.';
+            respond(msg);
+            if (fromHome) void renderAttendanceHome(payload.user.id, user);
+            return;
+        }
+        publish([REALTIME_TOPICS.ATTENDANCE]);
+        if (fromHome) {
+            res.status(200).json({});
+            void renderAttendanceHome(payload.user.id, user);
+        } else {
+            respond(isBreakStart ? '✅ Break started.' : '✅ Break ended.');
+        }
+        return;
+    }
 
     const isAttendanceIn = action.action_id === SLACK_ACTION_ATTENDANCE_CHECK_IN;
     const isAttendanceOut = action.action_id === SLACK_ACTION_ATTENDANCE_CHECK_OUT;

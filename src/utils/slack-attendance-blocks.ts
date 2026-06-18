@@ -1,4 +1,11 @@
-import { SLACK_ACTION_ATTENDANCE_CHECK_IN, SLACK_ACTION_ATTENDANCE_CHECK_OUT } from '../constants/slack.js';
+import {
+    SLACK_ACTION_ATTENDANCE_CHECK_IN,
+    SLACK_ACTION_ATTENDANCE_CHECK_OUT,
+    SLACK_ACTION_BREAK_START_LUNCH,
+    SLACK_ACTION_BREAK_START_TEA,
+    SLACK_ACTION_BREAK_START_OTHER,
+    SLACK_ACTION_BREAK_END,
+} from '../constants/slack.js';
 
 /**
  * Pure Block Kit builders for the Slack attendance surfaces (App Home tab
@@ -11,13 +18,20 @@ import { SLACK_ACTION_ATTENDANCE_CHECK_IN, SLACK_ACTION_ATTENDANCE_CHECK_OUT } f
 interface Punch {
     time?: Date | string | null;
 }
+interface BreakLite {
+    break_type?: string;
+    start?: Punch | null;
+    end?: Punch | null;
+}
 interface Segment {
     check_in?: Punch | null;
     check_out?: Punch | null;
+    breaks?: BreakLite[] | null;
 }
 interface TodayRecord {
     segments?: Segment[] | null;
     total_worked_minutes?: number | null;
+    total_break_minutes?: number | null;
 }
 
 const toDate = (raw: Date | string | null | undefined): Date | null =>
@@ -64,6 +78,39 @@ const checkOutButton = () => ({
     ],
 });
 
+const breakPickerButtons = () => ({
+    type: 'actions',
+    elements: [
+        {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Lunch', emoji: true },
+            action_id: SLACK_ACTION_BREAK_START_LUNCH,
+        },
+        {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Tea', emoji: true },
+            action_id: SLACK_ACTION_BREAK_START_TEA,
+        },
+        {
+            type: 'button',
+            text: { type: 'plain_text', text: 'Other', emoji: true },
+            action_id: SLACK_ACTION_BREAK_START_OTHER,
+        },
+    ],
+});
+
+const endBreakButton = () => ({
+    type: 'actions',
+    elements: [
+        {
+            type: 'button',
+            text: { type: 'plain_text', text: 'End break', emoji: true },
+            style: 'primary',
+            action_id: SLACK_ACTION_BREAK_END,
+        },
+    ],
+});
+
 /** Render the segment list as bullet lines: `11:03 → 18:30` / `11:03 → now`. */
 const segmentLines = (segments: Segment[]): string =>
     segments
@@ -94,6 +141,21 @@ export const attendanceHeaderBlocks = (
         const inT = toDate(lastSeg!.check_in?.time);
         blocks.push(section(`:large_green_circle: Checked in since *${inT ? formatTimeIST(inT) : '—'}*`));
         blocks.push(section(segmentLines(segs)));
+        const breaks = lastSeg!.breaks ?? [];
+        const openBreak = breaks.find((b) => !b.end) ?? null;
+        const totalBreak = record?.total_break_minutes ?? 0;
+        if (openBreak) {
+            const since = toDate(openBreak.start?.time);
+            blocks.push(
+                section(
+                    `:coffee: On a break (*${openBreak.break_type ?? 'other'}*) since *${since ? formatTimeIST(since) : '—'}*`
+                )
+            );
+            blocks.push(endBreakButton());
+        } else {
+            blocks.push(section(`:coffee: Break today: *${formatDuration(totalBreak)}*`));
+            blocks.push(breakPickerButtons());
+        }
         blocks.push(checkOutButton());
     } else if (segs.length > 0) {
         blocks.push(section(`:white_check_mark: Done for today · *${formatDuration(worked)}* worked`));

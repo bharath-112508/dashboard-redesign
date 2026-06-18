@@ -20,10 +20,14 @@ vi.mock('../services/leave-request.service.js', () => ({
 const checkInMock = vi.fn();
 const checkOutMock = vi.fn();
 const getMyTodayMock = vi.fn();
+const startBreakMock = vi.fn();
+const endBreakMock = vi.fn();
 vi.mock('../services/attendance.service.js', () => ({
     checkIn: (...args: unknown[]) => checkInMock(...args),
     checkOut: (...args: unknown[]) => checkOutMock(...args),
     getMyToday: (...args: unknown[]) => getMyTodayMock(...args),
+    startBreak: (...args: unknown[]) => startBreakMock(...args),
+    endBreak: (...args: unknown[]) => endBreakMock(...args),
 }));
 
 const resolveSlackUserMock = vi.fn();
@@ -406,5 +410,100 @@ describe('handleSlashCommand — Phase 2', () => {
         expect(res.status).toBe(200);
         expect(res.body.text).toMatch(/09:00.*13:00/);
         expect(res.body.text).toMatch(/4h 0m/);
+    });
+});
+
+// ─── Phase 3: break_start_* / break_end ─────────────────────────────────
+
+describe('handleInteractive — break actions', () => {
+    beforeEach(() => {
+        startBreakMock.mockReset();
+        endBreakMock.mockReset();
+        resolveSlackUserMock.mockReset();
+        getOrInitSettingsMock.mockReset();
+        slackContextFromMock.mockReset();
+        getOrInitSettingsMock.mockResolvedValue({
+            slack: { enabled: true, bot_token: 'xoxb', channels: {} },
+        });
+        slackContextFromMock.mockReturnValue({ enabled: true, botToken: 'xoxb' });
+    });
+
+    const breakPayload = (action_id: string, fromHome = true) => ({
+        type: 'block_actions',
+        user: { id: 'U_EMP' },
+        actions: [{ action_id }],
+        ...(fromHome ? { view: { type: 'home' } } : {}),
+    });
+
+    it('break_start_lunch from home calls startBreak(user._id, "lunch", "slack")', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        startBreakMock.mockResolvedValueOnce({});
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(breakPayload('break_start_lunch')) });
+        expect(res.status).toBe(200);
+        expect(startBreakMock).toHaveBeenCalledTimes(1);
+        const [id, type, source] = startBreakMock.mock.calls[0];
+        expect(String(id)).toBe(String(userId));
+        expect(type).toBe('lunch');
+        expect(source).toBe('slack');
+    });
+
+    it('break_end from home calls endBreak(user._id, "slack")', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        endBreakMock.mockResolvedValueOnce({});
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(breakPayload('break_end')) });
+        expect(res.status).toBe(200);
+        expect(endBreakMock).toHaveBeenCalledTimes(1);
+        const [id, source] = endBreakMock.mock.calls[0];
+        expect(String(id)).toBe(String(userId));
+        expect(source).toBe('slack');
+    });
+
+    it('break_start_tea: ALREADY_ON_BREAK → ephemeral "already on a break"', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        startBreakMock.mockRejectedValueOnce({ code: 'ALREADY_ON_BREAK' });
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(breakPayload('break_start_tea')) });
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/already on a break/i);
+    });
+
+    it('break_start_other: NOT_CHECKED_IN → ephemeral hint', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        startBreakMock.mockRejectedValueOnce({ code: 'NOT_CHECKED_IN' });
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(breakPayload('break_start_other')) });
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/check in before/i);
+    });
+
+    it('break_end: NOT_ON_BREAK → ephemeral hint', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        endBreakMock.mockRejectedValueOnce({ code: 'NOT_ON_BREAK' });
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(breakPayload('break_end')) });
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/not on a break/i);
+    });
+
+    it('break_start_lunch: unidentified caller → ephemeral error', async () => {
+        resolveSlackUserMock.mockResolvedValueOnce(null);
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(breakPayload('break_start_lunch')) });
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/identify your Viljetech account/i);
+        expect(startBreakMock).not.toHaveBeenCalled();
     });
 });

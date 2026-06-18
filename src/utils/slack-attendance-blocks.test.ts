@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { SLACK_ACTION_ATTENDANCE_CHECK_IN, SLACK_ACTION_ATTENDANCE_CHECK_OUT } from '../constants/slack.js';
+import {
+    SLACK_ACTION_ATTENDANCE_CHECK_IN,
+    SLACK_ACTION_ATTENDANCE_CHECK_OUT,
+    SLACK_ACTION_BREAK_START_LUNCH,
+    SLACK_ACTION_BREAK_START_TEA,
+    SLACK_ACTION_BREAK_START_OTHER,
+    SLACK_ACTION_BREAK_END,
+} from '../constants/slack.js';
 import {
     attendanceHeaderBlocks,
     buildAttendanceHomeView,
@@ -36,10 +43,36 @@ describe('buildAttendanceHomeView', () => {
         expect(actionIds(view)).toEqual([SLACK_ACTION_ATTENDANCE_CHECK_IN]);
     });
 
-    it('shows only Check Out when a segment is open', () => {
-        const record = { segments: [{ check_in: { time: inAt }, check_out: null }], total_worked_minutes: 0 };
+    it('shows break pickers + Check Out when a segment is open (no active break)', () => {
+        const record = {
+            segments: [{ check_in: { time: inAt }, check_out: null, breaks: [] }],
+            total_worked_minutes: 0,
+        };
         const view = buildAttendanceHomeView(record, 'Raj') as { blocks: Array<Record<string, unknown>> };
-        expect(actionIds(view)).toEqual([SLACK_ACTION_ATTENDANCE_CHECK_OUT]);
+        const ids = actionIds(view);
+        expect(ids).toContain(SLACK_ACTION_BREAK_START_LUNCH);
+        expect(ids).toContain(SLACK_ACTION_BREAK_START_TEA);
+        expect(ids).toContain(SLACK_ACTION_BREAK_START_OTHER);
+        expect(ids).toContain(SLACK_ACTION_ATTENDANCE_CHECK_OUT);
+        expect(ids).not.toContain(SLACK_ACTION_BREAK_END);
+    });
+
+    it('shows End break + Check Out when a break is open', () => {
+        const record = {
+            segments: [
+                {
+                    check_in: { time: inAt },
+                    check_out: null,
+                    breaks: [{ break_type: 'tea', start: { time: inAt }, end: null }],
+                },
+            ],
+            total_worked_minutes: 0,
+        };
+        const view = buildAttendanceHomeView(record, 'Raj') as { blocks: Array<Record<string, unknown>> };
+        const ids = actionIds(view);
+        expect(ids).toContain(SLACK_ACTION_BREAK_END);
+        expect(ids).toContain(SLACK_ACTION_ATTENDANCE_CHECK_OUT);
+        expect(ids).not.toContain(SLACK_ACTION_BREAK_START_LUNCH);
     });
 
     it('shows Check In again when the day is closed', () => {
@@ -61,6 +94,40 @@ describe('attendanceHeaderBlocks', () => {
             (b as { elements: Array<{ action_id?: string }> }).elements.map((e) => e.action_id)
         );
         expect(ids).toEqual([SLACK_ACTION_ATTENDANCE_CHECK_IN]);
+    });
+});
+
+describe('attendanceHeaderBlocks — break sub-UI', () => {
+    it('shows break picker buttons when checked in and not on a break', () => {
+        const rec = {
+            segments: [{ check_in: { time: new Date() }, check_out: null, breaks: [] }],
+            total_break_minutes: 0,
+            break_minutes_by_type: { lunch: 0, tea: 0, other: 0 },
+        };
+        const blocks = attendanceHeaderBlocks(rec as never, 'Vivek');
+        const ids = JSON.stringify(blocks);
+        expect(ids).toContain('break_start_lunch');
+        expect(ids).toContain('break_start_tea');
+        expect(ids).toContain('break_start_other');
+        expect(ids).not.toContain('break_end');
+    });
+
+    it('shows End break + on-break line when a break is open', () => {
+        const rec = {
+            segments: [
+                {
+                    check_in: { time: new Date() },
+                    check_out: null,
+                    breaks: [{ break_type: 'tea', start: { time: new Date() }, end: null }],
+                },
+            ],
+            total_break_minutes: 0,
+            break_minutes_by_type: { lunch: 0, tea: 0, other: 0 },
+        };
+        const blocks = attendanceHeaderBlocks(rec as never, 'Vivek');
+        const s = JSON.stringify(blocks);
+        expect(s).toContain('break_end');
+        expect(s).toContain('On a break');
     });
 });
 
