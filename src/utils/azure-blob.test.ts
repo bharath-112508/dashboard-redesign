@@ -67,12 +67,21 @@ const setContainerStub = (stub: unknown): void => {
     containerStub = stub;
 };
 
+const getPropertiesMock = vi.fn(async () => ({ logging: { read: true }, cors: [] as unknown[] }));
+const setPropertiesMock = vi.fn(async (_props: unknown) => undefined);
+
 class FakeBlobServiceClient {
     static fromConnectionString = vi.fn(() => new FakeBlobServiceClient());
     // Prototype method (not instance-property) so a runtime override
     // takes effect on the cached service client too.
     getContainerClient(): unknown {
         return containerStub;
+    }
+    getProperties(): unknown {
+        return getPropertiesMock();
+    }
+    setProperties(props: unknown): unknown {
+        return setPropertiesMock(props);
     }
 }
 
@@ -326,5 +335,32 @@ describe('exported error classes', () => {
         const err = new azure.BlobNotFoundError('test');
         expect(err.name).toBe('BlobNotFoundError');
         expect(err).toBeInstanceOf(Error);
+    });
+});
+
+// ─── ensureBlobCorsRules ─────────────────────────────────────────────────
+
+describe('ensureBlobCorsRules', () => {
+    it('sets a single CORS rule joining the explicit origins, preserving other props', async () => {
+        await azure.ensureBlobCorsRules([
+            'https://app.example.com',
+            'https://app.example.com', // dup → de-duped
+            ' https://staging.example.com ', // trimmed
+        ]);
+        expect(setPropertiesMock).toHaveBeenCalledTimes(1);
+        const props = setPropertiesMock.mock.calls[0]![0] as {
+            logging: unknown;
+            cors: { allowedOrigins: string; allowedMethods: string }[];
+        };
+        // getProperties result is preserved (logging untouched).
+        expect(props.logging).toEqual({ read: true });
+        expect(props.cors).toHaveLength(1);
+        expect(props.cors[0].allowedOrigins).toBe('https://app.example.com,https://staging.example.com');
+        expect(props.cors[0].allowedMethods).toBe('GET,HEAD,PUT,OPTIONS');
+    });
+
+    it('is a no-op when only a wildcard / empty origins are given (never sets * CORS)', async () => {
+        await azure.ensureBlobCorsRules(['*', '', '  ']);
+        expect(setPropertiesMock).not.toHaveBeenCalled();
     });
 });

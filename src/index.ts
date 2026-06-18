@@ -17,6 +17,7 @@ import { realtimeEmit } from './middlewares/realtime-emit.middleware.js';
 import { generalRateLimiter, healthRateLimiter } from './middlewares/rate-limit.middleware.js';
 import { API_PREFIX, ERROR_CODES } from './constants/index.js';
 import { ok } from './utils/api-response.js';
+import { ensureBlobCorsRules, isAzureConfigured } from './utils/azure-blob.js';
 import logger from './utils/logger.js';
 import { getMetricsContentType, getMetricsText, recordHttp, unhandledRejectionTotal } from './utils/metrics.js';
 import { seedDefaultLeaveTypes } from './services/leave-type.service.js';
@@ -355,6 +356,24 @@ const startServer = async () => {
         // permanently deletes the bad rows so they stop consuming
         // dispatch attempts. Idempotent. Never throws.
         await migrateDisallowedPushEndpoints();
+
+        // Configure the storage account's blob-service CORS rules so the
+        // browser can PUT profile-photo / attachment bytes directly to a
+        // SAS URL (and GET them back) from the FE origin. Without this the
+        // cross-origin upload fails its preflight ("No Access-Control-
+        // Allow-Origin header"). Self-healed from the same trusted origins
+        // the API trusts (CORS_ORIGINS). Idempotent; never crashes boot.
+        if (isAzureConfigured()) {
+            try {
+                await ensureBlobCorsRules(CORS_ORIGINS);
+                logger.info({ origins: CORS_ORIGINS }, 'Configured Azure Blob CORS for browser uploads');
+            } catch (err) {
+                logger.warn(
+                    { err, code: 'BLOB_CORS_CONFIG_FAILED' },
+                    'Failed to configure Azure Blob CORS — direct browser uploads may be blocked'
+                );
+            }
+        }
 
         // L3 — bind explicitly to `0.0.0.0` so the host interface is
         // grep-able + obvious. Defaulting (no host arg) lands on the

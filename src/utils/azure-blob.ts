@@ -132,6 +132,42 @@ export const __resetAzureClientForTests = (): void => {
 export const isAzureConfigured = (): boolean =>
     Boolean(AZURE_STORAGE_CONNECTION_STRING || (AZURE_STORAGE_ACCOUNT_NAME && AZURE_STORAGE_ACCOUNT_KEY));
 
+/**
+ * Set the storage account's **blob-service CORS rules** so browsers can PUT
+ * profile-photo / attachment bytes directly to a SAS URL and GET them back.
+ *
+ * Without this, a cross-origin upload from the FE origin fails the preflight
+ * with "No 'Access-Control-Allow-Origin' header" — blob CORS is configured
+ * on the storage account, NOT by the API's own CORS middleware. We self-heal
+ * it on boot from the same trusted-origin list the API uses (`CORS_ORIGINS`)
+ * so a fresh storage account / new environment Just Works after deploy.
+ *
+ * Idempotent: re-applies the same single rule each boot. `getProperties`
+ * first so we replace only the `cors` block and preserve logging/metrics.
+ * Caller should wrap in try/catch — a failure here must never crash boot.
+ */
+export const ensureBlobCorsRules = async (origins: readonly string[]): Promise<void> => {
+    const cleaned = [...new Set(origins.map((o) => o.trim()).filter(Boolean))];
+    // A bare '*' wildcard would let any site PUT to a leaked SAS; require
+    // explicit origins. Nothing to do if none are configured.
+    const explicit = cleaned.filter((o) => o !== '*');
+    if (explicit.length === 0) return;
+
+    const { serviceClient } = getContext();
+    const props = await serviceClient.getProperties();
+    props.cors = [
+        {
+            allowedOrigins: explicit.join(','),
+            // PUT to upload, GET/HEAD to display, OPTIONS for the preflight.
+            allowedMethods: 'GET,HEAD,PUT,OPTIONS',
+            allowedHeaders: '*',
+            exposedHeaders: '*',
+            maxAgeInSeconds: 3600,
+        },
+    ];
+    await serviceClient.setProperties(props);
+};
+
 // ─── SAS minting ─────────────────────────────────────────────────────────
 
 export interface MintSasOptions {
