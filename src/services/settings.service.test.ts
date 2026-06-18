@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Types } from 'mongoose';
+import { DEFAULT_BREAK_ALLOWANCE_MINUTES } from '../constants/attendance.js';
 
 /**
  * Unit tests for `settings.service` — Step 25 hardening pass.
@@ -158,5 +159,24 @@ describe('patchSettings (legacy audit redaction)', () => {
         const slack = result.slack as Record<string, unknown>;
         expect(slack).not.toHaveProperty('bot_token');
         expect(slack.has_bot_token).toBe(true);
+    });
+});
+
+// ─── AttendanceSettings.break_allowance_minutes default ───────────────────
+
+describe('AttendanceSettings.break_allowance_minutes default', () => {
+    it(`schema default equals DEFAULT_BREAK_ALLOWANCE_MINUTES (${DEFAULT_BREAK_ALLOWANCE_MINUTES})`, async () => {
+        // Bypass the vi.mock above by importing the real model module.
+        // Mongoose models can be re-registered safely inside a vi.mock
+        // context because vi.importActual bypasses module mocks.
+        const { SystemSettings } = await vi.importActual<typeof import('../models/system-settings.model.js')>(
+            '../models/system-settings.model.js'
+        );
+        const schemaPath = SystemSettings.schema.path('attendance.break_allowance_minutes');
+        expect(schemaPath).toBeDefined();
+
+        expect((schemaPath as { options: { default?: unknown } }).options.default).toBe(
+            DEFAULT_BREAK_ALLOWANCE_MINUTES
+        );
     });
 });

@@ -3,6 +3,7 @@ import { Schema, model, Types, type Document, type Model } from 'mongoose';
 import { BASE_SCHEMA_OPTIONS } from './_base.js';
 import { COLLECTIONS } from '../constants/collections.js';
 import { SETTINGS_SINGLETON_KEY } from '../constants/settings.js';
+import { DEFAULT_BREAK_ALLOWANCE_MINUTES } from '../constants/attendance.js';
 
 /**
  * `system_settings` — Data_Model.md §2.1
@@ -54,6 +55,7 @@ export interface AttendanceSettings {
     geofence: GeofenceSettings;
     wifi_restriction: WifiRestrictionSettings;
     forgot_checkout_flag_time: string; // "HH:MM"
+    break_allowance_minutes: number;
 }
 
 export interface SecuritySettings {
@@ -217,6 +219,7 @@ const attendanceSchema = new Schema<AttendanceSettings>(
         geofence: { type: geofenceSchema, required: true },
         wifi_restriction: { type: wifiRestrictionSchema, required: true },
         forgot_checkout_flag_time: { type: String, required: true },
+        break_allowance_minutes: { type: Number, default: DEFAULT_BREAK_ALLOWANCE_MINUTES, min: 0, max: 480 },
     },
     { _id: false }
 );

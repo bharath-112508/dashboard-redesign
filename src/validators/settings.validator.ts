@@ -78,6 +78,7 @@ const attendanceSchema = z
         geofence: geofenceSchema,
         wifi_restriction: wifiRestrictionSchema,
         forgot_checkout_flag_time: hhmm,
+        break_allowance_minutes: z.number().int().min(0).max(480).optional(),
     })
     .partial();
 
