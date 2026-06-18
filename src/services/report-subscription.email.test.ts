@@ -109,6 +109,7 @@ describe('renderReportSubscriptionEmail', () => {
                     weekend: 8,
                     incomplete: 1,
                     total_days: 30,
+                    total_break_minutes: 0,
                 },
             ],
         };

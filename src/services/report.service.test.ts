@@ -410,6 +410,7 @@ describe('buildAttendanceReport', () => {
                 { _id: userB, full_name: 'Ben' },
             ])
         );
+        // First aggregate call: status-pivot counts.
         attendanceAggregateMock.mockResolvedValueOnce([
             { _id: { user_id: userA, status: 'present' }, count: 18 },
             { _id: { user_id: userA, status: 'on_leave' }, count: 2 },
@@ -417,6 +418,11 @@ describe('buildAttendanceReport', () => {
             { _id: { user_id: userB, status: 'present' }, count: 15 },
             { _id: { user_id: userB, status: 'absent' }, count: 1 },
             { _id: { user_id: userB, status: 'incomplete' }, count: 4 },
+        ]);
+        // Second aggregate call: per-user break-minute totals.
+        attendanceAggregateMock.mockResolvedValueOnce([
+            { _id: userA, total_break_minutes: 0 },
+            { _id: userB, total_break_minutes: 0 },
         ]);
 
         const result = await svc.buildAttendanceReport({
@@ -443,7 +449,8 @@ describe('buildAttendanceReport', () => {
     it('returns a zero-filled row for users with no attendance rows in range', async () => {
         const userId = new Types.ObjectId();
         userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna' }]));
-        attendanceAggregateMock.mockResolvedValueOnce([]);
+        // Two aggregate calls: status-pivot then break-totals — both empty.
+        attendanceAggregateMock.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
         const result = await svc.buildAttendanceReport({
             from_date: '2026-04-01',
@@ -459,7 +466,56 @@ describe('buildAttendanceReport', () => {
             weekend: 0,
             incomplete: 0,
             total_days: 0,
+            total_break_minutes: 0,
         });
+    });
+
+    it('sums total_break_minutes across all attendance records in the range', async () => {
+        const userA = new Types.ObjectId();
+        const userB = new Types.ObjectId();
+
+        userFindMock.mockReturnValueOnce(
+            queryStub([
+                { _id: userA, full_name: 'Anna' },
+                { _id: userB, full_name: 'Ben' },
+            ])
+        );
+        // First aggregate call: status-pivot counts.
+        attendanceAggregateMock.mockResolvedValueOnce([
+            { _id: { user_id: userA, status: 'present' }, count: 10 },
+            { _id: { user_id: userB, status: 'present' }, count: 8 },
+        ]);
+        // Second aggregate call: per-user break-minute totals.
+        attendanceAggregateMock.mockResolvedValueOnce([
+            { _id: userA, total_break_minutes: 150 },
+            { _id: userB, total_break_minutes: 60 },
+        ]);
+
+        const result = await svc.buildAttendanceReport({
+            from_date: '2026-05-01',
+            to_date: '2026-05-31',
+        });
+
+        const rowA = result.rows.find((r) => r.user.id === userA.toString())!;
+        expect(rowA.total_break_minutes).toBe(150);
+
+        const rowB = result.rows.find((r) => r.user.id === userB.toString())!;
+        expect(rowB.total_break_minutes).toBe(60);
+    });
+
+    it('defaults total_break_minutes to 0 for users with no break records in range', async () => {
+        const userId = new Types.ObjectId();
+        userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna' }]));
+        attendanceAggregateMock
+            .mockResolvedValueOnce([{ _id: { user_id: userId, status: 'present' }, count: 5 }])
+            .mockResolvedValueOnce([]); // No break totals row for this user.
+
+        const result = await svc.buildAttendanceReport({
+            from_date: '2026-05-01',
+            to_date: '2026-05-31',
+        });
+
+        expect(result.rows[0].total_break_minutes).toBe(0);
     });
 });
 

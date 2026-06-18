@@ -196,4 +196,40 @@ describe('finalizeAttendanceForDate', () => {
         expect(summary.user_errors).toBe(1);
         expect(summary.placeholders_inserted).toBe(1);
     });
+
+    it('closes open breaks in checked-in records via a second updateMany with arrayFilters', async () => {
+        // Step A closes incomplete rows (first updateMany), step A.1 closes open
+        // breaks (second updateMany). We assert the second call targets only records
+        // with an open break and uses the positional filtered operator.
+        attendanceUpdateManyMock
+            .mockResolvedValueOnce({ modifiedCount: 2 }) // step A — incomplete flip
+            .mockResolvedValueOnce({ modifiedCount: 1 }); // step A.1 — break auto-close
+
+        await finalizeAttendanceForDate('2026-04-23', log);
+
+        expect(attendanceUpdateManyMock).toHaveBeenCalledTimes(2);
+
+        const breakCloseCall = attendanceUpdateManyMock.mock.calls[1] as Parameters<typeof attendanceUpdateManyMock>[0];
+
+        // Filter: targets checked-in records with at least one open break.
+        expect(breakCloseCall[0]).toMatchObject({
+            local_date: '2026-04-23',
+            check_in: { $ne: null },
+            'segments.breaks': { $elemMatch: { end: null } },
+        });
+
+        // Update: sets end on null-end break entries via positional filtered operator.
+        const updateDoc = breakCloseCall[1] as Record<string, unknown>;
+        expect(updateDoc).toHaveProperty('$set');
+        const setFields = updateDoc['$set'] as Record<string, unknown>;
+        const breakEndKey = 'segments.$[s].breaks.$[b].end';
+        expect(setFields).toHaveProperty(breakEndKey);
+        const endValue = setFields[breakEndKey] as { time: Date; source: string };
+        expect(endValue.source).toBe('app');
+        expect(endValue.time).toBeInstanceOf(Date);
+
+        // Options: arrayFilters targeting open breaks.
+        const options = breakCloseCall[2] as { arrayFilters: unknown[] };
+        expect(options.arrayFilters).toHaveLength(2);
+    });
 });

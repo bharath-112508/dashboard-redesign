@@ -456,6 +456,7 @@ interface AttendanceRow {
     weekend: number;
     incomplete: number;
     total_days: number;
+    total_break_minutes: number;
 }
 
 export interface AttendanceReportResult {
@@ -481,23 +482,40 @@ export const buildAttendanceReport = async (query: AttendanceReportQuery): Promi
     }
 
     const userIds = users.map((u) => u._id);
-    const counts = await AttendanceRecord.aggregate<{
-        _id: { user_id: Types.ObjectId; status: string };
-        count: number;
-    }>([
-        {
-            $match: {
-                user_id: { $in: userIds },
-                local_date: { $gte: query.from_date, $lte: query.to_date },
-            },
+    const matchStage = {
+        $match: {
+            user_id: { $in: userIds },
+            local_date: { $gte: query.from_date, $lte: query.to_date },
         },
-        {
-            $group: {
-                _id: { user_id: '$user_id', status: '$status' },
-                count: { $sum: 1 },
+    };
+    const [counts, breakTotals] = await Promise.all([
+        AttendanceRecord.aggregate<{
+            _id: { user_id: Types.ObjectId; status: string };
+            count: number;
+        }>([
+            matchStage,
+            {
+                $group: {
+                    _id: { user_id: '$user_id', status: '$status' },
+                    count: { $sum: 1 },
+                },
             },
-        },
+        ]),
+        AttendanceRecord.aggregate<{
+            _id: Types.ObjectId;
+            total_break_minutes: number;
+        }>([
+            matchStage,
+            {
+                $group: {
+                    _id: '$user_id',
+                    total_break_minutes: { $sum: { $ifNull: ['$total_break_minutes', 0] } },
+                },
+            },
+        ]),
     ]);
+
+    const breakByUser = new Map<string, number>(breakTotals.map((t) => [t._id.toString(), t.total_break_minutes]));
 
     type StatusBuckets = {
         present: number;
@@ -532,6 +550,7 @@ export const buildAttendanceReport = async (query: AttendanceReportQuery): Promi
             user: { id: u._id.toString(), full_name: u.full_name },
             ...b,
             total_days: total,
+            total_break_minutes: breakByUser.get(u._id.toString()) ?? 0,
         };
     });
 

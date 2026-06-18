@@ -132,6 +132,28 @@ export const finalizeAttendanceForDate = async (
     );
     summary.incomplete_marked = incompleteFlip.modifiedCount ?? 0;
 
+    // Step A.1 — close any open break inside checked-in records for targetDate.
+    //
+    // A break is open when `segments[].breaks[].end` is null. We synthesize
+    // the end time as 23:59:59 IST on targetDate (same approach as the finalizer
+    // using end-of-day rather than recomputing per-user, keeping this bulk/no-JS).
+    // We use the positional filtered operator ($[b]) with arrayFilters to target
+    // only null-end breaks across all segments without fetching individual docs.
+    const synthesizedBreakEnd = dayjs.tz(`${targetDate} 23:59:59`, DEFAULT_TIMEZONE).toDate();
+    await AttendanceRecord.updateMany(
+        {
+            local_date: targetDate,
+            check_in: { $ne: null },
+            'segments.breaks': { $elemMatch: { end: null } },
+        },
+        {
+            $set: { 'segments.$[s].breaks.$[b].end': { time: synthesizedBreakEnd, source: 'app' } },
+        },
+        {
+            arrayFilters: [{ 's.breaks': { $elemMatch: { end: null } } }, { 'b.end': null }],
+        }
+    );
+
     // Step B — insert placeholders for users with no row.
     //
     // We stream the user list to keep memory bounded. For each user we do an
