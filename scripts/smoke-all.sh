@@ -55,6 +55,8 @@ DEFAULT_SMOKES=(
     smoke-command-palette.sh
     # Task 10 — dashboard analytics endpoints (admin/employee RBAC + validator).
     smoke-dashboard-analytics.sh
+    # Task 8 — attendance break endpoints (break/start, break/end, error codes).
+    smoke-attendance-breaks.sh
 )
 
 if [[ ${#ARGS[@]} -gt 0 ]]; then
