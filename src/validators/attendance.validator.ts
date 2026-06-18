@@ -5,6 +5,7 @@ import {
     ATTENDANCE_DATE_RANGE_MAX_DAYS,
     ATTENDANCE_NOTES_MAX,
     ATTENDANCE_STATUSES,
+    BREAK_TYPES,
     CHECK_METHODS,
     CORRECTION_REASON_MAX,
     CORRECTION_REASON_MIN,
@@ -275,3 +276,10 @@ export type AttendanceIdParam = z.infer<typeof attendanceIdParamSchema>;
 
 export const correctionRequestIdParamSchema = z.object({ id: objectIdSchema });
 export type CorrectionRequestIdParam = z.infer<typeof correctionRequestIdParamSchema>;
+
+// ─── POST /attendance/break/start ────────────────────────────────────────
+
+export const breakStartBodySchema = z.object({
+    break_type: z.enum(BREAK_TYPES),
+});
+export type BreakStartBody = z.infer<typeof breakStartBodySchema>;

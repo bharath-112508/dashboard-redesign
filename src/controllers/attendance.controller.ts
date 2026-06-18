@@ -8,6 +8,7 @@ import { type RoleType } from '../constants/roles.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import type { AuditContext } from '../services/audit.service.js';
 import type {
+    BreakStartBody,
     CheckInBody,
     CheckOutBody,
     ListAttendanceQuery,
@@ -145,5 +146,20 @@ export const postCancelCorrection = async (req: Request, res: Response): Promise
         id: callerId(req),
         audit: buildAuditContext(req),
     });
+    return ok(res, data);
+};
+
+// ─── POST /attendance/break/start ────────────────────────────────────────
+
+export const postBreakStart = async (req: Request, res: Response): Promise<Response> => {
+    const body = req.body as BreakStartBody;
+    const data = await service.startBreak(callerId(req), body.break_type, 'app');
+    return ok(res, data);
+};
+
+// ─── POST /attendance/break/end ──────────────────────────────────────────
+
+export const postBreakEnd = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.endBreak(callerId(req), 'app');
     return ok(res, data);
 };

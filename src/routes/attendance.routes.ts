@@ -7,6 +7,7 @@ import { validate } from '../middlewares/validate.middleware.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import {
     attendanceIdParamSchema,
+    breakStartBodySchema,
     checkInBodySchema,
     checkOutBodySchema,
     correctionRequestIdParamSchema,
@@ -35,6 +36,10 @@ router.use(authenticate, requirePermission(PERMISSIONS.ATTENDANCE_CHECK_IN_OUT))
 router.post('/check-in', validate({ body: checkInBodySchema }), asyncHandler(ctrl.postCheckIn));
 
 router.post('/check-out', validate({ body: checkOutBodySchema }), asyncHandler(ctrl.postCheckOut));
+
+router.post('/break/start', validate({ body: breakStartBodySchema }), asyncHandler(ctrl.postBreakStart));
+
+router.post('/break/end', asyncHandler(ctrl.postBreakEnd));
 
 router.post('/qr-verify', validate({ body: qrVerifyBodySchema }), asyncHandler(ctrl.postQrVerify));
 
