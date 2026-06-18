@@ -228,8 +228,14 @@ describe('finalizeAttendanceForDate', () => {
         expect(endValue.source).toBe('app');
         expect(endValue.time).toBeInstanceOf(Date);
 
-        // Options: arrayFilters targeting open breaks.
+        // Options: arrayFilters targeting open breaks — first filter must also
+        // restrict to the open segment (check_out: null) so only the currently-open
+        // segment has its breaks closed, not segments from earlier sessions.
         const options = breakCloseCall[2] as { arrayFilters: unknown[] };
         expect(options.arrayFilters).toHaveLength(2);
+        expect(options.arrayFilters[0]).toEqual({
+            's.check_out': null,
+            's.breaks': { $elemMatch: { end: null } },
+        });
     });
 });

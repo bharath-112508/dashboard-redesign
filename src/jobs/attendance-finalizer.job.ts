@@ -150,7 +150,7 @@ export const finalizeAttendanceForDate = async (
             $set: { 'segments.$[s].breaks.$[b].end': { time: synthesizedBreakEnd, source: 'app' } },
         },
         {
-            arrayFilters: [{ 's.breaks': { $elemMatch: { end: null } } }, { 'b.end': null }],
+            arrayFilters: [{ 's.check_out': null, 's.breaks': { $elemMatch: { end: null } } }, { 'b.end': null }],
         }
     );
 
