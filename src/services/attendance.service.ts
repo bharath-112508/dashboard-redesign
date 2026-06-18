@@ -5,6 +5,7 @@ import {
     type AttendanceRecordDocument,
     type AttendancePunch,
     type AttendanceSegment,
+    type BreakSession,
 } from '../models/attendance-record.model.js';
 import {
     AttendanceCorrectionRequest,
@@ -24,7 +25,12 @@ import {
 } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
-import { haversineDistanceMeters, ATTENDANCE_REVIEW_ROLES } from '../constants/attendance.js';
+import {
+    haversineDistanceMeters,
+    ATTENDANCE_REVIEW_ROLES,
+    BREAK_TYPES,
+    type BreakType,
+} from '../constants/attendance.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     CheckInBody,
@@ -151,14 +157,45 @@ const segmentMinutes = (s: AttendanceSegment): number => {
     return Math.max(0, Math.round((s.check_out.time.getTime() - s.check_in.time.getTime()) / 60_000));
 };
 
-const computeWorkedAcrossSegments = async (
+const breakMinutes = (b: BreakSession): number => {
+    if (!b.end) return 0; // open break — not counted yet
+    return Math.max(0, Math.round((b.end.time.getTime() - b.start.time.getTime()) / 60_000));
+};
+
+/** Closed-break minutes inside one segment. */
+export const segmentBreakMinutes = (s: AttendanceSegment): number =>
+    (s.breaks ?? []).reduce((acc, b) => acc + breakMinutes(b), 0);
+
+/** Total + per-type closed-break minutes across all segments. */
+export const breakTotalsAcrossSegments = (
     segments: AttendanceSegment[]
-): Promise<{ total_worked_minutes: number; overtime_minutes: number }> => {
+): { total_break_minutes: number; break_minutes_by_type: Record<BreakType, number> } => {
+    const by_type: Record<BreakType, number> = { lunch: 0, tea: 0, other: 0 };
+    for (const s of segments ?? []) {
+        for (const b of s.breaks ?? []) {
+            if (!b.end) continue;
+            by_type[b.break_type] += breakMinutes(b);
+        }
+    }
+    const total = BREAK_TYPES.reduce((acc, k) => acc + by_type[k], 0);
+    return { total_break_minutes: total, break_minutes_by_type: by_type };
+};
+
+export const computeWorkedAcrossSegments = async (
+    segments: AttendanceSegment[]
+): Promise<{
+    total_worked_minutes: number;
+    overtime_minutes: number;
+    total_break_minutes: number;
+    break_minutes_by_type: Record<BreakType, number>;
+}> => {
     const settings = await getOrInitSettings();
     const expectedMinutes = (settings.work_schedule.daily_expected_hours ?? 8) * 60;
-    const total = segments.reduce((acc, s) => acc + segmentMinutes(s), 0);
+    // Net worked per closed segment = gross - its closed breaks (never < 0).
+    const total = (segments ?? []).reduce((acc, s) => acc + Math.max(0, segmentMinutes(s) - segmentBreakMinutes(s)), 0);
     const overtime = Math.max(0, total - expectedMinutes);
-    return { total_worked_minutes: total, overtime_minutes: overtime };
+    const breaks = breakTotalsAcrossSegments(segments);
+    return { total_worked_minutes: total, overtime_minutes: overtime, ...breaks };
 };
 
 /**
@@ -303,6 +340,8 @@ export const checkOut = async (
     const computed = await computeWorkedAcrossSegments(record.segments);
     record.total_worked_minutes = computed.total_worked_minutes;
     record.overtime_minutes = computed.overtime_minutes;
+    record.total_break_minutes = computed.total_break_minutes;
+    record.break_minutes_by_type = computed.break_minutes_by_type;
     syncAliasesFromSegments(record);
     // Mongoose doesn't always notice in-place mutations of nested subdocs
     // (lastSeg.check_out = …). Explicitly mark the path dirty so the save
@@ -494,6 +533,8 @@ export const patchAttendance = async (
         const computed = await computeWorkedAcrossSegments(record.segments ?? []);
         record.total_worked_minutes = computed.total_worked_minutes;
         record.overtime_minutes = computed.overtime_minutes;
+        record.total_break_minutes = computed.total_break_minutes;
+        record.break_minutes_by_type = computed.break_minutes_by_type;
         record.flagged_for_correction = false;
     }
 
@@ -782,6 +823,8 @@ export const approveCorrection = async (
         const computed = await computeWorkedAcrossSegments(record.segments ?? []);
         record.total_worked_minutes = computed.total_worked_minutes;
         record.overtime_minutes = computed.overtime_minutes;
+        record.total_break_minutes = computed.total_break_minutes;
+        record.break_minutes_by_type = computed.break_minutes_by_type;
         if (record.status === 'incomplete') record.status = 'present';
         record.flagged_for_correction = false;
     }
