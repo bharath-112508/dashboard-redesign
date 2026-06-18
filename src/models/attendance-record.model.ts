@@ -65,7 +65,7 @@ export interface AttendanceSegment {
     check_in: AttendancePunch;
     check_out: AttendancePunch | null;
     /** Breaks taken during this work session. Subtracted from worked time. */
-    breaks?: BreakSession[];
+    breaks: BreakSession[];
 }
 
 export interface AttendanceRecordDocument extends Document {

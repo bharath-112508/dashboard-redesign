@@ -33,9 +33,8 @@ describe('AttendanceRecord break fields', () => {
             ],
             status: 'present',
         });
-        expect(doc.segments[0]!.breaks!).toBeDefined();
-        expect(doc.segments[0]!.breaks![0]!.break_type).toBe('lunch');
-        expect(doc.segments[0]!.breaks![0]!.start.source).toBe('slack');
-        expect(doc.segments[0]!.breaks![0]!.end).toBeNull();
+        expect(doc.segments[0]!.breaks[0]!.break_type).toBe('lunch');
+        expect(doc.segments[0]!.breaks[0]!.start.source).toBe('slack');
+        expect(doc.segments[0]!.breaks[0]!.end).toBeNull();
     });
 });

@@ -222,7 +222,7 @@ export const checkIn = async (
         const created = await AttendanceRecord.create({
             user_id,
             local_date,
-            segments: [{ check_in: punch, check_out: null }],
+            segments: [{ check_in: punch, check_out: null, breaks: [] }],
             check_in: punch,
             check_out: null,
             status: 'present',
@@ -242,10 +242,10 @@ export const checkIn = async (
                 }
                 if (segs.length === 0) {
                     // EOD placeholder row — seed the first segment.
-                    existing.segments = [{ check_in: punch, check_out: null }];
+                    existing.segments = [{ check_in: punch, check_out: null, breaks: [] }];
                 } else {
                     // All previous segments are closed — append a fresh one.
-                    existing.segments.push({ check_in: punch, check_out: null });
+                    existing.segments.push({ check_in: punch, check_out: null, breaks: [] });
                 }
                 existing.status = 'present';
                 existing.flagged_for_correction = false;
@@ -464,7 +464,7 @@ export const patchAttendance = async (
             record.segments[0]!.check_in = newIn;
             record.markModified('segments');
         } else {
-            record.segments = [{ check_in: newIn, check_out: null }];
+            record.segments = [{ check_in: newIn, check_out: null, breaks: [] }];
         }
     }
     if (patch.check_out?.time) {
@@ -736,6 +736,7 @@ export const approveCorrection = async (
                           ip: outMeta?.ip ?? '',
                       }
                     : null,
+                breaks: old?.breaks ?? [],
             };
         });
         record.markModified('segments');
@@ -757,7 +758,7 @@ export const approveCorrection = async (
                 record.segments[0]!.check_in = newIn;
                 record.markModified('segments');
             } else {
-                record.segments = [{ check_in: newIn, check_out: null }];
+                record.segments = [{ check_in: newIn, check_out: null, breaks: [] }];
             }
             record.local_date = utcDateToLocalDate(changes.check_in);
         }
