@@ -363,4 +363,25 @@ describe('ensureBlobCorsRules', () => {
         await azure.ensureBlobCorsRules(['*', '', '  ']);
         expect(setPropertiesMock).not.toHaveBeenCalled();
     });
+
+    it('MERGES our origins into the existing CORS rules instead of replacing them', async () => {
+        // A second backend (e.g. prod) already set its own origin; local must
+        // not wipe it. The result is the union.
+        getPropertiesMock.mockResolvedValueOnce({
+            logging: { read: true },
+            cors: [{ allowedOrigins: 'https://prod.example.com', allowedMethods: 'GET,HEAD,PUT,OPTIONS' }],
+        } as never);
+        await azure.ensureBlobCorsRules(['http://localhost:5173']);
+        const props = setPropertiesMock.mock.calls[0]![0] as { cors: { allowedOrigins: string }[] };
+        expect(props.cors[0].allowedOrigins).toBe('http://localhost:5173,https://prod.example.com');
+    });
+
+    it('skips the write when a single rule already covers exactly our origins', async () => {
+        getPropertiesMock.mockResolvedValueOnce({
+            logging: { read: true },
+            cors: [{ allowedOrigins: 'http://localhost:5173', allowedMethods: 'GET,HEAD,PUT,OPTIONS' }],
+        } as never);
+        await azure.ensureBlobCorsRules(['http://localhost:5173']);
+        expect(setPropertiesMock).not.toHaveBeenCalled();
+    });
 });

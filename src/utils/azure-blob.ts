@@ -142,24 +142,52 @@ export const isAzureConfigured = (): boolean =>
  * it on boot from the same trusted-origin list the API uses (`CORS_ORIGINS`)
  * so a fresh storage account / new environment Just Works after deploy.
  *
- * Idempotent: re-applies the same single rule each boot. `getProperties`
- * first so we replace only the `cors` block and preserve logging/metrics.
- * Caller should wrap in try/catch — a failure here must never crash boot.
+ * **MERGES** our origins into whatever is already configured rather than
+ * replacing — several backends (e.g. local dev + the deployed prod app)
+ * can point at the same storage account, and a plain replace would have
+ * each boot clobber the other's origins, breaking uploads from all but the
+ * last-booted instance. We union the existing allowed origins with ours.
+ *
+ * Idempotent: skips the write entirely when our origins are already covered
+ * by a single matching rule, so steady-state boots don't churn the config.
+ * `getProperties` first so we preserve logging/metrics. Caller should wrap
+ * in try/catch — a failure here must never crash boot.
  */
+const BLOB_CORS_METHODS = 'GET,HEAD,PUT,OPTIONS';
+
+const splitOrigins = (csv: string | undefined): string[] =>
+    (csv ?? '')
+        .split(',')
+        .map((o) => o.trim())
+        .filter((o) => o && o !== '*');
+
 export const ensureBlobCorsRules = async (origins: readonly string[]): Promise<void> => {
-    const cleaned = [...new Set(origins.map((o) => o.trim()).filter(Boolean))];
     // A bare '*' wildcard would let any site PUT to a leaked SAS; require
     // explicit origins. Nothing to do if none are configured.
-    const explicit = cleaned.filter((o) => o !== '*');
-    if (explicit.length === 0) return;
+    const desired = [...new Set(origins.map((o) => o.trim()).filter((o) => o && o !== '*'))];
+    if (desired.length === 0) return;
 
     const { serviceClient } = getContext();
     const props = await serviceClient.getProperties();
+    const existing = props.cors ?? [];
+
+    // Union of every origin already configured (across all rules) with ours.
+    const existingOrigins = existing.flatMap((r) => splitOrigins(r.allowedOrigins));
+    const merged = [...new Set([...existingOrigins, ...desired])].sort();
+
+    // Skip the write when a single rule already covers exactly the merged
+    // set with our method list — avoids needless config churn on every boot.
+    const already =
+        existing.length === 1 &&
+        existing[0]?.allowedMethods === BLOB_CORS_METHODS &&
+        JSON.stringify(splitOrigins(existing[0]?.allowedOrigins).sort()) === JSON.stringify(merged);
+    if (already) return;
+
     props.cors = [
         {
-            allowedOrigins: explicit.join(','),
+            allowedOrigins: merged.join(','),
             // PUT to upload, GET/HEAD to display, OPTIONS for the preflight.
-            allowedMethods: 'GET,HEAD,PUT,OPTIONS',
+            allowedMethods: BLOB_CORS_METHODS,
             allowedHeaders: '*',
             exposedHeaders: '*',
             maxAgeInSeconds: 3600,
