@@ -178,7 +178,7 @@ describe('buildHomeDashboardView — redesigned layout', () => {
         expect(view.blocks.some((b) => Array.isArray((b as { fields?: unknown }).fields))).toBe(false);
     });
 
-    it('pending row uses an image accessory when avatar_url present', () => {
+    it('pending row uses a small left avatar (context image) when avatar_url present', () => {
         const reviewer: DashboardUser = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' };
         const view = buildHomeDashboardView(
             base({
@@ -198,11 +198,22 @@ describe('buildHomeDashboardView — redesigned layout', () => {
             }),
             reviewer
         ) as { blocks: Array<Record<string, unknown>> };
+        // Small left avatar = a context block carrying an image element with
+        // the row's avatar URL (NOT a section accessory, which renders large
+        // on the right).
         const withImg = view.blocks.find(
-            (b) => b.type === 'section' && (b as { accessory?: { type?: string } }).accessory?.type === 'image'
+            (b) =>
+                b.type === 'context' &&
+                ((b as { elements?: Array<{ type?: string; image_url?: string }> }).elements ?? []).some(
+                    (e) => e.type === 'image' && e.image_url === 'https://a/1.png'
+                )
         );
         expect(withImg).toBeTruthy();
-        expect(JSON.stringify(withImg)).toContain('https://a/1.png');
+        // And it must not be a large right-side section accessory.
+        const sectionAccessory = view.blocks.find(
+            (b) => b.type === 'section' && (b as { accessory?: { type?: string } }).accessory?.type === 'image'
+        );
+        expect(sectionAccessory).toBeFalsy();
     });
 
     it('pending row falls back to 👤 (no image accessory) when avatar_url null, keeps Approve/Reject', () => {

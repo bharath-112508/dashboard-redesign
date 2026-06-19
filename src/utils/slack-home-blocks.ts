@@ -43,15 +43,21 @@ const actionButton = (text: string, actionId: string, style?: 'primary' | 'dange
 });
 
 const header = (text: string) => ({ type: 'header', text: { type: 'plain_text', text, emoji: true } });
-/** A row with an avatar image accessory, or 👤-prefixed text when none. */
-const avatarRow = (text: string, avatarUrl: string | null | undefined, altText: string) =>
-    avatarUrl
-        ? {
-              type: 'section',
-              text: { type: 'mrkdwn', text },
-              accessory: { type: 'image', image_url: avatarUrl, alt_text: altText },
-          }
-        : { type: 'section', text: { type: 'mrkdwn', text: `👤 ${text}` } };
+/**
+ * A row with a small avatar on the LEFT, inline with the text. Uses a context
+ * block (image element ~20px, left-aligned) rather than a section accessory
+ * (which renders a large image on the right). Falls back to a 👤 prefix when
+ * there's no avatar.
+ */
+const avatarRow = (text: string, avatarUrl: string | null | undefined, altText: string) => ({
+    type: 'context',
+    elements: avatarUrl
+        ? [
+              { type: 'image', image_url: avatarUrl, alt_text: altText },
+              { type: 'mrkdwn', text },
+          ]
+        : [{ type: 'mrkdwn', text: `👤 ${text}` }],
+});
 /** Mini-avatar context elements: image + name, ~5 people per context block. */
 const avatarContext = (
     rows: Array<{ avatar_url?: string | null; label: string; alt: string }>
