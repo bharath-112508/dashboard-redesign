@@ -47,6 +47,14 @@ describe('buildApplyLeaveModal', () => {
         expect(view.blocks[1]!.element!.initial_date).toBe('2026-06-19');
         expect(view.blocks[2]!.element!.initial_date).toBe('2026-06-19');
     });
+
+    it('labels leave-type option with zero balance as "Name — 0 left"', () => {
+        const typesWithZero = [{ id: 'x', code: 'CL', name: 'Casual Leave', available: 0 }];
+        const viewWithZero = buildApplyLeaveModal(typesWithZero, '2026-06-19') as {
+            blocks: Array<{ element?: { options?: Array<{ text: { text: string } }> } }>;
+        };
+        expect(viewWithZero.blocks[0]!.element!.options![0]!.text.text).toBe('Casual Leave — 0 left');
+    });
 });
 
 describe('parseApplyLeaveSubmission', () => {
@@ -78,6 +86,9 @@ describe('parseApplyLeaveSubmission', () => {
         const parsed = parseApplyLeaveSubmission(makeView('first_half'));
         expect(parsed.is_half_day).toBe(true);
         expect(parsed.half_day_slot).toBe('first_half');
+        const parsed2 = parseApplyLeaveSubmission(makeView('second_half'));
+        expect(parsed2.is_half_day).toBe(true);
+        expect(parsed2.half_day_slot).toBe('second_half');
     });
 });
 
