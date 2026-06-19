@@ -1,6 +1,7 @@
 import { APP_BASE_URL } from '../config/server.config.js';
 import { attendanceHeaderBlocks } from './slack-attendance-blocks.js';
 import dayjs, { DEFAULT_TIMEZONE } from './date.js';
+import { SLACK_ACTION_APPLY_LEAVE_OPEN } from '../constants/slack.js';
 import {
     ATT_ROSTER_CAP,
     PENDING_CAP,
@@ -26,6 +27,19 @@ const context = (text: string) => ({ type: 'context', elements: [{ type: 'mrkdwn
 const linkButton = (text: string, url: string) => ({
     type: 'actions',
     elements: [{ type: 'button', text: { type: 'plain_text', text }, url }],
+});
+
+/** A non-link action button (opens a modal via its action_id). */
+const actionButton = (text: string, actionId: string, style?: 'primary' | 'danger') => ({
+    type: 'actions',
+    elements: [
+        {
+            type: 'button',
+            text: { type: 'plain_text', text },
+            action_id: actionId,
+            ...(style ? { style } : {}),
+        },
+    ],
 });
 
 const header = (text: string) => ({ type: 'header', text: { type: 'plain_text', text, emoji: true } });
@@ -105,6 +119,7 @@ const myLeavesBlocks = (data: HomeDashboardData): Array<Record<string, unknown>>
             )
         );
     }
+    blocks.push(actionButton('➕ Apply for leave', SLACK_ACTION_APPLY_LEAVE_OPEN, 'primary'));
     blocks.push(linkButton('Open leaves →', appUrl('/leaves')));
     return blocks;
 };

@@ -10,14 +10,20 @@ import {
     SLACK_ACTION_BREAK_START_TEA,
     SLACK_ACTION_BREAK_START_OTHER,
     SLACK_ACTION_BREAK_END,
+    SLACK_ACTION_APPLY_LEAVE_OPEN,
+    SLACK_CALLBACK_APPLY_LEAVE,
 } from '../constants/slack.js';
-import { approveLeave, rejectLeave } from '../services/leave-request.service.js';
+import { approveLeave, rejectLeave, applyLeave } from '../services/leave-request.service.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
 import { fetchSlackUserInfo, resolveSlackUser } from '../services/slack-user-mapping.service.js';
-import { slackContextFrom, publishHomeView } from '../utils/slack.js';
+import { slackContextFrom, publishHomeView, openSlackModal, postSlackMessage } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
+import { loadApplyLeaveModalTypes } from '../services/slack-leave.service.js';
+import { buildApplyLeaveModal, parseApplyLeaveSubmission, appErrorToModalErrors } from '../utils/slack-leave-blocks.js';
+import { applyLeaveBodySchema } from '../validators/leave-request.validator.js';
+import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import { publish } from '../services/realtime.service.js';
 import { REALTIME_TOPICS } from '../constants/realtime.js';
@@ -52,6 +58,13 @@ interface BlockActionPayload {
     actions: Array<{ action_id: string; value?: string }>;
     response_url?: string;
     view?: { type?: string };
+    trigger_id?: string;
+}
+
+interface ViewSubmissionPayload {
+    type: 'view_submission';
+    user: { id: string };
+    view: { callback_id?: string; state?: { values?: unknown } };
 }
 
 const ephemeral = (text: string) => ({ response_type: 'ephemeral' as const, text });
@@ -104,6 +117,32 @@ const resolveCaller = async (slackUserId: string) => {
     });
 };
 
+/** Every role except `client` holds `leave_request.write`. The Slack path
+ *  bypasses Express `requirePermission`, so gate here the same way. */
+const canApplyLeave = (role: RoleType): boolean => role !== ROLES.CLIENT;
+
+/**
+ * Open the Apply-for-leave modal. Shared by the App Home button and the
+ * `/applyleave` slash command. Returns an ephemeral text on any pre-open
+ * failure (no Slack context, no active types) so the caller can surface it;
+ * returns null once the modal open has been dispatched.
+ */
+const openApplyLeaveModal = async (
+    triggerId: string | undefined,
+    user: { _id: Types.ObjectId }
+): Promise<string | null> => {
+    if (!triggerId) return 'Sorry, something went wrong.';
+    const settings = await getOrInitSettings();
+    const ctx = slackContextFrom(settings.slack);
+    if (!ctx) return 'Slack is not configured.';
+    const types = await loadApplyLeaveModalTypes(user._id);
+    if (types.length === 0) return 'No leave types are available to apply for.';
+    const today = dayjs().tz(DEFAULT_TIMEZONE).format('YYYY-MM-DD');
+    const view = buildApplyLeaveModal(types, today);
+    const opened = await openSlackModal(ctx, triggerId, view);
+    return opened ? null : 'Could not open the leave form — please try again.';
+};
+
 /**
  * Re-render a user's App Home tab from their current attendance state.
  * Fire-and-forget — non-throwing; logs via publishHomeView's own policy.
@@ -127,6 +166,86 @@ const renderAttendanceHome = async (
 
 export { renderAttendanceHome };
 
+/**
+ * Apply-for-leave modal submit. Maps `view.state.values` → the existing
+ * `applyLeaveBodySchema` (reusing the web form's validation verbatim), calls
+ * `applyLeave`, and either clears the modal (empty 200) or returns inline
+ * field errors (`response_action: errors`). On success, fires a DM confirmation
+ * + Home re-publish fire-and-forget (the balance reservation changed).
+ *
+ * MUST respond within Slack's 3s window — `applyLeave` is awaited (we need the
+ * outcome to decide the response), the side-effects are not.
+ */
+const handleApplyLeaveSubmission: RequestHandler = async (req, res) => {
+    const payload = JSON.parse((req.body as { payload: string }).payload) as ViewSubmissionPayload;
+    const slackUserId = payload.user.id;
+
+    const user = await resolveCaller(slackUserId);
+    if (!user) {
+        res.status(200).json({
+            response_action: 'errors',
+            errors: { reason: "Couldn't identify your Viljetech account — contact an admin." },
+        });
+        return;
+    }
+    if (!canApplyLeave(user.role as RoleType)) {
+        res.status(200).json({ response_action: 'errors', errors: { reason: "Your role can't apply for leave." } });
+        return;
+    }
+
+    // Reuse the HTTP validator so Slack input gets identical validation +
+    // defaults. Field-level Zod issues map to the matching block_id.
+    const parsed = applyLeaveBodySchema.safeParse(parseApplyLeaveSubmission(payload.view));
+    if (!parsed.success) {
+        const errors: Record<string, string> = {};
+        for (const issue of parsed.error.issues) {
+            const field = String(issue.path[0] ?? '');
+            // Zod field names map 1:1 to the modal block_ids except the type id.
+            const block = field === 'leave_type_id' ? 'leave_type' : field;
+            errors[block] = issue.message;
+        }
+        // Guarantee at least one error references a real block.
+        if (Object.keys(errors).length === 0) errors.reason = 'Please check the form and try again.';
+        res.status(200).json({ response_action: 'errors', errors });
+        return;
+    }
+
+    const audit = buildAuditContext(req, {
+        overrideActor: { actor_id: user._id, actor_role: user.role as RoleType },
+    });
+
+    try {
+        await applyLeave(parsed.data, { id: user._id, role: user.role as RoleType, audit });
+    } catch (err: unknown) {
+        const code = (err as { code?: string })?.code;
+        const message = (err as { message?: string })?.message ?? 'Could not submit your leave.';
+        logger.warn({ err, code, reason: 'apply_leave_submit_failed' }, 'Slack apply-leave submission rejected');
+        res.status(200).json({ response_action: 'errors', errors: appErrorToModalErrors(code, message) });
+        return;
+    }
+
+    // Success — clear the modal, then fire side-effects. Slack actions bypass
+    // the HTTP after-write middleware, so emit the realtime events explicitly.
+    res.status(200).json({});
+    // Fire-and-forget side-effects — the response is already sent, so isolate
+    // them in their own async frame; a settings-read rejection here must not
+    // surface as a post-response unhandled rejection.
+    void (async () => {
+        publish([REALTIME_TOPICS.LEAVES, REALTIME_TOPICS.LEAVE_BALANCES]);
+        const settings = await getOrInitSettings();
+        const ctx = slackContextFrom(settings.slack);
+        if (ctx) {
+            void postSlackMessage(ctx, {
+                channel: slackUserId,
+                text: '✅ Your leave request was submitted and is pending approval.',
+                context: 'apply-leave-confirm-dm',
+            });
+        }
+        void renderAttendanceHome(slackUserId, user);
+    })();
+    return;
+};
+
 export const handleInteractive: RequestHandler = async (req, res) => {
     const rawPayload = (req.body as { payload?: unknown })?.payload;
     if (typeof rawPayload !== 'string') {
@@ -138,7 +257,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
         return;
     }
 
-    let payload: BlockActionPayload;
+    let payload: BlockActionPayload | ViewSubmissionPayload;
     try {
         payload = JSON.parse(rawPayload);
     } catch {
@@ -147,6 +266,15 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             'Slack interactive payload JSON.parse failed'
         );
         res.status(200).json(ephemeral('Sorry, something went wrong.'));
+        return;
+    }
+
+    if (payload.type === 'view_submission') {
+        if (payload.view?.callback_id === SLACK_CALLBACK_APPLY_LEAVE) {
+            await handleApplyLeaveSubmission(req, res, () => undefined);
+            return;
+        }
+        res.status(200).json({});
         return;
     }
 
@@ -269,6 +397,24 @@ export const handleInteractive: RequestHandler = async (req, res) => {
         const user = await resolveCaller(payload.user.id);
         res.status(200).json({});
         if (user) void renderAttendanceHome(payload.user.id, user);
+        return;
+    }
+
+    if (action.action_id === SLACK_ACTION_APPLY_LEAVE_OPEN) {
+        const user = await resolveCaller(payload.user.id);
+        if (!user) {
+            respond(
+                "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin."
+            );
+            return;
+        }
+        if (!canApplyLeave(user.role as RoleType)) {
+            respond("Your role can't apply for leave.");
+            return;
+        }
+        const err = await openApplyLeaveModal(payload.trigger_id, user);
+        if (err) respond(err);
+        else res.status(200).json({});
         return;
     }
 
@@ -411,6 +557,7 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
         res.status(200).json(ephemeral('Missing Slack user id.'));
         return;
     }
+    const triggerId = (req.body as { trigger_id?: string })?.trigger_id;
 
     const user = await resolveCaller(slackUserId);
     if (!user) {
@@ -423,6 +570,15 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
     }
 
     try {
+        if (command === 'applyleave') {
+            if (!canApplyLeave(user.role as RoleType)) {
+                res.status(200).json(ephemeral("Your role can't apply for leave."));
+                return;
+            }
+            const err = await openApplyLeaveModal(triggerId, user);
+            res.status(200).json(err ? ephemeral(err) : {});
+            return;
+        }
         if (command === 'checkin') {
             // Slack has no QR / no geolocation — record as a manual
             // check-in. The attendance service still respects

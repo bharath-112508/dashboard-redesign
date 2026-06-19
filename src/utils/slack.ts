@@ -4,6 +4,7 @@ import {
     SLACK_API_POST_MESSAGE,
     SLACK_API_PUBLISH_VIEW,
     SLACK_API_UPDATE_MESSAGE,
+    SLACK_API_VIEWS_OPEN,
     SLACK_REQUEST_TIMEOUT_MS,
     SLACK_TEXT_MAX,
 } from '../constants/slack.js';
@@ -404,6 +405,58 @@ export const postOrUpdateSlackMessage = async (
                 : `Slack ${isUpdate ? 'chat.update' : 'chat.postMessage'} threw`
         );
         return { success: false };
+    } finally {
+        clearTimeout(timeoutId);
+    }
+};
+
+/**
+ * Open an interactive modal via `views.open`. Used by the Apply-for-leave
+ * flow (App Home button + `/applyleave`). Non-throwing, same dispatch policy
+ * as `publishHomeView`: logs `SLACK_DISPATCH_FAILED` at warn and returns a
+ * boolean.
+ *
+ * The common failure is `expired_trigger_id` — Slack `trigger_id`s are valid
+ * for ~3s, so the caller must reach this with minimal upstream work. A false
+ * return means the modal never opened; the caller falls back to an ephemeral
+ * "please try again".
+ */
+export const openSlackModal = async (ctx: SlackContext, triggerId: string, view: unknown): Promise<boolean> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
+    try {
+        const response = await fetch(SLACK_API_VIEWS_OPEN, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                Authorization: `Bearer ${ctx.botToken}`,
+            },
+            body: JSON.stringify({ trigger_id: triggerId, view }),
+            signal: controller.signal,
+        });
+        if (!response.ok) {
+            logger.warn(
+                { code: ERROR_CODES.SLACK_DISPATCH_FAILED, dispatch_event: 'apply-leave-modal-open', http_status: response.status },
+                'Slack views.open returned a non-2xx status'
+            );
+            return false;
+        }
+        const body = (await response.json()) as { ok: boolean; error?: string };
+        if (!body.ok) {
+            logger.warn(
+                { code: ERROR_CODES.SLACK_DISPATCH_FAILED, dispatch_event: 'apply-leave-modal-open', slack_error: body.error },
+                'Slack views.open rejected the request'
+            );
+            return false;
+        }
+        return true;
+    } catch (err) {
+        const isAbort = (err as { name?: string })?.name === 'AbortError';
+        logger.warn(
+            { err, code: ERROR_CODES.SLACK_DISPATCH_FAILED, dispatch_event: 'apply-leave-modal-open', timed_out: isAbort },
+            isAbort ? 'Slack views.open timed out' : 'Slack views.open threw'
+        );
+        return false;
     } finally {
         clearTimeout(timeoutId);
     }
