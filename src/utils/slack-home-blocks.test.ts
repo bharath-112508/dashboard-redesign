@@ -261,3 +261,15 @@ describe('buildHomeDashboardView — redesigned layout', () => {
         expect(JSON.stringify(view)).toContain('No leave balance');
     });
 });
+
+describe('App Home — apply for leave', () => {
+    it('renders an Apply-for-leave button with the open action_id', async () => {
+        const { SLACK_ACTION_APPLY_LEAVE_OPEN } = await import('../constants/slack.js');
+        const view = buildHomeDashboardView(
+            base({ my_balances: [{ leave_type: { code: 'CL' }, available: 8 }] }),
+            base({}).user
+        ) as { blocks: Array<Record<string, unknown>> };
+        const actionIds = allActionIds(view);
+        expect(actionIds).toContain(SLACK_ACTION_APPLY_LEAVE_OPEN);
+    });
+});
