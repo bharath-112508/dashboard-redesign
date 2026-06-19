@@ -71,6 +71,9 @@ export const SLACK_API_PUBLISH_VIEW = `${SLACK_API_BASE}/views.publish`;
 // from a Viljetech account email without an interactive payload to hand us
 // the id. https://api.slack.com/methods/users.lookupByEmail
 export const SLACK_API_LOOKUP_BY_EMAIL = `${SLACK_API_BASE}/users.lookupByEmail`;
+// Modal — open an interactive form (Apply-for-leave). Same bot-token auth.
+// https://api.slack.com/methods/views.open
+export const SLACK_API_VIEWS_OPEN = `${SLACK_API_BASE}/views.open`;
 
 /**
  * Network timeout for a single Slack API call. Slack's docs target ~3s
@@ -106,3 +109,17 @@ export const SLACK_ACTION_BREAK_START_LUNCH = 'break_start_lunch';
 export const SLACK_ACTION_BREAK_START_TEA = 'break_start_tea';
 export const SLACK_ACTION_BREAK_START_OTHER = 'break_start_other';
 export const SLACK_ACTION_BREAK_END = 'break_end';
+
+// ─── Apply-for-leave modal ids ────────────────────────────────────────────
+//
+// `apply_leave_open` is the action_id of the App Home button AND the value the
+// open-modal branch keys off. `apply_leave_submit` is the modal's callback_id
+// the view_submission branch routes on. The block ids are the `state.values`
+// keys read back on submit — they MUST match the ids used in the builder.
+export const SLACK_ACTION_APPLY_LEAVE_OPEN = 'apply_leave_open';
+export const SLACK_CALLBACK_APPLY_LEAVE = 'apply_leave_submit';
+export const SLACK_BLOCK_LEAVE_TYPE = 'leave_type';
+export const SLACK_BLOCK_START_DATE = 'start_date';
+export const SLACK_BLOCK_END_DATE = 'end_date';
+export const SLACK_BLOCK_HALF_DAY = 'half_day';
+export const SLACK_BLOCK_REASON = 'reason';
