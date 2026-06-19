@@ -228,18 +228,23 @@ const handleApplyLeaveSubmission: RequestHandler = async (req, res) => {
     // Success — clear the modal, then fire side-effects. Slack actions bypass
     // the HTTP after-write middleware, so emit the realtime events explicitly.
     res.status(200).json({});
-    publish([REALTIME_TOPICS.LEAVES, REALTIME_TOPICS.LEAVE_BALANCES]);
-
-    const settings = await getOrInitSettings();
-    const ctx = slackContextFrom(settings.slack);
-    if (ctx) {
-        void postSlackMessage(ctx, {
-            channel: slackUserId,
-            text: '✅ Your leave request was submitted and is pending approval.',
-            context: 'apply-leave-confirm-dm',
-        });
-    }
-    void renderAttendanceHome(slackUserId, user);
+    // Fire-and-forget side-effects — the response is already sent, so isolate
+    // them in their own async frame; a settings-read rejection here must not
+    // surface as a post-response unhandled rejection.
+    void (async () => {
+        publish([REALTIME_TOPICS.LEAVES, REALTIME_TOPICS.LEAVE_BALANCES]);
+        const settings = await getOrInitSettings();
+        const ctx = slackContextFrom(settings.slack);
+        if (ctx) {
+            void postSlackMessage(ctx, {
+                channel: slackUserId,
+                text: '✅ Your leave request was submitted and is pending approval.',
+                context: 'apply-leave-confirm-dm',
+            });
+        }
+        void renderAttendanceHome(slackUserId, user);
+    })();
+    return;
 };
 
 export const handleInteractive: RequestHandler = async (req, res) => {
