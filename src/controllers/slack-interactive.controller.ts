@@ -21,7 +21,7 @@ import { slackContextFrom, publishHomeView, openSlackModal, postSlackMessage } f
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
 import { loadApplyLeaveModalTypes } from '../services/slack-leave.service.js';
-import { buildApplyLeaveModal, parseApplyLeaveSubmission, appErrorToModalErrors } from '../utils/slack-leave-blocks.js';
+import { buildApplyLeaveModal, parseApplyLeaveSubmission } from '../utils/slack-leave-blocks.js';
 import { applyLeaveBodySchema } from '../validators/leave-request.validator.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import { buildAuditContext } from '../utils/audit-context.js';
@@ -214,26 +214,39 @@ const handleApplyLeaveSubmission: RequestHandler = async (req, res) => {
         overrideActor: { actor_id: user._id, actor_role: user.role as RoleType },
     });
 
-    try {
-        await applyLeave(parsed.data, { id: user._id, role: user.role as RoleType, audit });
-    } catch (err: unknown) {
-        const code = (err as { code?: string })?.code;
-        const message = (err as { message?: string })?.message ?? 'Could not submit your leave.';
-        logger.warn({ err, code, reason: 'apply_leave_submit_failed' }, 'Slack apply-leave submission rejected');
-        res.status(200).json({ response_action: 'errors', errors: appErrorToModalErrors(code, message) });
-        return;
-    }
-
-    // Success — clear the modal, then fire side-effects. Slack actions bypass
-    // the HTTP after-write middleware, so emit the realtime events explicitly.
+    // ACK FIRST. `view_submission` has a hard ~3-second window: Slack shows
+    // "We had some trouble connecting" if the response is late. `applyLeave`
+    // does real DB work AND awaits notification dispatch (in-app + email +
+    // Slack DM), which blows past 3s on Azure — the leave was created but the
+    // user saw a connection error. So close the modal immediately, then run
+    // applyLeave off the critical path and report the outcome by DM.
+    //
+    // Trade-off: once the modal is acked closed, Slack can no longer render
+    // inline field errors, so business failures (overlap / balance / advance
+    // notice) are delivered as a DM instead of inline. Cheap field validation
+    // (Zod, above) still surfaces inline because it runs before this ack.
     res.status(200).json({});
-    // Fire-and-forget side-effects — the response is already sent, so isolate
-    // them in their own async frame; a settings-read rejection here must not
-    // surface as a post-response unhandled rejection.
     void (async () => {
-        publish([REALTIME_TOPICS.LEAVES, REALTIME_TOPICS.LEAVE_BALANCES]);
         const settings = await getOrInitSettings();
         const ctx = slackContextFrom(settings.slack);
+        try {
+            await applyLeave(parsed.data, { id: user._id, role: user.role as RoleType, audit });
+        } catch (err: unknown) {
+            const code = (err as { code?: string })?.code;
+            const message = (err as { message?: string })?.message ?? 'Could not submit your leave.';
+            logger.warn({ err, code, reason: 'apply_leave_submit_failed' }, 'Slack apply-leave submission rejected');
+            if (ctx) {
+                void postSlackMessage(ctx, {
+                    channel: slackUserId,
+                    text: `⚠️ Couldn't submit your leave: ${message}`,
+                    context: 'apply-leave-error-dm',
+                });
+            }
+            return;
+        }
+        // Slack actions bypass the HTTP after-write middleware, so emit the
+        // realtime events explicitly.
+        publish([REALTIME_TOPICS.LEAVES, REALTIME_TOPICS.LEAVE_BALANCES]);
         if (ctx) {
             void postSlackMessage(ctx, {
                 channel: slackUserId,

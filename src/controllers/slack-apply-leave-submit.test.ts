@@ -30,6 +30,7 @@ vi.mock('../utils/slack.js', async (orig) => ({
 import { getOrInitSettings } from '../services/settings.service.js';
 import { resolveSlackUser } from '../services/slack-user-mapping.service.js';
 import { applyLeave } from '../services/leave-request.service.js';
+import { postSlackMessage } from '../utils/slack.js';
 import { handleInteractive } from './slack-interactive.controller.js';
 
 const makeRes = () => {
@@ -59,7 +60,7 @@ const submissionPayload = () => ({
 afterEach(() => vi.clearAllMocks());
 
 describe('apply-leave view_submission', () => {
-    it('calls applyLeave with the parsed body and clears the modal on success', async () => {
+    it('acks the modal immediately, then applies async and DMs success', async () => {
         const submitUser = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Asha' };
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
         vi.mocked(resolveSlackUser).mockResolvedValue(submitUser as never);
@@ -69,7 +70,12 @@ describe('apply-leave view_submission', () => {
         const res = makeRes();
         await handleInteractive(req as never, res as never, () => undefined);
 
-        expect(vi.mocked(applyLeave)).toHaveBeenCalledTimes(1);
+        // The modal is acked closed synchronously — within Slack's 3s window —
+        // BEFORE the slow applyLeave runs.
+        expect(res.json).toHaveBeenCalledWith({});
+
+        // applyLeave runs in the fire-and-forget frame; wait for it.
+        await vi.waitFor(() => expect(vi.mocked(applyLeave)).toHaveBeenCalledTimes(1));
         const [body, caller] = vi.mocked(applyLeave).mock.calls[0]!;
         expect(body).toMatchObject({
             leave_type_id: '64b2f0000000000000000001',
@@ -80,18 +86,61 @@ describe('apply-leave view_submission', () => {
         });
         expect(caller).toMatchObject({ id: submitUser._id, role: 'employee' });
         expect((caller as { audit?: unknown }).audit).toBeDefined();
-        expect(res.json).toHaveBeenCalledWith({});
+
+        // Success is reported via a DM (the modal is already closed).
+        await vi.waitFor(() =>
+            expect(vi.mocked(postSlackMessage)).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ channel: 'U1', context: 'apply-leave-confirm-dm' })
+            )
+        );
     });
 
-    it('returns response_action errors mapped to the offending block on AppError', async () => {
+    it('acks the modal and DMs the error when applyLeave throws a business error', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
         vi.mocked(resolveSlackUser).mockResolvedValue({ _id: new Types.ObjectId(), role: 'employee' } as never);
-        vi.mocked(applyLeave).mockRejectedValue(AppError.conflict('overlaps', ERROR_CODES.LEAVE_OVERLAP));
+        vi.mocked(applyLeave).mockRejectedValue(
+            AppError.conflict('overlaps with an existing leave', ERROR_CODES.LEAVE_OVERLAP)
+        );
 
         const req = { body: { payload: JSON.stringify(submissionPayload()) }, headers: {} };
         const res = makeRes();
         await handleInteractive(req as never, res as never, () => undefined);
 
-        expect(res.json).toHaveBeenCalledWith({ response_action: 'errors', errors: { start_date: 'overlaps' } });
+        // Still a clean ack (NOT response_action errors — the modal is closed).
+        expect(res.json).toHaveBeenCalledWith({});
+
+        await vi.waitFor(() =>
+            expect(vi.mocked(postSlackMessage)).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({
+                    channel: 'U1',
+                    context: 'apply-leave-error-dm',
+                    text: expect.stringContaining('overlaps with an existing leave'),
+                })
+            )
+        );
+    });
+
+    it('returns inline field errors (no ack-close) when Zod validation fails — never calls applyLeave', async () => {
+        vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
+        vi.mocked(resolveSlackUser).mockResolvedValue({ _id: new Types.ObjectId(), role: 'employee' } as never);
+
+        // start_date after end_date — Zod (instant) rejects before any ack.
+        const bad = submissionPayload();
+        bad.view.state.values.start_date.start_date.selected_date = '2026-07-09';
+        bad.view.state.values.end_date.end_date.selected_date = '2026-07-01';
+
+        const req = { body: { payload: JSON.stringify(bad) }, headers: {} };
+        const res = makeRes();
+        await handleInteractive(req as never, res as never, () => undefined);
+
+        expect(res.json).toHaveBeenCalledWith(
+            expect.objectContaining({
+                response_action: 'errors',
+                errors: expect.objectContaining({ start_date: expect.any(String) }),
+            })
+        );
+        expect(vi.mocked(applyLeave)).not.toHaveBeenCalled();
     });
 });
