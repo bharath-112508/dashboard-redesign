@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const findOneMock = vi.fn();
 const findByIdAndUpdateMock = vi.fn();
+const updateManyMock = vi.fn();
 
 vi.mock('../models/user.model.js', () => ({
     User: {
         findOne: findOneMock,
         findByIdAndUpdate: findByIdAndUpdateMock,
+        updateMany: updateManyMock,
     },
 }));
 
@@ -38,6 +40,8 @@ describe('resolveSlackUser', () => {
     beforeEach(() => {
         findOneMock.mockReset();
         findByIdAndUpdateMock.mockReset();
+        updateManyMock.mockReset();
+        updateManyMock.mockResolvedValue({ acknowledged: true, modifiedCount: 0 });
     });
 
     it('returns the user when slack_user_id is already mapped (no Slack API call)', async () => {
@@ -70,6 +74,23 @@ describe('resolveSlackUser', () => {
         expect(findByIdAndUpdateMock).toHaveBeenCalledWith('u1', {
             slack_user_id: 'U999NEW',
         });
+    });
+
+    it('steals the slack_user_id from any other user before persisting (no duplicate mappings)', async () => {
+        // Email match resolves to u1; another row (the old admin) still holds
+        // the same slack_user_id. The resolver must null it out on the others
+        // so findOne can never return the wrong user next time.
+        findOneMock.mockResolvedValueOnce(null);
+        findOneMock.mockResolvedValueOnce(fakeUser({ slack_user_id: null }));
+        findByIdAndUpdateMock.mockResolvedValueOnce(fakeUser());
+        const fetchUserInfo = vi.fn().mockResolvedValueOnce({ email: 'alice@example.com' });
+
+        await resolveSlackUser('U999NEW', { botToken: 'xoxb', fetchUserInfo });
+
+        expect(updateManyMock).toHaveBeenCalledWith(
+            { slack_user_id: 'U999NEW', _id: { $ne: 'u1' } },
+            { $set: { slack_user_id: null } }
+        );
     });
 
     it('persists slack_avatar_url too when users.info returns an avatar', async () => {

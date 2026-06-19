@@ -90,6 +90,12 @@ const slackIdFor = async (
     }
     const resolved = await resolveSlackIdByEmail(user.email, botToken);
     if (resolved) {
+        // Steal the id from any other holder first — one Slack id maps to one
+        // Viljetech user (see resolveSlackUser + the unique_slack_user_id index).
+        await User.updateMany(
+            { slack_user_id: resolved.slackId, _id: { $ne: user._id } },
+            { $set: { slack_user_id: null } }
+        );
         await User.findByIdAndUpdate(user._id, {
             slack_user_id: resolved.slackId,
             ...(resolved.avatarUrl ? { slack_avatar_url: resolved.avatarUrl } : {}),

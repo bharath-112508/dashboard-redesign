@@ -291,6 +291,29 @@ userSchema.index(
 );
 
 /**
+ * A Slack user id identifies exactly one human, so at most one Viljetech
+ * account may carry a given `slack_user_id`. Without this, two rows could hold
+ * the same id and the Slack resolver's `findOne({ slack_user_id })` fast-path
+ * would return whichever row Mongo hit first — the bug where a team lead saw
+ * the admin's App Home because both accounts had been mapped to his Slack id.
+ *
+ * Partial (not sparse): every unmapped user stores `slack_user_id: null`
+ * (schema default), so a sparse index wouldn't skip them and all the nulls
+ * would collide on the unique constraint. The partial filter indexes only
+ * string (mapped) values, leaving unlimited nulls. Mirrors `employee_id`'s
+ * intent but uses a partial filter because that field is unset-when-absent
+ * while this one is explicitly null.
+ */
+userSchema.index(
+    { slack_user_id: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { slack_user_id: { $type: 'string' } },
+        name: 'unique_slack_user_id',
+    }
+);
+
+/**
  * Text index for global search (Data_Model.md §Text Indexes line 1120;
  * Step 33 indexes audit). One text index per collection — Mongo's hard
  * limit — so we combine the four searchable fields into a single

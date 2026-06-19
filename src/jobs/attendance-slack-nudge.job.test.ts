@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 
-vi.mock('../models/user.model.js', () => ({ User: { find: vi.fn(), findByIdAndUpdate: vi.fn() } }));
+vi.mock('../models/user.model.js', () => ({
+    User: { find: vi.fn(), findByIdAndUpdate: vi.fn(), updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }) },
+}));
 vi.mock('../models/attendance-record.model.js', () => ({ AttendanceRecord: { find: vi.fn() } }));
 vi.mock('../models/holiday.model.js', () => ({ Holiday: { exists: vi.fn() } }));
 vi.mock('../models/leave-request.model.js', () => ({ LeaveRequest: { find: vi.fn() } }));

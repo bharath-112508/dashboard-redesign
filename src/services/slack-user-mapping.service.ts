@@ -58,6 +58,15 @@ export const resolveSlackUser = async (slackUserId: string, ctx: ResolverContext
         return null;
     }
 
+    // Steal the mapping from any OTHER user that still holds this Slack id
+    // before claiming it. A Slack id identifies exactly one human, so it must
+    // map to exactly one Viljetech user — otherwise the fast-path
+    // `findOne({ slack_user_id })` can return the wrong account (the bug where
+    // a team lead opened the App Home and saw the admin's data because both
+    // rows carried his Slack id). Clearing first also avoids a duplicate-key
+    // write conflict against the partial-unique index on `slack_user_id`.
+    await User.updateMany({ slack_user_id: slackUserId, _id: { $ne: byEmail._id } }, { $set: { slack_user_id: null } });
+
     // Persist back so step 1 catches it next time (+ cache the avatar).
     await User.findByIdAndUpdate(byEmail._id, {
         slack_user_id: slackUserId,
