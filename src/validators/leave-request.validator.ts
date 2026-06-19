@@ -141,6 +141,10 @@ export const listLeavesQuerySchema = z
     .object({
         status: z.enum(Object.values(LEAVE_REQUEST_STATUSES) as [string, ...string[]]).optional(),
         user_id: objectIdSchema.optional(),
+        // Reviewers can exclude one user's requests from the list — used by the
+        // Slack App Home so a reviewer's own pending leave doesn't appear in
+        // their approval queue (they can't self-approve anyway).
+        exclude_user_id: objectIdSchema.optional(),
         from_date: isoDate.optional(),
         to_date: isoDate.optional(),
         requires_additional_approval: z

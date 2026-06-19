@@ -389,13 +389,9 @@ const loadAvailableMap = async (params: {
         year: { $in: params.years },
     });
     const have = new Set(rows.map((r) => `${r.leave_type_id.toString()}|${r.year}`));
-    const missing = params.years.some((y) =>
-        params.types.some((t) => !have.has(`${t._id.toString()}|${y}`))
-    );
+    const missing = params.years.some((y) => params.types.some((t) => !have.has(`${t._id.toString()}|${y}`)));
     if (missing) {
-        await Promise.all(
-            params.years.map((y) => initializeBalancesForUserYear({ user_id: params.user_id, year: y }))
-        );
+        await Promise.all(params.years.map((y) => initializeBalancesForUserYear({ user_id: params.user_id, year: y })));
         rows = await LeaveBalance.find({
             user_id: params.user_id,
             year: { $in: params.years },
@@ -801,6 +797,10 @@ export const listLeaves = async (
     const filter: Filter = {};
     if (isReviewer(caller.role)) {
         if (query.user_id) filter.user_id = new Types.ObjectId(query.user_id);
+        // Exclude one user (e.g. the reviewer themselves) from the queue — a
+        // reviewer can't approve their own request, so it shouldn't appear in
+        // their approvals list. Ignored when a positive user_id filter is set.
+        else if (query.exclude_user_id) filter.user_id = { $ne: new Types.ObjectId(query.exclude_user_id) };
     } else {
         // Employees only see their own.
         filter.user_id = caller.id;

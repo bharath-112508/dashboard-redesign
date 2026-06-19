@@ -27,7 +27,8 @@ import { getSlackAvatarUrlsByIds } from './user.service.js';
 import { buildHomeDashboardData } from './slack-home.service.js';
 
 const employee = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Raj' } as never;
-const admin = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' } as never;
+const adminId = new Types.ObjectId();
+const admin = { _id: adminId, role: 'admin', full_name: 'Boss' } as never;
 
 afterEach(() => vi.clearAllMocks());
 
@@ -54,6 +55,12 @@ describe('buildHomeDashboardData', () => {
         expect(data.pending_leaves).toEqual([{ id: 'L1', status: 'pending' }]);
         // True backlog total comes from meta, not the capped array length.
         expect(data.pending_total).toBe(7);
+        // The reviewer's own request is excluded from their approvals queue —
+        // a reviewer can't self-approve, so it must not show with Approve/Reject.
+        expect(listLeaves).toHaveBeenCalledWith(
+            expect.objectContaining({ status: 'pending', exclude_user_id: adminId.toString() }),
+            expect.objectContaining({ id: adminId, role: 'admin' })
+        );
     });
 
     it("attaches avatar_url onto who's-out and pending rows", async () => {

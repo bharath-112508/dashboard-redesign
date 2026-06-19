@@ -108,7 +108,15 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
         reviewer
             ? safe('pending_leaves', () =>
                   listLeaves(
-                      { status: 'pending', page: 1, limit: PENDING_CAP + 1 } as Parameters<typeof listLeaves>[0],
+                      // Exclude the reviewer's own request — they can't approve
+                      // their own leave, so it must not appear in their queue
+                      // (it still shows under "Your leaves" as pending).
+                      {
+                          status: 'pending',
+                          exclude_user_id: user._id.toString(),
+                          page: 1,
+                          limit: PENDING_CAP + 1,
+                      } as Parameters<typeof listLeaves>[0],
                       { id: user._id, role: user.role }
                   )
               )
