@@ -114,13 +114,15 @@ const uploadsSchema = z
     })
     .partial();
 
+// Empty string is allowed and means "disable channel posts for this category"
+// (the dispatcher skips a blank channel; per-recipient DMs still send).
 const slackChannelsSchema = z
     .object({
-        leaves: z.string().min(1),
-        attendance: z.string().min(1),
-        projects: z.string().min(1),
-        timesheet: z.string().min(1),
-        general: z.string().min(1),
+        leaves: z.string().trim(),
+        attendance: z.string().trim(),
+        projects: z.string().trim(),
+        timesheet: z.string().trim(),
+        general: z.string().trim(),
     })
     .partial();
 

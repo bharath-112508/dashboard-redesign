@@ -54,9 +54,16 @@ describe('patchSlackSettingsBodySchema', () => {
         expect(result.success).toBe(true);
     });
 
-    it('rejects an empty channel name (whitespace-only)', () => {
+    it('accepts an empty channel as the explicit "disable broadcast" signal (DMs still send)', () => {
         const result = patchSlackSettingsBodySchema.safeParse({ channels: { leaves: '' } });
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.data.channels?.leaves).toBe('');
+    });
+
+    it('trims a whitespace-only channel to empty (also "disabled")', () => {
+        const result = patchSlackSettingsBodySchema.safeParse({ channels: { leaves: '   ' } });
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.data.channels?.leaves).toBe('');
     });
 });
 

@@ -11,13 +11,16 @@ import { SLACK_BOT_TOKEN_MAX, SLACK_TEXT_MAX } from '../constants/slack.js';
  * Slack-only payload without having to wrap it in `{ slack: ... }`.
  */
 
+// Each channel is optional, and an EMPTY string is allowed — it's the explicit
+// "disable channel posts for this category" signal (DMs still go out). Omitting
+// a key leaves the existing value; sending '' clears it.
 const slackChannelsPatchSchema = z
     .object({
-        leaves: z.string().min(1).optional(),
-        attendance: z.string().min(1).optional(),
-        projects: z.string().min(1).optional(),
-        timesheet: z.string().min(1).optional(),
-        general: z.string().min(1).optional(),
+        leaves: z.string().trim().optional(),
+        attendance: z.string().trim().optional(),
+        projects: z.string().trim().optional(),
+        timesheet: z.string().trim().optional(),
+        general: z.string().trim().optional(),
     })
     .partial();
 

@@ -251,13 +251,17 @@ const uploadSchema = new Schema<UploadSettings>(
     { _id: false }
 );
 
+// Each category channel is optional: an empty string means "don't broadcast
+// to a channel for this category" — the dispatcher skips the post (`if
+// (!channel)`) and per-recipient DMs still go out. Defaulted to '' so a blank
+// value is a valid, savable "disabled" state (a `required` String rejects '').
 const slackChannelsSchema = new Schema<SlackChannelMap>(
     {
-        leaves: { type: String, required: true },
-        attendance: { type: String, required: true },
-        projects: { type: String, required: true },
-        timesheet: { type: String, required: true },
-        general: { type: String, required: true },
+        leaves: { type: String, default: '' },
+        attendance: { type: String, default: '' },
+        projects: { type: String, default: '' },
+        timesheet: { type: String, default: '' },
+        general: { type: String, default: '' },
     },
     { _id: false }
 );
