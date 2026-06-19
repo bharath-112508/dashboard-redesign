@@ -87,4 +87,25 @@ describe('apply-leave modal open', () => {
         expect(vi.mocked(openSlackModal)).not.toHaveBeenCalled();
         expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ response_type: 'ephemeral' }));
     });
+
+    it('button click refuses a client role with an ephemeral and never opens the modal', async () => {
+        vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
+        vi.mocked(resolveSlackUser).mockResolvedValue({ _id: new Types.ObjectId(), role: 'client', full_name: 'Cli' } as never);
+
+        const req = {
+            body: {
+                payload: JSON.stringify({
+                    type: 'block_actions',
+                    user: { id: 'U1' },
+                    trigger_id: 'trig-x',
+                    actions: [{ action_id: 'apply_leave_open' }],
+                }),
+            },
+        };
+        const res = makeRes();
+        await handleInteractive(req as never, res as never);
+
+        expect(vi.mocked(openSlackModal)).not.toHaveBeenCalled();
+        expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ response_type: 'ephemeral' }));
+    });
 });
