@@ -26,4 +26,19 @@ describe('loadApplyLeaveModalTypes', () => {
             { id: 't2', code: 'WFH', name: 'Work From Home', available: null },
         ]);
     });
+
+    it('treats missing available field on a balance row as null, not 0', async () => {
+        vi.mocked(listLeaveTypes).mockResolvedValue([
+            { id: 't1', code: 'CL', name: 'Casual Leave' },
+        ] as never);
+        vi.mocked(listOwnBalances).mockResolvedValue([
+            { leave_type: { code: 'CL' } },
+        ] as never);
+
+        const out = await loadApplyLeaveModalTypes(new Types.ObjectId());
+
+        expect(out).toEqual([
+            { id: 't1', code: 'CL', name: 'Casual Leave', available: null },
+        ]);
+    });
 });

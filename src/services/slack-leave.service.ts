@@ -17,10 +17,10 @@ import type { ApplyLeaveModalType } from '../utils/slack-leave-blocks.js';
 export const loadApplyLeaveModalTypes = async (userId: Types.ObjectId): Promise<ApplyLeaveModalType[]> => {
     const [types, balances] = await Promise.all([listLeaveTypes({ is_active: true }), listOwnBalances(userId)]);
 
-    const availableByCode = new Map<string, number>();
+    const availableByCode = new Map<string, number | null>();
     for (const b of balances) {
         const code = (b as { leave_type?: { code?: string } }).leave_type?.code;
-        if (code) availableByCode.set(code, ((b as { available?: number }).available ?? 0) as number);
+        if (code) availableByCode.set(code, (b as { available?: number }).available ?? null);
     }
 
     return types.map((t) => {
