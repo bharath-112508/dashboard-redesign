@@ -79,6 +79,15 @@ export interface TimesheetWriteResult {
 
 const isManagerOrAdmin = (role: string): boolean => role === ROLES.ADMIN || role === ROLES.MANAGER;
 
+// Read access to the TEAM timesheet surfaces (list + summary) is open to every
+// team-tier role that holds `timesheet.read` — admin, manager, AND team lead.
+// The `GET /timesheets` + `/summary` routes already enforce `timesheet.read`
+// (M4); this mirrors that so team leads aren't 403'd by the service *after*
+// passing the route. Privileged WRITE surfaces (patch/delete others, get a
+// single non-owned entry) stay manager/admin-only via `isManagerOrAdmin`.
+const canReadTeamTimesheets = (role: string): boolean =>
+    role === ROLES.ADMIN || role === ROLES.MANAGER || role === ROLES.TEAM_LEAD;
+
 const toPublic = (doc: TimesheetEntryDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
 
 const todayLocal = (): string => dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
@@ -557,7 +566,7 @@ export const listAllEntries = async (
     query: ListTimesheetsQuery,
     caller: Caller
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
-    if (!isManagerOrAdmin(caller.role)) throw AppError.forbidden();
+    if (!canReadTeamTimesheets(caller.role)) throw AppError.forbidden();
     const scopeUserId = query.user_id ? new Types.ObjectId(query.user_id) : null;
     const filter = buildListFilter(query, scopeUserId);
     const skip = (query.page - 1) * query.limit;
@@ -649,7 +658,7 @@ const loadTimesheetTaskDisplays = async (ids: Types.ObjectId[]): Promise<Map<str
 };
 
 export const summary = async (query: SummaryQuery, caller: Caller): Promise<Array<Record<string, unknown>>> => {
-    if (!isManagerOrAdmin(caller.role)) throw AppError.forbidden();
+    if (!canReadTeamTimesheets(caller.role)) throw AppError.forbidden();
     const match: Record<string, unknown> = {};
     if (query.user_id) match.user_id = new Types.ObjectId(query.user_id);
     if (query.project_id) match.project_id = new Types.ObjectId(query.project_id);

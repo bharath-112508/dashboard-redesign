@@ -16,8 +16,8 @@ import { Types } from 'mongoose';
  *      row, zero-duration after patch rejected.
  *   3. `deleteEntry` — same gates as patch.
  *   4. `listMyEntries` — ignores `user_id` query (caller scope only).
- *   5. `listAllEntries` — manager+ only.
- *   6. `summary` — manager+ only, group_by translation.
+ *   5. `listAllEntries` — team-tier read (admin/manager/team_lead), employees 403.
+ *   6. `summary` — team-tier read (admin/manager/team_lead), group_by translation.
  */
 
 const {
@@ -98,6 +98,7 @@ const daysAgo = (n: number): string => dayjs().tz(DEFAULT_TIMEZONE).subtract(n, 
 
 const adminCaller = () => ({ id: new Types.ObjectId(), role: ROLES.ADMIN, audit: undefined });
 const managerCaller = () => ({ id: new Types.ObjectId(), role: ROLES.MANAGER, audit: undefined });
+const teamLeadCaller = () => ({ id: new Types.ObjectId(), role: ROLES.TEAM_LEAD, audit: undefined });
 const employeeCaller = (id?: Types.ObjectId) => ({
     id: id ?? new Types.ObjectId(),
     role: ROLES.EMPLOYEE,
@@ -500,6 +501,18 @@ describe('list & summary RBAC', () => {
         await expect(svc.summary({ group_by: 'project' }, employeeCaller())).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
+    });
+
+    it('listAllEntries allows a team lead (holds timesheet.read — matches the route gate)', async () => {
+        stubFind([]);
+        await expect(svc.listAllEntries({ page: 1, limit: 20 }, teamLeadCaller())).resolves.toMatchObject({
+            data: [],
+        });
+    });
+
+    it('summary allows a team lead', async () => {
+        entryAggregateMock.mockResolvedValueOnce([]);
+        await expect(svc.summary({ group_by: 'project' }, teamLeadCaller())).resolves.toEqual([]);
     });
 
     it('summary builds the correct aggregation $group key for group_by=user', async () => {
