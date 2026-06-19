@@ -139,6 +139,8 @@ export const parseApplyLeaveSubmission = (view: unknown): ParsedLeaveSubmission 
  * (Slack-unsupported) top-level error.
  */
 export const appErrorToModalErrors = (code: string | undefined, message: string): Record<string, string> => {
+    // Note: end_date errors (start>end, span overflow) are caught at the Zod layer and mapped to the
+    // end_date block by the controller — they never reach this AppError map, so there is no end_date case here.
     switch (code) {
         case ERROR_CODES.INSUFFICIENT_LEAVE_BALANCE:
         case ERROR_CODES.RESOURCE_NOT_FOUND:

@@ -128,7 +128,6 @@ const canApplyLeave = (role: RoleType): boolean => role !== ROLES.CLIENT;
  * returns null once the modal open has been dispatched.
  */
 const openApplyLeaveModal = async (
-    slackUserId: string,
     triggerId: string | undefined,
     user: { _id: Types.ObjectId }
 ): Promise<string | null> => {
@@ -413,7 +412,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             respond("Your role can't apply for leave.");
             return;
         }
-        const err = await openApplyLeaveModal(payload.user.id, payload.trigger_id, user);
+        const err = await openApplyLeaveModal(payload.trigger_id, user);
         if (err) respond(err);
         else res.status(200).json({});
         return;
@@ -576,7 +575,7 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
                 res.status(200).json(ephemeral("Your role can't apply for leave."));
                 return;
             }
-            const err = await openApplyLeaveModal(slackUserId, triggerId, user);
+            const err = await openApplyLeaveModal(triggerId, user);
             res.status(200).json(err ? ephemeral(err) : {});
             return;
         }

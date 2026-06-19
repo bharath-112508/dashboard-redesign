@@ -60,12 +60,9 @@ afterEach(() => vi.clearAllMocks());
 
 describe('apply-leave view_submission', () => {
     it('calls applyLeave with the parsed body and clears the modal on success', async () => {
+        const submitUser = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Asha' };
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
-        vi.mocked(resolveSlackUser).mockResolvedValue({
-            _id: new Types.ObjectId(),
-            role: 'employee',
-            full_name: 'Asha',
-        } as never);
+        vi.mocked(resolveSlackUser).mockResolvedValue(submitUser as never);
         vi.mocked(applyLeave).mockResolvedValue({ id: 'leave1' } as never);
 
         const req = { body: { payload: JSON.stringify(submissionPayload()) }, headers: {} };
@@ -73,7 +70,7 @@ describe('apply-leave view_submission', () => {
         await handleInteractive(req as never, res as never, () => undefined);
 
         expect(vi.mocked(applyLeave)).toHaveBeenCalledTimes(1);
-        const [body] = vi.mocked(applyLeave).mock.calls[0]!;
+        const [body, caller] = vi.mocked(applyLeave).mock.calls[0]!;
         expect(body).toMatchObject({
             leave_type_id: '64b2f0000000000000000001',
             start_date: '2026-07-01',
@@ -81,6 +78,8 @@ describe('apply-leave view_submission', () => {
             is_half_day: false,
             reason: 'Trip',
         });
+        expect(caller).toMatchObject({ id: submitUser._id, role: 'employee' });
+        expect((caller as { audit?: unknown }).audit).toBeDefined();
         expect(res.json).toHaveBeenCalledWith({});
     });
 
