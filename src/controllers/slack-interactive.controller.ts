@@ -11,16 +11,18 @@ import {
     SLACK_ACTION_BREAK_START_OTHER,
     SLACK_ACTION_BREAK_END,
     SLACK_ACTION_APPLY_LEAVE_OPEN,
+    SLACK_CALLBACK_APPLY_LEAVE,
 } from '../constants/slack.js';
-import { approveLeave, rejectLeave } from '../services/leave-request.service.js';
+import { approveLeave, rejectLeave, applyLeave } from '../services/leave-request.service.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
 import { fetchSlackUserInfo, resolveSlackUser } from '../services/slack-user-mapping.service.js';
-import { slackContextFrom, publishHomeView, openSlackModal } from '../utils/slack.js';
+import { slackContextFrom, publishHomeView, openSlackModal, postSlackMessage } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
 import { loadApplyLeaveModalTypes } from '../services/slack-leave.service.js';
-import { buildApplyLeaveModal } from '../utils/slack-leave-blocks.js';
+import { buildApplyLeaveModal, parseApplyLeaveSubmission, appErrorToModalErrors } from '../utils/slack-leave-blocks.js';
+import { applyLeaveBodySchema } from '../validators/leave-request.validator.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import { publish } from '../services/realtime.service.js';
@@ -57,6 +59,12 @@ interface BlockActionPayload {
     response_url?: string;
     view?: { type?: string };
     trigger_id?: string;
+}
+
+interface ViewSubmissionPayload {
+    type: 'view_submission';
+    user: { id: string };
+    view: { callback_id?: string; state?: { values?: unknown } };
 }
 
 const ephemeral = (text: string) => ({ response_type: 'ephemeral' as const, text });
@@ -159,6 +167,81 @@ const renderAttendanceHome = async (
 
 export { renderAttendanceHome };
 
+/**
+ * Apply-for-leave modal submit. Maps `view.state.values` → the existing
+ * `applyLeaveBodySchema` (reusing the web form's validation verbatim), calls
+ * `applyLeave`, and either clears the modal (empty 200) or returns inline
+ * field errors (`response_action: errors`). On success, fires a DM confirmation
+ * + Home re-publish fire-and-forget (the balance reservation changed).
+ *
+ * MUST respond within Slack's 3s window — `applyLeave` is awaited (we need the
+ * outcome to decide the response), the side-effects are not.
+ */
+const handleApplyLeaveSubmission: RequestHandler = async (req, res) => {
+    const payload = JSON.parse((req.body as { payload: string }).payload) as ViewSubmissionPayload;
+    const slackUserId = payload.user.id;
+
+    const user = await resolveCaller(slackUserId);
+    if (!user) {
+        res.status(200).json({
+            response_action: 'errors',
+            errors: { reason: "Couldn't identify your Viljetech account — contact an admin." },
+        });
+        return;
+    }
+    if (!canApplyLeave(user.role as RoleType)) {
+        res.status(200).json({ response_action: 'errors', errors: { reason: "Your role can't apply for leave." } });
+        return;
+    }
+
+    // Reuse the HTTP validator so Slack input gets identical validation +
+    // defaults. Field-level Zod issues map to the matching block_id.
+    const parsed = applyLeaveBodySchema.safeParse(parseApplyLeaveSubmission(payload.view));
+    if (!parsed.success) {
+        const errors: Record<string, string> = {};
+        for (const issue of parsed.error.issues) {
+            const field = String(issue.path[0] ?? '');
+            // Zod field names map 1:1 to the modal block_ids except the type id.
+            const block = field === 'leave_type_id' ? 'leave_type' : field;
+            errors[block] = issue.message;
+        }
+        // Guarantee at least one error references a real block.
+        if (Object.keys(errors).length === 0) errors.reason = 'Please check the form and try again.';
+        res.status(200).json({ response_action: 'errors', errors });
+        return;
+    }
+
+    const audit = buildAuditContext(req, {
+        overrideActor: { actor_id: user._id, actor_role: user.role as RoleType },
+    });
+
+    try {
+        await applyLeave(parsed.data, { id: user._id, role: user.role as RoleType, audit });
+    } catch (err: unknown) {
+        const code = (err as { code?: string })?.code;
+        const message = (err as { message?: string })?.message ?? 'Could not submit your leave.';
+        logger.warn({ err, code, reason: 'apply_leave_submit_failed' }, 'Slack apply-leave submission rejected');
+        res.status(200).json({ response_action: 'errors', errors: appErrorToModalErrors(code, message) });
+        return;
+    }
+
+    // Success — clear the modal, then fire side-effects. Slack actions bypass
+    // the HTTP after-write middleware, so emit the realtime events explicitly.
+    res.status(200).json({});
+    publish([REALTIME_TOPICS.LEAVES, REALTIME_TOPICS.LEAVE_BALANCES]);
+
+    const settings = await getOrInitSettings();
+    const ctx = slackContextFrom(settings.slack);
+    if (ctx) {
+        void postSlackMessage(ctx, {
+            channel: slackUserId,
+            text: '✅ Your leave request was submitted and is pending approval.',
+            context: 'apply-leave-confirm-dm',
+        });
+    }
+    void renderAttendanceHome(slackUserId, user);
+};
+
 export const handleInteractive: RequestHandler = async (req, res) => {
     const rawPayload = (req.body as { payload?: unknown })?.payload;
     if (typeof rawPayload !== 'string') {
@@ -170,7 +253,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
         return;
     }
 
-    let payload: BlockActionPayload;
+    let payload: BlockActionPayload | ViewSubmissionPayload;
     try {
         payload = JSON.parse(rawPayload);
     } catch {
@@ -179,6 +262,15 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             'Slack interactive payload JSON.parse failed'
         );
         res.status(200).json(ephemeral('Sorry, something went wrong.'));
+        return;
+    }
+
+    if (payload.type === 'view_submission') {
+        if (payload.view?.callback_id === SLACK_CALLBACK_APPLY_LEAVE) {
+            await handleApplyLeaveSubmission(req, res, () => undefined);
+            return;
+        }
+        res.status(200).json({});
         return;
     }
 
