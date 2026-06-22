@@ -164,12 +164,12 @@ const teamAttendanceBlocks = (data: HomeDashboardData): Array<Record<string, unk
         // or sit ragged. A vertical list is clean and unambiguous.
         section(
             `🟢 *Present* ${t.present}\n\n` +
-                `⚪ *Not in* ${t.not_in_count}\n\n` +
+                `⚪ *Not checked in* ${t.not_in_count}\n\n` +
                 `🌴 *On leave* ${t.on_leave}\n\n` +
-                `🟡 *Incomplete* ${t.incomplete}`
+                `🟡 *Missing check-out* ${t.incomplete}`
         ),
     ];
-    if (roster) blocks.push(section(`*Not in:* ${roster}`));
+    if (roster) blocks.push(section(`*Not checked in:* ${roster}`));
     blocks.push(...moreLine(t.not_in_count, ATT_ROSTER_CAP));
     blocks.push(linkButton('View attendance →', appUrl('/attendance')));
     return blocks;
