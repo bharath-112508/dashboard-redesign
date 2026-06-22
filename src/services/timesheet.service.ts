@@ -579,9 +579,16 @@ export const listAllEntries = async (
     const projectIds = Array.from(new Set(rows.filter((r) => r.project_id).map((r) => r.project_id!.toString()))).map(
         (id) => new Types.ObjectId(id)
     );
-    const [userMap, projectMap] = await Promise.all([
+    // Task-linked entries carry only `task_id`; resolve titles so the team
+    // view can show WHICH task an employee logged against (not just the
+    // project). Reuses the same display helper the summary tab uses.
+    const taskIds = Array.from(new Set(rows.filter((r) => r.task_id).map((r) => r.task_id!.toString()))).map(
+        (id) => new Types.ObjectId(id)
+    );
+    const [userMap, projectMap, taskMap] = await Promise.all([
         loadTimesheetUserDisplays(userIds),
         loadTimesheetProjectDisplays(projectIds),
+        loadTimesheetTaskDisplays(taskIds),
     ]);
 
     return {
@@ -594,6 +601,10 @@ export const listAllEntries = async (
             if (r.project_id) {
                 const pid = r.project_id.toString();
                 obj.project = projectMap.get(pid) ?? { id: pid, name: null, code: null };
+            }
+            if (r.task_id) {
+                const tid = r.task_id.toString();
+                obj.task = taskMap.get(tid) ?? { id: tid, title: null };
             }
             return obj;
         }),
