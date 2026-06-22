@@ -171,9 +171,9 @@ describe('buildHomeDashboardView — redesigned layout', () => {
         ) as { blocks: Array<Record<string, unknown>> };
         const text = JSON.stringify(view);
         expect(text).toMatch(/Present\* 18/);
-        expect(text).toMatch(/Not in\* 4/);
+        expect(text).toMatch(/Not checked in\* 4/);
         expect(text).toMatch(/On leave\* 3/);
-        expect(text).toMatch(/Incomplete\* 1/);
+        expect(text).toMatch(/Missing check-out\* 1/);
         // No 2-column `fields` block — stats render inline in a section.
         expect(view.blocks.some((b) => Array.isArray((b as { fields?: unknown }).fields))).toBe(false);
     });
