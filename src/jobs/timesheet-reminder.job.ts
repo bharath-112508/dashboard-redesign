@@ -1,5 +1,6 @@
 import { User, type UserDocument } from '../models/user.model.js';
 import { LeaveRequest } from '../models/leave-request.model.js';
+import { Holiday } from '../models/holiday.model.js';
 import { ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
@@ -17,6 +18,9 @@ import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
  * Fires daily at 20:00 IST. For each active **internal** user (admin /
  * manager / employee — clients don't log time):
  *
+ *   0. Skip the whole run if today is a non-working day (weekend per
+ *      `work_schedule.working_days`) or a holiday — nobody is expected to
+ *      log time, so don't nag (Sat/Sun reminders were the bug).
  *   1. Skip if the user has an `approved` leave covering today.
  *   2. Skip if the user has already logged at least one entry for today.
  *   3. Otherwise fire `notifyTimesheetReminder` (in-app + email).
@@ -42,6 +46,8 @@ interface TimesheetReminderSummary extends Record<string, unknown> {
     on_leave: number;
     already_logged: number;
     notified: number;
+    /** Set when the whole run was skipped before notifying anyone. */
+    skipped_reason?: 'non_working_day' | 'holiday';
 }
 
 const todayIst = (now: Date): string => dayjs(now).tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
@@ -67,6 +73,39 @@ export const remindUnloggedUsers = async (now: Date, log: JobContext['log']): Pr
     const targetDate = todayIst(now);
 
     const settings = await getOrInitSettings();
+
+    // Don't nag on non-working days. `working_days` uses 0=Sun..6=Sat (same
+    // convention as the leave engine); default Mon–Fri. A weekend (or any day
+    // not in the configured working days) short-circuits the whole run.
+    const workingDays = settings.work_schedule?.working_days ?? [1, 2, 3, 4, 5];
+    const dayOfWeek = dayjs(now).tz(DEFAULT_TIMEZONE).day();
+    if (!workingDays.includes(dayOfWeek)) {
+        const skipped: TimesheetReminderSummary = {
+            target_date: targetDate,
+            headcount: 0,
+            on_leave: 0,
+            already_logged: 0,
+            notified: 0,
+            skipped_reason: 'non_working_day',
+        };
+        log.info(skipped, 'Timesheet reminder skipped — non-working day');
+        return skipped;
+    }
+
+    // Don't nag on company holidays either.
+    if (await Holiday.exists({ date: targetDate })) {
+        const skipped: TimesheetReminderSummary = {
+            target_date: targetDate,
+            headcount: 0,
+            on_leave: 0,
+            already_logged: 0,
+            notified: 0,
+            skipped_reason: 'holiday',
+        };
+        log.info(skipped, 'Timesheet reminder skipped — holiday');
+        return skipped;
+    }
+
     const expectedHours = Number.isFinite(settings.timesheet.daily_warn_threshold_hours)
         ? settings.timesheet.daily_warn_threshold_hours
         : TIMESHEET_DEFAULT_DAILY_WARN_THRESHOLD_HOURS;

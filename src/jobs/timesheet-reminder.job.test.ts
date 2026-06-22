@@ -28,6 +28,7 @@ const leaveRequestFindMock = vi.fn();
 const userIdsWithEntriesOnMock = vi.fn();
 const notifyTimesheetReminderMock = vi.fn();
 const getOrInitSettingsMock = vi.fn();
+const holidayExistsMock = vi.fn();
 
 vi.mock('../models/user.model.js', () => ({
     User: { find: userFindMock },
@@ -36,6 +37,14 @@ vi.mock('../models/user.model.js', () => ({
 vi.mock('../models/leave-request.model.js', () => ({
     LeaveRequest: { find: leaveRequestFindMock },
 }));
+
+vi.mock('../models/holiday.model.js', () => ({
+    Holiday: { exists: holidayExistsMock },
+}));
+
+// A fixed weekday (Thursday 2026-04-23, 20:30 IST) so the working-day gate
+// doesn't make these tests depend on the day they run.
+const WEEKDAY = new Date('2026-04-23T15:00:00Z');
 
 vi.mock('../services/timesheet.service.js', () => ({
     userIdsWithEntriesOn: userIdsWithEntriesOnMock,
@@ -66,10 +75,13 @@ const stubLogger = (): { info: ReturnType<typeof vi.fn> } => ({ info: vi.fn() })
 
 beforeEach(() => {
     vi.resetAllMocks();
-    // Default: settings provide a 7h threshold.
+    // Default: settings provide a 7h threshold + Mon–Fri working days.
     getOrInitSettingsMock.mockResolvedValue({
         timesheet: { daily_warn_threshold_hours: 7 },
+        work_schedule: { working_days: [1, 2, 3, 4, 5] },
     });
+    // Default: today is not a holiday.
+    holidayExistsMock.mockResolvedValue(null);
 });
 
 describe('remindUnloggedUsers', () => {
@@ -84,7 +96,7 @@ describe('remindUnloggedUsers', () => {
         });
         userIdsWithEntriesOnMock.mockResolvedValueOnce(new Set<string>());
 
-        const summary = await job.remindUnloggedUsers(new Date('2026-04-23T15:00:00Z'), stubLogger() as never);
+        const summary = await job.remindUnloggedUsers(WEEKDAY, stubLogger() as never);
 
         expect(summary.on_leave).toBe(1);
         expect(summary.notified).toBe(1);
@@ -104,7 +116,7 @@ describe('remindUnloggedUsers', () => {
         });
         userIdsWithEntriesOnMock.mockResolvedValueOnce(new Set<string>([String(loggedUser._id)]));
 
-        const summary = await job.remindUnloggedUsers(new Date(), stubLogger() as never);
+        const summary = await job.remindUnloggedUsers(WEEKDAY, stubLogger() as never);
 
         expect(summary.already_logged).toBe(1);
         expect(summary.notified).toBe(1);
@@ -125,7 +137,7 @@ describe('remindUnloggedUsers', () => {
         });
         userIdsWithEntriesOnMock.mockResolvedValueOnce(new Set<string>([String(dualUser._id)]));
 
-        const summary = await job.remindUnloggedUsers(new Date(), stubLogger() as never);
+        const summary = await job.remindUnloggedUsers(WEEKDAY, stubLogger() as never);
 
         expect(summary.on_leave).toBe(1);
         expect(summary.already_logged).toBe(0);
@@ -145,7 +157,7 @@ describe('remindUnloggedUsers', () => {
         leaveRequestFindMock.mockReturnValueOnce({ distinct: () => Promise.resolve([]) });
         userIdsWithEntriesOnMock.mockResolvedValueOnce(new Set<string>());
 
-        await job.remindUnloggedUsers(new Date(), stubLogger() as never);
+        await job.remindUnloggedUsers(WEEKDAY, stubLogger() as never);
 
         expect(notifyTimesheetReminderMock.mock.calls[0]![0].expected_hours).toBe(6);
     });
@@ -161,7 +173,7 @@ describe('remindUnloggedUsers', () => {
         leaveRequestFindMock.mockReturnValueOnce({ distinct: () => Promise.resolve([]) });
         userIdsWithEntriesOnMock.mockResolvedValueOnce(new Set<string>());
 
-        await job.remindUnloggedUsers(new Date(), stubLogger() as never);
+        await job.remindUnloggedUsers(WEEKDAY, stubLogger() as never);
 
         const expected = notifyTimesheetReminderMock.mock.calls[0]![0].expected_hours;
         // The fallback constant — pin that we got SOME finite number.
@@ -185,7 +197,7 @@ describe('remindUnloggedUsers', () => {
         });
         userIdsWithEntriesOnMock.mockResolvedValueOnce(new Set<string>([String(alreadyLogged._id)]));
 
-        const summary = await job.remindUnloggedUsers(new Date(), stubLogger() as never);
+        const summary = await job.remindUnloggedUsers(WEEKDAY, stubLogger() as never);
 
         expect(summary.headcount).toBe(4);
         expect(summary.on_leave).toBe(1);
@@ -201,7 +213,7 @@ describe('remindUnloggedUsers', () => {
         userIdsWithEntriesOnMock.mockResolvedValueOnce(new Set<string>());
 
         const log = stubLogger();
-        await job.remindUnloggedUsers(new Date(), log as never);
+        await job.remindUnloggedUsers(WEEKDAY, log as never);
 
         expect(log.info).toHaveBeenCalledTimes(1);
         const [summary] = log.info.mock.calls[0]!;
@@ -211,5 +223,28 @@ describe('remindUnloggedUsers', () => {
             already_logged: 0,
             notified: 0,
         });
+    });
+
+    it('skips the whole run on a weekend — no Saturday/Sunday nag', async () => {
+        // Saturday 2026-04-25 (20:30 IST). working_days is Mon–Fri, so the
+        // run short-circuits before loading users or notifying anyone.
+        const saturday = new Date('2026-04-25T15:00:00Z');
+        const summary = await job.remindUnloggedUsers(saturday, stubLogger() as never);
+
+        expect(summary.skipped_reason).toBe('non_working_day');
+        expect(summary.notified).toBe(0);
+        expect(notifyTimesheetReminderMock).not.toHaveBeenCalled();
+        // Short-circuits before touching users / leave.
+        expect(userFindMock).not.toHaveBeenCalled();
+    });
+
+    it('skips the whole run on a company holiday', async () => {
+        holidayExistsMock.mockResolvedValueOnce({ _id: 'h1' });
+        const summary = await job.remindUnloggedUsers(WEEKDAY, stubLogger() as never);
+
+        expect(summary.skipped_reason).toBe('holiday');
+        expect(summary.notified).toBe(0);
+        expect(notifyTimesheetReminderMock).not.toHaveBeenCalled();
+        expect(userFindMock).not.toHaveBeenCalled();
     });
 });
