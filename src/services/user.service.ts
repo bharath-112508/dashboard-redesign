@@ -613,7 +613,16 @@ export const changeUserRole = async (input: {
         throw err;
     }
 
-    await revokeAllRefreshTokens(target._id);
+    // Deliberately do NOT revoke the target's refresh tokens here. The
+    // change-role dialog promises "Sessions are not revoked", and the FE
+    // self-heals: `useAuthMe` re-resolves DB-fresh permissions and, on drift
+    // from the JWT, rotates the access token in place (see queries.ts) — so
+    // the new role takes effect in the target's active session within a
+    // couple of minutes WITHOUT logging them out. Revoking here would break
+    // that rotation (it would fail against the dead tokens), stranding the
+    // user with a fresh-looking UI but a stale JWT until the 8h access token
+    // expired — and that's slower than the drift-heal even for a downgrade.
+    // Deactivation (which DOES revoke) remains the path for killing sessions.
 
     if (input.audit) {
         await recordAudit(input.audit, {
