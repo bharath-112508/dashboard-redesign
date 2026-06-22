@@ -541,8 +541,8 @@ export const assignRolesToUser = async (
         throw AppError.notFound(`One or more roles not found: ${missing.join(', ')}`, ERROR_CODES.ROLE_NOT_FOUND);
     }
 
-    // Preserve the order the client requested (mongoose `find` returns
-    // in arbitrary order, but the legacy-role denorm picks the first).
+    // Preserve the order the client requested (mongoose `find` returns in
+    // arbitrary order) — used for the audit metadata below.
     const orderedKeys = roleIds.map((id) => roles.find((r) => r._id.equals(id))?.key ?? '');
     const before = {
         role: user.role,
@@ -550,13 +550,26 @@ export const assignRolesToUser = async (
     };
 
     const set: Record<string, unknown> = { role_ids: roleIds };
-    // If the new primary role's key matches a legacy enum value, sync
-    // the cache. Otherwise leave it as-is — service-layer code that
-    // still branches on `caller.role === 'manager'` won't see a
-    // surprise non-enum value.
+    // Sync the denormalised legacy `role` to the HIGHEST-privilege system
+    // role in the selection. Service-layer authorization (task create,
+    // project author, team reads, etc.) still branches on this single
+    // `caller.role` field, so picking the first-selected role would leave a
+    // user promoted to e.g. Team Lead — but with Employee also ticked and
+    // listed first — stuck behaving as an Employee (can't create tasks).
+    // Custom (non-system) roles aren't legacy-enum values; their permissions
+    // still apply via the role_ids union, they just don't drive `role`.
     const legacyEnumValues = new Set<string>(Object.values(SYSTEM_ROLE_KEYS));
-    const primaryKey = orderedKeys[0];
-    if (primaryKey && legacyEnumValues.has(primaryKey)) {
+    const LEGACY_ROLE_RANK: Record<string, number> = {
+        [SYSTEM_ROLE_KEYS.ADMIN]: 4,
+        [SYSTEM_ROLE_KEYS.MANAGER]: 3,
+        [SYSTEM_ROLE_KEYS.TEAM_LEAD]: 2,
+        [SYSTEM_ROLE_KEYS.EMPLOYEE]: 1,
+        [SYSTEM_ROLE_KEYS.CLIENT]: 0,
+    };
+    const primaryKey = orderedKeys
+        .filter((k) => legacyEnumValues.has(k))
+        .reduce((best, k) => ((LEGACY_ROLE_RANK[k] ?? -1) > (best ? LEGACY_ROLE_RANK[best] : -1) ? k : best), '');
+    if (primaryKey) {
         set.role = primaryKey;
     }
 

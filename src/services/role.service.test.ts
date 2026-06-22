@@ -582,7 +582,7 @@ describe('assignRolesToUser', () => {
         expect(userUpdateOneMock).not.toHaveBeenCalled();
     });
 
-    it('replaces role_ids and syncs the legacy `role` cache to the first system-key', async () => {
+    it('replaces role_ids and syncs the legacy `role` cache to the assigned system-key', async () => {
         // The legacy denormalized `role` field still drives some
         // service-level branching (project visibility, attendance).
         // When the new primary role's key matches a legacy enum
@@ -604,6 +604,35 @@ describe('assignRolesToUser', () => {
             managerRoleId.toString(),
         ]);
         expect(out.role_keys).toEqual([SYSTEM_ROLE_KEYS.MANAGER]);
+    });
+
+    it('syncs the legacy `role` to the HIGHEST-privilege system role when several are assigned', async () => {
+        // Regression: promoting Employee → Team Lead with BOTH boxes ticked
+        // (Employee listed first) must leave the user as `team_lead`, not
+        // `employee`. Service-layer authz (task create, project author, team
+        // reads) branches on the single legacy `role`, so the denorm must be
+        // the most-privileged selected role — independent of selection order.
+        const employeeRoleId = new Types.ObjectId();
+        const teamLeadRoleId = new Types.ObjectId();
+        userFindByIdMock.mockReturnValueOnce({
+            select: () => Promise.resolve({ role: 'employee', role_ids: [employeeRoleId] }),
+        });
+        roleFindMock.mockReturnValueOnce(
+            findChain([
+                { _id: employeeRoleId, key: SYSTEM_ROLE_KEYS.EMPLOYEE },
+                { _id: teamLeadRoleId, key: SYSTEM_ROLE_KEYS.TEAM_LEAD },
+            ]),
+        );
+        userUpdateOneMock.mockResolvedValueOnce({ matchedCount: 1, modifiedCount: 1 });
+
+        await service.assignRolesToUser(
+            userId,
+            { role_ids: [employeeRoleId.toString(), teamLeadRoleId.toString()] },
+            actorId,
+        );
+
+        const updateArg = userUpdateOneMock.mock.calls[0][1] as { $set: Record<string, unknown> };
+        expect(updateArg.$set).toMatchObject({ role: SYSTEM_ROLE_KEYS.TEAM_LEAD });
     });
 
     it('does NOT touch the legacy `role` field when the primary role is a custom (non-enum) key', async () => {
