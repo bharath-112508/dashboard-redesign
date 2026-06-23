@@ -290,12 +290,10 @@ describe('buildManagerDashboard', () => {
         expect(result.pending_leave_approvals!.requires_additional_approval).toBe(2);
     });
 
-    it('managers see only direct reports — pending count is filtered by team', async () => {
+    it('managers see org-wide data — pending count is NOT scoped to a team (read_team is org-wide today)', async () => {
         const managerId = new Types.ObjectId();
-        const reportA = { _id: new Types.ObjectId() };
-        const reportB = { _id: new Types.ObjectId() };
 
-        userFindMock.mockReturnValueOnce(queryStub([reportA, reportB]));
+        userCountMock.mockResolvedValueOnce(9);
         leaveCountMock.mockResolvedValueOnce(3).mockResolvedValueOnce(0);
         leaveFindMock.mockReturnValueOnce(queryStub([]));
 
@@ -303,47 +301,42 @@ describe('buildManagerDashboard', () => {
             'leave_request.approve',
         ]);
 
-        expect(result.scope).toBe('team');
-        expect(result.team_size).toBe(2);
+        expect(result.scope).toBe('org');
+        expect(result.team_size).toBe(9);
         expect(result.pending_leave_approvals!.count).toBe(3);
 
-        // The pending-count call must be passed a `user_id: { $in: [...] }`
-        // filter that includes both reports — i.e. the team scope is real.
-        const filter = leaveCountMock.mock.calls[0][0] as {
-            user_id?: { $in: Types.ObjectId[] };
-            status?: string;
-        };
+        // No reporting_manager_id resolution and no `user_id` team filter on the
+        // pending-count call — the scope is org-wide.
+        expect(userFindMock).not.toHaveBeenCalled();
+        const filter = leaveCountMock.mock.calls[0][0] as { user_id?: unknown; status?: string };
         expect(filter.status).toBe(LEAVE_REQUEST_STATUSES.PENDING);
-        expect(filter.user_id?.$in).toHaveLength(2);
+        expect(filter.user_id).toBeUndefined();
     });
 
-    it('managers with no direct reports short-circuit to a zero card', async () => {
-        userFindMock.mockReturnValueOnce(queryStub([])); // no reports
+    it('team-leads get the same org-wide scope as managers', async () => {
+        userCountMock.mockResolvedValueOnce(5);
+        leaveCountMock.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+        leaveFindMock.mockReturnValueOnce(queryStub([]));
 
-        const result = await dashboard.buildManagerDashboard({ id: new Types.ObjectId(), role: ROLES.MANAGER }, [
+        const result = await dashboard.buildManagerDashboard({ id: new Types.ObjectId(), role: ROLES.TEAM_LEAD }, [
             'leave_request.approve',
         ]);
 
-        expect(result.scope).toBe('team');
-        expect(result.team_size).toBe(0);
-        expect(result.pending_leave_approvals!.count).toBe(0);
-        expect(result.pending_leave_approvals!.recent).toEqual([]);
-        // No DB count call should have been issued for a 0-report manager.
-        expect(leaveCountMock).not.toHaveBeenCalled();
+        expect(result.scope).toBe('org');
+        expect(result.team_size).toBe(5);
+        expect(userFindMock).not.toHaveBeenCalled();
     });
 
     it('without LEAVE_REQUEST_APPROVE, pending_leave_approvals is absent but team_size is present', async () => {
-        const managerId = new Types.ObjectId();
-        const reportA = { _id: new Types.ObjectId() };
-        userFindMock.mockReturnValueOnce(queryStub([reportA]));
+        userCountMock.mockResolvedValueOnce(11);
 
         const result = await dashboard.buildManagerDashboard(
-            { id: managerId, role: ROLES.MANAGER },
+            { id: new Types.ObjectId(), role: ROLES.MANAGER },
             ['dashboard.manager'] // no leave_request.approve
         );
 
-        expect(result.scope).toBe('team');
-        expect(result.team_size).toBe(1);
+        expect(result.scope).toBe('org');
+        expect(result.team_size).toBe(11);
         expect(result.pending_leave_approvals).toBeUndefined();
         expect(leaveCountMock).not.toHaveBeenCalled();
     });

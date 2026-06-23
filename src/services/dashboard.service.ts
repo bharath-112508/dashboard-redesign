@@ -12,7 +12,6 @@ import { Task } from '../models/task.model.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
-import { isAdminLike } from '../utils/role-check.js';
 import { callerCan } from '../utils/caller-permissions.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
@@ -270,23 +269,8 @@ interface ManagerDashboardPayload {
     pending_leave_approvals?: PendingLeaveCard;
 }
 
-/**
- * Resolve the manager's direct reports — non-client active users whose
- * `internal_profile.reporting_manager_id` points at the caller. Admins are
- * intentionally treated as org-scoped (no team filter) so they see the
- * full pending queue from this endpoint as well as `/dashboard/admin`.
- */
-const resolveDirectReportIds = async (manager_id: Types.ObjectId): Promise<Types.ObjectId[]> => {
-    const reports = await User.find({
-        status: USER_STATUSES.ACTIVE,
-        role: { $ne: ROLES.CLIENT },
-        'internal_profile.reporting_manager_id': manager_id,
-    }).select('_id');
-    return reports.map((u) => u._id);
-};
-
 export const buildManagerDashboard = async (
-    caller: {
+    _caller: {
         id: Types.ObjectId;
         role: RoleType;
         /** Step-47 RBAC signal (BACKEND_AUDIT.md R4). */
@@ -294,58 +278,32 @@ export const buildManagerDashboard = async (
     },
     held: readonly string[] | undefined
 ): Promise<ManagerDashboardPayload> => {
-    if (isAdminLike(caller)) {
-        const team_size = await safeCard(
-            'manager.team_size',
-            () =>
-                User.countDocuments({
-                    status: USER_STATUSES.ACTIVE,
-                    role: { $ne: ROLES.CLIENT },
-                }),
-            0
-        );
-        const payload: ManagerDashboardPayload = {
-            generated_at: new Date().toISOString(),
-            scope: 'org',
-            team_size,
-        };
-        if (callerCan(held, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
-            payload.pending_leave_approvals = await safeCard(
-                'manager.pending_leaves',
-                () => computePendingLeaves({}),
-                EMPTY_PENDING
-            );
-        }
-        return payload;
-    }
-
-    const reports = await safeCard(
-        'manager.direct_reports',
-        () => resolveDirectReportIds(caller.id),
-        [] as Types.ObjectId[]
+    // `read_team` is org-wide today (CLAUDE.md — per-team scoping via
+    // `internal_profile.reporting_manager_id` is future work). Managers and
+    // team-leads see the whole active org here, matching the Team Attendance
+    // page; the (currently unpopulated) direct-report set would otherwise
+    // yield an empty team_size + pending queue.
+    const team_size = await safeCard(
+        'manager.team_size',
+        () =>
+            User.countDocuments({
+                status: USER_STATUSES.ACTIVE,
+                role: { $ne: ROLES.CLIENT },
+            }),
+        0
     );
-
     const payload: ManagerDashboardPayload = {
         generated_at: new Date().toISOString(),
-        scope: 'team',
-        team_size: reports.length,
+        scope: 'org',
+        team_size,
     };
-
     if (callerCan(held, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
         payload.pending_leave_approvals = await safeCard(
             'manager.pending_leaves',
-            () =>
-                reports.length === 0
-                    ? Promise.resolve({
-                          count: 0,
-                          requires_additional_approval: 0,
-                          recent: [] as Record<string, unknown>[],
-                      } satisfies PendingLeaveCard)
-                    : computePendingLeaves({ user_id: { $in: reports } }),
+            () => computePendingLeaves({}),
             EMPTY_PENDING
         );
     }
-
     return payload;
 };
 

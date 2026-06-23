@@ -369,15 +369,10 @@ describe('buildEmployeeAnalytics — self-scope in aggregation pipelines', () =>
     });
 });
 
-describe('buildManagerAnalytics — team scope via reporting_manager_id', () => {
-    it('non-admin-like manager: User.find is called with reporting_manager_id filter', async () => {
+describe('buildManagerAnalytics — org-wide scope (read_team is org-wide today)', () => {
+    it('does not scope to a reporting_manager_id team — aggregations are org-wide', async () => {
         stubEmptyModels();
         const managerId = new Types.ObjectId();
-
-        // Simulate User.find for team members returning a list stub.
-        // The manager service calls: User.find({ ..., 'internal_profile.reporting_manager_id': caller.id })
-        //   .select('_id').lean()  — which our queryStub handles via the `.then()` resolver.
-        vi.mocked(User.find).mockReturnValue(queryStub([]) as never);
 
         await buildManagerAnalytics(
             { id: managerId, role: 'manager', role_keys: ['manager'] },
@@ -385,17 +380,19 @@ describe('buildManagerAnalytics — team scope via reporting_manager_id', () => 
             'month'
         );
 
-        // Verify at least one User.find call includes the reporting_manager_id filter.
-        const calls = vi.mocked(User.find).mock.calls;
-        const hasManagerFilter = calls.some((args) => {
-            const filter = args[0] as unknown as Record<string, unknown>;
-            return (
-                Object.prototype.hasOwnProperty.call(filter, 'internal_profile.reporting_manager_id') &&
-                (filter['internal_profile.reporting_manager_id'] as { toString(): string })?.toString() ===
-                    managerId.toString()
-            );
+        // No User.find call should carry a direct-report team filter any more.
+        const hasManagerFilter = vi.mocked(User.find).mock.calls.some((args) => {
+            const filter = (args[0] ?? {}) as Record<string, unknown>;
+            return Object.prototype.hasOwnProperty.call(filter, 'internal_profile.reporting_manager_id');
         });
-        expect(hasManagerFilter).toBe(true);
+        expect(hasManagerFilter).toBe(false);
+
+        // Attendance aggregation must be org-wide: no `user_id: { $in }` scoping.
+        for (const call of vi.mocked(AttendanceRecord.aggregate).mock.calls) {
+            const pipeline = call[0] as unknown as Record<string, unknown>[];
+            const matchStage = pipeline[0] as { $match?: { user_id?: unknown } } | undefined;
+            expect(matchStage?.$match?.user_id).toBeUndefined();
+        }
     });
 });
 

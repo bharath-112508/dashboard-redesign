@@ -22,7 +22,6 @@ import {
     type DashboardRangeKey,
     type ResolvedRange,
 } from '../utils/dashboard-range.js';
-import { isAdminLike } from '../utils/role-check.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import {
@@ -693,25 +692,20 @@ export const buildAdminAnalytics = async (held: Held, rangeKey: DashboardRangeKe
 };
 
 export const buildManagerAnalytics = async (
-    caller: { id: Types.ObjectId; role: string; role_keys?: readonly string[] },
+    _caller: { id: Types.ObjectId; role: string; role_keys?: readonly string[] },
     held: Held,
     rangeKey: DashboardRangeKey
 ): Promise<AnalyticsPayload> => {
     const range = resolveDashboardRange(rangeKey);
 
-    const orgWide = isAdminLike(caller);
-    const teamIds = orgWide
-        ? null
-        : await User.find({
-              status: USER_STATUSES.ACTIVE,
-              role: { $ne: ROLES.CLIENT },
-              'internal_profile.reporting_manager_id': caller.id,
-          })
-              .select('_id')
-              .lean<{ _id: Types.ObjectId }[]>()
-              .then((rows) => rows.map((r) => r._id));
-    const headcount = orgWide ? await activeInternalCount().catch(() => 0) : (teamIds?.length ?? 0);
-    const taskScope = teamIds === null ? {} : { primary_assignee_id: { $in: teamIds } };
+    // `read_team` is org-wide today (CLAUDE.md — per-team scoping via
+    // `internal_profile.reporting_manager_id` is future work). Managers and
+    // team-leads therefore see the whole active org on the dashboard, matching
+    // the Team Attendance page; scoping to a (currently unpopulated) direct-
+    // report set would render every team section empty.
+    const teamIds: UserScope = null;
+    const headcount = await activeInternalCount().catch(() => 0);
+    const taskScope = {};
 
     const { add, settle } = sectionCollector(held);
 
