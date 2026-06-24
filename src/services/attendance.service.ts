@@ -481,9 +481,95 @@ const loadUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, User
     return new Map(rows.map((r) => [r._id.toString(), { id: r._id.toString(), full_name: r.full_name }]));
 };
 
+/**
+ * Roster view for a single day (`include_absent=true`, `from_date === to_date`):
+ * real attendance rows + a synthetic `absent` row for every active non-client
+ * employee with no record that day. Filtering + pagination run in memory — a
+ * single day is at most ~headcount rows.
+ */
+const listAttendanceRoster = async (
+    query: ListAttendanceQuery
+): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
+    const date = query.from_date as string;
+    const userFilter = query.user_id ? new Types.ObjectId(query.user_id) : null;
+
+    const recordFilter: Record<string, unknown> = { local_date: date };
+    if (userFilter) recordFilter.user_id = userFilter;
+
+    const [records, employees, totalInternalActive] = await Promise.all([
+        AttendanceRecord.find(recordFilter).sort({ _id: -1 }),
+        User.find({
+            status: USER_STATUSES.ACTIVE,
+            role: { $ne: ROLES.CLIENT },
+            ...(userFilter ? { _id: userFilter } : {}),
+        })
+            .select('_id full_name')
+            .lean<{ _id: Types.ObjectId; full_name: string }[]>(),
+        User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } }),
+    ]);
+
+    // Real rows (with user display). Records for non-employees (e.g. a client
+    // who checked in) still surface here on their own row.
+    const userMap = await loadUserDisplays(
+        Array.from(new Set(records.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id))
+    );
+    const realRows: Record<string, unknown>[] = records.map((r) => {
+        const obj = r.toJSON() as unknown as Record<string, unknown>;
+        obj.user = userMap.get(r.user_id.toString()) ?? { id: r.user_id.toString(), full_name: null };
+        return obj;
+    });
+
+    // Synthetic absent rows for active non-client employees with no record.
+    const recordedIds = new Set(records.map((r) => r.user_id.toString()));
+    const absentRows: Record<string, unknown>[] = employees
+        .filter((u) => !recordedIds.has(u._id.toString()))
+        .sort((a, b) => (a.full_name ?? '').localeCompare(b.full_name ?? ''))
+        .map((u) => ({
+            id: `absent:${u._id.toString()}`,
+            user_id: u._id.toString(),
+            user: { id: u._id.toString(), full_name: u.full_name ?? null },
+            local_date: date,
+            status: 'absent',
+            check_in: null,
+            check_out: null,
+            segments: [],
+            total_worked_minutes: null,
+            total_break_minutes: 0,
+            flagged_for_correction: false,
+            is_synthetic: true,
+        }));
+
+    let combined = [...realRows, ...absentRows];
+    if (query.status) combined = combined.filter((r) => r.status === query.status);
+    if (query.flagged_for_correction !== undefined) {
+        combined = combined.filter((r) => Boolean(r.flagged_for_correction) === query.flagged_for_correction);
+    }
+
+    const total = combined.length;
+    const skip = (query.page - 1) * query.limit;
+    return {
+        data: combined.slice(skip, skip + query.limit),
+        meta: {
+            page: query.page,
+            limit: query.limit,
+            total,
+            total_pages: Math.max(1, Math.ceil(total / query.limit)),
+            total_internal_active: totalInternalActive,
+        },
+    };
+};
+
 export const listAttendance = async (
     query: ListAttendanceQuery
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
+    // Single-day roster mode — surface the FULL active non-client workforce for
+    // the day: real records for whoever has one, plus a synthetic `absent` row
+    // for every active non-client employee who hasn't checked in. The FE only
+    // requests this on working, non-holiday, non-future days.
+    if (query.include_absent && query.from_date && query.from_date === query.to_date) {
+        return listAttendanceRoster(query);
+    }
+
     const filter: Record<string, unknown> = {};
     if (query.user_id) filter.user_id = new Types.ObjectId(query.user_id);
     if (query.status) filter.status = query.status;
@@ -498,9 +584,13 @@ export const listAttendance = async (
     }
 
     const skip = (query.page - 1) * query.limit;
-    const [rows, total] = await Promise.all([
+    const [rows, total, totalInternalActive] = await Promise.all([
         AttendanceRecord.find(filter).sort({ local_date: -1, _id: -1 }).skip(skip).limit(query.limit),
         AttendanceRecord.countDocuments(filter),
+        // Active non-client headcount — the canonical "workforce" denominator
+        // shared with the dashboard's attendance card. Clients are excluded;
+        // any client attendance still surfaces as its own row in `data`.
+        User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } }),
     ]);
 
     const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
@@ -520,6 +610,7 @@ export const listAttendance = async (
             limit: query.limit,
             total,
             total_pages: Math.max(1, Math.ceil(total / query.limit)),
+            total_internal_active: totalInternalActive,
         },
     };
 };

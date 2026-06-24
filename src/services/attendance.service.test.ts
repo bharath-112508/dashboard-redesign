@@ -20,12 +20,14 @@ const {
     attendanceRecordFindOneMock,
     attendanceRecordFindMock,
     userFindMock,
+    userCountMock,
     settingsLoadMock,
 } = vi.hoisted(() => ({
     attendanceRecordCreateMock: vi.fn(),
     attendanceRecordFindOneMock: vi.fn(),
     attendanceRecordFindMock: vi.fn(),
     userFindMock: vi.fn(),
+    userCountMock: vi.fn(),
     settingsLoadMock: vi.fn(),
 }));
 
@@ -42,6 +44,7 @@ vi.mock('../models/attendance-record.model.js', () => ({
 vi.mock('../models/user.model.js', () => ({
     User: {
         find: userFindMock,
+        countDocuments: userCountMock,
     },
 }));
 
@@ -520,5 +523,74 @@ describe('getTodayAttendanceSummary', () => {
         expect(summary.incomplete).toBe(1);
         expect(summary.not_in_count).toBe(1);
         expect(summary.not_in_roster).toEqual([{ id: u3.toString(), full_name: 'Meera' }]);
+    });
+});
+
+// ─── listAttendance — single-day roster (include_absent) ───────────────────
+
+describe('listAttendance — single-day roster', () => {
+    const date = '2026-06-24';
+    const present = new Types.ObjectId();
+    const absent = new Types.ObjectId();
+
+    const setupRoster = () => {
+        attendanceRecordFindMock.mockReturnValue({
+            sort: vi.fn().mockResolvedValue([
+                {
+                    user_id: present,
+                    toJSON: () => ({
+                        id: 'rec-1',
+                        user_id: present.toString(),
+                        status: 'present',
+                        local_date: date,
+                    }),
+                },
+            ]),
+        });
+        // Both the employee roster and loadUserDisplays go through User.find().select().lean().
+        userFindMock.mockReturnValue({
+            select: vi.fn().mockReturnValue({
+                lean: vi.fn().mockResolvedValue([
+                    { _id: present, full_name: 'Present Person' },
+                    { _id: absent, full_name: 'Absent Person' },
+                ]),
+            }),
+        });
+        userCountMock.mockResolvedValue(2);
+    };
+
+    it('adds a synthetic absent row for an active employee with no record', async () => {
+        setupRoster();
+        const res = await svc.listAttendance({
+            from_date: date,
+            to_date: date,
+            include_absent: true,
+            page: 1,
+            limit: 20,
+        } as never);
+
+        expect(res.meta.total).toBe(2);
+        expect(res.meta.total_internal_active).toBe(2);
+
+        const absentRow = res.data.find((r) => r.user_id === absent.toString());
+        expect(absentRow?.status).toBe('absent');
+        expect(absentRow?.is_synthetic).toBe(true);
+        const presentRow = res.data.find((r) => r.user_id === present.toString());
+        expect(presentRow?.status).toBe('present');
+    });
+
+    it('status=present filters OUT the synthetic absent rows', async () => {
+        setupRoster();
+        const res = await svc.listAttendance({
+            from_date: date,
+            to_date: date,
+            include_absent: true,
+            status: 'present',
+            page: 1,
+            limit: 20,
+        } as never);
+
+        expect(res.meta.total).toBe(1);
+        expect(res.data.every((r) => r.status === 'present')).toBe(true);
     });
 });

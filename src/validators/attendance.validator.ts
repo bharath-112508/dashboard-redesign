@@ -116,6 +116,13 @@ export const listAttendanceQuerySchema = dateRangeRefine(
             .union([z.literal('true'), z.literal('false'), z.boolean()])
             .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
             .optional(),
+        // Single-day roster mode: include active non-client employees with NO
+        // record that day as synthetic `absent` rows, so reviewers see the full
+        // workforce. Only honoured when from_date === to_date.
+        include_absent: z
+            .union([z.literal('true'), z.literal('false'), z.boolean()])
+            .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
+            .optional(),
         from_date: isoDateOnly.optional(),
         to_date: isoDateOnly.optional(),
         page: z.coerce.number().int().min(1).default(1),

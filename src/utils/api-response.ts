@@ -16,6 +16,12 @@ export interface PaginationMeta {
     limit: number;
     total: number;
     total_pages: number;
+    /**
+     * Optional, endpoint-specific. Team-attendance list responses set this to
+     * the active non-client headcount so the FE can render "present / workforce"
+     * (e.g. 11/17) consistently with the dashboard, instead of "present / rows".
+     */
+    total_internal_active?: number;
 }
 
 export const ok = <T>(res: Response, data: T, meta?: Record<string, unknown>): Response => {
