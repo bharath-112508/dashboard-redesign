@@ -802,8 +802,9 @@ export const submitCorrection = async (
 
 /**
  * Visibility:
- *  - Managers / admins see everything (subject to optional `user_id`/`status`
- *    filters).
+ *  - Reviewers (managers / team leads / admins) see everyone's requests
+ *    EXCEPT their own (a reviewer can't action their own request), unless they
+ *    pass an explicit `user_id` filter. Optional `status` filter applies too.
  *  - Employees see only their own correction requests (auto-filtered by
  *    `user_id`, ignoring any value in the query).
  */
@@ -817,6 +818,12 @@ export const listCorrections = async (
         filter.user_id = caller_id;
     } else if (query.user_id) {
         filter.user_id = new Types.ObjectId(query.user_id);
+    } else {
+        // A reviewer can never review their OWN correction request, so it must
+        // not appear in their approvals queue — always exclude self (mirrors
+        // the leave approvals queue). They can still look up their own via an
+        // explicit `user_id` filter.
+        filter.user_id = { $ne: caller_id };
     }
     if (query.status) filter.status = query.status;
 
@@ -887,6 +894,11 @@ export const approveCorrection = async (
     assertCanReviewCorrections(caller.role);
 
     const reqDoc = await loadPendingCorrection(id);
+    // Separation of duties: a reviewer can never approve their OWN correction
+    // request — it must be actioned by someone above them (mirrors leaves).
+    if (reqDoc.user_id.equals(reviewer_id)) {
+        throw AppError.forbidden('You cannot review your own correction request');
+    }
     const record = await AttendanceRecord.findById(reqDoc.attendance_record_id);
     if (!record) {
         throw AppError.notFound('Underlying attendance record not found', ERROR_CODES.ATTENDANCE_RECORD_NOT_FOUND);
@@ -1045,6 +1057,11 @@ export const rejectCorrection = async (
     assertCanReviewCorrections(caller.role);
 
     const reqDoc = await loadPendingCorrection(id);
+    // Separation of duties: a reviewer can never reject their OWN correction
+    // request — it must be actioned by someone above them (mirrors leaves).
+    if (reqDoc.user_id.equals(reviewer_id)) {
+        throw AppError.forbidden('You cannot review your own correction request');
+    }
     reqDoc.status = 'rejected';
     reqDoc.reviewer_id = reviewer_id;
     reqDoc.reviewer_remarks = body.reviewer_remarks ?? '';

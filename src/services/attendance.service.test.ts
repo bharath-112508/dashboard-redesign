@@ -74,6 +74,8 @@ vi.mock('./notification-dispatcher.service.js', () => ({
 const svc = await import('./attendance.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { haversineDistanceMeters } from '../constants/attendance.js';
+import { ROLES } from '../constants/roles.js';
+import { AttendanceCorrectionRequest } from '../models/attendance-correction-request.model.js';
 
 const defaultSettings = (overrides: Record<string, unknown> = {}) => ({
     work_schedule: { working_days: [1, 2, 3, 4, 5], daily_expected_hours: 8 },
@@ -592,5 +594,88 @@ describe('listAttendance — single-day roster', () => {
 
         expect(res.meta.total).toBe(1);
         expect(res.data.every((r) => r.status === 'present')).toBe(true);
+    });
+});
+
+// ─── Correction review — separation of duties ─────────────────────────────
+
+describe('correction review — reviewer cannot action their own request', () => {
+    const reviewer = new Types.ObjectId();
+    const someoneElse = new Types.ObjectId();
+
+    const mockPending = (requesterId: Types.ObjectId) => {
+        vi.mocked(AttendanceCorrectionRequest.findById).mockResolvedValue({
+            status: 'pending',
+            user_id: requesterId,
+            attendance_record_id: new Types.ObjectId(),
+        } as never);
+    };
+
+    it('approveCorrection throws FORBIDDEN when the reviewer is the requester', async () => {
+        mockPending(reviewer);
+        await expect(
+            svc.approveCorrection(new Types.ObjectId(), {} as never, {
+                id: reviewer,
+                role: ROLES.TEAM_LEAD,
+            })
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it('rejectCorrection throws FORBIDDEN when the reviewer is the requester', async () => {
+        mockPending(reviewer);
+        await expect(
+            svc.rejectCorrection(new Types.ObjectId(), {} as never, {
+                id: reviewer,
+                role: ROLES.TEAM_LEAD,
+            })
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it("approveCorrection does NOT short-circuit on someone else's request (passes the self-guard)", async () => {
+        // The underlying record is absent here, so it must fail PAST the
+        // self-guard with a *different* error — proving the guard let it through.
+        mockPending(someoneElse);
+        vi.mocked(AttendanceCorrectionRequest.findById).mockResolvedValueOnce({
+            status: 'pending',
+            user_id: someoneElse,
+            attendance_record_id: new Types.ObjectId(),
+        } as never);
+        await expect(
+            svc.approveCorrection(new Types.ObjectId(), {} as never, {
+                id: reviewer,
+                role: ROLES.TEAM_LEAD,
+            })
+        ).rejects.toMatchObject({ code: ERROR_CODES.ATTENDANCE_RECORD_NOT_FOUND });
+    });
+});
+
+describe('listCorrections — reviewer queue excludes self', () => {
+    const reviewer = new Types.ObjectId();
+
+    const stubEmptyQuery = () => {
+        vi.mocked(AttendanceCorrectionRequest.find).mockReturnValue({
+            sort: () => ({ skip: () => ({ limit: () => Promise.resolve([]) }) }),
+        } as never);
+        vi.mocked(AttendanceCorrectionRequest.countDocuments).mockResolvedValue(0 as never);
+    };
+
+    it('a reviewer with no user_id filter never sees their own requests', async () => {
+        stubEmptyQuery();
+        await svc.listCorrections({ page: 1, limit: 20 } as never, reviewer, ROLES.TEAM_LEAD);
+
+        const filter = vi.mocked(AttendanceCorrectionRequest.find).mock.calls[0][0] as unknown as {
+            user_id: { $ne: Types.ObjectId };
+        };
+        expect(filter.user_id.$ne.equals(reviewer)).toBe(true);
+    });
+
+    it('an employee is still scoped to only their own requests', async () => {
+        stubEmptyQuery();
+        await svc.listCorrections({ page: 1, limit: 20 } as never, reviewer, ROLES.EMPLOYEE);
+
+        const filter = vi.mocked(AttendanceCorrectionRequest.find).mock.calls[0][0] as unknown as {
+            user_id: Types.ObjectId;
+        };
+        expect(filter.user_id.equals(reviewer)).toBe(true);
     });
 });
