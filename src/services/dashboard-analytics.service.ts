@@ -22,6 +22,7 @@ import {
     type DashboardRangeKey,
     type ResolvedRange,
 } from '../utils/dashboard-range.js';
+import { isAdminLike } from '../utils/role-check.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import {
@@ -691,21 +692,51 @@ export const buildAdminAnalytics = async (held: Held, rangeKey: DashboardRangeKe
     return { generated_at: new Date().toISOString(), range, sections };
 };
 
+/**
+ * Team-lead dashboard scope: the projects they're a MEMBER of, plus everyone
+ * who shares one of those projects (the lead included). Admins and Managers are
+ * org-wide and never call this.
+ */
+export const resolveTeamLeadScope = async (
+    callerId: Types.ObjectId
+): Promise<{ projectIds: Types.ObjectId[]; memberIds: Types.ObjectId[] }> => {
+    const projects = await Project.find({ member_ids: callerId })
+        .select('_id member_ids')
+        .lean<{ _id: Types.ObjectId; member_ids: Types.ObjectId[] }[]>();
+    const projectIds = projects.map((p) => p._id);
+    const memberMap = new Map<string, Types.ObjectId>();
+    memberMap.set(callerId.toString(), callerId);
+    for (const p of projects) for (const m of p.member_ids ?? []) memberMap.set(m.toString(), m);
+    return { projectIds, memberIds: [...memberMap.values()] };
+};
+
+/** Tasks belonging to none — used when a team lead is a member of no project. */
+const NO_TASKS_FILTER = { _id: new Types.ObjectId('000000000000000000000000') };
+
 export const buildManagerAnalytics = async (
-    _caller: { id: Types.ObjectId; role: string; role_keys?: readonly string[] },
+    caller: { id: Types.ObjectId; role: string; role_keys?: readonly string[] },
     held: Held,
     rangeKey: DashboardRangeKey
 ): Promise<AnalyticsPayload> => {
     const range = resolveDashboardRange(rangeKey);
 
-    // `read_team` is org-wide today (CLAUDE.md — per-team scoping via
-    // `internal_profile.reporting_manager_id` is future work). Managers and
-    // team-leads therefore see the whole active org on the dashboard, matching
-    // the Team Attendance page; scoping to a (currently unpopulated) direct-
-    // report set would render every team section empty.
-    const teamIds: UserScope = null;
-    const headcount = await activeInternalCount().catch(() => 0);
-    const taskScope = {};
+    // Admins + Managers are org-wide. A Team Lead's dashboard is scoped to the
+    // projects they belong to and the people in those projects, so they don't
+    // see org-wide tasks/hours/attendance for projects they aren't on.
+    const orgWide = isAdminLike(caller) || caller.role === ROLES.MANAGER;
+    let teamIds: UserScope;
+    let headcount: number;
+    let taskScope: Record<string, unknown>;
+    if (orgWide) {
+        teamIds = null;
+        headcount = await activeInternalCount().catch(() => 0);
+        taskScope = {};
+    } else {
+        const scope = await resolveTeamLeadScope(caller.id);
+        teamIds = scope.memberIds;
+        headcount = scope.memberIds.length;
+        taskScope = scope.projectIds.length > 0 ? { project_id: { $in: scope.projectIds } } : NO_TASKS_FILTER;
+    }
 
     const { add, settle } = sectionCollector(held);
 

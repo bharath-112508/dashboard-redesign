@@ -369,8 +369,8 @@ describe('buildEmployeeAnalytics — self-scope in aggregation pipelines', () =>
     });
 });
 
-describe('buildManagerAnalytics — org-wide scope (read_team is org-wide today)', () => {
-    it('does not scope to a reporting_manager_id team — aggregations are org-wide', async () => {
+describe('buildManagerAnalytics — scope by role', () => {
+    it('manager: org-wide — attendance aggregation has no user_id scoping', async () => {
         stubEmptyModels();
         const managerId = new Types.ObjectId();
 
@@ -380,18 +380,41 @@ describe('buildManagerAnalytics — org-wide scope (read_team is org-wide today)
             'month'
         );
 
-        // No User.find call should carry a direct-report team filter any more.
-        const hasManagerFilter = vi.mocked(User.find).mock.calls.some((args) => {
-            const filter = (args[0] ?? {}) as Record<string, unknown>;
-            return Object.prototype.hasOwnProperty.call(filter, 'internal_profile.reporting_manager_id');
-        });
-        expect(hasManagerFilter).toBe(false);
-
-        // Attendance aggregation must be org-wide: no `user_id: { $in }` scoping.
         for (const call of vi.mocked(AttendanceRecord.aggregate).mock.calls) {
             const pipeline = call[0] as unknown as Record<string, unknown>[];
             const matchStage = pipeline[0] as { $match?: { user_id?: unknown } } | undefined;
             expect(matchStage?.$match?.user_id).toBeUndefined();
+        }
+    });
+
+    it('team-lead: scoped to their project members — attendance has a user_id $in filter', async () => {
+        stubEmptyModels();
+        const leadId = new Types.ObjectId();
+        const member2 = new Types.ObjectId();
+        const projectId = new Types.ObjectId();
+        // resolveTeamLeadScope → Project.find({ member_ids }).select().lean()
+        vi.mocked(Project.find).mockReturnValue(
+            queryStub([{ _id: projectId, member_ids: [leadId, member2] }]) as never
+        );
+
+        await buildManagerAnalytics(
+            { id: leadId, role: 'team_lead', role_keys: ['team_lead'] },
+            ['dashboard.manager', 'attendance.read_team', 'task.read'],
+            'month'
+        );
+
+        const scoped = vi
+            .mocked(AttendanceRecord.aggregate)
+            .mock.calls.map(
+                (c) =>
+                    (c[0] as unknown as Record<string, unknown>[])[0] as {
+                        $match?: { user_id?: { $in?: Types.ObjectId[] } };
+                    }
+            )
+            .filter((m) => m?.$match?.user_id);
+        expect(scoped.length).toBeGreaterThan(0);
+        for (const m of scoped) {
+            expect(m.$match!.user_id!.$in!.map(String).sort()).toEqual([leadId.toString(), member2.toString()].sort());
         }
     });
 });

@@ -8,6 +8,8 @@ import { LeaveType, type LeaveTypeDocument } from '../models/leave-type.model.js
 import { Holiday } from '../models/holiday.model.js';
 import { Notification } from '../models/notification.model.js';
 import { Project } from '../models/project.model.js';
+import { isAdminLike } from '../utils/role-check.js';
+import { resolveTeamLeadScope } from './dashboard-analytics.service.js';
 import { Task } from '../models/task.model.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import logger from '../utils/logger.js';
@@ -270,7 +272,7 @@ interface ManagerDashboardPayload {
 }
 
 export const buildManagerDashboard = async (
-    _caller: {
+    caller: {
         id: Types.ObjectId;
         role: RoleType;
         /** Step-47 RBAC signal (BACKEND_AUDIT.md R4). */
@@ -278,29 +280,52 @@ export const buildManagerDashboard = async (
     },
     held: readonly string[] | undefined
 ): Promise<ManagerDashboardPayload> => {
-    // `read_team` is org-wide today (CLAUDE.md — per-team scoping via
-    // `internal_profile.reporting_manager_id` is future work). Managers and
-    // team-leads see the whole active org here, matching the Team Attendance
-    // page; the (currently unpopulated) direct-report set would otherwise
-    // yield an empty team_size + pending queue.
-    const team_size = await safeCard(
-        'manager.team_size',
-        () =>
-            User.countDocuments({
-                status: USER_STATUSES.ACTIVE,
-                role: { $ne: ROLES.CLIENT },
-            }),
-        0
-    );
+    // Admins + Managers are org-wide; a Team Lead is scoped to the members of
+    // the projects they belong to (so team_size + the pending-approval queue
+    // reflect their projects' people, not the whole org).
+    const orgWide = isAdminLike(caller) || caller.role === ROLES.MANAGER;
+
+    if (orgWide) {
+        const team_size = await safeCard(
+            'manager.team_size',
+            () => User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } }),
+            0
+        );
+        const payload: ManagerDashboardPayload = {
+            generated_at: new Date().toISOString(),
+            scope: 'org',
+            team_size,
+        };
+        if (callerCan(held, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
+            payload.pending_leave_approvals = await safeCard(
+                'manager.pending_leaves',
+                () => computePendingLeaves({}),
+                EMPTY_PENDING
+            );
+        }
+        return payload;
+    }
+
+    // Team lead — scope to the people who share a project with them, minus self
+    // (a lead can't approve their own leave).
+    const { memberIds } = await safeCard('manager.team_scope', () => resolveTeamLeadScope(caller.id), {
+        projectIds: [],
+        memberIds: [],
+    });
+    const reviewIds = memberIds.filter((id) => !id.equals(caller.id));
+
     const payload: ManagerDashboardPayload = {
         generated_at: new Date().toISOString(),
-        scope: 'org',
-        team_size,
+        scope: 'team',
+        team_size: memberIds.length,
     };
     if (callerCan(held, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
         payload.pending_leave_approvals = await safeCard(
             'manager.pending_leaves',
-            () => computePendingLeaves({}),
+            () =>
+                reviewIds.length === 0
+                    ? Promise.resolve(EMPTY_PENDING)
+                    : computePendingLeaves({ user_id: { $in: reviewIds } }),
             EMPTY_PENDING
         );
     }

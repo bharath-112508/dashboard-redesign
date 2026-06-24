@@ -313,18 +313,29 @@ describe('buildManagerDashboard', () => {
         expect(filter.user_id).toBeUndefined();
     });
 
-    it('team-leads get the same org-wide scope as managers', async () => {
-        userCountMock.mockResolvedValueOnce(5);
-        leaveCountMock.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    it('team-leads are scoped to their projects — team_size = project members, pending excludes self', async () => {
+        const leadId = new Types.ObjectId();
+        const member2 = new Types.ObjectId();
+        const projectId = new Types.ObjectId();
+
+        // resolveTeamLeadScope → Project.find({ member_ids }).select().lean()
+        projectFindMock.mockReturnValueOnce(queryStub([{ _id: projectId, member_ids: [leadId, member2] }]));
+        leaveCountMock.mockResolvedValueOnce(2).mockResolvedValueOnce(0);
         leaveFindMock.mockReturnValueOnce(queryStub([]));
 
-        const result = await dashboard.buildManagerDashboard({ id: new Types.ObjectId(), role: ROLES.TEAM_LEAD }, [
+        const result = await dashboard.buildManagerDashboard({ id: leadId, role: ROLES.TEAM_LEAD }, [
             'leave_request.approve',
         ]);
 
-        expect(result.scope).toBe('org');
-        expect(result.team_size).toBe(5);
-        expect(userFindMock).not.toHaveBeenCalled();
+        expect(result.scope).toBe('team');
+        expect(result.team_size).toBe(2); // lead + member2
+        expect(result.pending_leave_approvals!.count).toBe(2);
+
+        // Pending-approval query is scoped to project members, EXCLUDING the lead.
+        const filter = leaveCountMock.mock.calls[0][0] as { user_id?: { $in: Types.ObjectId[] } };
+        expect(filter.user_id?.$in?.map(String)).toEqual([member2.toString()]);
+        // Org-wide headcount path is NOT taken.
+        expect(userCountMock).not.toHaveBeenCalled();
     });
 
     it('without LEAVE_REQUEST_APPROVE, pending_leave_approvals is absent but team_size is present', async () => {
