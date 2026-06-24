@@ -451,27 +451,11 @@ export const applyLeave = async (
     }
 
     // Date-policy gates ----------------------------------------------------
-    const today = dayjs().tz(ctx.timezone).format('YYYY-MM-DD');
-    if (body.start_date < today) {
-        throw AppError.unprocessable('Backdated leave is not allowed', ERROR_CODES.LEAVE_BACKDATED_NOT_ALLOWED);
-    }
-
-    // Advance-notice gate — per-leave-type. The admin-configured
-    // `LeaveType.advance_notice_days` is the single source of truth.
-    // A value of 0 means "no advance notice required". Built-in types
-    // ship with sane defaults (CL=14, SL/EL/CO/ML/PL=0) via the seeder
-    // and can be overridden at runtime through the leave-types CRUD.
-    const noticeDays = requestedType.advance_notice_days ?? 0;
-    if (noticeDays > 0) {
-        const earliest = dayjs(today).add(noticeDays, 'day').format('YYYY-MM-DD');
-        if (body.start_date < earliest) {
-            throw AppError.unprocessable(
-                `${requestedType.name} must be applied at least ${noticeDays} day${noticeDays === 1 ? '' : 's'} in advance (earliest start: ${earliest})`,
-                ERROR_CODES.LEAVE_NOTICE_VIOLATION,
-                { earliest_start_date: earliest, advance_notice_days: noticeDays }
-            );
-        }
-    }
+    // Leave can be applied for ANY date — same-day and backdated included —
+    // so an employee can record a last-minute absence (e.g. sick leave taken
+    // this morning) and a manager can enter a forgotten leave the next day.
+    // The previous backdated-not-allowed + per-type advance-notice gates are
+    // intentionally removed; `advance_notice_days` is no longer enforced.
 
     // Half-day / supports_half_day check
     if (body.is_half_day && !requestedType.supports_half_day) {
@@ -678,10 +662,10 @@ const reserveBalances = async (params: {
                 leave_type_id: seg.leave_type_id,
                 year: seg.year,
             };
-            // CL is allowed to dip negative (additional-approval workflow);
-            // every other type must have enough room. Unlimited types skip
-            // the guard entirely.
-            if (!lt.is_unlimited && lt.code !== LEAVE_CODES.CL) {
+            // Every limited type must have enough room — no leave can be taken
+            // into a negative balance (the prior CL "go negative with manager
+            // override" path is removed). Unlimited types skip the guard.
+            if (!lt.is_unlimited) {
                 filter.available = { $gte: seg.days };
             }
 
@@ -692,7 +676,7 @@ const reserveBalances = async (params: {
             );
             if (!updated) {
                 // Either the row is gone or balance is short.
-                if (lt.is_unlimited || lt.code === LEAVE_CODES.CL) {
+                if (lt.is_unlimited) {
                     throw AppError.internal('Failed to reserve balance');
                 }
                 throw AppError.conflict(
@@ -796,11 +780,14 @@ export const listLeaves = async (
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const filter: Filter = {};
     if (isReviewer(caller.role)) {
-        if (query.user_id) filter.user_id = new Types.ObjectId(query.user_id);
-        // Exclude one user (e.g. the reviewer themselves) from the queue — a
-        // reviewer can't approve their own request, so it shouldn't appear in
-        // their approvals list. Ignored when a positive user_id filter is set.
-        else if (query.exclude_user_id) filter.user_id = { $ne: new Types.ObjectId(query.exclude_user_id) };
+        if (query.user_id) {
+            filter.user_id = new Types.ObjectId(query.user_id);
+        } else {
+            // A reviewer can never approve their OWN request, so it must not
+            // appear in their approvals queue — always exclude self. (Supersedes
+            // the old opt-in `exclude_user_id`, which only ever excluded self.)
+            filter.user_id = { $ne: caller.id };
+        }
     } else {
         // Employees only see their own.
         filter.user_id = caller.id;

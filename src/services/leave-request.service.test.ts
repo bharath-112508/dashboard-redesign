@@ -111,6 +111,7 @@ vi.mock('./audit.service.js', () => ({
 }));
 
 const svc = await import('./leave-request.service.js');
+import { LeaveRequest } from '../models/leave-request.model.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
 import { ROLES } from '../constants/roles.js';
@@ -645,5 +646,51 @@ describe('buildSlMonthUsedMap — C4 month attribution', () => {
         });
 
         expect(out.get('2026-4')).toBe(1);
+    });
+});
+
+// ─── listLeaves — reviewer self-exclusion (bug 3) ──────────────────────────
+
+describe('listLeaves — reviewer approvals queue', () => {
+    const stubFindReturningEmpty = (capture: (filter: Record<string, unknown>) => void) => {
+        leaveRequestFindMock.mockImplementation((filter: Record<string, unknown>) => {
+            capture(filter);
+            return { sort: () => ({ skip: () => ({ limit: () => Promise.resolve([]) }) }) };
+        });
+        vi.mocked(LeaveRequest.countDocuments).mockResolvedValue(0 as never);
+    };
+
+    it("excludes the reviewer's OWN requests from the queue (can't self-approve)", async () => {
+        const reviewerId = new Types.ObjectId();
+        let filter: Record<string, unknown> = {};
+        stubFindReturningEmpty((f) => (filter = f));
+
+        await svc.listLeaves({ page: 1, limit: 50 } as never, { id: reviewerId, role: ROLES.MANAGER });
+
+        expect(filter.user_id).toEqual({ $ne: reviewerId });
+    });
+
+    it('honours a positive user_id filter instead of excluding self', async () => {
+        const reviewerId = new Types.ObjectId();
+        const targetId = new Types.ObjectId();
+        let filter: Record<string, unknown> = {};
+        stubFindReturningEmpty((f) => (filter = f));
+
+        await svc.listLeaves({ page: 1, limit: 50, user_id: targetId.toString() } as never, {
+            id: reviewerId,
+            role: ROLES.MANAGER,
+        });
+
+        expect(filter.user_id).toEqual(targetId);
+    });
+
+    it('scopes an employee to ONLY their own requests', async () => {
+        const employeeId = new Types.ObjectId();
+        let filter: Record<string, unknown> = {};
+        stubFindReturningEmpty((f) => (filter = f));
+
+        await svc.listLeaves({ page: 1, limit: 50 } as never, { id: employeeId, role: ROLES.EMPLOYEE });
+
+        expect(filter.user_id).toEqual(employeeId);
     });
 });
