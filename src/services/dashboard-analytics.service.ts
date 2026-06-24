@@ -98,19 +98,16 @@ export const computeAttendanceTrend = async (
     range: ResolvedRange,
     totalHeads: number
 ): Promise<AttendanceTrendSection> => {
-    // `today` renders the last 7 days for context (spec §4).
-    const winFrom =
-        range.key === 'today'
-            ? dayjs.tz(range.to, DEFAULT_TIMEZONE).subtract(6, 'day').format(DATE_FORMAT)
-            : range.from;
-
+    // The trend window is exactly the selected range — see the note in
+    // computeHoursTrend. `days_present` is counted from this section, so a
+    // wider-than-range window made "Today" count multiple days.
     const rows = await AttendanceRecord.aggregate<{ _id: { date: string; status: string }; count: number }>([
-        { $match: { local_date: { $gte: winFrom, $lte: range.to }, ...userMatch(userIds) } },
+        { $match: { local_date: { $gte: range.from, $lte: range.to }, ...userMatch(userIds) } },
         { $group: { _id: { date: '$local_date', status: '$status' }, count: { $sum: 1 } } },
     ]);
 
     const byDate = new Map<string, { present: number; on_leave: number }>();
-    for (const d of enumerateDates(winFrom, range.to)) byDate.set(d, { present: 0, on_leave: 0 });
+    for (const d of enumerateDates(range.from, range.to)) byDate.set(d, { present: 0, on_leave: 0 });
     for (const r of rows) {
         const slot = byDate.get(r._id.date);
         if (!slot) continue;
@@ -123,7 +120,7 @@ export const computeAttendanceTrend = async (
     const avgPresent = daysWithData === 0 ? 0 : data.reduce((a, d) => a + d.present, 0) / daysWithData;
     const insight =
         userIds !== null && userIds.length === 1
-            ? employeeAttendanceInsight(daysWithData, await countWorkingDays(winFrom, range.to), range.label)
+            ? employeeAttendanceInsight(daysWithData, await countWorkingDays(range.from, range.to), range.label)
             : attendanceTrendInsight(avgPresent, totalHeads, range.label);
 
     return { insight, delta: null, data };
@@ -342,13 +339,13 @@ export interface HoursTrendSection {
 }
 
 export const computeHoursTrend = async (userIds: UserScope, range: ResolvedRange): Promise<HoursTrendSection> => {
-    const winFrom =
-        range.key === 'today'
-            ? dayjs.tz(range.to, DEFAULT_TIMEZONE).subtract(6, 'day').format(DATE_FORMAT)
-            : range.from;
+    // The trend window is exactly the selected range. (Previously `today`
+    // widened to the last 7 days for chart context, but the dashboards derive
+    // their headline "Hours logged" KPI by summing this section — so the wide
+    // window made "Today" report a whole week. Range-accurate beats context.)
     const [rows, prev] = await Promise.all([
         TimesheetEntry.aggregate<{ _id: string; minutes: number }>([
-            { $match: { local_date: { $gte: winFrom, $lte: range.to }, ...userMatch(userIds) } },
+            { $match: { local_date: { $gte: range.from, $lte: range.to }, ...userMatch(userIds) } },
             { $group: { _id: '$local_date', minutes: { $sum: '$total_minutes' } } },
         ]),
         TimesheetEntry.aggregate<{ _id: null; minutes: number }>([
@@ -357,7 +354,7 @@ export const computeHoursTrend = async (userIds: UserScope, range: ResolvedRange
         ]),
     ]);
     const byDate = new Map(rows.map((r) => [r._id, r.minutes]));
-    const data = enumerateDates(winFrom, range.to).map((date) => ({ date, minutes: byDate.get(date) ?? 0 }));
+    const data = enumerateDates(range.from, range.to).map((date) => ({ date, minutes: byDate.get(date) ?? 0 }));
     const total = data.reduce((a, d) => a + d.minutes, 0);
     return {
         insight: hoursLoggedInsight(total, range.label),

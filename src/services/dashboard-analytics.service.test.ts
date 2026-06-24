@@ -51,6 +51,19 @@ const RANGE = {
     prev_to: '2026-05-31',
 };
 
+// `today` collapses from === to. The trend window must equal the range (no
+// 7-day widening) so the dashboards' "Hours logged" / "Days present" KPIs —
+// derived by summing/counting these sections — report a single day.
+const TODAY_RANGE = {
+    key: 'today' as const,
+    label: 'Today',
+    prev_label: 'yesterday',
+    from: '2026-06-24',
+    to: '2026-06-24',
+    prev_from: '2026-06-23',
+    prev_to: '2026-06-23',
+};
+
 // Chainable .find() stub: find().select().lean() etc resolve to `rows`.
 const queryStub = (rows: unknown) => {
     const q: Record<string, unknown> = {};
@@ -117,6 +130,20 @@ describe('computeAttendanceTrend', () => {
             },
         });
     });
+
+    it('today range scopes to a single day (no 7-day widening)', async () => {
+        vi.mocked(AttendanceRecord.aggregate).mockResolvedValue([
+            { _id: { date: '2026-06-24', status: 'present' }, count: 1 },
+        ] as never);
+        const out = await computeAttendanceTrend([new Types.ObjectId()], TODAY_RANGE, 1);
+        const pipeline = vi.mocked(AttendanceRecord.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[];
+        expect((pipeline[0] as { $match: { local_date: unknown } }).$match.local_date).toEqual({
+            $gte: '2026-06-24',
+            $lte: '2026-06-24',
+        });
+        // Exactly one day in the section → days_present can only ever be 0 or 1.
+        expect(out.data).toHaveLength(1);
+    });
 });
 
 describe('countWorkingDays', () => {
@@ -178,6 +205,19 @@ describe('computeHoursTrend', () => {
             { date: '2026-06-02', minutes: 300 },
             { date: '2026-06-03', minutes: 0 },
         ]);
+    });
+
+    it('today range yields a single day so the Hours-logged KPI sums one day', async () => {
+        vi.mocked(TimesheetEntry.aggregate)
+            .mockResolvedValueOnce([{ _id: '2026-06-24', minutes: 240 }] as never)
+            .mockResolvedValueOnce([{ _id: null, minutes: 0 }] as never);
+        const out = await computeHoursTrend([new Types.ObjectId()], TODAY_RANGE);
+        const pipeline = vi.mocked(TimesheetEntry.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[];
+        expect((pipeline[0] as { $match: { local_date: unknown } }).$match.local_date).toEqual({
+            $gte: '2026-06-24',
+            $lte: '2026-06-24',
+        });
+        expect(out.data).toEqual([{ date: '2026-06-24', minutes: 240 }]);
     });
 });
 
