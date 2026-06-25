@@ -482,6 +482,16 @@ export const setMyTimes = async (
     const first = segs[0]!;
     const last = segs[segs.length - 1]!;
 
+    // A punch can't be in the future. Allow a small grace so client/server
+    // clock skew doesn't reject an edit set to "now".
+    const futureLimit = Date.now() + 2 * 60 * 1000;
+    if (times.check_in !== undefined && new Date(times.check_in).getTime() > futureLimit) {
+        throw AppError.badRequest('Check-in cannot be in the future');
+    }
+    if (times.check_out && new Date(times.check_out).getTime() > futureLimit) {
+        throw AppError.badRequest('Check-out cannot be in the future');
+    }
+
     if (times.check_in !== undefined) {
         first.check_in.time = new Date(times.check_in);
     }
