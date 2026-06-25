@@ -1,8 +1,6 @@
 import {
     SLACK_ACTION_ATTENDANCE_CHECK_IN,
     SLACK_ACTION_ATTENDANCE_CHECK_OUT,
-    SLACK_ACTION_BREAK_START_LUNCH,
-    SLACK_ACTION_BREAK_START_TEA,
     SLACK_ACTION_BREAK_START_OTHER,
     SLACK_ACTION_BREAK_END,
 } from '../constants/slack.js';
@@ -78,22 +76,12 @@ const checkOutButton = () => ({
     ],
 });
 
-const breakPickerButtons = () => ({
+const startBreakButton = () => ({
     type: 'actions',
     elements: [
         {
             type: 'button',
-            text: { type: 'plain_text', text: 'Lunch', emoji: true },
-            action_id: SLACK_ACTION_BREAK_START_LUNCH,
-        },
-        {
-            type: 'button',
-            text: { type: 'plain_text', text: 'Tea', emoji: true },
-            action_id: SLACK_ACTION_BREAK_START_TEA,
-        },
-        {
-            type: 'button',
-            text: { type: 'plain_text', text: 'Other', emoji: true },
+            text: { type: 'plain_text', text: 'Start break', emoji: true },
             action_id: SLACK_ACTION_BREAK_START_OTHER,
         },
     ],
@@ -122,6 +110,26 @@ const segmentLines = (segments: Segment[]): string =>
         .join('\n');
 
 /**
+ * Render today's break sessions across all segments as `:coffee:` lines:
+ * `:coffee: 14:00 → 14:25 · 0h 25m` for a closed break, `:coffee: 14:00 → now`
+ * for an ongoing one. Returns null when there are no breaks.
+ */
+const breakSessionLines = (segments: Segment[]): string | null => {
+    const lines = segments
+        .flatMap((s) => s.breaks ?? [])
+        .map((b) => {
+            const st = toDate(b.start?.time);
+            if (!st) return null;
+            const en = toDate(b.end?.time);
+            return en
+                ? `:coffee: ${formatTimeIST(st)} → ${formatTimeIST(en)} · ${formatDuration((en.getTime() - st.getTime()) / 60000)}`
+                : `:coffee: ${formatTimeIST(st)} → now`;
+        })
+        .filter((l): l is string => l !== null);
+    return lines.length > 0 ? lines.join('\n') : null;
+};
+
+/**
  * The header/status/button blocks for the attendance panel — shared by the
  * standalone Home view and the richer Home dashboard so the check-in/out UI
  * is defined once.
@@ -137,6 +145,8 @@ export const attendanceHeaderBlocks = (
 
     const blocks: Array<Record<string, unknown>> = [section(`Hi ${displayName} :wave:`), { type: 'divider' }];
 
+    const breakSessions = breakSessionLines(segs);
+
     if (isOpen) {
         const inT = toDate(lastSeg!.check_in?.time);
         blocks.push(section(`:large_green_circle: Checked in since *${inT ? formatTimeIST(inT) : '—'}*`));
@@ -146,22 +156,21 @@ export const attendanceHeaderBlocks = (
         const totalBreak = record?.total_break_minutes ?? 0;
         if (openBreak) {
             const since = toDate(openBreak.start?.time);
-            blocks.push(
-                section(
-                    `:coffee: On a break (*${openBreak.break_type ?? 'other'}*) since *${since ? formatTimeIST(since) : '—'}*`
-                )
-            );
+            blocks.push(section(`:coffee: On a break since *${since ? formatTimeIST(since) : '—'}*`));
             blocks.push(endBreakButton());
         } else {
             blocks.push(section(`:coffee: Break today: *${formatDuration(totalBreak)}*`));
-            blocks.push(breakPickerButtons());
+            blocks.push(startBreakButton());
         }
+        if (breakSessions) blocks.push(section(`*Break sessions*\n${breakSessions}`));
         blocks.push(checkOutButton());
     } else if (segs.length > 0) {
-        // Single check-in/out per day — once checked out, the day is done. No
-        // re-check-in button (the API now refuses a second check-in).
+        // All segments closed — checked out, but the user can re-check-in
+        // (resume) to start a new segment.
         blocks.push(section(`:white_check_mark: Done for today · *${formatDuration(worked)}* worked`));
         blocks.push(section(segmentLines(segs)));
+        if (breakSessions) blocks.push(section(`*Break sessions*\n${breakSessions}`));
+        blocks.push(checkInButton());
     } else {
         blocks.push(section("You haven't checked in yet today."));
         blocks.push(checkInButton());
@@ -174,7 +183,7 @@ export const attendanceHeaderBlocks = (
  * Home UI itself can't trigger an invalid action:
  *   - no open segment & no segments → "Check In"
  *   - latest segment open           → "Check Out"
- *   - segment closed (day done)     → no button (single check-in/out per day)
+ *   - all segments closed           → "Check In" (start a new segment)
  */
 export const buildAttendanceHomeView = (record: TodayRecord | null, displayName: string): Record<string, unknown> => ({
     type: 'home',

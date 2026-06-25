@@ -3,8 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
     SLACK_ACTION_ATTENDANCE_CHECK_IN,
     SLACK_ACTION_ATTENDANCE_CHECK_OUT,
-    SLACK_ACTION_BREAK_START_LUNCH,
-    SLACK_ACTION_BREAK_START_TEA,
     SLACK_ACTION_BREAK_START_OTHER,
     SLACK_ACTION_BREAK_END,
 } from '../constants/slack.js';
@@ -43,16 +41,15 @@ describe('buildAttendanceHomeView', () => {
         expect(actionIds(view)).toEqual([SLACK_ACTION_ATTENDANCE_CHECK_IN]);
     });
 
-    it('shows break pickers + Check Out when a segment is open (no active break)', () => {
+    it('shows a single Start break + Check Out when a segment is open (no active break)', () => {
         const record = {
             segments: [{ check_in: { time: inAt }, check_out: null, breaks: [] }],
             total_worked_minutes: 0,
         };
         const view = buildAttendanceHomeView(record, 'Raj') as { blocks: Array<Record<string, unknown>> };
         const ids = actionIds(view);
-        expect(ids).toContain(SLACK_ACTION_BREAK_START_LUNCH);
-        expect(ids).toContain(SLACK_ACTION_BREAK_START_TEA);
-        expect(ids).toContain(SLACK_ACTION_BREAK_START_OTHER);
+        const breakStarts = ids.filter((id) => id.startsWith('break_start'));
+        expect(breakStarts).toEqual([SLACK_ACTION_BREAK_START_OTHER]);
         expect(ids).toContain(SLACK_ACTION_ATTENDANCE_CHECK_OUT);
         expect(ids).not.toContain(SLACK_ACTION_BREAK_END);
     });
@@ -72,16 +69,16 @@ describe('buildAttendanceHomeView', () => {
         const ids = actionIds(view);
         expect(ids).toContain(SLACK_ACTION_BREAK_END);
         expect(ids).toContain(SLACK_ACTION_ATTENDANCE_CHECK_OUT);
-        expect(ids).not.toContain(SLACK_ACTION_BREAK_START_LUNCH);
+        expect(ids.filter((id) => id.startsWith('break_start'))).toEqual([]);
     });
 
-    it('offers no button once the day is closed (single check-in/out per day)', () => {
+    it('shows Check In again once all segments are closed (re-check-in / resume)', () => {
         const record = {
             segments: [{ check_in: { time: inAt }, check_out: { time: outAt } }],
             total_worked_minutes: 447,
         };
         const view = buildAttendanceHomeView(record, 'Raj') as { blocks: Array<Record<string, unknown>> };
-        expect(actionIds(view)).toEqual([]);
+        expect(actionIds(view)).toEqual([SLACK_ACTION_ATTENDANCE_CHECK_IN]);
     });
 });
 
@@ -98,21 +95,21 @@ describe('attendanceHeaderBlocks', () => {
 });
 
 describe('attendanceHeaderBlocks — break sub-UI', () => {
-    it('shows break picker buttons when checked in and not on a break', () => {
+    it('shows a single Start break button when checked in and not on a break', () => {
         const rec = {
             segments: [{ check_in: { time: new Date() }, check_out: null, breaks: [] }],
             total_break_minutes: 0,
-            break_minutes_by_type: { lunch: 0, tea: 0, other: 0 },
         };
         const blocks = attendanceHeaderBlocks(rec as never, 'Vivek');
-        const ids = JSON.stringify(blocks);
-        expect(ids).toContain('break_start_lunch');
-        expect(ids).toContain('break_start_tea');
-        expect(ids).toContain('break_start_other');
-        expect(ids).not.toContain('break_end');
+        const s = JSON.stringify(blocks);
+        expect(s).toContain('Start break');
+        expect(s).toContain('break_start_other');
+        expect(s).not.toContain('break_start_lunch');
+        expect(s).not.toContain('break_start_tea');
+        expect(s).not.toContain('break_end');
     });
 
-    it('shows End break + on-break line when a break is open', () => {
+    it('shows End break + a type-free on-break line when a break is open', () => {
         const rec = {
             segments: [
                 {
@@ -122,12 +119,34 @@ describe('attendanceHeaderBlocks — break sub-UI', () => {
                 },
             ],
             total_break_minutes: 0,
-            break_minutes_by_type: { lunch: 0, tea: 0, other: 0 },
         };
         const blocks = attendanceHeaderBlocks(rec as never, 'Vivek');
         const s = JSON.stringify(blocks);
         expect(s).toContain('break_end');
         expect(s).toContain('On a break');
+        // No break-type label leaks into the status line.
+        expect(s).not.toContain('(*tea*)');
+    });
+
+    it('lists break sessions with times + duration', () => {
+        const bIn = new Date('2026-06-16T05:33:00.000Z'); // 11:03 IST
+        const bStart = new Date('2026-06-16T08:30:00.000Z'); // 14:00 IST
+        const bEnd = new Date('2026-06-16T08:55:00.000Z'); // 14:25 IST
+        const rec = {
+            segments: [
+                {
+                    check_in: { time: bIn },
+                    check_out: null,
+                    breaks: [{ break_type: 'other', start: { time: bStart }, end: { time: bEnd } }],
+                },
+            ],
+            total_break_minutes: 25,
+        };
+        const blocks = attendanceHeaderBlocks(rec as never, 'Vivek');
+        const s = JSON.stringify(blocks);
+        expect(s).toContain('Break sessions');
+        expect(s).toContain('14:00 → 14:25');
+        expect(s).toContain('0h 25m');
     });
 });
 

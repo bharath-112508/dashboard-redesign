@@ -8,6 +8,8 @@ import { PERMISSIONS } from '../constants/permissions.js';
 import {
     attendanceIdParamSchema,
     breakStartBodySchema,
+    setMyBreaksBodySchema,
+    setMyTimesBodySchema,
     checkInBodySchema,
     checkOutBodySchema,
     correctionRequestIdParamSchema,
@@ -40,6 +42,10 @@ router.post('/check-out', validate({ body: checkOutBodySchema }), asyncHandler(c
 router.post('/break/start', validate({ body: breakStartBodySchema }), asyncHandler(ctrl.postBreakStart));
 
 router.post('/break/end', asyncHandler(ctrl.postBreakEnd));
+
+router.post('/me/breaks', validate({ body: setMyBreaksBodySchema }), asyncHandler(ctrl.putMyBreaks));
+
+router.post('/me/times', validate({ body: setMyTimesBodySchema }), asyncHandler(ctrl.putMyTimes));
 
 router.post('/qr-verify', validate({ body: qrVerifyBodySchema }), asyncHandler(ctrl.postQrVerify));
 

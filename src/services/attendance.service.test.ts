@@ -287,7 +287,7 @@ describe('checkIn', () => {
         expect(out).toEqual({ status: 'present', upgraded: true });
     });
 
-    it('on E11000: a row whose segment is already closed refuses re-check-in (single check-in/out per day)', async () => {
+    it('on E11000: row with all-closed segments appends a fresh segment for re-check-in (BUG-040)', async () => {
         const dup = Object.assign(new Error('dup'), { code: 11000 });
         attendanceRecordCreateMock.mockRejectedValueOnce(dup);
         const firstIn = new Date('2026-04-24T03:30:00Z');
@@ -305,15 +305,24 @@ describe('checkIn', () => {
             flagged_for_correction: false,
             markModified: vi.fn(),
             save: vi.fn().mockResolvedValue(undefined),
+            toJSON() {
+                return { segments_count: this.segments.length };
+            },
         };
         attendanceRecordFindOneMock.mockResolvedValueOnce(existing);
 
-        await expect(svc.checkIn(makeBody(), new Types.ObjectId(), '1.1.1.1')).rejects.toMatchObject({
-            code: ERROR_CODES.ALREADY_CHECKED_OUT,
+        const out = await svc.checkIn(makeBody(), new Types.ObjectId(), '1.1.1.1');
+
+        expect(existing.segments).toHaveLength(2);
+        expect(existing.segments[1]).toMatchObject({
+            check_in: expect.objectContaining({ method: 'manual', ip: '1.1.1.1' }),
+            check_out: null,
         });
-        // No second segment is appended.
-        expect(existing.segments).toHaveLength(1);
-        expect(existing.save).not.toHaveBeenCalled();
+        // Aliases re-synced: check_in stays at the first arrival, check_out
+        // flips back to null because the new last segment is open.
+        expect(existing.check_in).toMatchObject({ time: firstIn });
+        expect(existing.check_out).toBeNull();
+        expect(out).toEqual({ segments_count: 2 });
     });
 
     it('non-E11000 errors propagate unchanged', async () => {

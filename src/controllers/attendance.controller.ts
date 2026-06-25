@@ -9,6 +9,8 @@ import { buildAuditContext } from '../utils/audit-context.js';
 import type { AuditContext } from '../services/audit.service.js';
 import type {
     BreakStartBody,
+    SetMyBreaksBody,
+    SetMyTimesBody,
     CheckInBody,
     CheckOutBody,
     ListAttendanceQuery,
@@ -161,5 +163,21 @@ export const postBreakStart = async (req: Request, res: Response): Promise<Respo
 
 export const postBreakEnd = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.endBreak(callerId(req), 'app');
+    return ok(res, data);
+};
+
+// ─── PUT /attendance/me/breaks ───────────────────────────────────────────
+
+export const putMyBreaks = async (req: Request, res: Response): Promise<Response> => {
+    const body = req.body as SetMyBreaksBody;
+    const data = await service.setMyBreaks(callerId(req), body.breaks);
+    return ok(res, data);
+};
+
+// ─── POST /attendance/me/times ───────────────────────────────────────────
+
+export const putMyTimes = async (req: Request, res: Response): Promise<Response> => {
+    const body = req.body as SetMyTimesBody;
+    const data = await service.setMyTimes(callerId(req), body);
     return ok(res, data);
 };

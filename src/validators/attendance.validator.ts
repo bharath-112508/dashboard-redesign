@@ -299,3 +299,32 @@ export const breakStartBodySchema = z.object({
     break_type: z.enum(BREAK_TYPES),
 });
 export type BreakStartBody = z.infer<typeof breakStartBodySchema>;
+
+// ─── PUT /attendance/me/breaks ───────────────────────────────────────────
+// Replace today's break list with manual times (immediate, own record).
+export const setMyBreaksBodySchema = z.object({
+    breaks: z
+        .array(
+            z.object({
+                break_type: z.enum(BREAK_TYPES),
+                start: isoDateTime,
+                end: isoDateTime.nullable(),
+            })
+        )
+        .max(20),
+});
+export type SetMyBreaksBody = z.infer<typeof setMyBreaksBodySchema>;
+
+// ─── POST /attendance/me/times ───────────────────────────────────────────
+// Edit today's check-in / check-out times on the caller's OWN record,
+// applied immediately (no manager correction). Today-page self-service —
+// the approval-gated correction flow on the Attendance page is unchanged.
+export const setMyTimesBodySchema = z
+    .object({
+        check_in: isoDateTime.optional(),
+        check_out: isoDateTime.nullable().optional(),
+    })
+    .refine((d) => d.check_in !== undefined || d.check_out !== undefined, {
+        message: 'Provide a check-in or check-out time',
+    });
+export type SetMyTimesBody = z.infer<typeof setMyTimesBodySchema>;

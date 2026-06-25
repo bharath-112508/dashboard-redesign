@@ -250,11 +250,12 @@ export const checkIn = async (
         ip: clientIp,
     };
 
-    // Single check-in / check-out per day. Two valid entry points:
-    //   (a) brand-new day for this user                      → create row with one segment
-    //   (b) row exists but no segments yet (EOD placeholder)  → seed the first segment
-    // Refusals: latest segment still open → ALREADY_CHECKED_IN; the day already
-    // has a closed segment (checked out) → ALREADY_CHECKED_OUT (no re-check-in).
+    // BUG-040 — three valid entry points to a check-in:
+    //   (a) brand-new day for this user                 → create row with one segment
+    //   (b) row exists but no segments yet (EOD placeholder) → seed first segment
+    //   (c) row exists and the LATEST segment is closed → append a new segment
+    //                                                     (re-check-in after lunch / errand)
+    // The only refusal is "latest segment still open" → ALREADY_CHECKED_IN.
     try {
         const created = await AttendanceRecord.create({
             user_id,
@@ -277,13 +278,13 @@ export const checkIn = async (
                 if (lastSeg && !lastSeg.check_out) {
                     throw AppError.conflict('Already checked in for today', ERROR_CODES.ALREADY_CHECKED_IN);
                 }
-                if (segs.length > 0) {
-                    // A closed segment already exists → the day's single
-                    // check-in/out is complete. No re-check-in.
-                    throw AppError.conflict("You've already checked out for today.", ERROR_CODES.ALREADY_CHECKED_OUT);
+                if (segs.length === 0) {
+                    // EOD placeholder row — seed the first segment.
+                    existing.segments = [{ check_in: punch, check_out: null, breaks: [] }];
+                } else {
+                    // All previous segments are closed — append a fresh one.
+                    existing.segments.push({ check_in: punch, check_out: null, breaks: [] });
                 }
-                // EOD placeholder row with no segments yet — seed the first one.
-                existing.segments = [{ check_in: punch, check_out: null, breaks: [] }];
                 existing.status = 'present';
                 existing.flagged_for_correction = false;
                 syncAliasesFromSegments(existing);
@@ -411,6 +412,106 @@ export const endBreak = async (user_id: Types.ObjectId, source: BreakSource): Pr
         throw AppError.conflict('Not on a break', ERROR_CODES.NOT_ON_BREAK);
     }
     openBreak.end = { time: new Date(), source };
+    record.markModified('segments');
+    await persistTotals(record);
+    await record.save();
+    return record.toJSON() as unknown as Record<string, unknown>;
+};
+
+// ─── PUT /attendance/me/breaks ───────────────────────────────────────────
+//
+// Replace today's break list on the caller's OWN record with manual times.
+// Adding/removing a break only changes the caller's own day and (by excluding
+// break time) never inflates worked minutes, so it applies immediately — no
+// manager correction. Each break is attached to the segment whose window
+// contains its start (single check-in/out → the one segment).
+
+export const setMyBreaks = async (
+    user_id: Types.ObjectId,
+    breaks: { break_type: BreakType; start: string; end: string | null }[]
+): Promise<Record<string, unknown>> => {
+    const local_date = todayLocalDate();
+    const record = await AttendanceRecord.findOne({ user_id, local_date });
+    const segs = record?.segments ?? [];
+    if (!record || segs.length === 0) {
+        throw AppError.conflict('Check in before adding a break', ERROR_CODES.NOT_CHECKED_IN);
+    }
+    const now = Date.now();
+    for (const s of segs) s.breaks = [];
+    for (const b of breaks) {
+        if (b.end && new Date(b.start).getTime() >= new Date(b.end).getTime()) {
+            throw AppError.badRequest('A break must end after it starts');
+        }
+        const startMs = new Date(b.start).getTime();
+        let idx = segs.findIndex((s) => {
+            const inMs = s.check_in.time.getTime();
+            const outMs = s.check_out ? s.check_out.time.getTime() : now;
+            return startMs >= inMs && startMs <= outMs;
+        });
+        if (idx < 0) idx = segs.length - 1;
+        segs[idx]!.breaks.push({
+            break_type: b.break_type,
+            start: { time: new Date(b.start), source: 'app' },
+            end: b.end ? { time: new Date(b.end), source: 'app' } : null,
+        });
+    }
+    record.markModified('segments');
+    await persistTotals(record);
+    await record.save();
+    return record.toJSON() as unknown as Record<string, unknown>;
+};
+
+// ─── POST /attendance/me/times ───────────────────────────────────────────
+//
+// Edit the caller's OWN check-in / check-out times for today, applied
+// immediately (no manager correction). This is the Today-page self-service
+// edit; the approval-gated correction flow on the Attendance page is for
+// past days / when an approver should sign off. Sets the first segment's
+// check-in and/or the last segment's check-out, then recomputes totals.
+
+export const setMyTimes = async (
+    user_id: Types.ObjectId,
+    times: { check_in?: string; check_out?: string | null }
+): Promise<Record<string, unknown>> => {
+    const local_date = todayLocalDate();
+    const record = await AttendanceRecord.findOne({ user_id, local_date });
+    const segs = record?.segments ?? [];
+    if (!record || segs.length === 0) {
+        throw AppError.conflict('Check in before editing your times', ERROR_CODES.NOT_CHECKED_IN);
+    }
+    const first = segs[0]!;
+    const last = segs[segs.length - 1]!;
+
+    if (times.check_in !== undefined) {
+        first.check_in.time = new Date(times.check_in);
+    }
+    if (times.check_out !== undefined) {
+        if (times.check_out === null) {
+            last.check_out = null;
+        } else if (last.check_out) {
+            last.check_out.time = new Date(times.check_out);
+        } else {
+            last.check_out = { time: new Date(times.check_out), method: 'manual', location_id: null, ip: '' };
+        }
+    }
+
+    // Each segment must read in < out, and a still-open break can't precede
+    // a check-out we just moved before it.
+    for (const s of segs) {
+        if (s.check_out && s.check_in.time.getTime() >= s.check_out.time.getTime()) {
+            throw AppError.badRequest('Check-in must be earlier than check-out');
+        }
+    }
+
+    // Closing the day promotes an incomplete record to present; reopening it
+    // (clearing the check-out) drops it back to incomplete.
+    if (last.check_out) {
+        if (record.status === 'incomplete') record.status = 'present';
+    } else {
+        record.status = 'incomplete';
+    }
+
+    syncAliasesFromSegments(record);
     record.markModified('segments');
     await persistTotals(record);
     await record.save();

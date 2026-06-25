@@ -85,6 +85,7 @@ export const patchTimesheetBodySchema = z
         non_billable_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
         description: z.string().trim().max(TIMESHEET_DESCRIPTION_MAX),
         general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX),
+        project_id: objectIdSchema.nullable(),
         sprint_id: objectIdSchema.nullable(),
         task_id: objectIdSchema,
     })
@@ -98,15 +99,17 @@ export type PatchTimesheetBody = z.infer<typeof patchTimesheetBodySchema>;
 // in one schema and let the service filter — managers see everything,
 // non-managers get their own row regardless of any `user_id` they pass.
 
-export const listTimesheetsQuerySchema = z.object({
-    user_id: objectIdSchema.optional(),
-    project_id: objectIdSchema.optional(),
-    task_id: objectIdSchema.optional(),
-    from_date: isoDateSchema.optional(),
-    to_date: isoDateSchema.optional(),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(TIMESHEET_LIST_MAX_LIMIT).default(TIMESHEET_LIST_DEFAULT_LIMIT),
-}).strict();
+export const listTimesheetsQuerySchema = z
+    .object({
+        user_id: objectIdSchema.optional(),
+        project_id: objectIdSchema.optional(),
+        task_id: objectIdSchema.optional(),
+        from_date: isoDateSchema.optional(),
+        to_date: isoDateSchema.optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(TIMESHEET_LIST_MAX_LIMIT).default(TIMESHEET_LIST_DEFAULT_LIMIT),
+    })
+    .strict();
 export type ListTimesheetsQuery = z.infer<typeof listTimesheetsQuerySchema>;
 
 // ─── GET /timesheets/summary ─────────────────────────────────────────────

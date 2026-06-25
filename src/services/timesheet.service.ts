@@ -359,6 +359,16 @@ export const patchEntry = async (
         entry.general_category = patch.general_category;
     }
 
+    if (entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL && patch.project_id !== undefined) {
+        if (patch.project_id) {
+            const pOid = new Types.ObjectId(patch.project_id);
+            await loadProjectForCaller(pOid, caller);
+            entry.project_id = pOid;
+        } else {
+            entry.project_id = null;
+        }
+    }
+
     if (entry.entry_type === TIMESHEET_ENTRY_TYPES.TASK_LINKED) {
         if (patch.task_id !== undefined) {
             const newTaskOid = new Types.ObjectId(patch.task_id);
