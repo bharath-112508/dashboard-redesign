@@ -250,12 +250,11 @@ export const checkIn = async (
         ip: clientIp,
     };
 
-    // BUG-040 — three valid entry points to a check-in:
-    //   (a) brand-new day for this user                 → create row with one segment
-    //   (b) row exists but no segments yet (EOD placeholder) → seed first segment
-    //   (c) row exists and the LATEST segment is closed → append a new segment
-    //                                                     (re-check-in after lunch / errand)
-    // The only refusal is "latest segment still open" → ALREADY_CHECKED_IN.
+    // Single check-in / check-out per day. Two valid entry points:
+    //   (a) brand-new day for this user                      → create row with one segment
+    //   (b) row exists but no segments yet (EOD placeholder)  → seed the first segment
+    // Refusals: latest segment still open → ALREADY_CHECKED_IN; the day already
+    // has a closed segment (checked out) → ALREADY_CHECKED_OUT (no re-check-in).
     try {
         const created = await AttendanceRecord.create({
             user_id,
@@ -278,13 +277,13 @@ export const checkIn = async (
                 if (lastSeg && !lastSeg.check_out) {
                     throw AppError.conflict('Already checked in for today', ERROR_CODES.ALREADY_CHECKED_IN);
                 }
-                if (segs.length === 0) {
-                    // EOD placeholder row — seed the first segment.
-                    existing.segments = [{ check_in: punch, check_out: null, breaks: [] }];
-                } else {
-                    // All previous segments are closed — append a fresh one.
-                    existing.segments.push({ check_in: punch, check_out: null, breaks: [] });
+                if (segs.length > 0) {
+                    // A closed segment already exists → the day's single
+                    // check-in/out is complete. No re-check-in.
+                    throw AppError.conflict("You've already checked out for today.", ERROR_CODES.ALREADY_CHECKED_OUT);
                 }
+                // EOD placeholder row with no segments yet — seed the first one.
+                existing.segments = [{ check_in: punch, check_out: null, breaks: [] }];
                 existing.status = 'present';
                 existing.flagged_for_correction = false;
                 syncAliasesFromSegments(existing);

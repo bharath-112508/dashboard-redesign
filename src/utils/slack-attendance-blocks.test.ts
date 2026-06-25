@@ -75,13 +75,13 @@ describe('buildAttendanceHomeView', () => {
         expect(ids).not.toContain(SLACK_ACTION_BREAK_START_LUNCH);
     });
 
-    it('shows Check In again when the day is closed', () => {
+    it('offers no button once the day is closed (single check-in/out per day)', () => {
         const record = {
             segments: [{ check_in: { time: inAt }, check_out: { time: outAt } }],
             total_worked_minutes: 447,
         };
         const view = buildAttendanceHomeView(record, 'Raj') as { blocks: Array<Record<string, unknown>> };
-        expect(actionIds(view)).toEqual([SLACK_ACTION_ATTENDANCE_CHECK_IN]);
+        expect(actionIds(view)).toEqual([]);
     });
 });
 

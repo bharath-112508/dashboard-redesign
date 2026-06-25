@@ -158,9 +158,10 @@ export const attendanceHeaderBlocks = (
         }
         blocks.push(checkOutButton());
     } else if (segs.length > 0) {
+        // Single check-in/out per day — once checked out, the day is done. No
+        // re-check-in button (the API now refuses a second check-in).
         blocks.push(section(`:white_check_mark: Done for today · *${formatDuration(worked)}* worked`));
         blocks.push(section(segmentLines(segs)));
-        blocks.push(checkInButton());
     } else {
         blocks.push(section("You haven't checked in yet today."));
         blocks.push(checkInButton());
@@ -173,7 +174,7 @@ export const attendanceHeaderBlocks = (
  * Home UI itself can't trigger an invalid action:
  *   - no open segment & no segments → "Check In"
  *   - latest segment open           → "Check Out"
- *   - all segments closed           → "Check In" (start a new segment)
+ *   - segment closed (day done)     → no button (single check-in/out per day)
  */
 export const buildAttendanceHomeView = (record: TodayRecord | null, displayName: string): Record<string, unknown> => ({
     type: 'home',
