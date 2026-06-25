@@ -2,7 +2,12 @@ import { Schema, Types, model, type Document, type Model } from 'mongoose';
 
 import { BASE_SCHEMA_OPTIONS } from './_base.js';
 import { COLLECTIONS } from '../constants/collections.js';
-import { CORRECTION_REQUEST_STATUSES, type CorrectionRequestStatus } from '../constants/attendance.js';
+import {
+    BREAK_TYPES,
+    CORRECTION_REQUEST_STATUSES,
+    type BreakType,
+    type CorrectionRequestStatus,
+} from '../constants/attendance.js';
 
 /**
  * `attendance_correction_requests` — Data_Model.md §4.2.
@@ -31,9 +36,17 @@ import { CORRECTION_REQUEST_STATUSES, type CorrectionRequestStatus } from '../co
  *    pre-7.0 didn't always honour them; the lookup is cheap and explicit.
  */
 
+export interface RequestedBreak {
+    break_type: BreakType;
+    start: Date;
+    end: Date | null;
+}
+
 export interface RequestedSegment {
     check_in: Date;
     check_out: Date | null;
+    /** Proposed breaks for this segment (manual break correction). */
+    breaks?: RequestedBreak[];
 }
 
 export interface RequestedChanges {
@@ -58,10 +71,20 @@ export interface AttendanceCorrectionRequestDocument extends Document {
     updated_at: Date;
 }
 
+const requestedBreakSchema = new Schema<RequestedBreak>(
+    {
+        break_type: { type: String, enum: BREAK_TYPES, required: true },
+        start: { type: Date, required: true },
+        end: { type: Date, default: null },
+    },
+    { _id: false }
+);
+
 const requestedSegmentSchema = new Schema<RequestedSegment>(
     {
         check_in: { type: Date, required: true },
         check_out: { type: Date, default: null },
+        breaks: { type: [requestedBreakSchema], default: undefined },
     },
     { _id: false }
 );

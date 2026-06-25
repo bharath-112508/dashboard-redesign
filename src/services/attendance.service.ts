@@ -766,6 +766,13 @@ export const submitCorrection = async (
                 ? requestedSegments.map((s) => ({
                       check_in: new Date(s.check_in),
                       check_out: s.check_out ? new Date(s.check_out) : null,
+                      breaks: s.breaks
+                          ? s.breaks.map((b) => ({
+                                break_type: b.break_type,
+                                start: new Date(b.start),
+                                end: b.end ? new Date(b.end) : null,
+                            }))
+                          : undefined,
                   }))
                 : undefined,
             check_in: body.requested_changes.check_in ? new Date(body.requested_changes.check_in) : null,
@@ -946,7 +953,15 @@ export const approveCorrection = async (
                           ip: outMeta?.ip ?? '',
                       }
                     : null,
-                breaks: old?.breaks ?? [],
+                // Proposed breaks (manual break correction) replace this
+                // segment's breaks; otherwise the existing breaks are kept.
+                breaks: p.breaks
+                    ? p.breaks.map((b) => ({
+                          break_type: b.break_type,
+                          start: { time: b.start, source: 'app' as const },
+                          end: b.end ? { time: b.end, source: 'app' as const } : null,
+                      }))
+                    : (old?.breaks ?? []),
             };
         });
         record.markModified('segments');
@@ -988,6 +1003,12 @@ export const approveCorrection = async (
     }
 
     syncAliasesFromSegments(record);
+    // Break totals only count CLOSED breaks, so they're valid even while the
+    // day is still open — recompute unconditionally after a correction (a
+    // manual break added to an open day must reflect in the totals).
+    const breakTotals = breakTotalsAcrossSegments(record.segments ?? []);
+    record.total_break_minutes = breakTotals.total_break_minutes;
+    record.break_minutes_by_type = breakTotals.break_minutes_by_type;
     if (record.check_in && record.check_out) {
         const computed = await computeWorkedAcrossSegments(record.segments ?? []);
         record.total_worked_minutes = computed.total_worked_minutes;

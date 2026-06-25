@@ -162,9 +162,18 @@ export type PatchAttendanceBody = z.infer<typeof patchAttendanceBodySchema>;
 // BUG-040 — multi-segment correction. `segments[]` is the canonical
 // shape going forward; `check_in` / `check_out` are kept as legacy
 // fallbacks for older clients that haven't been upgraded yet.
+// A break inside a corrected segment — start required, end optional/null (an
+// open break on the final segment). `break_type` defaults to "other".
+const correctionBreakSchema = z.object({
+    break_type: z.enum(BREAK_TYPES).optional().default('other'),
+    start: isoDateTime,
+    end: isoDateTime.nullable().optional(),
+});
+
 const requestedSegmentSchema = z.object({
     check_in: isoDateTime,
     check_out: isoDateTime.nullable().optional(),
+    breaks: z.array(correctionBreakSchema).optional(),
 });
 
 export const submitCorrectionBodySchema = z
