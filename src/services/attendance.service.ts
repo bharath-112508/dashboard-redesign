@@ -479,7 +479,9 @@ export const setMyTimes = async (
     if (!record || segs.length === 0) {
         throw AppError.conflict('Check in before editing your times', ERROR_CODES.NOT_CHECKED_IN);
     }
-    const first = segs[0]!;
+    // Edit the CURRENT (latest) segment — its check-in and check-out. After a
+    // resume that's the active session, so a check-in edit changes the session
+    // the user is in, not the day's first arrival.
     const last = segs[segs.length - 1]!;
 
     // A punch can't be in the future. Allow a small grace so client/server
@@ -493,7 +495,7 @@ export const setMyTimes = async (
     }
 
     if (times.check_in !== undefined) {
-        first.check_in.time = new Date(times.check_in);
+        last.check_in.time = new Date(times.check_in);
     }
     if (times.check_out !== undefined) {
         if (times.check_out === null) {
