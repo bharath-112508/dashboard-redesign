@@ -72,8 +72,12 @@ const loadActorDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, Act
 };
 
 const stampActor = (row: Record<string, unknown>, actorMap: Map<string, ActorDisplay>): Record<string, unknown> => {
-    const actorId = row.actor_id;
-    if (typeof actorId !== 'string') return row;
+    // `toJSON()` leaves `actor_id` as an ObjectId, so normalise to its hex
+    // string (the actorMap key) — a raw `typeof === 'string'` check skipped
+    // every row and left `actor` null, which clients (no member roster to fall
+    // back on) saw as a bare id.
+    const actorId = row.actor_id == null ? null : String(row.actor_id);
+    if (!actorId) return row;
     return {
         ...row,
         actor: actorMap.get(actorId) ?? { id: actorId, full_name: null },

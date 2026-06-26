@@ -78,8 +78,11 @@ const loadAuthorDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, Au
  * for moderation tooling without crashing on missing data.
  */
 const stampAuthor = (row: Record<string, unknown>, authorMap: Map<string, AuthorDisplay>): Record<string, unknown> => {
-    const authorId = row.author_id;
-    if (typeof authorId !== 'string') return row;
+    // `toJSON()` leaves `author_id` as an ObjectId — normalise to its hex
+    // string (the authorMap key). A raw `typeof === 'string'` check skipped
+    // every row, leaving `author` null (clients then saw a bare id).
+    const authorId = row.author_id == null ? null : String(row.author_id);
+    if (!authorId) return row;
     return {
         ...row,
         author: authorMap.get(authorId) ?? { id: authorId, full_name: null },
