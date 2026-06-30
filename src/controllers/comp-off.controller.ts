@@ -22,7 +22,7 @@ export const getMine = async (req: Request, res: Response): Promise<Response> =>
 };
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {
-    const { data, meta } = await service.listCompOff(req.query as unknown as ListCompOffQuery);
+    const { data, meta } = await service.listCompOff(req.query as unknown as ListCompOffQuery, caller(req));
     return paginated(res, data, meta);
 };
 

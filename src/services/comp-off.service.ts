@@ -181,10 +181,21 @@ const loadCompOffUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<strin
 };
 
 export const listCompOff = async (
-    query: ListCompOffQuery
+    query: ListCompOffQuery,
+    caller: { id: Types.ObjectId; role: RoleType }
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const filter: Filter = {};
-    if (query.user_id) filter.user_id = new Types.ObjectId(query.user_id);
+    // `COMP_OFF_READ` is in the employee bundle (it gates the route for a
+    // user's OWN /comp-off page), so a non-reviewer reaching this list
+    // endpoint must be scoped to their own ledger — otherwise they could
+    // enumerate the whole org's comp-off (names + days + remarks). Only
+    // reviewers (admin/manager) get the org-wide view. Mirrors the
+    // attendance / leave-balance team-read gating.
+    if (isReviewer(caller.role)) {
+        if (query.user_id) filter.user_id = new Types.ObjectId(query.user_id);
+    } else {
+        filter.user_id = caller.id;
+    }
     if (query.type) filter.type = query.type;
 
     const skip = (query.page - 1) * query.limit;

@@ -22,6 +22,8 @@ import { Types } from 'mongoose';
 const {
     compOffLedgerCreateMock,
     compOffLedgerAggregateMock,
+    compOffLedgerFindMock,
+    compOffLedgerCountMock,
     userExistsMock,
     userUpdateOneMock,
     userFindByIdMock,
@@ -33,6 +35,8 @@ const {
 } = vi.hoisted(() => ({
     compOffLedgerCreateMock: vi.fn(),
     compOffLedgerAggregateMock: vi.fn(),
+    compOffLedgerFindMock: vi.fn(),
+    compOffLedgerCountMock: vi.fn(),
     userExistsMock: vi.fn(),
     userUpdateOneMock: vi.fn(),
     userFindByIdMock: vi.fn(),
@@ -47,8 +51,8 @@ vi.mock('../models/comp-off-ledger.model.js', () => ({
     CompOffLedger: {
         create: compOffLedgerCreateMock,
         aggregate: compOffLedgerAggregateMock,
-        find: vi.fn(),
-        countDocuments: vi.fn(),
+        find: compOffLedgerFindMock,
+        countDocuments: compOffLedgerCountMock,
     },
 }));
 
@@ -504,5 +508,53 @@ describe('adjustCompOff — BUG-037 client-target guard', () => {
         ).rejects.toMatchObject({ statusCode: 422, code: 'FORBIDDEN_ROLE_TARGET' });
 
         expect(compOffLedgerCreateMock).not.toHaveBeenCalled();
+    });
+});
+
+describe('listCompOff — caller scoping (org-wide leak guard)', () => {
+    // Chainable find() stub: find(filter).sort().skip().limit() → rows.
+    // Empty rows so `loadCompOffUserDisplays` short-circuits (no User.find).
+    const stubFind = () =>
+        compOffLedgerFindMock.mockReturnValue({
+            sort: () => ({ skip: () => ({ limit: () => Promise.resolve([]) }) }),
+        });
+
+    beforeEach(() => {
+        stubFind();
+        compOffLedgerCountMock.mockResolvedValue(0);
+    });
+
+    const caller = (role: string) => ({ id: new Types.ObjectId(), role: role as never });
+
+    it('scopes a non-reviewer (employee) to their OWN ledger', async () => {
+        const me = caller(ROLES.EMPLOYEE);
+        await svc.listCompOff({ page: 1, limit: 20 } as never, me);
+        expect(compOffLedgerFindMock).toHaveBeenCalledWith(expect.objectContaining({ user_id: me.id }));
+    });
+
+    it('scopes a team_lead (non-reviewer) to their OWN ledger', async () => {
+        const me = caller(ROLES.TEAM_LEAD);
+        await svc.listCompOff({ page: 1, limit: 20 } as never, me);
+        expect(compOffLedgerFindMock).toHaveBeenCalledWith(expect.objectContaining({ user_id: me.id }));
+    });
+
+    it('ignores a non-reviewer-supplied user_id (cannot read someone else)', async () => {
+        const me = caller(ROLES.EMPLOYEE);
+        const someoneElse = new Types.ObjectId().toString();
+        await svc.listCompOff({ page: 1, limit: 20, user_id: someoneElse } as never, me);
+        expect(compOffLedgerFindMock).toHaveBeenCalledWith(expect.objectContaining({ user_id: me.id }));
+    });
+
+    it('gives a reviewer (manager) the org-wide ledger (no user_id filter)', async () => {
+        await svc.listCompOff({ page: 1, limit: 20 } as never, caller(ROLES.MANAGER));
+        const filter = compOffLedgerFindMock.mock.calls[0]![0];
+        expect(filter.user_id).toBeUndefined();
+    });
+
+    it('lets a reviewer (admin) filter by a specific user_id', async () => {
+        const target = new Types.ObjectId().toString();
+        await svc.listCompOff({ page: 1, limit: 20, user_id: target } as never, caller(ROLES.ADMIN));
+        const filter = compOffLedgerFindMock.mock.calls[0]![0];
+        expect(filter.user_id?.toString()).toBe(target);
     });
 });
