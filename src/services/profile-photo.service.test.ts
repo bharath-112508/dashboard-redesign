@@ -66,6 +66,9 @@ vi.mock('../utils/azure-blob.js', async (importOriginal) => {
 
 const svc = await import('./profile-photo.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
+// Assert against the CONFIGURED container (env may override the default),
+// so the test verifies the real contract instead of a hardcoded literal.
+import { AZURE_BLOB_PROFILE_PHOTOS_CONTAINER } from '../config/server.config.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -168,7 +171,7 @@ describe('mintUploadUrl', () => {
 
 describe('finalizeProfilePhoto', () => {
     const validBody = (uploaderId: Types.ObjectId) => ({
-        blob_container: 'profile-photos',
+        blob_container: AZURE_BLOB_PROFILE_PHOTOS_CONTAINER,
         blob_key: `users/${uploaderId.toString()}/01ULID-avatar.png`,
         file_name: 'avatar.png',
         file_size: 1024,
@@ -181,7 +184,7 @@ describe('finalizeProfilePhoto', () => {
         await expect(
             svc.finalizeProfilePhoto(
                 {
-                    blob_container: 'profile-photos',
+                    blob_container: AZURE_BLOB_PROFILE_PHOTOS_CONTAINER,
                     blob_key: `users/${userA.toString()}/01ULID-avatar.png`,
                     file_name: 'avatar.png',
                     file_size: 1024,
@@ -239,7 +242,7 @@ describe('finalizeProfilePhoto', () => {
         expect(user.profile_photo_blob_key).toBe(newBody.blob_key);
         expect(user.save).toHaveBeenCalledTimes(1);
         // Previous blob deleted AFTER the pointer swap.
-        expect(deleteBlobMock).toHaveBeenCalledWith('profile-photos', previousKey);
+        expect(deleteBlobMock).toHaveBeenCalledWith(AZURE_BLOB_PROFILE_PHOTOS_CONTAINER, previousKey);
         expect((result as { profile_photo_url: string | null }).profile_photo_url).toMatch(/^https:\/\//);
     });
 
@@ -313,7 +316,7 @@ describe('clearProfilePhoto', () => {
         expect(result).toEqual({ cleared: true, previous_blob_key: previousKey });
         expect(user.profile_photo_blob_key).toBeNull();
         expect(user.save).toHaveBeenCalledTimes(1);
-        expect(deleteBlobMock).toHaveBeenCalledWith('profile-photos', previousKey);
+        expect(deleteBlobMock).toHaveBeenCalledWith(AZURE_BLOB_PROFILE_PHOTOS_CONTAINER, previousKey);
     });
 
     it('skips blob delete (still clears the pointer) when Azure is unconfigured', async () => {
@@ -349,7 +352,7 @@ describe('signProfilePhotoUrl', () => {
         const url = svc.signProfilePhotoUrl('users/abc/pic.png', 15);
         expect(url).toMatch(/^https:\/\//);
         expect(mintDownloadSasMock).toHaveBeenCalledWith(
-            expect.objectContaining({ container: 'profile-photos', blobKey: 'users/abc/pic.png' })
+            expect.objectContaining({ container: AZURE_BLOB_PROFILE_PHOTOS_CONTAINER, blobKey: 'users/abc/pic.png' })
         );
     });
 
