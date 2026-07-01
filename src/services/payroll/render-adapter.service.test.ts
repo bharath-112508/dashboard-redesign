@@ -48,7 +48,7 @@ describe('buildPayslipRenderData', () => {
                         employee_id: 'VT04',
                         job_title: 'Sr.FullStack Developer',
                         department: 'Software Developer',
-                        date_of_joining: '2-Mar-2022',
+                        date_of_joining: '2022-03-02',
                     },
                 }),
         });
@@ -78,6 +78,7 @@ describe('buildPayslipRenderData', () => {
         expect(d.function).toBe('Software Developer');
         expect(d.dateOfJoining).toBe('2-Mar-2022');
         expect(d.pan).toBe('CZQPG6515F');
+        // ^ formatted from the stored `2022-03-02` (YYYY-MM-DD) via dayjs 'D-MMM-YYYY'.
         expect(d.uan).toBe('102245544157');
         expect(d.pfAccountNumber).toBe('-');
         expect(d.esiNumber).toBe('-');
@@ -105,7 +106,7 @@ describe('buildPayslipRenderData', () => {
                         employee_id: 'VT99',
                         job_title: 'Engineer',
                         department: 'Engineering',
-                        date_of_joining: '1-Jan-2024',
+                        date_of_joining: '2024-01-01',
                     },
                 }),
         });
@@ -145,6 +146,53 @@ describe('buildPayslipRenderData', () => {
             buildPayslipRenderData(new Types.ObjectId(), 'March-2026', 20, '2026-03-31')
         ).rejects.toMatchObject({ code: 'USER_NOT_FOUND' });
     });
+
+    it('formats a stored YYYY-MM-DD date_of_joining to D-MMM-YYYY', async () => {
+        (User.findById as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    full_name: 'Date Format User',
+                    internal_profile: {
+                        employee_id: 'VT55',
+                        job_title: 'Engineer',
+                        department: 'Engineering',
+                        date_of_joining: '2022-03-02',
+                    },
+                }),
+        });
+        (getCurrentStructure as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            earnings: [],
+            deductions: [],
+        });
+        mockSettings();
+
+        const d = await buildPayslipRenderData(new Types.ObjectId(), 'March-2026', 20, '2026-03-31');
+        expect(d.dateOfJoining).toBe('2-Mar-2022');
+    });
+
+    it('falls back to the raw value instead of throwing/"Invalid Date" when date_of_joining is blank', async () => {
+        (User.findById as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    full_name: 'Blank Date User',
+                    internal_profile: {
+                        employee_id: 'VT56',
+                        job_title: 'Engineer',
+                        department: 'Engineering',
+                        date_of_joining: '',
+                    },
+                }),
+        });
+        (getCurrentStructure as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            earnings: [],
+            deductions: [],
+        });
+        mockSettings();
+
+        const d = await buildPayslipRenderData(new Types.ObjectId(), 'March-2026', 20, '2026-03-31');
+        expect(d.dateOfJoining).toBe('');
+        expect(d.dateOfJoining).not.toMatch(/invalid/i);
+    });
 });
 
 describe('getCompanyBlock', () => {
@@ -173,7 +221,7 @@ describe('buildLetterRenderData', () => {
                         employee_id: 'VT10',
                         job_title: 'Senior Engineer',
                         department: 'Engineering',
-                        date_of_joining: '1-Apr-2020',
+                        date_of_joining: '2020-04-01',
                     },
                 }),
         });
@@ -189,6 +237,7 @@ describe('buildLetterRenderData', () => {
         expect(d.designation).toBe('Senior Engineer');
         expect(d.department).toBe('Engineering');
         expect(d.dateOfJoining).toBe('1-Apr-2020');
+        // ^ formatted from the stored `2020-04-01` (YYYY-MM-DD) via dayjs 'D-MMM-YYYY'.
         expect(d.lastWorkingDay).toBe('2026-06-30');
         expect(d.companyName).toBe('M/S VILJA TECH LABS PRIVATE LIMITED');
         expect(getCurrentStructure).not.toHaveBeenCalled();

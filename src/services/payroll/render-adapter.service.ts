@@ -66,6 +66,22 @@ interface EmployeeCore {
     dateOfJoining: string;
 }
 
+/** Render-facing date format for payslips/letters, e.g. `2-Mar-2022`. */
+const RENDER_DATE_FORMAT = 'D-MMM-YYYY';
+
+/**
+ * Formats a stored `YYYY-MM-DD` date (e.g. `User.internal_profile.date_of_joining`)
+ * into the `D-MMM-YYYY` shape the payslip/letter templates render (matches the
+ * reference samples, e.g. `2-Mar-2022`). Falls back to the raw input — never
+ * throws, never emits "Invalid Date" — when the value is empty/falsy or dayjs
+ * can't parse it.
+ */
+const formatRenderDate = (value: string | undefined | null): string => {
+    if (!value) return value ?? '';
+    const parsed = dayjs(value);
+    return parsed.isValid() ? parsed.format(RENDER_DATE_FORMAT) : value;
+};
+
 const loadEmployeeCore = async (userId: Types.ObjectId): Promise<EmployeeCore> => {
     const user = await User.findById(userId).lean();
     if (!user) throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
@@ -76,7 +92,7 @@ const loadEmployeeCore = async (userId: Types.ObjectId): Promise<EmployeeCore> =
         employeeNumber: profile?.employee_id ?? '',
         designation: profile?.job_title ?? '',
         department: profile?.department ?? '',
-        dateOfJoining: profile?.date_of_joining ?? '',
+        dateOfJoining: formatRenderDate(profile?.date_of_joining),
     };
 };
 
