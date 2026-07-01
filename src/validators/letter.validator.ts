@@ -83,7 +83,77 @@ export const generateLetterBodySchema = z
         ctc_breakdown: z.array(offerCtcRowSchema).optional(),
         terms_paragraphs: z.array(z.string().min(1)).optional(),
     })
-    .strict();
+    .strict()
+    .superRefine((val, ctx) => {
+        // Every type-specific field above is optional at the flat-schema
+        // level (see the module doc comment). Without this refine, e.g.
+        // `{ type: 'offer', user_id }` passes validation and silently
+        // generates a blank "Dear Candidate ... the role offered" PDF with
+        // an empty CTC table (see letter.service.ts buildOfferRenderData —
+        // every offer field falls back to `''`/`[]` when absent). Require
+        // the fields each type actually needs for a meaningful letter.
+        if (val.type === 'offer') {
+            if (!val.candidate_name || val.candidate_name.trim() === '') {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['candidate_name'],
+                    message: 'candidate_name is required for an offer letter',
+                });
+            }
+            if (!val.designation || val.designation.trim() === '') {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['designation'],
+                    message: 'designation is required for an offer letter',
+                });
+            }
+            if (!val.ctc_breakdown || val.ctc_breakdown.length === 0) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['ctc_breakdown'],
+                    message: 'ctc_breakdown must have at least one row for an offer letter',
+                });
+            }
+        }
+
+        if (val.type === 'hike' || val.type === 'promotion') {
+            if (!val.effective_date) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['effective_date'],
+                    message: `effective_date is required for a ${val.type} letter`,
+                });
+            }
+            if (!val.new_designation || val.new_designation.trim() === '') {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['new_designation'],
+                    message: `new_designation is required for a ${val.type} letter`,
+                });
+            }
+        }
+
+        if (val.type === 'relieving' || val.type === 'experience') {
+            if (!val.last_working_day) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['last_working_day'],
+                    message: `last_working_day is required for a ${val.type} letter`,
+                });
+            }
+        }
+
+        // `internship` (Task 8): every field the template renders
+        // (employeeName/designation/dateOfJoining) is derived from the
+        // platform User/PayrollProfile in `buildLetterRenderData`, not from
+        // the request body — an internship letter still renders a
+        // meaningful document with zero body overrides. The nested
+        // `internship {startDate, endDate, designation}` block is itself
+        // optional even in the template (falls back to dateOfJoining /
+        // lastWorkingDay — see letter-template.ts `defaultBody`), so there
+        // is no single request-body field that's strictly required here.
+        // Deliberately left unconstrained.
+    });
 export type GenerateLetterBody = z.infer<typeof generateLetterBodySchema>;
 
 // ─── GET /letters ────────────────────────────────────────────────────────
