@@ -19,6 +19,7 @@ export interface PayrollProfileDocument extends Document {
     esi_number: string;
     pran_number: string;
     bank_details: string;
+    location: string;
     tax_regime: string;
     updated_by: Types.ObjectId;
     created_at: Date;
@@ -34,6 +35,7 @@ const payrollProfileSchema = new Schema<PayrollProfileDocument>(
         esi_number: { type: String, default: '', trim: true },
         pran_number: { type: String, default: '', trim: true },
         bank_details: { type: String, default: '', trim: true },
+        location: { type: String, default: '', trim: true },
         tax_regime: { type: String, default: 'Regular Tax Regime', trim: true },
         updated_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
     },

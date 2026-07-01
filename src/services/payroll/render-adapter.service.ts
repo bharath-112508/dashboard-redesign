@@ -6,6 +6,7 @@ import { getCurrentStructure } from '../salary-structure.service.js';
 import { getOrInitSettings } from '../settings.service.js';
 import { AppError } from '../../utils/app-error.js';
 import { ERROR_CODES } from '../../constants/error-codes.js';
+import dayjs, { DATE_FORMAT } from '../../utils/date.js';
 import type { PayslipRenderData } from './payslip-template.js';
 import type { LetterRenderData, LetterType } from './letter-template.js';
 
@@ -111,6 +112,7 @@ export const buildPayslipRenderData = async (
         esi_number: '',
         pran_number: '',
         bank_details: '',
+        location: '',
         tax_regime: '',
     };
 
@@ -127,7 +129,7 @@ export const buildPayslipRenderData = async (
         employeeNumber: employee.employeeNumber,
         function: employee.department,
         designation: employee.designation,
-        location: '',
+        location: profile.location ?? '',
         bankDetails: profile.bank_details,
         dateOfJoining: employee.dateOfJoining,
         taxRegime: profile.tax_regime,
@@ -176,14 +178,17 @@ const deriveHikePromotionFields = async (
     // `effective_from` — is the "previous" structure. No row → no previousCtc.
     let previousCtc: number | undefined;
     try {
-        const dayBeforeCurrent = new Date(current.effective_from);
-        dayBeforeCurrent.setUTCDate(dayBeforeCurrent.getUTCDate() - 1);
-        const previous = await getCurrentStructure(userId, dayBeforeCurrent.toISOString().slice(0, 10));
+        const dayBeforeCurrent = dayjs(current.effective_from).subtract(1, 'day').format(DATE_FORMAT);
+        const previous = await getCurrentStructure(userId, dayBeforeCurrent);
         previousCtc = sumEarnings(previous) * 12;
-    } catch {
-        // No prior structure — AppError.notFound (PAYROLL_NO_CURRENT_SALARY).
-        // Leave previousCtc undefined; the template supplies its own default.
-        previousCtc = undefined;
+    } catch (err) {
+        if (err instanceof AppError && err.code === ERROR_CODES.PAYROLL_NO_CURRENT_SALARY) {
+            // No prior structure — leave previousCtc undefined; the template
+            // supplies its own default.
+            previousCtc = undefined;
+        } else {
+            throw err;
+        }
     }
 
     return { newCtc, previousCtc };
@@ -204,7 +209,11 @@ export const buildLetterRenderData = async (
     type: LetterType,
     overrides: LetterRenderDataOverrides = {}
 ): Promise<LetterRenderData> => {
-    const [employee, company] = await Promise.all([loadEmployeeCore(userId), getCompanyBlock()]);
+    const [employee, company, profile] = await Promise.all([
+        loadEmployeeCore(userId),
+        getCompanyBlock(),
+        PayrollProfile.findOne({ user_id: userId }).lean(),
+    ]);
 
     const derivedCtc = HIKE_PROMOTION_TYPES.has(type)
         ? await deriveHikePromotionFields(userId, overrides.effectiveDate)
@@ -224,7 +233,7 @@ export const buildLetterRenderData = async (
         employeeNumber: employee.employeeNumber,
         designation: employee.designation,
         department: employee.department,
-        location: '',
+        location: overrides.location ?? profile?.location ?? '',
         dateOfJoining: employee.dateOfJoining,
         lastWorkingDay: '',
 

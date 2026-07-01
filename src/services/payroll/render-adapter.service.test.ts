@@ -14,9 +14,16 @@ import { User } from '../../models/user.model.js';
 import { PayrollProfile } from '../../models/payroll-profile.model.js';
 import { getCurrentStructure } from '../salary-structure.service.js';
 import { getOrInitSettings } from '../settings.service.js';
+import { AppError } from '../../utils/app-error.js';
+import { ERROR_CODES } from '../../constants/error-codes.js';
 import { buildPayslipRenderData, buildLetterRenderData, getCompanyBlock } from './render-adapter.service.js';
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+    vi.clearAllMocks();
+    (PayrollProfile.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+        lean: () => Promise.resolve(null),
+    });
+});
 
 const mockSettings = () =>
     (getOrInitSettings as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -54,6 +61,7 @@ describe('buildPayslipRenderData', () => {
                     esi_number: '-',
                     pran_number: '-',
                     bank_details: 'HDFC',
+                    location: 'Hyderabad',
                     tax_regime: 'Regular Tax Regime',
                 }),
         });
@@ -75,6 +83,7 @@ describe('buildPayslipRenderData', () => {
         expect(d.esiNumber).toBe('-');
         expect(d.pranNumber).toBe('-');
         expect(d.bankDetails).toBe('HDFC');
+        expect(d.location).toBe('Hyderabad');
         expect(d.taxRegime).toBe('Regular Tax Regime');
         expect(d.payPeriod).toBe('February-2026');
         expect(d.daysPresent).toBe(22);
@@ -215,11 +224,29 @@ describe('buildLetterRenderData', () => {
                 earnings: [{ label: 'Basic Pay', amount: 75000 }],
                 deductions: [],
             })
-            .mockRejectedValueOnce(Object.assign(new Error('none'), { code: 'PAYROLL_NO_CURRENT_SALARY' }));
+            .mockRejectedValueOnce(
+                AppError.notFound('No salary structure on or before this date', ERROR_CODES.PAYROLL_NO_CURRENT_SALARY)
+            );
 
         const d = await buildLetterRenderData(new Types.ObjectId(), 'promotion', { effectiveDate: '2026-04-01' });
         expect(d.newCtc).toBe(75000 * 12);
         expect(d.previousCtc).toBeUndefined();
+    });
+
+    it('propagates a non-not-found error from the prior-structure lookup instead of swallowing it', async () => {
+        setUser();
+        mockSettings();
+        (getCurrentStructure as unknown as ReturnType<typeof vi.fn>)
+            .mockResolvedValueOnce({
+                effective_from: '2026-04-01',
+                earnings: [{ label: 'Basic Pay', amount: 75000 }],
+                deductions: [],
+            })
+            .mockRejectedValueOnce(new Error('DB connection lost'));
+
+        await expect(
+            buildLetterRenderData(new Types.ObjectId(), 'promotion', { effectiveDate: '2026-04-01' })
+        ).rejects.toThrow('DB connection lost');
     });
 
     it('lets caller overrides win over derived defaults', async () => {

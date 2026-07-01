@@ -14,6 +14,7 @@ export const upsertPayrollProfileBodySchema = z
         esi_number: z.string().max(40).optional(),
         pran_number: z.string().max(40).optional(),
         bank_details: z.string().max(120).optional(),
+        location: z.string().max(120).optional(),
         tax_regime: z.string().max(60).optional(),
     })
     .strict();
