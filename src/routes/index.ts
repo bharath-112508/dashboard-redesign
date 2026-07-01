@@ -22,6 +22,7 @@ import { attachmentsRouter, taskAttachmentsNestedRouter } from './task-attachmen
 import timesheetRoutes from './timesheet.routes.js';
 import billingRateRoutes from './billing-rate.routes.js';
 import payrollProfileRoutes from './payroll-profile.routes.js';
+import salaryStructureRoutes from './salary-structure.routes.js';
 import reportRoutes from './report.routes.js';
 import auditLogRoutes from './audit-log.routes.js';
 import auditArchiveRoutes from './audit-archive.routes.js';
@@ -75,6 +76,7 @@ appRoutes.use('/attachments', attachmentsRouter());
 appRoutes.use('/timesheets', timesheetRoutes);
 appRoutes.use('/billing-rates', billingRateRoutes);
 appRoutes.use('/payroll-profiles', payrollProfileRoutes);
+appRoutes.use('/salary-structures', salaryStructureRoutes);
 appRoutes.use('/reports', reportRoutes);
 appRoutes.use('/audit-logs', auditLogRoutes);
 appRoutes.use('/audit-archives', auditArchiveRoutes);
