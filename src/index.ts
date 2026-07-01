@@ -32,6 +32,7 @@ import { migratePlaintextSlackBotToken } from './services/slack-settings.service
 import { migrateShareLinkTokensToHashed } from './services/share-link.service.js';
 import { migrateDisallowedPushEndpoints } from './services/push-subscription.service.js';
 import { getScheduledJobCount, startScheduler, stopScheduler } from './jobs/index.js';
+import { shutdownPdf } from './services/payroll/pdf.service.js';
 
 const app = express();
 
@@ -451,7 +452,17 @@ const startServer = async () => {
                 logger.warn({ err }, 'server.close promise rejected during shutdown');
             }
 
-            // 2. Drain cron handlers (F5 — `stopScheduler` is now
+            // 2. Close the Playwright browser used by the payroll PDF
+            //    renderer so Chromium doesn't linger as an orphaned
+            //    child process after the Node process exits.
+            try {
+                await shutdownPdf();
+                logger.info('Playwright browser closed');
+            } catch (err) {
+                logger.warn({ err }, 'shutdownPdf threw during shutdown');
+            }
+
+            // 3. Drain cron handlers (F5 — `stopScheduler` is now
             //    async + awaits in-flight runJob promises up to 25s).
             try {
                 await stopScheduler();
@@ -459,7 +470,7 @@ const startServer = async () => {
                 logger.warn({ err }, 'stopScheduler threw during shutdown');
             }
 
-            // 3. Disconnect Mongo — only AFTER both HTTP + cron have
+            // 4. Disconnect Mongo — only AFTER both HTTP + cron have
             //    drained so handlers that needed the DB to finalise
             //    their `job_runs` row + audit didn't lose access
             //    mid-write.
