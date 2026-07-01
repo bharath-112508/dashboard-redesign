@@ -114,6 +114,12 @@ const MANAGER_ADDITIONS: readonly Permission[] = [
     // Maintain team employment records (internal_profile) without full
     // user.write — name/email/role/status stay admin-only.
     PERMISSIONS.USER_EMPLOYMENT_WRITE,
+    // Payroll & certificates (foundation) — manager-only surface. Admin
+    // already covers it via the system.admin wildcard.
+    PERMISSIONS.PAYROLL_READ,
+    PERMISSIONS.PAYROLL_WRITE,
+    PERMISSIONS.PAYSLIP_GENERATE,
+    PERMISSIONS.LETTER_GENERATE,
 ];
 
 const dedupe = (list: readonly Permission[]): Permission[] => Array.from(new Set(list));

@@ -311,6 +311,18 @@ export const AUDIT_ACTIONS = {
     USER_ROLES_ASSIGN: 'user.roles_assign',
     // Pattern B — per-user extra permission grants (Step 47 follow-up).
     USER_EXTRA_PERMISSIONS_UPDATE: 'user.extra_permissions_update',
+
+    // Payroll & certificates (foundation). Profile upsert is a single verb
+    // (create-or-update collapse, same rationale as elsewhere); salary
+    // structures split create/update because they're append-only history
+    // rows, not a single mutable doc. Generation verbs are their own
+    // actions (not folded into a generic "download") since they're the
+    // sensitive, auditable event — the document leaving the system.
+    PAYROLL_PROFILE_UPSERT: 'payroll_profile.upsert',
+    SALARY_STRUCTURE_CREATE: 'salary_structure.create',
+    SALARY_STRUCTURE_UPDATE: 'salary_structure.update',
+    PAYSLIP_GENERATE: 'payslip.generate',
+    LETTER_GENERATE: 'letter.generate',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];
@@ -348,6 +360,10 @@ export const AUDIT_TARGET_KINDS = {
     REPORT_PRESET: 'report_preset',
     PUSH_SUBSCRIPTION: 'push_subscription',
     ROLE: 'role',
+    PAYROLL_PROFILE: 'payroll_profile',
+    SALARY_STRUCTURE: 'salary_structure',
+    PAYSLIP: 'payslip',
+    LETTER: 'letter',
 } as const;
 
 export type AuditTargetKind = (typeof AUDIT_TARGET_KINDS)[keyof typeof AUDIT_TARGET_KINDS];

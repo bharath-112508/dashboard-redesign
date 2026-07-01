@@ -134,6 +134,12 @@ export const PERMISSIONS = {
     DASHBOARD_MANAGER: 'dashboard.manager',
     DASHBOARD_EMPLOYEE: 'dashboard.employee',
     DASHBOARD_CLIENT: 'dashboard.client',
+
+    // ─── Payroll & certificates ────────────────────────────────────────
+    PAYROLL_READ: 'payroll.read',
+    PAYROLL_WRITE: 'payroll.write',
+    PAYSLIP_GENERATE: 'payslip.generate',
+    LETTER_GENERATE: 'letter.generate',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

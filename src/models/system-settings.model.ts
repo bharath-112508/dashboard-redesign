@@ -143,6 +143,18 @@ export interface CompanySettings {
     login_page_tagline: string;
 }
 
+export interface PayrollSettings {
+    company_legal_name: string;
+    company_address_lines: string[];
+    company_email: string;
+    cin_no: string;
+    iec_code: string;
+    signatory_name: string;
+    signatory_title: string;
+    hr_reply_to_address: string;
+    hr_reply_to_name: string;
+}
+
 export interface SystemSettingsDocument extends Document {
     _id: Types.ObjectId;
     singleton_key: typeof SETTINGS_SINGLETON_KEY;
@@ -157,6 +169,7 @@ export interface SystemSettingsDocument extends Document {
     email: EmailSettings;
     reminders: ReminderSettings;
     company: CompanySettings;
+    payroll: PayrollSettings;
 
     default_timezone: string;
 
@@ -315,6 +328,24 @@ const companySchema = new Schema<CompanySettings>(
     { _id: false }
 );
 
+// Payroll & certificates (foundation) — company letterhead fields used to
+// render payslip/certificate PDFs. All optional strings default to '' so
+// the subsection is savable field-by-field from day one.
+const payrollSchema = new Schema<PayrollSettings>(
+    {
+        company_legal_name: { type: String, default: 'M/S VILJA TECH LABS PRIVATE LIMITED' },
+        company_address_lines: { type: [String], default: [] },
+        company_email: { type: String, default: '' },
+        cin_no: { type: String, default: '' },
+        iec_code: { type: String, default: '' },
+        signatory_name: { type: String, default: '' },
+        signatory_title: { type: String, default: 'Human Resources' },
+        hr_reply_to_address: { type: String, default: '' },
+        hr_reply_to_name: { type: String, default: '' },
+    },
+    { _id: false }
+);
+
 // ─── Top-level schema ──────────────────────────────────────────────────────
 
 const systemSettingsSchema = new Schema<SystemSettingsDocument>(
@@ -337,6 +368,7 @@ const systemSettingsSchema = new Schema<SystemSettingsDocument>(
         email: { type: emailSchema, required: true },
         reminders: { type: remindersSchema, required: true },
         company: { type: companySchema, required: true },
+        payroll: { type: payrollSchema, default: () => ({}) },
 
         default_timezone: { type: String, required: true },
 

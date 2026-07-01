@@ -59,6 +59,12 @@ export const COLLECTIONS = {
     REPORT_PRESETS: 'report_presets',
     REPORT_SUBSCRIPTIONS: 'report_subscriptions',
     ROLES: 'roles',
+
+    // Payroll & certificates
+    PAYROLL_PROFILES: 'payroll_profiles',
+    SALARY_STRUCTURES: 'salary_structures',
+    PAYSLIPS: 'payslips',
+    LETTERS: 'letters',
 } as const;
 
 export type CollectionName = (typeof COLLECTIONS)[keyof typeof COLLECTIONS];

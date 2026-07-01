@@ -191,6 +191,11 @@ export const AZURE_BLOB_TASK_ATTACHMENTS_CONTAINER = getEnv(
     'task-attachments'
 );
 export const AZURE_BLOB_PROFILE_PHOTOS_CONTAINER = getEnv('AZURE_BLOB_PROFILE_PHOTOS_CONTAINER', 'profile-photos');
+// Payroll & certificates (foundation) — generated payslip/certificate PDFs.
+export const AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER = getEnv(
+    'AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER',
+    'payroll-documents'
+);
 
 // ─── Application Insights (V2-OPS-3) ────────────────────────────────────
 //
