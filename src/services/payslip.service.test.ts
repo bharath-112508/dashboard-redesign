@@ -17,6 +17,7 @@ vi.mock('./audit.service.js', () => ({ recordAudit: vi.fn() }));
 
 import { Types } from 'mongoose';
 import { buildPayslipRenderData } from './payroll/render-adapter.service.js';
+import { htmlToPdf } from './payroll/pdf.service.js';
 import { putBlob } from '../utils/azure-blob.js';
 import { Payslip } from '../models/payslip.model.js';
 import { recordAudit } from './audit.service.js';
@@ -48,5 +49,28 @@ describe('payslip.service', () => {
         expect(Payslip.create).toHaveBeenCalledOnce();
         expect(recordAudit).toHaveBeenCalledOnce();
         expect(out.download_url).toBe('https://sas');
+    });
+
+    it('previewPayslip renders a PDF without storing a blob, DB row, or audit', async () => {
+        (buildPayslipRenderData as never as ReturnType<typeof vi.fn>).mockResolvedValue({
+            employeeName: 'X',
+            payPeriod: 'February-2026',
+        });
+
+        const out = await service.previewPayslip({
+            user_id: new Types.ObjectId(),
+            pay_period: 'February-2026',
+            days_present: 22,
+            effective_on: '2026-02-28',
+        });
+
+        expect(htmlToPdf).toHaveBeenCalledOnce();
+        expect(typeof out.pdf_base64).toBe('string');
+        expect(out.pdf_base64.length).toBeGreaterThan(0);
+        expect(out.net_pay).toBe(72131);
+        expect(out.filename).toBe('Payslip_X_February-2026.pdf');
+        expect(putBlob).not.toHaveBeenCalled();
+        expect(Payslip.create).not.toHaveBeenCalled();
+        expect(recordAudit).not.toHaveBeenCalled();
     });
 });

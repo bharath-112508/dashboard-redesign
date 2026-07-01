@@ -28,6 +28,16 @@ router.post(
     asyncHandler(ctrl.postGenerate)
 );
 
+// Preview renders the exact same PDF as generate but stores nothing (no
+// blob, no Payslip row, no audit row) — placed before `/:id/download` so it
+// isn't shadowed by any future param-based route.
+router.post(
+    '/preview',
+    requirePermission(PERMISSIONS.PAYSLIP_GENERATE),
+    validate({ body: generatePayslipBodySchema }),
+    asyncHandler(ctrl.postPreview)
+);
+
 router.get(
     '/',
     requirePermission(PERMISSIONS.PAYROLL_READ),

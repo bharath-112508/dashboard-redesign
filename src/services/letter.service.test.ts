@@ -24,6 +24,7 @@ import { Types } from 'mongoose';
 import { buildLetterRenderData, getCompanyBlock } from './payroll/render-adapter.service.js';
 import { renderLetterHtml } from './payroll/letter-template.js';
 import { renderOfferLetterHtml } from './payroll/offer-letter-template.js';
+import { htmlToPdf } from './payroll/pdf.service.js';
 import { putBlob } from '../utils/azure-blob.js';
 import { Letter } from '../models/letter.model.js';
 import { recordAudit } from './audit.service.js';
@@ -100,5 +101,58 @@ describe('letter.service', () => {
         expect(Letter.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'offer' }));
         expect(recordAudit).toHaveBeenCalledOnce();
         expect(out.download_url).toBe('https://sas');
+    });
+
+    it('previewLetter renders a promotion letter PDF without storing a blob, DB row, or audit', async () => {
+        (buildLetterRenderData as never as ReturnType<typeof vi.fn>).mockResolvedValue({
+            type: 'promotion',
+            employeeName: 'Priya Sharma',
+            employeeNumber: 'VT10',
+        });
+
+        const out = await service.previewLetter({
+            type: 'promotion',
+            user_id: new Types.ObjectId().toString(),
+            effective_date: '2026-04-01',
+            new_designation: 'Staff Engineer',
+        });
+
+        expect(buildLetterRenderData).toHaveBeenCalledOnce();
+        expect(renderLetterHtml).toHaveBeenCalledOnce();
+        expect(htmlToPdf).toHaveBeenCalledOnce();
+        expect(typeof out.pdf_base64).toBe('string');
+        expect(out.pdf_base64.length).toBeGreaterThan(0);
+        expect(out.filename).toBe('Promotion_Letter_Priya_Sharma.pdf');
+        expect(putBlob).not.toHaveBeenCalled();
+        expect(Letter.create).not.toHaveBeenCalled();
+        expect(recordAudit).not.toHaveBeenCalled();
+    });
+
+    it('previewLetter routes an offer letter to renderOfferLetterHtml without persisting anything', async () => {
+        (getCompanyBlock as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            companyName: 'Vilja Tech',
+            companyAddress: ['Hyderabad'],
+            companyEmail: 'hr@viljetech.com',
+            cinNo: 'CIN',
+            iecCode: 'IEC',
+            signatoryName: 'S',
+            signatoryTitle: 'HR',
+        });
+
+        const out = await service.previewLetter({
+            type: 'offer',
+            user_id: new Types.ObjectId().toString(),
+            candidate_name: 'John Doe',
+            designation: 'Software Engineer',
+            ctc_breakdown: [{ label: 'Basic', amount: 500000 }],
+        });
+
+        expect(buildLetterRenderData).not.toHaveBeenCalled();
+        expect(getCompanyBlock).toHaveBeenCalledOnce();
+        expect(renderOfferLetterHtml).toHaveBeenCalledOnce();
+        expect(out.filename).toBe('Offer_Letter_John_Doe.pdf');
+        expect(putBlob).not.toHaveBeenCalled();
+        expect(Letter.create).not.toHaveBeenCalled();
+        expect(recordAudit).not.toHaveBeenCalled();
     });
 });

@@ -22,6 +22,14 @@ export const postGenerate = async (req: Request, res: Response): Promise<Respons
     return created(res, data);
 };
 
+// ─── POST /letters/preview ────────────────────────────────────────────────
+
+export const postPreview = async (req: Request, res: Response): Promise<Response> => {
+    const body = req.body as GenerateLetterBody;
+    const data = await service.previewLetter(body);
+    return ok(res, data);
+};
+
 // ─── GET /letters ─────────────────────────────────────────────────────────
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {

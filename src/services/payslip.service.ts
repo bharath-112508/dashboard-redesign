@@ -90,6 +90,32 @@ export const generatePayslip = async (
     return { ...toPublic(rec), download_url: sas.url };
 };
 
+// ─── POST /payslips/preview ──────────────────────────────────────────────
+
+/**
+ * Renders the exact same payslip PDF as `generatePayslip`, but stops before
+ * `putBlob`/`Payslip.create`/`recordAudit` — no blob, no DB row, no audit
+ * trail. Lets an admin eyeball the render before committing to generation.
+ */
+export const previewPayslip = async (input: {
+    user_id: Types.ObjectId;
+    pay_period: string;
+    days_present: number;
+    effective_on: string;
+}): Promise<{ pdf_base64: string; filename: string; net_pay: number }> => {
+    const data = await buildPayslipRenderData(input.user_id, input.pay_period, input.days_present, input.effective_on);
+    const html = renderPayslipHtmlFromData(data);
+    const pdf = await htmlToPdf(html);
+    const netPay = payslipNetPayFromData(data);
+    const safeName = safeFileNameOf(data.employeeName);
+
+    return {
+        pdf_base64: pdf.toString('base64'),
+        filename: `Payslip_${safeName}_${input.pay_period}.pdf`,
+        net_pay: netPay,
+    };
+};
+
 // ─── GET /payslips ───────────────────────────────────────────────────────
 
 export const listPayslips = async (

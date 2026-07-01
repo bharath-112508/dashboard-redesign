@@ -30,6 +30,19 @@ export const postGenerate = async (req: Request, res: Response): Promise<Respons
     return created(res, data);
 };
 
+// ─── POST /payslips/preview ──────────────────────────────────────────────
+
+export const postPreview = async (req: Request, res: Response): Promise<Response> => {
+    const body = req.body as GeneratePayslipBody;
+    const data = await service.previewPayslip({
+        user_id: new Types.ObjectId(body.user_id),
+        pay_period: body.pay_period,
+        days_present: body.days_present,
+        effective_on: body.effective_on,
+    });
+    return ok(res, data);
+};
+
 // ─── GET /payslips ───────────────────────────────────────────────────────
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {

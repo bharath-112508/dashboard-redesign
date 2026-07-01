@@ -29,6 +29,16 @@ router.post(
     asyncHandler(ctrl.postGenerate)
 );
 
+// Preview renders the exact same PDF as generate but stores nothing (no
+// blob, no Letter row, no audit row) — placed before `/:id/download` so it
+// isn't shadowed by any future param-based route.
+router.post(
+    '/preview',
+    requirePermission(PERMISSIONS.LETTER_GENERATE),
+    validate({ body: generateLetterBodySchema }),
+    asyncHandler(ctrl.postPreview)
+);
+
 router.get(
     '/',
     requirePermission(PERMISSIONS.PAYROLL_READ),

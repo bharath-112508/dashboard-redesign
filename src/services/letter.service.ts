@@ -211,6 +211,37 @@ export const generateLetter = async (
     return { ...toPublic(rec), download_url: sas.url };
 };
 
+// ─── POST /letters/preview ────────────────────────────────────────────────
+
+/**
+ * Renders the exact same letter PDF as `generateLetter`, but stops before
+ * `putBlob`/`Letter.create`/`recordAudit` — no blob, no DB row, no audit
+ * trail. Lets an admin eyeball the render before committing to generation.
+ */
+export const previewLetter = async (input: GenerateLetterBody): Promise<{ pdf_base64: string; filename: string }> => {
+    const userId = new Types.ObjectId(input.user_id);
+
+    let html: string;
+    let subjectName: string | undefined;
+
+    if (input.type === 'offer') {
+        const data = await buildOfferRenderData(input);
+        html = renderOfferLetterHtml(data);
+        subjectName = data.candidateName;
+    } else {
+        const data = await buildLetterRenderData(userId, input.type, buildEmployeeOverrides(input));
+        html = renderLetterHtml(data as Parameters<typeof renderLetterHtml>[0]);
+        subjectName = (data as { employeeName?: string }).employeeName;
+    }
+
+    const pdf = await htmlToPdf(html);
+
+    return {
+        pdf_base64: pdf.toString('base64'),
+        filename: filenameFor(input.type, subjectName),
+    };
+};
+
 // ─── GET /letters ─────────────────────────────────────────────────────────
 
 export const listLetters = async (
