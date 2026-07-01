@@ -36,6 +36,17 @@ const { settingsDoc, recordAuditMock } = vi.hoisted(() => {
                 general: string;
             };
         };
+        payroll: {
+            company_legal_name: string;
+            company_address_lines: string[];
+            company_email: string;
+            cin_no: string;
+            iec_code: string;
+            signatory_name: string;
+            signatory_title: string;
+            hr_reply_to_address: string;
+            hr_reply_to_name: string;
+        };
         toJSON: ReturnType<typeof vi.fn>;
         markModified: ReturnType<typeof vi.fn>;
         save: ReturnType<typeof vi.fn>;
@@ -52,6 +63,17 @@ const { settingsDoc, recordAuditMock } = vi.hoisted(() => {
                 timesheet: '#timesheet',
                 general: '#general',
             },
+        },
+        payroll: {
+            company_legal_name: 'M/S VILJA TECH LABS PRIVATE LIMITED',
+            company_address_lines: ['Line 1', 'Line 2'],
+            company_email: 'hr@viljetech.com',
+            cin_no: 'ORIGINAL-CIN',
+            iec_code: 'ORIGINAL-IEC',
+            signatory_name: 'Original Signatory',
+            signatory_title: 'Human Resources',
+            hr_reply_to_address: 'hr-reply@viljetech.com',
+            hr_reply_to_name: 'HR Team',
         },
         toJSON: vi.fn(),
         markModified: vi.fn(),
@@ -88,6 +110,17 @@ beforeEach(() => {
         timesheet: '#timesheet',
         general: '#general',
     };
+    settingsDoc.payroll = {
+        company_legal_name: 'M/S VILJA TECH LABS PRIVATE LIMITED',
+        company_address_lines: ['Line 1', 'Line 2'],
+        company_email: 'hr@viljetech.com',
+        cin_no: 'ORIGINAL-CIN',
+        iec_code: 'ORIGINAL-IEC',
+        signatory_name: 'Original Signatory',
+        signatory_title: 'Human Resources',
+        hr_reply_to_address: 'hr-reply@viljetech.com',
+        hr_reply_to_name: 'HR Team',
+    };
 
     // `toJSON` returns a deep-copy of the doc shape so each call gets a
     // fresh object the redaction can mutate without polluting later
@@ -98,6 +131,7 @@ beforeEach(() => {
             ...settingsDoc.slack,
             channels: { ...settingsDoc.slack.channels },
         },
+        payroll: { ...settingsDoc.payroll, company_address_lines: [...settingsDoc.payroll.company_address_lines] },
         company: { name: 'Viljetech' },
     }));
     settingsDoc.save.mockImplementation(async () => settingsDoc);
@@ -159,6 +193,29 @@ describe('patchSettings (legacy audit redaction)', () => {
         const slack = result.slack as Record<string, unknown>;
         expect(slack).not.toHaveProperty('bot_token');
         expect(slack.has_bot_token).toBe(true);
+    });
+});
+
+// ─── PATCH /settings — payroll subsection (Task 13) ──────────────────────
+
+describe('patchSettings (payroll subsection)', () => {
+    it('persists payload payroll fields and leaves other payroll fields intact', async () => {
+        const result = await svc.patchSettings({ payroll: { cin_no: 'X', signatory_name: 'Y' } }, new Types.ObjectId());
+
+        const payroll = result.payroll as Record<string, unknown>;
+        expect(payroll.cin_no).toBe('X');
+        expect(payroll.signatory_name).toBe('Y');
+        // Untouched fields survive the merge.
+        expect(payroll.company_legal_name).toBe('M/S VILJA TECH LABS PRIVATE LIMITED');
+        expect(payroll.company_email).toBe('hr@viljetech.com');
+        expect(payroll.iec_code).toBe('ORIGINAL-IEC');
+        expect(payroll.signatory_title).toBe('Human Resources');
+        expect(payroll.hr_reply_to_address).toBe('hr-reply@viljetech.com');
+        expect(payroll.hr_reply_to_name).toBe('HR Team');
+        expect(payroll.company_address_lines).toEqual(['Line 1', 'Line 2']);
+
+        expect(settingsDoc.markModified).toHaveBeenCalledWith('payroll');
+        expect(settingsDoc.save).toHaveBeenCalledTimes(1);
     });
 });
 

@@ -169,6 +169,30 @@ const companySchema = z
     })
     .partial();
 
+// Loose email — either blank (the model's "not yet configured" default for
+// these two fields, mirroring `slackChannelsSchema`'s blank-means-disabled
+// convention) or a real address.
+const optionalEmail = z.union([z.literal(''), z.string().trim().email()]);
+
+// Payroll & certificates (foundation) — company letterhead + signatory
+// fields consumed by the payslip/letter render adapter
+// (`services/payroll/render-adapter.service.ts`). All optional strings;
+// `company_address_lines` REPLACES (per the array-replace PATCH semantics
+// documented above) rather than merging line-by-line.
+const payrollSchema = z
+    .object({
+        company_legal_name: z.string().trim(),
+        company_address_lines: z.array(z.string()),
+        company_email: optionalEmail,
+        cin_no: z.string().trim(),
+        iec_code: z.string().trim(),
+        signatory_name: z.string().trim(),
+        signatory_title: z.string().trim(),
+        hr_reply_to_address: optionalEmail,
+        hr_reply_to_name: z.string().trim(),
+    })
+    .partial();
+
 // ─── PATCH body ────────────────────────────────────────────────────────────
 
 export const patchSettingsBodySchema = z
@@ -183,6 +207,7 @@ export const patchSettingsBodySchema = z
         email: emailSchema,
         reminders: remindersSchema,
         company: companySchema,
+        payroll: payrollSchema,
         default_timezone: z.string().trim().min(1),
     })
     .partial()

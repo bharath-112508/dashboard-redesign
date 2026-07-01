@@ -119,6 +119,25 @@ export const DEFAULT_SETTINGS = {
         login_page_tagline: '',
     },
 
+    // Payroll & certificates (foundation) — company letterhead + signatory
+    // fields consumed by the payslip/letter render adapter. Kept in sync
+    // with the Mongoose schema defaults in `models/system-settings.model.ts`
+    // (`payrollSchema`) — the model is the actual seed source since the
+    // subsection has its own `default: () => ({})`, but listing it here
+    // makes it a member of `SettingsSection` so `PATCH /settings` can
+    // address it like every other section.
+    payroll: {
+        company_legal_name: 'M/S VILJA TECH LABS PRIVATE LIMITED',
+        company_address_lines: [] as string[],
+        company_email: '',
+        cin_no: '',
+        iec_code: '',
+        signatory_name: '',
+        signatory_title: 'Human Resources',
+        hr_reply_to_address: '',
+        hr_reply_to_name: '',
+    },
+
     default_timezone: 'Asia/Kolkata',
 } as const;
 
