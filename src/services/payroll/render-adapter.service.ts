@@ -1,0 +1,237 @@
+import type { Types } from 'mongoose';
+
+import { User } from '../../models/user.model.js';
+import { PayrollProfile } from '../../models/payroll-profile.model.js';
+import { getCurrentStructure } from '../salary-structure.service.js';
+import { getOrInitSettings } from '../settings.service.js';
+import { AppError } from '../../utils/app-error.js';
+import { ERROR_CODES } from '../../constants/error-codes.js';
+import type { PayslipRenderData } from './payslip-template.js';
+import type { LetterRenderData, LetterType } from './letter-template.js';
+
+/**
+ * Render-data adapter (Task 6) — maps platform models (User, PayrollProfile,
+ * SalaryStructure, SystemSettings) into the render-data shapes consumed by
+ * the ported PDF templates (`payslip-template.ts`, `letter-template.ts`).
+ *
+ * Pure read/transform: no `req`/HTTP concerns, no audit rows (nothing is
+ * mutated here). Callers (payslip/letter generation services, Tasks 7 & 8)
+ * own the audit trail for the actual document-generation act.
+ */
+
+// ─── Company block (shared by payslip + every letter type) ────────────────
+
+export interface CompanyBlock {
+    companyName: string;
+    companyAddress: string[];
+    companyEmail: string;
+    cinNo: string;
+    iecCode: string;
+    signatoryName: string;
+    signatoryTitle: string;
+}
+
+/**
+ * Reads the singleton `SystemSettings.payroll` subsection and maps it to the
+ * company/signatory block shared across payslip + letter templates.
+ *
+ * NOTE on the settings accessor: the brief's sketch test mocks a `getSettings`
+ * export from `settings.service.js`, but no such export exists on the real
+ * service. The singleton read/lazy-seed accessor there is `getOrInitSettings`
+ * (returns the live `SystemSettingsDocument`, seeding `DEFAULT_SETTINGS` on
+ * first read) — that's the one used here.
+ */
+export const getCompanyBlock = async (): Promise<CompanyBlock> => {
+    const settings = await getOrInitSettings();
+    const payroll = settings.payroll;
+    return {
+        companyName: payroll.company_legal_name,
+        companyAddress: payroll.company_address_lines,
+        companyEmail: payroll.company_email,
+        cinNo: payroll.cin_no,
+        iecCode: payroll.iec_code,
+        signatoryName: payroll.signatory_name,
+        signatoryTitle: payroll.signatory_title,
+    };
+};
+
+// ─── Shared employee lookup ─────────────────────────────────────────────
+
+interface EmployeeCore {
+    employeeName: string;
+    employeeNumber: string;
+    designation: string;
+    department: string;
+    dateOfJoining: string;
+}
+
+const loadEmployeeCore = async (userId: Types.ObjectId): Promise<EmployeeCore> => {
+    const user = await User.findById(userId).lean();
+    if (!user) throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
+
+    const profile = user.internal_profile;
+    return {
+        employeeName: user.full_name,
+        employeeNumber: profile?.employee_id ?? '',
+        designation: profile?.job_title ?? '',
+        department: profile?.department ?? '',
+        dateOfJoining: profile?.date_of_joining ?? '',
+    };
+};
+
+// ─── Payslip ────────────────────────────────────────────────────────────
+
+/**
+ * Builds the full render-data payload for a payslip PDF.
+ *
+ * `payPeriod` and `daysPresent` are caller-supplied (payroll-run inputs, not
+ * derived from a model here). `effectiveOn` pins which `SalaryStructure` row
+ * applies (`getCurrentStructure` re-derives from `effective_from`, not the
+ * denormalized `is_current` flag).
+ */
+export const buildPayslipRenderData = async (
+    userId: Types.ObjectId,
+    payPeriod: string,
+    daysPresent: number,
+    effectiveOn: string
+): Promise<PayslipRenderData> => {
+    const [employee, profileDoc, structure, company] = await Promise.all([
+        loadEmployeeCore(userId),
+        PayrollProfile.findOne({ user_id: userId }).lean(),
+        getCurrentStructure(userId, effectiveOn),
+        getCompanyBlock(),
+    ]);
+
+    // No PayrollProfile row yet — the payslip still renders, just with blank
+    // statutory/bank fields rather than 404ing.
+    const profile = profileDoc ?? {
+        pan: '',
+        uan: '',
+        pf_account_number: '',
+        esi_number: '',
+        pran_number: '',
+        bank_details: '',
+        tax_regime: '',
+    };
+
+    return {
+        companyName: company.companyName,
+        companyAddress: company.companyAddress,
+        companyEmail: company.companyEmail,
+        cinNo: company.cinNo,
+        iecCode: company.iecCode,
+
+        payPeriod,
+
+        employeeName: employee.employeeName,
+        employeeNumber: employee.employeeNumber,
+        function: employee.department,
+        designation: employee.designation,
+        location: '',
+        bankDetails: profile.bank_details,
+        dateOfJoining: employee.dateOfJoining,
+        taxRegime: profile.tax_regime,
+        pan: profile.pan,
+        uan: profile.uan,
+        pfAccountNumber: profile.pf_account_number,
+        esiNumber: profile.esi_number,
+        pranNumber: profile.pran_number,
+        daysPresent,
+        earnings: structure.earnings,
+        deductions: structure.deductions,
+    };
+};
+
+// ─── Letters (relieving / experience / internship / hike / promotion) ────
+
+/** Caller-supplied fields the adapter cannot derive from the platform models
+ * (dates, references, body copy, etc.) plus any derived-default override. */
+export type LetterRenderDataOverrides = Partial<LetterRenderData>;
+
+const sumEarnings = (structure: { earnings: { amount: number }[] }): number =>
+    structure.earnings.reduce((acc, e) => acc + (Number.isFinite(e.amount) ? e.amount : 0), 0);
+
+/**
+ * Hike/promotion "previous vs new" CTC.
+ *
+ * `SalaryStructure` rows store MONTHLY amounts (Task 5). The letter template
+ * renders an ANNUAL CTC (sample letter shows "₹ 9,00,000 p.a." for a monthly
+ * figure of ₹75,000), so both the current and prior structure's earnings sum
+ * is multiplied by 12 here before being placed on `newCtc`/`previousCtc`.
+ *
+ * "Previous" is the row immediately before the current one, i.e. the next-
+ * newest `effective_from` strictly before the current row's. If none exists
+ * (the employee has only ever had one structure), `previousCtc` is left
+ * `undefined` so the template's own defaults take over — NOT zeroed, which
+ * would misleadingly render "previous CTC: ₹0".
+ */
+const deriveHikePromotionFields = async (
+    userId: Types.ObjectId,
+    effectiveOn: string | undefined
+): Promise<Pick<LetterRenderData, 'newCtc' | 'previousCtc'>> => {
+    const current = await getCurrentStructure(userId, effectiveOn);
+    const newCtc = sumEarnings(current) * 12;
+
+    // The row immediately before `current` — one day earlier than its
+    // `effective_from` — is the "previous" structure. No row → no previousCtc.
+    let previousCtc: number | undefined;
+    try {
+        const dayBeforeCurrent = new Date(current.effective_from);
+        dayBeforeCurrent.setUTCDate(dayBeforeCurrent.getUTCDate() - 1);
+        const previous = await getCurrentStructure(userId, dayBeforeCurrent.toISOString().slice(0, 10));
+        previousCtc = sumEarnings(previous) * 12;
+    } catch {
+        // No prior structure — AppError.notFound (PAYROLL_NO_CURRENT_SALARY).
+        // Leave previousCtc undefined; the template supplies its own default.
+        previousCtc = undefined;
+    }
+
+    return { newCtc, previousCtc };
+};
+
+const HIKE_PROMOTION_TYPES: ReadonlySet<LetterType> = new Set(['hike', 'promotion']);
+
+/**
+ * Builds the render-data payload for a letter PDF (relieving / experience /
+ * internship / hike / promotion). Employee + company fields are derived from
+ * the platform models; everything the adapter cannot know (issue date,
+ * reference, last working day, body copy, etc.) comes from `overrides` —
+ * which also wins over any derived default the adapter computes, so a caller
+ * can always hand-correct a field.
+ */
+export const buildLetterRenderData = async (
+    userId: Types.ObjectId,
+    type: LetterType,
+    overrides: LetterRenderDataOverrides = {}
+): Promise<LetterRenderData> => {
+    const [employee, company] = await Promise.all([loadEmployeeCore(userId), getCompanyBlock()]);
+
+    const derivedCtc = HIKE_PROMOTION_TYPES.has(type)
+        ? await deriveHikePromotionFields(userId, overrides.effectiveDate)
+        : {};
+
+    return {
+        companyName: company.companyName,
+        companyAddress: company.companyAddress,
+        companyEmail: company.companyEmail,
+        cinNo: company.cinNo,
+        iecCode: company.iecCode,
+
+        type,
+        issueDate: '',
+
+        employeeName: employee.employeeName,
+        employeeNumber: employee.employeeNumber,
+        designation: employee.designation,
+        department: employee.department,
+        location: '',
+        dateOfJoining: employee.dateOfJoining,
+        lastWorkingDay: '',
+
+        signatoryName: company.signatoryName,
+        signatoryTitle: company.signatoryTitle,
+
+        ...derivedCtc,
+        ...overrides,
+    };
+};
