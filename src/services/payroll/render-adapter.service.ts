@@ -82,6 +82,20 @@ const formatRenderDate = (value: string | undefined | null): string => {
     return parsed.isValid() ? parsed.format(RENDER_DATE_FORMAT) : value;
 };
 
+/**
+ * Resolves the render-facing "date of joining" string: an admin-entered
+ * `PayrollProfile.date_of_joining_override` wins over the User record's
+ * `internal_profile.date_of_joining` when non-empty. The override is run
+ * through the same `D-MMM-YYYY` formatting as the user-record value when it
+ * parses as a date; if it's set but not parseable (e.g. free text), it's used
+ * as-is rather than discarded. With no override, the already-formatted
+ * fallback (`employeeDateOfJoining`) is returned unchanged.
+ */
+const resolveDateOfJoining = (override: string | undefined | null, employeeDateOfJoining: string): string => {
+    if (!override) return employeeDateOfJoining;
+    return formatRenderDate(override);
+};
+
 const loadEmployeeCore = async (userId: Types.ObjectId): Promise<EmployeeCore> => {
     const user = await User.findById(userId).lean();
     if (!user) throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
@@ -130,6 +144,9 @@ export const buildPayslipRenderData = async (
         bank_details: '',
         location: '',
         tax_regime: '',
+        function_override: '',
+        designation_override: '',
+        date_of_joining_override: '',
     };
 
     return {
@@ -143,11 +160,11 @@ export const buildPayslipRenderData = async (
 
         employeeName: employee.employeeName,
         employeeNumber: employee.employeeNumber,
-        function: employee.department,
-        designation: employee.designation,
+        function: profile.function_override || employee.department,
+        designation: profile.designation_override || employee.designation,
         location: profile.location ?? '',
         bankDetails: profile.bank_details,
-        dateOfJoining: employee.dateOfJoining,
+        dateOfJoining: resolveDateOfJoining(profile.date_of_joining_override, employee.dateOfJoining),
         taxRegime: profile.tax_regime,
         pan: profile.pan,
         uan: profile.uan,
@@ -247,10 +264,10 @@ export const buildLetterRenderData = async (
 
         employeeName: employee.employeeName,
         employeeNumber: employee.employeeNumber,
-        designation: employee.designation,
+        designation: profile?.designation_override || employee.designation,
         department: employee.department,
         location: overrides.location ?? profile?.location ?? '',
-        dateOfJoining: employee.dateOfJoining,
+        dateOfJoining: resolveDateOfJoining(profile?.date_of_joining_override, employee.dateOfJoining),
         lastWorkingDay: '',
 
         signatoryName: company.signatoryName,

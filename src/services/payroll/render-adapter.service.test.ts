@@ -97,6 +97,84 @@ describe('buildPayslipRenderData', () => {
         expect(d.iecCode).toBe('IEC');
     });
 
+    it('prefers the PayrollProfile designation/function overrides over the user record when set', async () => {
+        (User.findById as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    full_name: 'Gorrela Krishna Kumar',
+                    internal_profile: {
+                        employee_id: 'VT04',
+                        job_title: 'Sr.FullStack Developer',
+                        department: 'Software Developer',
+                        date_of_joining: '2022-03-02',
+                    },
+                }),
+        });
+        (PayrollProfile.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    pan: 'CZQPG6515F',
+                    uan: '102245544157',
+                    pf_account_number: '-',
+                    esi_number: '-',
+                    pran_number: '-',
+                    bank_details: 'HDFC',
+                    location: 'Hyderabad',
+                    tax_regime: 'Regular Tax Regime',
+                    designation_override: 'Sr. Architect',
+                    function_override: 'Platform Engineering',
+                }),
+        });
+        (getCurrentStructure as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            earnings: [],
+            deductions: [],
+        });
+        mockSettings();
+
+        const d = await buildPayslipRenderData(new Types.ObjectId(), 'February-2026', 22, '2026-02-28');
+        expect(d.designation).toBe('Sr. Architect');
+        expect(d.function).toBe('Platform Engineering');
+    });
+
+    it('falls back to the user record designation/department when the overrides are empty', async () => {
+        (User.findById as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    full_name: 'Gorrela Krishna Kumar',
+                    internal_profile: {
+                        employee_id: 'VT04',
+                        job_title: 'Sr.FullStack Developer',
+                        department: 'Software Developer',
+                        date_of_joining: '2022-03-02',
+                    },
+                }),
+        });
+        (PayrollProfile.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    pan: 'CZQPG6515F',
+                    uan: '102245544157',
+                    pf_account_number: '-',
+                    esi_number: '-',
+                    pran_number: '-',
+                    bank_details: 'HDFC',
+                    location: 'Hyderabad',
+                    tax_regime: 'Regular Tax Regime',
+                    designation_override: '',
+                    function_override: '',
+                }),
+        });
+        (getCurrentStructure as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            earnings: [],
+            deductions: [],
+        });
+        mockSettings();
+
+        const d = await buildPayslipRenderData(new Types.ObjectId(), 'February-2026', 22, '2026-02-28');
+        expect(d.designation).toBe('Sr.FullStack Developer');
+        expect(d.function).toBe('Software Developer');
+    });
+
     it('defaults PayrollProfile fields to empty strings when no profile row exists', async () => {
         (User.findById as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
             lean: () =>
@@ -168,6 +246,64 @@ describe('buildPayslipRenderData', () => {
 
         const d = await buildPayslipRenderData(new Types.ObjectId(), 'March-2026', 20, '2026-03-31');
         expect(d.dateOfJoining).toBe('2-Mar-2022');
+    });
+
+    it('prefers a valid PayrollProfile date_of_joining_override, formatted the same way as the user record value', async () => {
+        (User.findById as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    full_name: 'Date Override User',
+                    internal_profile: {
+                        employee_id: 'VT57',
+                        job_title: 'Engineer',
+                        department: 'Engineering',
+                        date_of_joining: '2022-03-02',
+                    },
+                }),
+        });
+        (PayrollProfile.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    date_of_joining_override: '2019-11-05',
+                }),
+        });
+        (getCurrentStructure as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            earnings: [],
+            deductions: [],
+        });
+        mockSettings();
+
+        const d = await buildPayslipRenderData(new Types.ObjectId(), 'March-2026', 20, '2026-03-31');
+        expect(d.dateOfJoining).toBe('5-Nov-2019');
+    });
+
+    it('uses an unparseable date_of_joining_override as-is instead of throwing', async () => {
+        (User.findById as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    full_name: 'Date Override User',
+                    internal_profile: {
+                        employee_id: 'VT58',
+                        job_title: 'Engineer',
+                        department: 'Engineering',
+                        date_of_joining: '2022-03-02',
+                    },
+                }),
+        });
+        (PayrollProfile.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    date_of_joining_override: 'Joined pre-incorporation',
+                }),
+        });
+        (getCurrentStructure as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            earnings: [],
+            deductions: [],
+        });
+        mockSettings();
+
+        const d = await buildPayslipRenderData(new Types.ObjectId(), 'March-2026', 20, '2026-03-31');
+        expect(d.dateOfJoining).toBe('Joined pre-incorporation');
     });
 
     it('falls back to the raw value instead of throwing/"Invalid Date" when date_of_joining is blank', async () => {
@@ -296,6 +432,20 @@ describe('buildLetterRenderData', () => {
         await expect(
             buildLetterRenderData(new Types.ObjectId(), 'promotion', { effectiveDate: '2026-04-01' })
         ).rejects.toThrow('DB connection lost');
+    });
+
+    it('prefers the PayrollProfile designation_override over the user record job_title in a letter', async () => {
+        setUser();
+        mockSettings();
+        (PayrollProfile.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    designation_override: 'Principal Engineer',
+                }),
+        });
+
+        const d = await buildLetterRenderData(new Types.ObjectId(), 'relieving', { lastWorkingDay: '2026-06-30' });
+        expect(d.designation).toBe('Principal Engineer');
     });
 
     it('lets caller overrides win over derived defaults', async () => {

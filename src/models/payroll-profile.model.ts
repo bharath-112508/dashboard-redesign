@@ -21,6 +21,9 @@ export interface PayrollProfileDocument extends Document {
     bank_details: string;
     location: string;
     tax_regime: string;
+    function_override: string;
+    designation_override: string;
+    date_of_joining_override: string;
     updated_by: Types.ObjectId;
     created_at: Date;
     updated_at: Date;
@@ -37,6 +40,9 @@ const payrollProfileSchema = new Schema<PayrollProfileDocument>(
         bank_details: { type: String, default: '', trim: true },
         location: { type: String, default: '', trim: true },
         tax_regime: { type: String, default: 'Regular Tax Regime', trim: true },
+        function_override: { type: String, default: '', trim: true },
+        designation_override: { type: String, default: '', trim: true },
+        date_of_joining_override: { type: String, default: '', trim: true },
         updated_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
     },
     { ...BASE_SCHEMA_OPTIONS, collection: COLLECTIONS.PAYROLL_PROFILES }

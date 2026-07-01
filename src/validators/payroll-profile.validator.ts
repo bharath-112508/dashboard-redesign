@@ -16,6 +16,9 @@ export const upsertPayrollProfileBodySchema = z
         bank_details: z.string().max(120).optional(),
         location: z.string().max(120).optional(),
         tax_regime: z.string().max(60).optional(),
+        function_override: z.string().max(120).optional(),
+        designation_override: z.string().max(120).optional(),
+        date_of_joining_override: z.string().max(40).optional(),
     })
     .strict();
 export type UpsertPayrollProfileBody = z.infer<typeof upsertPayrollProfileBodySchema>;
