@@ -37,7 +37,9 @@ const SAMPLE: PayslipRenderData = {
     ],
 };
 
-afterAll(async () => { await shutdownPdf(); });
+afterAll(async () => {
+    await shutdownPdf();
+});
 
 describe('payslip PDF renderer', () => {
     it('computes net pay as earnings minus deductions', () => {
