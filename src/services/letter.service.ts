@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { Letter, type LetterDocument, type LetterType } from '../models/letter.model.js';
 import {
     buildLetterRenderData,
+    formatRenderDate,
     getCompanyBlock,
     type LetterRenderDataOverrides,
 } from './payroll/render-adapter.service.js';
@@ -119,7 +120,7 @@ const buildOfferRenderData = async (input: GenerateLetterBody): Promise<OfferLet
         cinNo: company.cinNo,
         iecCode: company.iecCode,
 
-        issueDate: input.issue_date ?? '',
+        issueDate: formatRenderDate(input.issue_date),
         reference: input.reference,
         offerValidUntil: input.offer_valid_until,
 
@@ -132,7 +133,7 @@ const buildOfferRenderData = async (input: GenerateLetterBody): Promise<OfferLet
         department: input.department ?? '',
         location: input.location ?? '',
         reportingManager: input.reporting_manager ?? '',
-        joiningDate: input.joining_date ?? '',
+        joiningDate: formatRenderDate(input.joining_date),
         employmentType: input.employment_type ?? '',
 
         probationMonths: input.probation_months ?? 0,

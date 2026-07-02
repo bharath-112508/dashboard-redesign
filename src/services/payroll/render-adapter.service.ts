@@ -76,7 +76,7 @@ const RENDER_DATE_FORMAT = 'D-MMM-YYYY';
  * throws, never emits "Invalid Date" — when the value is empty/falsy or dayjs
  * can't parse it.
  */
-const formatRenderDate = (value: string | undefined | null): string => {
+export const formatRenderDate = (value: string | undefined | null): string => {
     if (!value) return value ?? '';
     const parsed = dayjs(value);
     return parsed.isValid() ? parsed.format(RENDER_DATE_FORMAT) : value;
@@ -252,6 +252,14 @@ export const buildLetterRenderData = async (
         ? await deriveHikePromotionFields(userId, overrides.effectiveDate)
         : {};
 
+    // Dates arrive as canonical `YYYY-MM-DD` (validated on the way in and used
+    // raw for the CTC derivation above); format them for display so the template
+    // prints `6-May-2026` rather than `2026-05-06`. Overlaid after `...overrides`.
+    const displayDates: LetterRenderDataOverrides = {};
+    if (overrides.issueDate) displayDates.issueDate = formatRenderDate(overrides.issueDate);
+    if (overrides.lastWorkingDay) displayDates.lastWorkingDay = formatRenderDate(overrides.lastWorkingDay);
+    if (overrides.effectiveDate) displayDates.effectiveDate = formatRenderDate(overrides.effectiveDate);
+
     return {
         companyName: company.companyName,
         companyAddress: company.companyAddress,
@@ -275,5 +283,6 @@ export const buildLetterRenderData = async (
 
         ...derivedCtc,
         ...overrides,
+        ...displayDates,
     };
 };
