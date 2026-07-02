@@ -183,7 +183,10 @@ const payrollSchema = z
     .object({
         company_legal_name: z.string().trim(),
         company_address_lines: z.array(z.string()),
-        company_email: optionalEmail,
+        // Free display string on the letterhead — the sample uses a website
+        // (www.viljetech.com), not an email address. (hr_reply_to_address below
+        // stays a real email since it's used as an outbound Reply-To.)
+        company_email: z.string().trim(),
         cin_no: z.string().trim(),
         iec_code: z.string().trim(),
         signatory_name: z.string().trim(),
