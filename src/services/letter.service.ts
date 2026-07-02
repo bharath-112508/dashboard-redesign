@@ -242,6 +242,30 @@ export const previewLetter = async (input: GenerateLetterBody): Promise<{ pdf_ba
     };
 };
 
+/**
+ * Renders the letter template to raw HTML — no Playwright, no blob, no record.
+ * Powers the on-page live preview (instant; shows the clean document). Same
+ * template the PDF is rendered from.
+ */
+export const previewLetterHtml = async (input: GenerateLetterBody): Promise<{ html: string; filename: string }> => {
+    const userId = new Types.ObjectId(input.user_id);
+
+    let html: string;
+    let subjectName: string | undefined;
+
+    if (input.type === 'offer') {
+        const data = await buildOfferRenderData(input);
+        html = renderOfferLetterHtml(data);
+        subjectName = data.candidateName;
+    } else {
+        const data = await buildLetterRenderData(userId, input.type, buildEmployeeOverrides(input));
+        html = renderLetterHtml(data as Parameters<typeof renderLetterHtml>[0]);
+        subjectName = (data as { employeeName?: string }).employeeName;
+    }
+
+    return { html, filename: filenameFor(input.type, subjectName) };
+};
+
 // ─── GET /letters ─────────────────────────────────────────────────────────
 
 export const listLetters = async (

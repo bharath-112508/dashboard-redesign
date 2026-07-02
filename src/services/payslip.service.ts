@@ -116,6 +116,26 @@ export const previewPayslip = async (input: {
     };
 };
 
+/**
+ * Renders the payslip template to raw HTML — no Playwright, no blob, no record.
+ * Powers the on-page live preview: it's instant (string build only) and shows
+ * the clean document itself rather than a PDF-viewer chrome. Same template the
+ * PDF is rendered from, so the preview is faithful.
+ */
+export const previewPayslipHtml = async (input: {
+    user_id: Types.ObjectId;
+    pay_period: string;
+    days_present: number;
+    effective_on: string;
+}): Promise<{ html: string; filename: string; net_pay: number }> => {
+    const data = await buildPayslipRenderData(input.user_id, input.pay_period, input.days_present, input.effective_on);
+    return {
+        html: renderPayslipHtmlFromData(data),
+        filename: `Payslip_${safeFileNameOf(data.employeeName)}_${input.pay_period}.pdf`,
+        net_pay: payslipNetPayFromData(data),
+    };
+};
+
 // ─── GET /payslips ───────────────────────────────────────────────────────
 
 export const listPayslips = async (

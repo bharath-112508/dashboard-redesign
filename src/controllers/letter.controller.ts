@@ -30,6 +30,14 @@ export const postPreview = async (req: Request, res: Response): Promise<Response
     return ok(res, data);
 };
 
+// ─── POST /letters/preview-html (live on-page preview, no PDF) ─────────────
+
+export const postPreviewHtml = async (req: Request, res: Response): Promise<Response> => {
+    const body = req.body as GenerateLetterBody;
+    const data = await service.previewLetterHtml(body);
+    return ok(res, data);
+};
+
 // ─── GET /letters ─────────────────────────────────────────────────────────
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {

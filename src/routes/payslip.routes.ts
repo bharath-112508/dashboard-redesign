@@ -38,6 +38,14 @@ router.post(
     asyncHandler(ctrl.postPreview)
 );
 
+// HTML preview for the live on-page editor (no Playwright, no persistence).
+router.post(
+    '/preview-html',
+    requirePermission(PERMISSIONS.PAYSLIP_GENERATE),
+    validate({ body: generatePayslipBodySchema }),
+    asyncHandler(ctrl.postPreviewHtml)
+);
+
 router.get(
     '/',
     requirePermission(PERMISSIONS.PAYROLL_READ),
