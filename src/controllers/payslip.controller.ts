@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as service from '../services/payslip.service.js';
-import { created, ok, paginated } from '../utils/api-response.js';
+import { created, ok, noContent, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import type { GeneratePayslipBody, ListPayslipsQuery } from '../validators/payslip.validator.js';
@@ -68,4 +68,11 @@ export const getList = async (req: Request, res: Response): Promise<Response> =>
 export const getDownload = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.downloadPayslip(idOf(req, 'id'));
     return ok(res, data);
+};
+
+// ─── DELETE /payslips/:id ────────────────────────────────────────────────
+
+export const del = async (req: Request, res: Response): Promise<Response> => {
+    await service.deletePayslip(idOf(req, 'id'), callerOf(req));
+    return noContent(res);
 };

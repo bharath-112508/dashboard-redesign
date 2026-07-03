@@ -5,7 +5,7 @@ import { Payslip, type PayslipDocument } from '../models/payslip.model.js';
 import { buildPayslipRenderData } from './payroll/render-adapter.service.js';
 import { renderPayslipHtmlFromData, payslipNetPayFromData } from './payroll/payslip-template.js';
 import { htmlToPdf } from './payroll/pdf.service.js';
-import { putBlob, mintDownloadSas } from '../utils/azure-blob.js';
+import { putBlob, mintDownloadSas, deleteBlob } from '../utils/azure-blob.js';
 import { AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER } from '../config/server.config.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -179,4 +179,26 @@ export const downloadPayslip = async (id: Types.ObjectId): Promise<{ download_ur
     });
 
     return { download_url: sas.url };
+};
+
+// ─── DELETE /payslips/:id ────────────────────────────────────────────────
+
+/**
+ * Permanently removes an issued payslip: deletes the PDF blob (best-effort)
+ * then the `Payslip` row, and audits the deletion.
+ */
+export const deletePayslip = async (id: Types.ObjectId, caller: PayrollCaller): Promise<void> => {
+    const rec = await Payslip.findById(id);
+    if (!rec) throw AppError.notFound('Payslip not found', ERROR_CODES.PAYSLIP_NOT_FOUND);
+
+    await deleteBlob(AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER, rec.blob_key);
+    await rec.deleteOne();
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.PAYSLIP_DELETE,
+            target: { kind: AUDIT_TARGET_KINDS.PAYSLIP, id: rec._id },
+            before: { user_id: rec.user_id?.toString(), pay_period: rec.pay_period },
+        });
+    }
 };

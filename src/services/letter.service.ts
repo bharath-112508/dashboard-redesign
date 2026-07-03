@@ -3,9 +3,12 @@ import crypto from 'node:crypto';
 
 import { Letter, type LetterDocument, type LetterType } from '../models/letter.model.js';
 import {
+    buildJoiningRenderData,
     buildLetterRenderData,
+    buildManualJoiningRenderData,
     formatRenderDate,
     getCompanyBlock,
+    type JoiningRenderDataOverrides,
     type LetterRenderDataOverrides,
 } from './payroll/render-adapter.service.js';
 import { renderLetterHtml, type InternshipDetails } from './payroll/letter-template.js';
@@ -15,7 +18,7 @@ import {
     type OfferLetterRenderData,
 } from './payroll/offer-letter-template.js';
 import { htmlToPdf } from './payroll/pdf.service.js';
-import { putBlob, mintDownloadSas } from '../utils/azure-blob.js';
+import { putBlob, mintDownloadSas, deleteBlob } from '../utils/azure-blob.js';
 import { AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER } from '../config/server.config.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -72,6 +75,7 @@ const safeFileNameOf = (name: string | undefined): string => (name ?? 'Letter').
 /** Reuses the source app's `letterKind` filename mapping (Task 8 brief). */
 const LETTER_KIND: Record<LetterType, string> = {
     offer: 'Offer_Letter',
+    joining: 'Appointment_Letter',
     relieving: 'Relieving_Letter',
     experience: 'Experience_Letter',
     internship: 'Internship_Experience_Letter',
@@ -104,6 +108,31 @@ const buildEmployeeOverrides = (input: GenerateLetterBody): LetterRenderDataOver
     if (input.closing !== undefined) overrides.closing = input.closing;
     if (input.signatory_name !== undefined) overrides.signatoryName = input.signatory_name;
     if (input.signatory_title !== undefined) overrides.signatoryTitle = input.signatory_title;
+    return overrides;
+};
+
+/** Builds the `JoiningRenderDataOverrides` from the validated request body —
+ * the appointment terms an admin sets; everything else (name, role, DOJ,
+ * compensation) the adapter derives from the employee record + salary
+ * structure. Reuses the shared offer-style term fields. */
+const buildJoiningOverrides = (input: GenerateLetterBody): JoiningRenderDataOverrides => {
+    const overrides: JoiningRenderDataOverrides = {};
+    if (input.issue_date !== undefined) overrides.issueDate = input.issue_date;
+    if (input.reference !== undefined) overrides.reference = input.reference;
+    if (input.candidate_name !== undefined) overrides.candidateName = input.candidate_name;
+    if (input.candidate_email !== undefined) overrides.candidateEmail = input.candidate_email;
+    if (input.designation !== undefined) overrides.designation = input.designation;
+    if (input.department !== undefined) overrides.department = input.department;
+    if (input.joining_date !== undefined) overrides.joiningDate = input.joining_date;
+    if (input.location !== undefined) overrides.location = input.location;
+    if (input.reporting_manager !== undefined) overrides.reportingManager = input.reporting_manager;
+    if (input.employment_type !== undefined) overrides.employmentType = input.employment_type;
+    if (input.probation_months !== undefined) overrides.probationMonths = input.probation_months;
+    if (input.notice_period_days !== undefined) overrides.noticePeriodDays = input.notice_period_days;
+    if (input.working_hours !== undefined) overrides.workingHours = input.working_hours;
+    if (input.working_days !== undefined) overrides.workingDays = input.working_days;
+    if (input.ctc_breakdown !== undefined) overrides.ctcBreakdown = input.ctc_breakdown as OfferCtcRow[];
+    if (input.additional_terms !== undefined) overrides.additionalTerms = input.additional_terms;
     return overrides;
 };
 
@@ -145,6 +174,7 @@ const buildOfferRenderData = async (input: GenerateLetterBody): Promise<OfferLet
 
         bodyParagraphs: input.body_paragraphs,
         termsParagraphs: input.terms_paragraphs,
+        additionalTerms: input.additional_terms,
         closing: input.closing,
         signatoryName: input.signatory_name,
         signatoryTitle: input.signatory_title,
@@ -157,7 +187,8 @@ export const generateLetter = async (
     input: GenerateLetterBody,
     caller: PayrollCaller
 ): Promise<Record<string, unknown>> => {
-    const userId = new Types.ObjectId(input.user_id);
+    // `user_id` is optional only for a manually-entered joining letter.
+    const userId = input.user_id ? new Types.ObjectId(input.user_id) : undefined;
 
     let html: string;
     let data: unknown;
@@ -167,15 +198,22 @@ export const generateLetter = async (
         data = await buildOfferRenderData(input);
         html = renderOfferLetterHtml(data as OfferLetterRenderData);
         subjectName = (data as OfferLetterRenderData).candidateName;
+    } else if (input.type === 'joining') {
+        data = userId
+            ? await buildJoiningRenderData(userId, buildJoiningOverrides(input))
+            : await buildManualJoiningRenderData(buildJoiningOverrides(input));
+        html = renderOfferLetterHtml(data as OfferLetterRenderData);
+        subjectName = (data as OfferLetterRenderData).candidateName;
     } else {
-        data = await buildLetterRenderData(userId, input.type, buildEmployeeOverrides(input));
+        // Validated: every non-joining type requires user_id.
+        data = await buildLetterRenderData(userId!, input.type, buildEmployeeOverrides(input));
         html = renderLetterHtml(data as Parameters<typeof renderLetterHtml>[0]);
         subjectName = (data as { employeeName?: string }).employeeName;
     }
 
     const pdf = await htmlToPdf(html);
     const contentHash = crypto.createHash('sha256').update(pdf).digest('hex');
-    const blobKey = `letters/${userId.toString()}/${input.type}/${contentHash.slice(0, 12)}.pdf`;
+    const blobKey = `letters/${userId?.toString() ?? 'unlinked'}/${input.type}/${contentHash.slice(0, 12)}.pdf`;
 
     await putBlob({
         container: AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER,
@@ -198,7 +236,7 @@ export const generateLetter = async (
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.LETTER_GENERATE,
             target: { kind: AUDIT_TARGET_KINDS.LETTER, id: rec._id },
-            after: { user_id: userId.toString(), type: input.type },
+            after: { user_id: userId?.toString(), type: input.type },
         });
     }
 
@@ -220,7 +258,7 @@ export const generateLetter = async (
  * trail. Lets an admin eyeball the render before committing to generation.
  */
 export const previewLetter = async (input: GenerateLetterBody): Promise<{ pdf_base64: string; filename: string }> => {
-    const userId = new Types.ObjectId(input.user_id);
+    const userId = input.user_id ? new Types.ObjectId(input.user_id) : undefined;
 
     let html: string;
     let subjectName: string | undefined;
@@ -229,8 +267,14 @@ export const previewLetter = async (input: GenerateLetterBody): Promise<{ pdf_ba
         const data = await buildOfferRenderData(input);
         html = renderOfferLetterHtml(data);
         subjectName = data.candidateName;
+    } else if (input.type === 'joining') {
+        const data = userId
+            ? await buildJoiningRenderData(userId, buildJoiningOverrides(input))
+            : await buildManualJoiningRenderData(buildJoiningOverrides(input));
+        html = renderOfferLetterHtml(data);
+        subjectName = data.candidateName;
     } else {
-        const data = await buildLetterRenderData(userId, input.type, buildEmployeeOverrides(input));
+        const data = await buildLetterRenderData(userId!, input.type, buildEmployeeOverrides(input));
         html = renderLetterHtml(data as Parameters<typeof renderLetterHtml>[0]);
         subjectName = (data as { employeeName?: string }).employeeName;
     }
@@ -249,7 +293,7 @@ export const previewLetter = async (input: GenerateLetterBody): Promise<{ pdf_ba
  * template the PDF is rendered from.
  */
 export const previewLetterHtml = async (input: GenerateLetterBody): Promise<{ html: string; filename: string }> => {
-    const userId = new Types.ObjectId(input.user_id);
+    const userId = input.user_id ? new Types.ObjectId(input.user_id) : undefined;
 
     let html: string;
     let subjectName: string | undefined;
@@ -258,8 +302,14 @@ export const previewLetterHtml = async (input: GenerateLetterBody): Promise<{ ht
         const data = await buildOfferRenderData(input);
         html = renderOfferLetterHtml(data);
         subjectName = data.candidateName;
+    } else if (input.type === 'joining') {
+        const data = userId
+            ? await buildJoiningRenderData(userId, buildJoiningOverrides(input))
+            : await buildManualJoiningRenderData(buildJoiningOverrides(input));
+        html = renderOfferLetterHtml(data);
+        subjectName = data.candidateName;
     } else {
-        const data = await buildLetterRenderData(userId, input.type, buildEmployeeOverrides(input));
+        const data = await buildLetterRenderData(userId!, input.type, buildEmployeeOverrides(input));
         html = renderLetterHtml(data as Parameters<typeof renderLetterHtml>[0]);
         subjectName = (data as { employeeName?: string }).employeeName;
     }
@@ -310,4 +360,27 @@ export const downloadLetter = async (id: Types.ObjectId): Promise<{ download_url
     });
 
     return { download_url: sas.url };
+};
+
+// ─── DELETE /letters/:id ─────────────────────────────────────────────────
+
+/**
+ * Permanently removes an issued letter: deletes the PDF blob (best-effort —
+ * `deleteBlob` never throws, so a briefly-unreachable Azure doesn't block the
+ * row removal) then the `Letter` row, and audits the deletion.
+ */
+export const deleteLetter = async (id: Types.ObjectId, caller: PayrollCaller): Promise<void> => {
+    const rec = await Letter.findById(id);
+    if (!rec) throw AppError.notFound('Letter not found', ERROR_CODES.LETTER_NOT_FOUND);
+
+    await deleteBlob(AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER, rec.blob_key);
+    await rec.deleteOne();
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.LETTER_DELETE,
+            target: { kind: AUDIT_TARGET_KINDS.LETTER, id: rec._id },
+            before: { user_id: rec.user_id?.toString(), type: rec.type },
+        });
+    }
 };

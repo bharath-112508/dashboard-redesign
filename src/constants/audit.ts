@@ -323,6 +323,8 @@ export const AUDIT_ACTIONS = {
     SALARY_STRUCTURE_UPDATE: 'salary_structure.update',
     PAYSLIP_GENERATE: 'payslip.generate',
     LETTER_GENERATE: 'letter.generate',
+    PAYSLIP_DELETE: 'payslip.delete',
+    LETTER_DELETE: 'letter.delete',
 } as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS];

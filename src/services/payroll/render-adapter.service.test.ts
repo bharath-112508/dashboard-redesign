@@ -374,7 +374,8 @@ describe('buildLetterRenderData', () => {
         expect(d.department).toBe('Engineering');
         expect(d.dateOfJoining).toBe('1-Apr-2020');
         // ^ formatted from the stored `2020-04-01` (YYYY-MM-DD) via dayjs 'D-MMM-YYYY'.
-        expect(d.lastWorkingDay).toBe('2026-06-30');
+        expect(d.lastWorkingDay).toBe('30-Jun-2026');
+        // ^ the `YYYY-MM-DD` override is display-formatted for the template too.
         expect(d.companyName).toBe('M/S VILJA TECH LABS PRIVATE LIMITED');
         expect(getCurrentStructure).not.toHaveBeenCalled();
     });

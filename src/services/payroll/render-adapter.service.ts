@@ -9,6 +9,7 @@ import { ERROR_CODES } from '../../constants/error-codes.js';
 import dayjs, { DATE_FORMAT } from '../../utils/date.js';
 import type { PayslipRenderData } from './payslip-template.js';
 import type { LetterRenderData, LetterType } from './letter-template.js';
+import type { OfferCtcRow, OfferLetterRenderData } from './offer-letter-template.js';
 
 /**
  * Render-data adapter (Task 6) — maps platform models (User, PayrollProfile,
@@ -64,6 +65,7 @@ interface EmployeeCore {
     designation: string;
     department: string;
     dateOfJoining: string;
+    email: string;
 }
 
 /** Render-facing date format for payslips/letters, e.g. `2-Mar-2022`. */
@@ -107,6 +109,7 @@ const loadEmployeeCore = async (userId: Types.ObjectId): Promise<EmployeeCore> =
         designation: profile?.job_title ?? '',
         department: profile?.department ?? '',
         dateOfJoining: formatRenderDate(profile?.date_of_joining),
+        email: user.email ?? '',
     };
 };
 
@@ -284,5 +287,183 @@ export const buildLetterRenderData = async (
         ...derivedCtc,
         ...overrides,
         ...displayDates,
+    };
+};
+
+// ─── Joining / appointment letter ─────────────────────────────────────────
+//
+// A joining (appointment) letter is issued to an existing EMPLOYEE who has
+// joined — unlike an offer, which goes to an external candidate. So it reuses
+// the rich offer-letter LAYOUT (`OfferLetterRenderData` → `renderOfferLetterHtml`
+// with `variant: 'joining'`) but sources the employee/role fields from the
+// platform record and the compensation from the current `SalaryStructure`.
+
+/** Caller-supplied overrides for a joining letter — the terms the adapter
+ * can't derive from the employee record + salary structure, plus manual
+ * overrides for the employee-sourced fields (used when the letter is issued
+ * for a person not yet added as a User, or to hand-correct a field). Any
+ * non-empty override wins over the value derived from the record. */
+export interface JoiningRenderDataOverrides {
+    issueDate?: string;
+    reference?: string;
+    /** Overrides the employee's full name (also the sole name source when the
+     * letter is built manually with no linked User). */
+    candidateName?: string;
+    candidateEmail?: string;
+    designation?: string;
+    department?: string;
+    /** `YYYY-MM-DD`; formatted for display. Overrides the record's DOJ. */
+    joiningDate?: string;
+    location?: string;
+    reportingManager?: string;
+    employmentType?: string;
+    probationMonths?: number;
+    noticePeriodDays?: number;
+    workingHours?: string;
+    workingDays?: string;
+    /** Explicit CTC rows; when absent, derived from the current structure. */
+    ctcBreakdown?: OfferCtcRow[];
+    /** Extra per-employee clauses appended to Terms & Conditions. */
+    additionalTerms?: string[];
+}
+
+/** The company/signatory + variant fields common to both joining builders. */
+const joiningCompanyBase = (
+    company: CompanyBlock
+): Pick<
+    OfferLetterRenderData,
+    | 'variant'
+    | 'companyName'
+    | 'companyAddress'
+    | 'companyEmail'
+    | 'cinNo'
+    | 'iecCode'
+    | 'signatoryName'
+    | 'signatoryTitle'
+> => ({
+    variant: 'joining',
+    companyName: company.companyName,
+    companyAddress: company.companyAddress,
+    companyEmail: company.companyEmail,
+    cinNo: company.cinNo,
+    iecCode: company.iecCode,
+    signatoryName: company.signatoryName,
+    signatoryTitle: company.signatoryTitle,
+});
+
+/**
+ * Annual CTC breakdown from the employee's current salary structure. Structure
+ * amounts are MONTHLY (Task 5); the letter shows an ANNUAL figure, so each
+ * earning line is ×12. Returns `[]` (not a throw) when the employee has no
+ * structure yet — the letter still renders, just with an empty compensation
+ * table — mirroring how the payslip adapter tolerates missing data.
+ */
+export const buildAnnualCtcBreakdown = async (userId: Types.ObjectId, onDate?: string): Promise<OfferCtcRow[]> => {
+    try {
+        const structure = await getCurrentStructure(userId, onDate);
+        return structure.earnings.map((e) => ({
+            label: e.label,
+            amount: (Number.isFinite(e.amount) ? e.amount : 0) * 12,
+            note: 'Per annum',
+        }));
+    } catch (err) {
+        if (err instanceof AppError && err.code === ERROR_CODES.PAYROLL_NO_CURRENT_SALARY) {
+            return [];
+        }
+        throw err;
+    }
+};
+
+/**
+ * Builds the `OfferLetterRenderData` (variant `joining`) for an existing
+ * employee's appointment/joining letter. Employee + company fields come from
+ * the platform record; compensation from the current salary structure; the
+ * `overrides` carry the terms an admin sets (reporting manager, probation,
+ * notice, working schedule) and win over any derived default.
+ */
+export const buildJoiningRenderData = async (
+    userId: Types.ObjectId,
+    overrides: JoiningRenderDataOverrides = {}
+): Promise<OfferLetterRenderData> => {
+    const [employee, company, profile, ctcBreakdown] = await Promise.all([
+        loadEmployeeCore(userId),
+        getCompanyBlock(),
+        PayrollProfile.findOne({ user_id: userId }).lean(),
+        overrides.ctcBreakdown && overrides.ctcBreakdown.length > 0
+            ? Promise.resolve(overrides.ctcBreakdown)
+            : buildAnnualCtcBreakdown(userId),
+    ]);
+
+    return {
+        ...joiningCompanyBase(company),
+
+        issueDate: formatRenderDate(overrides.issueDate),
+        reference: overrides.reference,
+
+        // Overrides win over the employee-sourced value (hand-correction).
+        candidateName: overrides.candidateName?.trim() || employee.employeeName,
+        candidateAddress: [],
+        candidateEmail: overrides.candidateEmail?.trim() || employee.email,
+
+        designation: overrides.designation?.trim() || profile?.designation_override || employee.designation,
+        department: overrides.department?.trim() || employee.department,
+        location: overrides.location ?? profile?.location ?? '',
+        reportingManager: overrides.reportingManager ?? '',
+        joiningDate: overrides.joiningDate
+            ? formatRenderDate(overrides.joiningDate)
+            : resolveDateOfJoining(profile?.date_of_joining_override, employee.dateOfJoining),
+        employmentType: overrides.employmentType ?? '',
+
+        probationMonths: overrides.probationMonths ?? 0,
+        noticePeriodDays: overrides.noticePeriodDays ?? 0,
+        workingHours: overrides.workingHours ?? '',
+        workingDays: overrides.workingDays ?? '',
+
+        ctcBreakdown,
+        additionalTerms: overrides.additionalTerms,
+
+        signatoryName: company.signatoryName,
+        signatoryTitle: company.signatoryTitle,
+    };
+};
+
+/**
+ * Builds a joining letter purely from manual input — no linked User. Used when
+ * an appointment/joining letter is issued for a person not yet added to the
+ * platform: name, role, joining date and compensation all come from the
+ * `overrides` (the compensation table is empty unless CTC rows are supplied).
+ */
+export const buildManualJoiningRenderData = async (
+    overrides: JoiningRenderDataOverrides = {}
+): Promise<OfferLetterRenderData> => {
+    const company = await getCompanyBlock();
+
+    return {
+        ...joiningCompanyBase(company),
+
+        issueDate: formatRenderDate(overrides.issueDate),
+        reference: overrides.reference,
+
+        candidateName: overrides.candidateName?.trim() ?? '',
+        candidateAddress: [],
+        candidateEmail: overrides.candidateEmail?.trim() ?? '',
+
+        designation: overrides.designation?.trim() ?? '',
+        department: overrides.department?.trim() ?? '',
+        location: overrides.location ?? '',
+        reportingManager: overrides.reportingManager ?? '',
+        joiningDate: formatRenderDate(overrides.joiningDate),
+        employmentType: overrides.employmentType ?? '',
+
+        probationMonths: overrides.probationMonths ?? 0,
+        noticePeriodDays: overrides.noticePeriodDays ?? 0,
+        workingHours: overrides.workingHours ?? '',
+        workingDays: overrides.workingDays ?? '',
+
+        ctcBreakdown: overrides.ctcBreakdown ?? [],
+        additionalTerms: overrides.additionalTerms,
+
+        signatoryName: company.signatoryName,
+        signatoryTitle: company.signatoryTitle,
     };
 };

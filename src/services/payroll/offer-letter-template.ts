@@ -9,6 +9,14 @@ export interface OfferCtcRow {
 }
 
 export interface OfferLetterRenderData {
+  /**
+   * Which document this render data drives. `offer` (default) is a pre-hire
+   * offer to a candidate; `joining` is a post-hire appointment/joining letter
+   * for an existing employee. Both share this rich layout (compensation table
+   * + facts + terms + signatures); only the wording differs.
+   */
+  variant?: "offer" | "joining";
+
   // Company
   companyName: string;
   companyAddress: string[];
@@ -47,6 +55,10 @@ export interface OfferLetterRenderData {
   // Body
   bodyParagraphs?: string[];
   termsParagraphs?: string[];
+  /** Extra per-letter clauses APPENDED to the Terms & Conditions list (plain
+   * text, one clause each — escaped on render). Unlike `termsParagraphs`
+   * (which replaces the whole list), these add to the standard terms. */
+  additionalTerms?: string[];
   closing?: string;
   signatoryName?: string;
   signatoryTitle?: string;
@@ -162,16 +174,91 @@ function defaultTerms(d: OfferLetterRenderData): string[] {
   ];
 }
 
+/**
+ * Body copy for a `joining` (appointment) letter — an existing employee who
+ * has joined, rather than a candidate being offered a role. Confirms the
+ * appointment and welcomes the employee.
+ */
+function defaultBodyJoining(d: OfferLetterRenderData): string[] {
+  const name = escape(d.candidateName || "the employee");
+  const company = escape(d.companyName || "the Company");
+  const role = d.designation
+    ? `<strong>${escape(d.designation)}</strong>`
+    : "your role";
+  const deptSeg = d.department
+    ? ` in the ${escape(d.department)} department`
+    : "";
+  const locSeg = d.location
+    ? `, based at our ${escape(d.location)} office`
+    : "";
+  const doj = d.joiningDate
+    ? `<strong>${escape(d.joiningDate)}</strong>`
+    : "your date of joining";
+  const empType = d.employmentType
+    ? `as a <strong>${escape(d.employmentType)}</strong> employee`
+    : "as a full-time employee";
+  const reportSeg = d.reportingManager
+    ? ` You will report to <strong>${escape(d.reportingManager)}</strong>.`
+    : "";
+
+  return [
+    `Dear ${name},`,
+    `We are pleased to confirm your appointment with <strong>${company}</strong> in the position of ${role}${deptSeg}${locSeg}. On behalf of the entire team, we warmly welcome you on board.`,
+    `Your appointment is effective from ${doj}, ${empType}.${reportSeg} This letter, together with the Company's policies, records the principal terms and conditions of your employment.`,
+    `The compensation applicable to your role is set out in the table below. The total annual cost to company (CTC) reflects all fixed and applicable components of your remuneration.`,
+  ];
+}
+
+function defaultTermsJoining(d: OfferLetterRenderData): string[] {
+  const probation = d.probationMonths > 0
+    ? `Your employment is subject to a probation period of <strong>${d.probationMonths} month${d.probationMonths === 1 ? "" : "s"}</strong> from your date of joining, on successful completion of which your services will be confirmed in writing.`
+    : `Your employment stands confirmed with effect from your date of joining.`;
+  const notice = d.noticePeriodDays > 0
+    ? `Either party may terminate this employment by serving a written notice of <strong>${d.noticePeriodDays} day${d.noticePeriodDays === 1 ? "" : "s"}</strong>, or payment in lieu thereof.`
+    : `Either party may terminate this employment by serving written notice in accordance with the Company's policy.`;
+  const hours = d.workingHours || d.workingDays
+    ? `Your standard working schedule will be <strong>${escape(d.workingHours || "regular business hours")}</strong>${d.workingDays ? ` on <strong>${escape(d.workingDays)}</strong>` : ""}. You may be required to work additional hours as your role demands.`
+    : `Your working schedule will follow the standard working hours and days of the Company.`;
+
+  return [
+    probation,
+    notice,
+    hours,
+    `You will comply with the Company's policies on confidentiality, data protection, and code of conduct. All intellectual property created in the course of your employment shall vest solely with the Company.`,
+    `This appointment is subject to satisfactory verification of the documents and information furnished by you, including proof of prior employment, education, and identity.`,
+    `We look forward to a long and mutually rewarding association, and wish you a successful and fulfilling career with us.`,
+  ];
+}
+
 export function renderOfferLetterHtml(d: OfferLetterRenderData): string {
-  const headline = "Offer Letter";
+  const isJoining = d.variant === "joining";
+  const headline = isJoining ? "Appointment Letter" : "Offer Letter";
   const refCode =
     d.reference ||
-    `OFF/OFFER/${(d.issueDate || issuedToday()).replace(/\s+/g, "-")}`;
+    `${isJoining ? "HR/APPT" : "OFF/OFFER"}/${(d.issueDate || issuedToday()).replace(/\s+/g, "-")}`;
   const issueDate = d.issueDate || issuedToday();
   const paragraphs =
-    d.bodyParagraphs && d.bodyParagraphs.length > 0 ? d.bodyParagraphs : defaultBody(d);
-  const terms =
-    d.termsParagraphs && d.termsParagraphs.length > 0 ? d.termsParagraphs : defaultTerms(d);
+    d.bodyParagraphs && d.bodyParagraphs.length > 0
+      ? d.bodyParagraphs
+      : isJoining
+        ? defaultBodyJoining(d)
+        : defaultBody(d);
+  const baseTerms =
+    d.termsParagraphs && d.termsParagraphs.length > 0
+      ? d.termsParagraphs
+      : isJoining
+        ? defaultTermsJoining(d)
+        : defaultTerms(d);
+  // Per-employee extra clauses are appended (escaped — plain text, no HTML).
+  const terms = [
+    ...baseTerms,
+    ...(d.additionalTerms ?? []).map((t) => escape(t)).filter((t) => t.trim() !== ''),
+  ];
+  const factsTitle = isJoining ? "Appointment at a glance" : "Engagement at a glance";
+  const acceptHeading = isJoining ? "Received &amp; accepted," : "Accepted and agreed,";
+  const legalText = isJoining
+    ? "This is a system-generated appointment letter and is valid without a wet signature. Please sign and return a copy in acknowledgement for our records."
+    : "This is a system-generated offer letter and is valid without a wet signature. Acceptance must be signed and returned by the offer validity date.";
   const closing = d.closing || "Yours sincerely,";
   const signatoryName = d.signatoryName || "Santhosh Reddy Panyala";
   const signatoryTitle = d.signatoryTitle || "Human Resources";
@@ -458,7 +545,7 @@ export function renderOfferLetterHtml(d: OfferLetterRenderData): string {
         </div>
 
         <div class="facts">
-          <div class="facts-title">Engagement at a glance</div>
+          <div class="facts-title">${escape(factsTitle)}</div>
           <div class="facts-grid">
             ${factsHtml}
           </div>
@@ -483,7 +570,7 @@ export function renderOfferLetterHtml(d: OfferLetterRenderData): string {
             <div class="sign-title">${field(signatoryTitle)} · ${field(d.companyName)}</div>
           </div>
           <div class="sign-col">
-            <p class="closing">Accepted and agreed,</p>
+            <p class="closing">${acceptHeading}</p>
             <div class="sign-spacer"></div>
             <div class="sign-line"></div>
             <div class="sign-name">${field(d.candidateName)}</div>
@@ -493,8 +580,7 @@ export function renderOfferLetterHtml(d: OfferLetterRenderData): string {
       </div>
 
       <div class="legal">
-        This is a system-generated offer letter and is valid without a wet signature.
-        Acceptance must be signed and returned by the offer validity date.
+        ${escape(legalText)}
       </div>
     </div>
   </div>

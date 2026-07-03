@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('./payroll/render-adapter.service.js', () => ({
     buildLetterRenderData: vi.fn(),
+    buildJoiningRenderData: vi.fn(),
     getCompanyBlock: vi.fn(),
+    formatRenderDate: vi.fn((v?: string) => v ?? ''),
 }));
 vi.mock('./payroll/letter-template.js', () => ({
     renderLetterHtml: vi.fn(() => '<html>letter</html>'),

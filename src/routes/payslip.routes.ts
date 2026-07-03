@@ -60,4 +60,13 @@ router.get(
     asyncHandler(ctrl.getDownload)
 );
 
+// Delete an issued payslip — admin-only (`payslip.delete` is granted only via
+// the `system.admin` wildcard).
+router.delete(
+    '/:id',
+    requirePermission(PERMISSIONS.PAYSLIP_DELETE),
+    validate({ params: payslipIdPathSchema }),
+    asyncHandler(ctrl.del)
+);
+
 export default router;

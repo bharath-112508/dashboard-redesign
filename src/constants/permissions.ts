@@ -140,6 +140,10 @@ export const PERMISSIONS = {
     PAYROLL_WRITE: 'payroll.write',
     PAYSLIP_GENERATE: 'payslip.generate',
     LETTER_GENERATE: 'letter.generate',
+    // Deleting an issued document — admin-only by default (not bundled into any
+    // role; only the `system.admin` wildcard grants it).
+    PAYSLIP_DELETE: 'payslip.delete',
+    LETTER_DELETE: 'letter.delete',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

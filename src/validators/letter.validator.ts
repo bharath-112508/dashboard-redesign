@@ -40,9 +40,11 @@ const offerCtcRowSchema = z
 
 export const generateLetterBodySchema = z
     .object({
-        // Base — every letter type.
+        // Base — every letter type. `user_id` is required for all types
+        // EXCEPT `joining`, which may be issued for a person not yet added as
+        // a User (name captured manually) — enforced in the superRefine below.
         type: z.enum(LETTER_TYPES),
-        user_id: objectIdSchema,
+        user_id: objectIdSchema.optional(),
         issue_date: z.string().min(1).optional(),
         reference: z.string().min(1).max(120).optional(),
 
@@ -82,9 +84,31 @@ export const generateLetterBodySchema = z
         working_days: z.string().min(1).max(120).optional(),
         ctc_breakdown: z.array(offerCtcRowSchema).optional(),
         terms_paragraphs: z.array(z.string().min(1)).optional(),
+        // offer / joining — extra per-employee clauses appended to Terms & Conditions.
+        additional_terms: z.array(z.string().min(1).max(500)).max(20).optional(),
     })
     .strict()
     .superRefine((val, ctx) => {
+        // `user_id` is required for every type except `joining`. A joining
+        // (appointment) letter can be issued either for an existing employee
+        // (user_id → auto-sourced record/salary) OR manually for a not-yet-
+        // added person (candidate_name), but it needs at least one of the two.
+        if (val.type !== 'joining') {
+            if (!val.user_id) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['user_id'],
+                    message: 'user_id is required',
+                });
+            }
+        } else if (!val.user_id && (!val.candidate_name || val.candidate_name.trim() === '')) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['candidate_name'],
+                message: 'Select an employee or enter a name for the joining letter',
+            });
+        }
+
         // Every type-specific field above is optional at the flat-schema
         // level (see the module doc comment). Without this refine, e.g.
         // `{ type: 'offer', user_id }` passes validation and silently

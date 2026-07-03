@@ -61,4 +61,13 @@ router.get(
     asyncHandler(ctrl.getDownload)
 );
 
+// Delete an issued letter — admin-only (`letter.delete` is granted only via
+// the `system.admin` wildcard).
+router.delete(
+    '/:id',
+    requirePermission(PERMISSIONS.LETTER_DELETE),
+    validate({ params: letterIdPathSchema }),
+    asyncHandler(ctrl.del)
+);
+
 export default router;

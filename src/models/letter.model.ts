@@ -6,14 +6,13 @@ import { COLLECTIONS } from '../constants/collections.js';
 /**
  * `letters` — one immutable row per generated letter PDF (Task 8).
  *
- * Covers all 6 letter types: offer, relieving, experience, internship, hike,
- * promotion. Like `payslips` (Task 7), a letter is never edited in place —
- * re-running generation creates a NEW row with a fresh `blob_key` /
- * `content_hash`. `render_snapshot` freezes the exact render-data payload
- * used to produce the PDF (the `LetterRenderData` shape for the 5 employee
- * letter types, or the ad-hoc offer-letter data for `type: 'offer'` — see
- * `letter.service.ts` for why offer letters don't go through
- * `buildLetterRenderData`).
+ * Covers all 7 letter types: offer, joining, relieving, experience,
+ * internship, hike, promotion. Like `payslips` (Task 7), a letter is never
+ * edited in place — re-running generation creates a NEW row with a fresh
+ * `blob_key` / `content_hash`. `render_snapshot` freezes the exact render-data
+ * payload used to produce the PDF (the `LetterRenderData` shape for the 5
+ * employee letter types, or the `OfferLetterRenderData` shape for `offer` and
+ * `joining` — see `letter.service.ts` for how each type is built).
  *
  * The PDF bytes live in the same **private** Azure Blob container as
  * payslips (`AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER`); `blob_key` is the
@@ -21,13 +20,16 @@ import { COLLECTIONS } from '../constants/collections.js';
  * check. Downloads are always short-lived SAS URLs.
  */
 
-export const LETTER_TYPES = ['offer', 'relieving', 'experience', 'internship', 'hike', 'promotion'] as const;
+export const LETTER_TYPES = ['offer', 'joining', 'relieving', 'experience', 'internship', 'hike', 'promotion'] as const;
 export type LetterType = (typeof LETTER_TYPES)[number];
 
 export interface LetterDocument extends Document {
     _id: Types.ObjectId;
 
-    user_id: Types.ObjectId;
+    /** The platform employee the letter is about. Optional: a `joining`
+     * (appointment) letter can be issued for a person not yet added as a
+     * User — its details are then captured manually in `render_snapshot`. */
+    user_id?: Types.ObjectId;
     type: LetterType;
     reference?: string;
     render_snapshot: unknown;
@@ -41,7 +43,7 @@ export interface LetterDocument extends Document {
 
 const letterSchema = new Schema<LetterDocument>(
     {
-        user_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
+        user_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: false },
         type: { type: String, enum: LETTER_TYPES, required: true },
         reference: { type: String, trim: true },
         render_snapshot: { type: Schema.Types.Mixed, required: true },

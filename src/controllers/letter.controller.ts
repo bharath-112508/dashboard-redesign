@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as service from '../services/letter.service.js';
-import { created, ok, paginated } from '../utils/api-response.js';
+import { created, ok, noContent, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import type { GenerateLetterBody, ListLettersQuery } from '../validators/letter.validator.js';
@@ -50,4 +50,11 @@ export const getList = async (req: Request, res: Response): Promise<Response> =>
 export const getDownload = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.downloadLetter(idOf(req, 'id'));
     return ok(res, data);
+};
+
+// ─── DELETE /letters/:id ─────────────────────────────────────────────────
+
+export const del = async (req: Request, res: Response): Promise<Response> => {
+    await service.deleteLetter(idOf(req, 'id'), callerOf(req));
+    return noContent(res);
 };
