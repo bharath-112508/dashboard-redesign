@@ -38,6 +38,7 @@ import { generatePdf } from './report-exporters/pdf.js';
 import { recordAudit, recordSystemAudit, type AuditContext } from './audit.service.js';
 import { sendEmail, type EmailAttachment } from '../utils/mailer.js';
 import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
+import { REPORT_SUBSCRIPTION_OVERRIDE_EMAIL } from '../config/server.config.js';
 import logger from '../utils/logger.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
@@ -483,8 +484,24 @@ export const runWeeklyReportSweep = async (now: Date = new Date()): Promise<Swee
                 }
             }
 
+            // Recipient is normally the owner. A configured
+            // REPORT_SUBSCRIPTION_OVERRIDE_EMAIL redirects delivery to a
+            // single address (demo/testing) without touching the report
+            // data or the audit target, both of which stay owner-scoped.
+            const recipient = REPORT_SUBSCRIPTION_OVERRIDE_EMAIL ?? owner.email;
+            if (REPORT_SUBSCRIPTION_OVERRIDE_EMAIL) {
+                logger.info(
+                    {
+                        subscription_id: sub._id.toString(),
+                        owner_email: owner.email,
+                        override_to: REPORT_SUBSCRIPTION_OVERRIDE_EMAIL,
+                    },
+                    'Report-subscription delivery redirected via REPORT_SUBSCRIPTION_OVERRIDE_EMAIL'
+                );
+            }
+
             await sendEmail({
-                to: owner.email,
+                to: recipient,
                 subject: email.subject,
                 html: email.html,
                 text: email.text,

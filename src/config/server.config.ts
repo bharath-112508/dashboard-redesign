@@ -313,6 +313,14 @@ export const MAILJET_API_SECRET = process.env.MAILJET_API_SECRET ?? null;
 export const MAILJET_FROM_ADDRESS = process.env.MAILJET_FROM_ADDRESS ?? null;
 export const MAILJET_FROM_NAME = process.env.MAILJET_FROM_NAME ?? 'Viljetech';
 
+// Demo/testing override for report-subscription delivery. When set,
+// every scheduled report-subscription email is delivered to THIS
+// address instead of the subscription owner's email (the report data
+// and audit target still resolve to the owner — only the `to:` is
+// redirected). Leave empty in normal operation. Handy for demos where
+// the seeded subscription owners aren't real mailboxes.
+export const REPORT_SUBSCRIPTION_OVERRIDE_EMAIL = process.env.REPORT_SUBSCRIPTION_OVERRIDE_EMAIL?.trim() || null;
+
 // Boot-time sanity: when an explicit transport is selected, the
 // matching credentials must be present. A typo'd ACS_CONNECTION_STRING
 // would otherwise throw at the first send (which might be hours into
