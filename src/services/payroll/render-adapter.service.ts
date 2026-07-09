@@ -403,7 +403,10 @@ export const buildJoiningRenderData = async (
         // Overrides win over the employee-sourced value (hand-correction).
         candidateName: overrides.candidateName?.trim() || employee.employeeName,
         candidateAddress: [],
-        candidateEmail: overrides.candidateEmail?.trim() || employee.email,
+        // Joining/appointment letters address the employee by name only — the
+        // email line under the name is intentionally omitted (unlike offer
+        // letters to external candidates). Only shown if an override supplies one.
+        candidateEmail: overrides.candidateEmail?.trim() ?? '',
 
         designation: overrides.designation?.trim() || profile?.designation_override || employee.designation,
         department: overrides.department?.trim() || employee.department,
