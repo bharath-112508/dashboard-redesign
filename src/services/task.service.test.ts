@@ -771,3 +771,41 @@ describe('listTasks read-visibility scoping', () => {
         expect(filter.project_id).toBeUndefined();
     });
 });
+
+// Regression: the flat cross-project `/tasks` list sorted by `position` (a
+// per-(project,status) column index) + created_at ASC, so a newly created task
+// — appended at the END of its column, i.e. a high position — landed on the
+// LAST page and was invisible to a user viewing page 1. The flat list now sorts
+// newest-first; column-scoped lists (board/sprint/story/subtask) keep position.
+describe('listTasks sort order', () => {
+    const captureSort = (rows: unknown[], cap: { sort?: unknown }) => ({
+        sort: (arg: unknown) => {
+            cap.sort = arg;
+            return { skip: () => ({ limit: () => Promise.resolve(rows) }) };
+        },
+    });
+
+    it('flat cross-project list sorts newest-first (created_at desc)', async () => {
+        const cap: { sort?: unknown } = {};
+        taskFindMock.mockReturnValueOnce(captureSort([], cap) as never);
+        taskCountDocumentsMock.mockResolvedValueOnce(0 as never);
+
+        await svc.listTasks({ page: 1, limit: 20 } as never, managerCaller() as never);
+
+        expect(cap.sort).toEqual({ created_at: -1, _id: -1 });
+    });
+
+    it('project-scoped list keeps position (column) order', async () => {
+        loadProjectForCallerMock.mockResolvedValueOnce({ _id: new Types.ObjectId() } as never);
+        const cap: { sort?: unknown } = {};
+        taskFindMock.mockReturnValueOnce(captureSort([], cap) as never);
+        taskCountDocumentsMock.mockResolvedValueOnce(0 as never);
+
+        await svc.listTasks(
+            { page: 1, limit: 20, project_id: new Types.ObjectId().toString() } as never,
+            managerCaller() as never
+        );
+
+        expect(cap.sort).toEqual({ position: 1, created_at: 1 });
+    });
+});

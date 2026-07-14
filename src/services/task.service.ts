@@ -454,9 +454,24 @@ export const listTasks = async (
         filter.$or = [{ title: { $regex: safe, $options: 'i' } }, { description: { $regex: safe, $options: 'i' } }];
     }
 
+    // Sort order depends on how the list is scoped:
+    //  - A single-column context (a project board / sprint / story / subtask
+    //    list) wants `position` order — that's the manual, drag-reorder order
+    //    within a status column.
+    //  - The flat cross-project list (`/tasks`, "My Tasks") spans many
+    //    projects, where `position` is a per-(project,status) index and thus
+    //    meaningless as a global sort — and worse, a newly created task is
+    //    appended at the END of its column (a high position), so a position-asc
+    //    sort buries it on the last page where the user never sees it. Sort
+    //    that list newest-first so a just-created task shows up top.
+    const isColumnScoped = Boolean(
+        query.project_id || query.sprint_id || query.story_id !== undefined || query.parent_task_id !== undefined
+    );
+    const sort: Record<string, 1 | -1> = isColumnScoped ? { position: 1, created_at: 1 } : { created_at: -1, _id: -1 };
+
     const skip = (query.page - 1) * query.limit;
     const [rows, total] = await Promise.all([
-        Task.find(filter).sort({ position: 1, created_at: 1 }).skip(skip).limit(query.limit),
+        Task.find(filter).sort(sort).skip(skip).limit(query.limit),
         Task.countDocuments(filter),
     ]);
 
