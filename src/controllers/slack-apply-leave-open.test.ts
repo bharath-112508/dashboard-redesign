@@ -90,7 +90,11 @@ describe('apply-leave modal open', () => {
 
     it('button click refuses a client role with an ephemeral and never opens the modal', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
-        vi.mocked(resolveSlackUser).mockResolvedValue({ _id: new Types.ObjectId(), role: 'client', full_name: 'Cli' } as never);
+        vi.mocked(resolveSlackUser).mockResolvedValue({
+            _id: new Types.ObjectId(),
+            role: 'client',
+            full_name: 'Cli',
+        } as never);
 
         const req = {
             body: {

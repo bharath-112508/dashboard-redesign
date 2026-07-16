@@ -3,8 +3,7 @@ import { Types } from 'mongoose';
 
 import * as service from '../services/task-template.service.js';
 import { created, ok, paginated } from '../utils/api-response.js';
-import { AppError } from '../utils/app-error.js';
-import { buildAuditContext } from '../utils/audit-context.js';
+import { projectCallerFrom } from '../utils/caller.js';
 import type {
     CreateTaskTemplateBody,
     InstantiateTaskTemplateBody,
@@ -14,14 +13,7 @@ import type {
     TaskTemplateIdParam,
 } from '../validators/task-template.validator.js';
 
-const callerOf = (req: Request): service.TemplateCaller => {
-    if (!req.user?.user_id || !req.user?.role) throw AppError.unauthenticated();
-    return {
-        id: new Types.ObjectId(req.user.user_id),
-        role: req.user.role,
-        audit: buildAuditContext(req),
-    };
-};
+const callerOf = (req: Request): service.TemplateCaller => projectCallerFrom(req);
 
 const projectIdOf = (req: Request): Types.ObjectId =>
     new Types.ObjectId((req.params as unknown as ProjectIdParam).project_id);
