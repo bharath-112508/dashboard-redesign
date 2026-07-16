@@ -4,6 +4,7 @@ import authRoutes from './auth.routes.js';
 import userRoutes from './user.routes.js';
 import settingsRoutes from './settings.routes.js';
 import officeLocationRoutes from './office-location.routes.js';
+import companyRoutes from './company.routes.js';
 import attendanceRoutes from './attendance.routes.js';
 import holidayRoutes from './holiday.routes.js';
 import leaveTypeRoutes from './leave-type.routes.js';
@@ -66,6 +67,9 @@ appRoutes.use('/push', pushRoutes);
 // `/slack` is mounted directly on the Express app ahead of the body
 // parsers — see comment at the import block above.
 appRoutes.use('/dashboard', dashboardRoutes);
+// Companies (clients). No prefix overlap with /projects, so order
+// doesn't matter here.
+appRoutes.use('/companies', companyRoutes);
 appRoutes.use('/projects', projectRoutes);
 appRoutes.use('/sprints', sprintRoutes);
 appRoutes.use('/stories', storyRoutes);
