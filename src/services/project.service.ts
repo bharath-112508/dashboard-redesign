@@ -480,6 +480,21 @@ export const updateProject = async (
     if (patch.status !== undefined) doc.status = patch.status as ProjectStatus;
     if (patch.is_archived !== undefined) doc.is_archived = patch.is_archived;
 
+    // Re-assigning the company invalidates the whole client-side roster:
+    // every representative_id must belong to THIS project's company, so the
+    // people from the old company no longer qualify. Reset the roster and
+    // re-seed it with the NEW company's clients rather than leaving rows
+    // that violate the invariant — silently keeping them would hand company
+    // A's people access to company B's project.
+    if (patch.company_id !== undefined) {
+        const nextCompanyId = patch.company_id ? new Types.ObjectId(patch.company_id) : null;
+        const changed = String(doc.company_id ?? '') !== String(nextCompanyId ?? '');
+        if (changed) {
+            doc.company_id = nextCompanyId;
+            doc.representative_ids = await companyClientIds(nextCompanyId);
+        }
+    }
+
     // Cross-field guard duplicates the validator's `.refine` for the case
     // where only one of the dates is present in the patch — the validator
     // can't know the persisted "other" date.

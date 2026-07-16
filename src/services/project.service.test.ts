@@ -595,6 +595,54 @@ describe('updateProjectMembers', () => {
     });
 });
 
+// ─── updateProject — company re-assignment ───────────────────────────────
+
+describe('updateProject — company_id', () => {
+    it('resets the roster when the company changes', async () => {
+        // The people on the roster belong to the OLD company. Keeping them
+        // would hand company A's people access to company B's project —
+        // exactly what the roster invariant exists to prevent.
+        const oldCompany = new Types.ObjectId();
+        const newCompany = new Types.ObjectId();
+        const oldRep = new Types.ObjectId();
+        const newClient = new Types.ObjectId();
+        const proj = makeProject({ company_id: oldCompany, representative_ids: [oldRep] });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        // companyClientIds() -> the new company's client-role people
+        userFindMock.mockReturnValueOnce(mkUserChain([{ _id: newClient, role: ROLES.CLIENT }]));
+
+        await svc.updateProject(proj._id, { company_id: newCompany.toString() }, adminCaller());
+
+        expect(proj.company_id).toEqual(newCompany);
+        expect(proj.representative_ids).toEqual([newClient]);
+        expect(proj.representative_ids).not.toContain(oldRep);
+    });
+
+    it('leaves the roster alone when the company is unchanged', async () => {
+        const companyId = new Types.ObjectId();
+        const rep = new Types.ObjectId();
+        const proj = makeProject({ company_id: companyId, representative_ids: [rep] });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { company_id: companyId.toString() }, adminCaller());
+
+        expect(proj.representative_ids).toEqual([rep]);
+    });
+
+    it('clearing the company empties the roster', async () => {
+        const proj = makeProject({
+            company_id: new Types.ObjectId(),
+            representative_ids: [new Types.ObjectId()],
+        });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { company_id: null }, adminCaller());
+
+        expect(proj.company_id).toBeNull();
+        expect(proj.representative_ids).toEqual([]);
+    });
+});
+
 // ─── updateProjectRepresentatives (mirror of members + roster invariant) ──
 
 describe('updateProjectRepresentatives', () => {

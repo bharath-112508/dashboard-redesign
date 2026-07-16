@@ -148,6 +148,15 @@ export const patchProjectBodySchema = z
         end_date: isoDateSchema.nullable(),
         status: z.enum(PROJECT_STATUS_VALUES as unknown as [string, ...string[]]),
         is_archived: z.boolean(),
+        /**
+         * Re-assign (or clear, with null) the client company.
+         *
+         * Unlike `representative_ids`, this IS patchable: it's a single
+         * scalar, so a partial update can't silently truncate a list. The
+         * service resets the roster when it changes — the existing people
+         * belong to the OLD company and would violate the roster invariant.
+         */
+        company_id: objectIdSchema.nullable(),
     })
     .partial()
     .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be supplied' })
