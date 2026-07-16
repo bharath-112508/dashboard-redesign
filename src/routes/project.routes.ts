@@ -119,14 +119,14 @@ router.post(
     // Team Lead does NOT (per role-bundle catalog). Pre-G1 the gate
     // was `PROJECT_WRITE`, which Team Lead also held — so Team Lead
     // could mutate the client roster despite the bundle's intent.
-    requirePermission(PERMISSIONS.PROJECT_CLIENTS_WRITE),
+    requirePermission(PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE),
     validate({ params: projectIdParamSchema, body: projectClientsBulkBodySchema }),
     asyncHandler(ctrl.postClients)
 );
 
 router.delete(
     '/:id/clients/:user_id',
-    requirePermission(PERMISSIONS.PROJECT_CLIENTS_WRITE),
+    requirePermission(PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE),
     validate({ params: projectClientIdParamSchema }),
     asyncHandler(ctrl.deleteClient)
 );

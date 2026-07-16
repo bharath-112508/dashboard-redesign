@@ -54,12 +54,31 @@ export const PERMISSIONS = {
     ROLE_WRITE: 'role.write',
     ROLE_DELETE: 'role.delete',
 
+    // ─── Companies (clients) ───────────────────────────────────────────
+    COMPANY_READ: 'company.read',
+    COMPANY_WRITE: 'company.write',
+    /**
+     * Create representatives for a company. Held by admin and `client`.
+     *
+     * Deliberately NOT `user.write`: creating a representative creates a
+     * User, and `user.write` is the admin-wide bit — granting it to a
+     * Client would let them create admins. The scoped route hard-codes
+     * role + company_id instead of reading either from the body.
+     */
+    REPRESENTATIVE_WRITE: 'representative.write',
+
     // ─── Projects + structure ──────────────────────────────────────────
     PROJECT_READ: 'project.read',
     PROJECT_WRITE: 'project.write',
     PROJECT_ARCHIVE: 'project.archive',
     PROJECT_MEMBERS_WRITE: 'project.members_write',
-    PROJECT_CLIENTS_WRITE: 'project.clients_write',
+    /**
+     * Assign representatives to a project. Replaces the retired
+     * `project.clients_write`. Held by admin, manager, and `client` —
+     * a Client may only touch their OWN company's projects, which is a
+     * service-layer scope check, not an RBAC one.
+     */
+    PROJECT_REPRESENTATIVES_WRITE: 'project.representatives_write',
     SPRINT_WRITE: 'sprint.write',
     STORY_WRITE: 'story.write',
 

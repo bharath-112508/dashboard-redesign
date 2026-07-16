@@ -25,6 +25,7 @@ export const SYSTEM_ROLE_KEYS = {
     TEAM_LEAD: 'team_lead',
     EMPLOYEE: 'employee',
     CLIENT: 'client',
+    REPRESENTATIVE: 'representative',
 } as const;
 
 export type SystemRoleKey = (typeof SYSTEM_ROLE_KEYS)[keyof typeof SYSTEM_ROLE_KEYS];

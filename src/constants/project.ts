@@ -58,10 +58,7 @@ export const DEFAULT_TASK_STATUS_KEYS = ['to_do', 'in_progress', 'review', 'done
 // seeds `default_status_orders[]` with these values; admins can re-arrange
 // per project via `PATCH /projects/:id/default-status-orders`. Values are
 // spaced by 100 so customs can be interleaved without renumbering.
-export const DEFAULT_STATUS_ORDER_VALUES: Record<
-    (typeof DEFAULT_TASK_STATUS_KEYS)[number],
-    number
-> = {
+export const DEFAULT_STATUS_ORDER_VALUES: Record<(typeof DEFAULT_TASK_STATUS_KEYS)[number], number> = {
     to_do: 100,
     in_progress: 200,
     review: 300,
@@ -131,5 +128,30 @@ export const SPRINT_LIST_MAX_LIMIT = 200;
  */
 export const PROJECT_MEMBER_SCOPED_ROLES: readonly string[] = [ROLES.TEAM_LEAD, ROLES.EMPLOYEE];
 
-/** Roles whose project access is restricted to `client_ids` containment. */
+/**
+ * Roles scoped to their COMPANY's projects (`company_id` match) — i.e. the
+ * `client` role, which represents the client company itself.
+ *
+ * A Client sees every project of their company, not just the ones they're
+ * rostered on. That's required, not generous: a Client's job is to assign
+ * representatives to their company's projects, and they can't staff a project
+ * they can't see. Roster-scoping them would deadlock a brand-new project.
+ */
+export const PROJECT_COMPANY_SCOPED_ROLES: readonly string[] = [ROLES.CLIENT];
+
+/**
+ * Roles restricted to `representative_ids` containment — the `representative`
+ * role, a client company's project-scoped person.
+ */
+export const PROJECT_REPRESENTATIVE_SCOPED_ROLES: readonly string[] = [ROLES.REPRESENTATIVE];
+
+/**
+ * @deprecated Superseded by PROJECT_COMPANY_SCOPED_ROLES +
+ * PROJECT_REPRESENTATIVE_SCOPED_ROLES. Kept only so the Company/Representative
+ * work can land in reviewable steps; removed when project.service switches to
+ * company_id scoping.
+ */
 export const PROJECT_CLIENT_SCOPED_ROLES: readonly string[] = [ROLES.CLIENT];
+
+/** Every client-side role — used where the two are treated alike (e.g. a project's client-side roster). */
+export const PROJECT_CLIENT_SIDE_ROLES: readonly string[] = [ROLES.CLIENT, ROLES.REPRESENTATIVE];

@@ -105,7 +105,8 @@ const TEAM_LEAD_ADDITIONS: readonly Permission[] = [
 
 /** Manager adds on top of team-lead: reports + billing + clients + audit-log read. */
 const MANAGER_ADDITIONS: readonly Permission[] = [
-    PERMISSIONS.PROJECT_CLIENTS_WRITE,
+    PERMISSIONS.COMPANY_READ,
+    PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE,
     PERMISSIONS.BILLING_RATE_READ,
     PERMISSIONS.REPORT_READ,
     PERMISSIONS.REPORT_EXPORT_WRITE,
@@ -120,6 +121,33 @@ const MANAGER_ADDITIONS: readonly Permission[] = [
     PERMISSIONS.PAYROLL_WRITE,
     PERMISSIONS.PAYSLIP_GENERATE,
     PERMISSIONS.LETTER_GENERATE,
+];
+
+/**
+ * Shared by both client-side roles (`client` and `representative`).
+ *
+ * The two roles hold almost identical PERMISSIONS and differ almost entirely
+ * in **visibility scope**, which is service-layer, not RBAC:
+ *   - `client`         → every project of their company (`company_id` match)
+ *   - `representative` → only projects they're rostered on
+ *
+ * That split mirrors the existing `PROJECT_*_SCOPED_ROLES` pattern rather than
+ * inventing a new one. `client` adds exactly two company-level permissions on
+ * top of this base; everything else is the same.
+ */
+const CLIENT_SIDE_BASE: readonly Permission[] = [
+    PERMISSIONS.PROJECT_READ,
+    PERMISSIONS.TASK_READ,
+    PERMISSIONS.TASK_COMMENT_WRITE,
+    // Client-side users can attach files on tasks within their visible
+    // projects. Per-project visibility is enforced at the service layer.
+    PERMISSIONS.TASK_ATTACHMENT_WRITE,
+    // Org-wide holiday calendar + leave-type catalog (read-only) — same as
+    // the pre-Step-47 client behaviour.
+    PERMISSIONS.HOLIDAY_READ,
+    PERMISSIONS.LEAVE_TYPE_READ,
+    PERMISSIONS.SETTINGS_READ,
+    PERMISSIONS.DASHBOARD_CLIENT,
 ];
 
 const dedupe = (list: readonly Permission[]): Permission[] => Array.from(new Set(list));
@@ -158,27 +186,31 @@ export const SYSTEM_ROLE_DEFINITIONS: readonly SystemRoleDefinition[] = [
         permissions: dedupe([...EMPLOYEE_BASE]),
     },
     {
-        key: SYSTEM_ROLE_KEYS.CLIENT,
-        display_name: 'Client',
+        key: SYSTEM_ROLE_KEYS.REPRESENTATIVE,
+        display_name: 'Representative',
         description:
-            'Read-only view of projects they are a client on, plus task comments + attachments. ' +
-            'Per-row visibility is enforced at the service layer (PROJECT_CLIENT_SCOPED_ROLES) — ' +
-            'a client only ever sees projects where they appear in `client_ids`.',
-        permissions: [
-            PERMISSIONS.PROJECT_READ,
-            PERMISSIONS.TASK_READ,
-            PERMISSIONS.TASK_COMMENT_WRITE,
-            // Clients today can attach files on tasks within their
-            // visible projects (the legacy ATTACHMENT_WRITE_ROLES is
-            // [admin, manager, employee, client]). Per-project visibility
-            // is enforced at the service layer.
-            PERMISSIONS.TASK_ATTACHMENT_WRITE,
-            // Clients see the org-wide holiday calendar + leave types
-            // catalog (read-only) — same as the pre-Step-47 behaviour.
-            PERMISSIONS.HOLIDAY_READ,
-            PERMISSIONS.LEAVE_TYPE_READ,
-            PERMISSIONS.SETTINGS_READ,
-            PERMISSIONS.DASHBOARD_CLIENT,
-        ],
+            "A client company's project-scoped person. Sees ONLY projects they are " +
+            'assigned to (`representative_ids ∋ them`), monitors development, and ' +
+            'comments. Per-row visibility is enforced at the service layer ' +
+            '(PROJECT_REPRESENTATIVE_SCOPED_ROLES).',
+        permissions: dedupe([...CLIENT_SIDE_BASE]),
+    },
+    {
+        key: SYSTEM_ROLE_KEYS.CLIENT,
+        display_name: 'Client (Company)',
+        description:
+            'The client company itself, at the person level. Sees EVERY project of ' +
+            'their company (`company_id` match) — not just ones they are rostered on, ' +
+            'because they must be able to see a new project in order to staff it. ' +
+            'Can create representatives for their own company and assign them to their ' +
+            "own company's projects. Several people may hold this role for one company.",
+        permissions: dedupe([
+            ...CLIENT_SIDE_BASE,
+            // The two company-level powers a Representative does NOT get.
+            // Both are scoped to the caller's OWN company at the service
+            // layer — RBAC says "may do this", not "may do this anywhere".
+            PERMISSIONS.REPRESENTATIVE_WRITE,
+            PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE,
+        ]),
     },
 ];

@@ -100,6 +100,7 @@ const computeHeadcount = async (): Promise<AdminHeadcount> => {
         [ROLES.TEAM_LEAD]: 0,
         [ROLES.EMPLOYEE]: 0,
         [ROLES.CLIENT]: 0,
+        [ROLES.REPRESENTATIVE]: 0,
     };
     let active = 0;
     let deactivated = 0;
@@ -204,6 +205,7 @@ const EMPTY_HEADCOUNT: AdminHeadcount = {
         [ROLES.TEAM_LEAD]: 0,
         [ROLES.EMPLOYEE]: 0,
         [ROLES.CLIENT]: 0,
+        [ROLES.REPRESENTATIVE]: 0,
     },
 };
 

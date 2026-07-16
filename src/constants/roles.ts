@@ -13,7 +13,10 @@ export const ROLES = {
     MANAGER: 'manager',
     TEAM_LEAD: 'team_lead',
     EMPLOYEE: 'employee',
+    /** The client organisation's company-level person. See `companies`. */
     CLIENT: 'client',
+    /** A client organisation's project-scoped person. Sees only assigned projects. */
+    REPRESENTATIVE: 'representative',
 } as const;
 
 export type RoleType = (typeof ROLES)[keyof typeof ROLES];
