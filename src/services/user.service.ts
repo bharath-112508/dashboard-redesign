@@ -663,18 +663,25 @@ export const listAssignable = async (
     query: AssignableQuery,
     caller: { id: Types.ObjectId; role: RoleType; company_id?: Types.ObjectId }
 ): Promise<Array<{ id: string; full_name: string; role: RoleType; job_title: string | null }>> => {
+    // `.lean()` does NOT apply Mongoose schema defaults, so a document
+    // predating the company migration can come back with `representative_ids`
+    // absent entirely. Typed optional and defaulted below — `.some()` on
+    // undefined is a 500, not merely a wrong answer.
     const project = await Project.findById(query.project_id).select('member_ids company_id representative_ids').lean<{
-        member_ids: Types.ObjectId[];
-        company_id: Types.ObjectId | null;
-        representative_ids: Types.ObjectId[];
+        member_ids?: Types.ObjectId[];
+        company_id?: Types.ObjectId | null;
+        representative_ids?: Types.ObjectId[];
     } | null>();
     if (!project) {
         throw AppError.notFound('Project not found', ERROR_CODES.RESOURCE_NOT_FOUND);
     }
 
+    const memberIds = project.member_ids ?? [];
+    const representativeIds = project.representative_ids ?? [];
+
     // Access check — mirrors `project.service.assertCallerCanRead`.
     const isAdminLike = caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER;
-    const inMembers = project.member_ids.some((u) => u.equals(caller.id));
+    const inMembers = memberIds.some((u) => u.equals(caller.id));
     // A `client` is company-scoped, not roster-scoped: they can read a
     // project of their company without appearing on its roster.
     const isCompanyScoped =
@@ -682,14 +689,14 @@ export const listAssignable = async (
         Boolean(caller.company_id) &&
         Boolean(project.company_id) &&
         project.company_id!.equals(caller.company_id!);
-    const inRepresentatives = project.representative_ids.some((u) => u.equals(caller.id));
+    const inRepresentatives = representativeIds.some((u) => u.equals(caller.id));
     if (!isAdminLike && !inMembers && !isCompanyScoped && !inRepresentatives) {
         throw AppError.forbidden('You do not have access to this project', ERROR_CODES.FORBIDDEN);
     }
 
     const filter: Filter = {
         status: USER_STATUSES.ACTIVE,
-        _id: { $in: project.member_ids },
+        _id: { $in: memberIds },
     };
     if (query.role) {
         filter.role = query.role;

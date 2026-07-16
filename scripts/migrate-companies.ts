@@ -34,9 +34,9 @@
  *   client). Every dropped rep is named, because they LOSE ACCESS to that
  *   project.
  *
- * Not idempotent by design: it reads `client_ids`, which it then removes. A
- * second run finds nothing to do. Re-running after a partial failure is safe
- * (already-migrated rows have no `client_ids` left to match).
+ * Re-runnable: it matches on the legacy `client_ids` field, which it removes,
+ * and skips clients that already carry a `company_id`. A second run is a
+ * clean no-op, so re-running after a partial failure is safe.
  */
 import mongoose from 'mongoose';
 
@@ -52,7 +52,11 @@ interface ClientUser {
     email: string;
     role: string;
     created_at?: Date;
-    client_profile?: { company_name?: string; point_of_contact?: string };
+    client_profile?: {
+        company_name?: string;
+        point_of_contact?: string;
+        company_id?: mongoose.Types.ObjectId;
+    };
 }
 
 interface LegacyProject {
@@ -90,7 +94,15 @@ const run = async (): Promise<void> => {
 
     const groups = new Map<string, { display: string; members: ClientUser[] }>();
     const noName: ClientUser[] = [];
+    const alreadyDone: ClientUser[] = [];
     for (const c of clients) {
+        // Already migrated (a prior run set company_id and cleared the
+        // name). Skip rather than reporting them as un-migratable — this
+        // script isn't idempotent, but a re-run shouldn't cry wolf.
+        if (c.client_profile?.company_id) {
+            alreadyDone.push(c);
+            continue;
+        }
         const raw = c.client_profile?.company_name?.trim();
         if (!raw) {
             noName.push(c);
@@ -100,6 +112,10 @@ const run = async (): Promise<void> => {
         const g = groups.get(key);
         if (g) g.members.push(c);
         else groups.set(key, { display: raw, members: [c] });
+    }
+
+    if (alreadyDone.length > 0) {
+        log(`\n  i  ${alreadyDone.length} client(s) already have a company_id — skipping (already migrated).`);
     }
 
     if (noName.length > 0) {
@@ -129,8 +145,16 @@ const run = async (): Promise<void> => {
     }
 
     // ── 3. Resolve company per project ───────────────────────────────────
+    //
+    // EVERY project with a legacy `client_ids` field — including ones whose
+    // array is EMPTY. Skipping the empties looks harmless but isn't: they'd
+    // keep a stale `client_ids` and never gain `representative_ids`, and
+    // `.lean()` reads don't apply Mongoose defaults, so
+    // `project.representative_ids.some(...)` would throw on a missing field
+    // (a 500, not a silent wrong answer). An internal project with no client
+    // side still needs `company_id: null` + `representative_ids: []` written.
     const legacyProjects = (await projects
-        .find({ client_ids: { $exists: true, $ne: [] } })
+        .find({ client_ids: { $exists: true } })
         .toArray()) as unknown as LegacyProject[];
 
     // client _id → group key
