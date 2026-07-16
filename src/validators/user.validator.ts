@@ -95,8 +95,14 @@ const internalProfileCreateSchema = z.object({
     emergency_contact: emergencyContactSchema.optional(),
 });
 
+/**
+ * The company-side profile. `company_name` (free text) is replaced by
+ * `company_id` — a reference to `companies`. Admins creating a `client`
+ * must name an existing company; there's no implicit create-by-typing,
+ * which is exactly how near-duplicate companies used to appear.
+ */
 const clientProfileCreateSchema = z.object({
-    company_name: z.string().trim().min(1),
+    company_id: z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId'),
     point_of_contact: z.string().trim().optional(),
     access_type: z.enum(['login', 'readonly_link']),
 });

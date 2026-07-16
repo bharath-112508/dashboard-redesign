@@ -24,6 +24,7 @@ const {
     userUpdateOneMock,
     userFindOneMock,
     projectFindByIdMock,
+    companyExistsMock,
     refreshUpdateManyMock,
     initBalancesMock,
     notifyUserInvitedMock,
@@ -43,6 +44,7 @@ const {
     userUpdateOneMock: vi.fn(),
     userFindOneMock: vi.fn(),
     projectFindByIdMock: vi.fn(),
+    companyExistsMock: vi.fn(),
     refreshUpdateManyMock: vi.fn(),
     initBalancesMock: vi.fn(),
     notifyUserInvitedMock: vi.fn(),
@@ -66,6 +68,10 @@ vi.mock('../models/user.model.js', () => ({
         find: userFindMock,
         countDocuments: vi.fn(),
     },
+}));
+
+vi.mock('../models/company.model.js', () => ({
+    Company: { exists: companyExistsMock },
 }));
 
 vi.mock('../models/project.model.js', () => ({
@@ -282,7 +288,7 @@ describe('createUser — H1 atomicity (balance-init failure aborts user create)'
                 full_name: 'External Client',
                 role: ROLES.CLIENT,
                 status: 'active',
-                client_profile: { company: 'Acme' },
+                client_profile: { company_id: new Types.ObjectId() },
                 toJSON() {
                     return { id: 'x' };
                 },
@@ -293,12 +299,39 @@ describe('createUser — H1 atomicity (balance-init failure aborts user create)'
             ...employeeInput,
             email: 'client@example.com',
             role: ROLES.CLIENT,
-            client_profile: { company: 'Acme' },
+            client_profile: { company_id: new Types.ObjectId().toHexString() },
             internal_profile: undefined,
         };
+        // The service verifies the company exists + is active before
+        // attaching it — a client pointed at a dead company would see
+        // nothing.
+        companyExistsMock.mockResolvedValueOnce({ _id: new Types.ObjectId() });
 
         await expect(svc.createUser(clientInput as never, new Types.ObjectId())).resolves.toBeDefined();
         expect(initBalancesMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses a client whose company_id does not resolve to an active company', async () => {
+        // company_name used to be free text, which is exactly how two
+        // people at one company became unrelated records. Pointing at a
+        // real company is now checked, not typed.
+        userExistsMock.mockResolvedValueOnce(null);
+        companyExistsMock.mockResolvedValueOnce(null);
+
+        await expect(
+            svc.createUser(
+                {
+                    ...employeeInput,
+                    email: 'ghost@example.com',
+                    role: ROLES.CLIENT,
+                    client_profile: { company_id: new Types.ObjectId().toHexString() },
+                    internal_profile: undefined,
+                } as never,
+                new Types.ObjectId()
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_ERROR });
+
+        expect(userCreateMock).not.toHaveBeenCalled();
     });
 });
 

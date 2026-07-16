@@ -4,6 +4,7 @@ import { Types } from 'mongoose';
 // good enough for our needs (shape-only type-check on the caller side).
 type Filter = Record<string, unknown>;
 
+import { Company } from '../models/company.model.js';
 import { Project } from '../models/project.model.js';
 import { User, type UserDocument } from '../models/user.model.js';
 import { RefreshToken } from '../models/refresh-token.model.js';
@@ -165,7 +166,16 @@ export const createUser = async (
     if (input.slack_user_id) doc.slack_user_id = input.slack_user_id;
 
     if (input.role === ROLES.CLIENT && input.client_profile) {
-        doc.client_profile = input.client_profile;
+        const companyId = new Types.ObjectId(input.client_profile.company_id);
+        const companyExists = await Company.exists({ _id: companyId, status: 'active' });
+        if (!companyExists) {
+            throw AppError.unprocessable(
+                'client_profile.company_id must reference an active company',
+                ERROR_CODES.VALIDATION_ERROR,
+                { company_id: input.client_profile.company_id }
+            );
+        }
+        doc.client_profile = { ...input.client_profile, company_id: companyId };
     } else if (input.internal_profile) {
         doc.internal_profile = {
             ...input.internal_profile,
@@ -417,10 +427,19 @@ export const updateUser = async (input: {
             : (coerced as unknown as UserDocument['internal_profile']);
     }
 
-    if (patch.client_profile && target.client_profile) {
-        target.client_profile = { ...target.client_profile, ...patch.client_profile };
-    } else if (patch.client_profile) {
-        target.client_profile = patch.client_profile as UserDocument['client_profile'];
+    if (patch.client_profile) {
+        // `company_id` arrives as a wire string; the schema stores an
+        // ObjectId. Coerce here rather than letting Mongoose cast, so a
+        // merge with the existing sub-doc doesn't mix the two types.
+        const patched = {
+            ...patch.client_profile,
+            ...(patch.client_profile.company_id
+                ? { company_id: new Types.ObjectId(patch.client_profile.company_id) }
+                : {}),
+        };
+        target.client_profile = (target.client_profile
+            ? { ...target.client_profile, ...patched }
+            : patched) as unknown as UserDocument['client_profile'];
     }
 
     if (patch.full_name !== undefined) target.full_name = patch.full_name;

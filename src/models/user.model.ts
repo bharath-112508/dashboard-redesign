@@ -38,8 +38,20 @@ export interface InternalProfile {
 
 export type ClientAccessType = 'login' | 'readonly_link';
 
+/**
+ * The company-side profile, carried by BOTH client-side roles:
+ *   - `client`         — the company-level person
+ *   - `representative` — that company's project-scoped person
+ *
+ * `company_name` (free text) is gone: it's what made two people at the
+ * same company unrelated records. `company_id` points at `companies`.
+ *
+ * `point_of_contact` is retained as a free-text note on the person, but is
+ * no longer how the contact is identified — the `client`-role users ARE the
+ * contacts.
+ */
 export interface ClientProfile {
-    company_name: string;
+    company_id: Types.ObjectId;
     point_of_contact?: string;
     access_type: ClientAccessType;
 }
@@ -148,7 +160,7 @@ const internalProfileSchema = new Schema<InternalProfile>(
 
 const clientProfileSchema = new Schema<ClientProfile>(
     {
-        company_name: { type: String, required: true, trim: true },
+        company_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.COMPANIES, required: true },
         point_of_contact: { type: String, required: false, trim: true },
         access_type: { type: String, enum: ['login', 'readonly_link'], required: true },
     },
