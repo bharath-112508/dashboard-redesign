@@ -122,7 +122,7 @@ const employeeCaller = (id?: Types.ObjectId) => ({
 const makeProject = (overrides: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(),
     member_ids: [] as Types.ObjectId[],
-    client_ids: [] as Types.ObjectId[],
+    representative_ids: [] as Types.ObjectId[],
     ...overrides,
 });
 

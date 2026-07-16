@@ -14,6 +14,7 @@ import { isAdminLike } from '../utils/role-check.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { PROJECT_COMPANY_SCOPED_ROLES } from '../constants/project.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { AssignableQuery, CreateUserBody, ListUsersQuery, UpdateUserBody } from '../validators/user.validator.js';
@@ -651,7 +652,8 @@ export const changeUserRole = async (input: {
  * Visibility rules mirror `project.service.assertCallerCanRead`:
  *   - admin / manager: all projects
  *   - team lead / employee: only projects they're a `member_ids[]` of
- *   - client: only projects they're a `client_ids[]` of
+ *   - client (company-level): any project of their company (`company_id`)
+ *   - representative: only projects they're a `representative_ids[]` of
  *
  * Unknown project_id → 404 (the validator already rejected non-ObjectId
  * inputs, so this only fires when the project genuinely doesn't exist
@@ -659,11 +661,13 @@ export const changeUserRole = async (input: {
  */
 export const listAssignable = async (
     query: AssignableQuery,
-    caller: { id: Types.ObjectId; role: RoleType }
+    caller: { id: Types.ObjectId; role: RoleType; company_id?: Types.ObjectId }
 ): Promise<Array<{ id: string; full_name: string; role: RoleType; job_title: string | null }>> => {
-    const project = await Project.findById(query.project_id)
-        .select('member_ids client_ids')
-        .lean<{ member_ids: Types.ObjectId[]; client_ids: Types.ObjectId[] } | null>();
+    const project = await Project.findById(query.project_id).select('member_ids company_id representative_ids').lean<{
+        member_ids: Types.ObjectId[];
+        company_id: Types.ObjectId | null;
+        representative_ids: Types.ObjectId[];
+    } | null>();
     if (!project) {
         throw AppError.notFound('Project not found', ERROR_CODES.RESOURCE_NOT_FOUND);
     }
@@ -671,8 +675,15 @@ export const listAssignable = async (
     // Access check — mirrors `project.service.assertCallerCanRead`.
     const isAdminLike = caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER;
     const inMembers = project.member_ids.some((u) => u.equals(caller.id));
-    const inClients = project.client_ids.some((u) => u.equals(caller.id));
-    if (!isAdminLike && !inMembers && !inClients) {
+    // A `client` is company-scoped, not roster-scoped: they can read a
+    // project of their company without appearing on its roster.
+    const isCompanyScoped =
+        PROJECT_COMPANY_SCOPED_ROLES.includes(caller.role) &&
+        Boolean(caller.company_id) &&
+        Boolean(project.company_id) &&
+        project.company_id!.equals(caller.company_id!);
+    const inRepresentatives = project.representative_ids.some((u) => u.equals(caller.id));
+    if (!isAdminLike && !inMembers && !isCompanyScoped && !inRepresentatives) {
         throw AppError.forbidden('You do not have access to this project', ERROR_CODES.FORBIDDEN);
     }
 

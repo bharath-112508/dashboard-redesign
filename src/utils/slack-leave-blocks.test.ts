@@ -19,7 +19,15 @@ describe('buildApplyLeaveModal', () => {
     const view = buildApplyLeaveModal(types, '2026-06-19') as {
         type: string;
         callback_id: string;
-        blocks: Array<{ block_id?: string; optional?: boolean; element?: { type?: string; options?: Array<{ text: { text: string }; value: string }>; initial_date?: string } }>;
+        blocks: Array<{
+            block_id?: string;
+            optional?: boolean;
+            element?: {
+                type?: string;
+                options?: Array<{ text: { text: string }; value: string }>;
+                initial_date?: string;
+            };
+        }>;
     };
 
     it('is a modal with the apply callback_id and five input blocks in order', () => {
@@ -37,7 +45,10 @@ describe('buildApplyLeaveModal', () => {
 
     it('labels leave-type options with balance when present, name only when null', () => {
         const opts = view.blocks[0]!.element!.options!;
-        expect(opts[0]).toEqual({ text: { type: 'plain_text', text: 'Casual Leave — 8 left' }, value: 'aaaaaaaaaaaaaaaaaaaaaaaa' });
+        expect(opts[0]).toEqual({
+            text: { type: 'plain_text', text: 'Casual Leave — 8 left' },
+            value: 'aaaaaaaaaaaaaaaaaaaaaaaa',
+        });
         expect(opts[1]!.text.text).toBe('Work From Home');
     });
 
@@ -61,7 +72,9 @@ describe('parseApplyLeaveSubmission', () => {
     const makeView = (half?: string) => ({
         state: {
             values: {
-                [SLACK_BLOCK_LEAVE_TYPE]: { [SLACK_BLOCK_LEAVE_TYPE]: { selected_option: { value: 'aaaaaaaaaaaaaaaaaaaaaaaa' } } },
+                [SLACK_BLOCK_LEAVE_TYPE]: {
+                    [SLACK_BLOCK_LEAVE_TYPE]: { selected_option: { value: 'aaaaaaaaaaaaaaaaaaaaaaaa' } },
+                },
                 [SLACK_BLOCK_START_DATE]: { [SLACK_BLOCK_START_DATE]: { selected_date: '2026-06-25' } },
                 [SLACK_BLOCK_END_DATE]: { [SLACK_BLOCK_END_DATE]: { selected_date: '2026-06-26' } },
                 [SLACK_BLOCK_HALF_DAY]: { [SLACK_BLOCK_HALF_DAY]: half ? { selected_option: { value: half } } : {} },
@@ -97,7 +110,9 @@ describe('appErrorToModalErrors', () => {
         expect(appErrorToModalErrors(ERROR_CODES.INSUFFICIENT_LEAVE_BALANCE, 'no balance')).toEqual({
             [SLACK_BLOCK_LEAVE_TYPE]: 'no balance',
         });
-        expect(Object.keys(appErrorToModalErrors(ERROR_CODES.RESOURCE_NOT_FOUND, 'x'))).toEqual([SLACK_BLOCK_LEAVE_TYPE]);
+        expect(Object.keys(appErrorToModalErrors(ERROR_CODES.RESOURCE_NOT_FOUND, 'x'))).toEqual([
+            SLACK_BLOCK_LEAVE_TYPE,
+        ]);
     });
 
     it('routes date-policy + overlap errors to start_date', () => {
@@ -112,7 +127,9 @@ describe('appErrorToModalErrors', () => {
     });
 
     it('routes half-day errors to the half_day block', () => {
-        expect(Object.keys(appErrorToModalErrors(ERROR_CODES.LEAVE_INVALID_HALF_DAY, 'm'))).toEqual([SLACK_BLOCK_HALF_DAY]);
+        expect(Object.keys(appErrorToModalErrors(ERROR_CODES.LEAVE_INVALID_HALF_DAY, 'm'))).toEqual([
+            SLACK_BLOCK_HALF_DAY,
+        ]);
     });
 
     it('falls back to the reason block for unmapped codes (Slack needs a real block_id)', () => {

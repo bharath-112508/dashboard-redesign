@@ -34,7 +34,7 @@ export const billingReportQuerySchema = z
         project_id: objectIdSchema,
         from_date: isoDateSchema,
         to_date: isoDateSchema,
-        client_id: objectIdSchema.optional(),
+        company_id: objectIdSchema.optional(),
         group_by: z.enum(BILLING_REPORT_GROUP_BY).default('employee'),
     })
     .refine(dateRangeRefine, { message: dateRangeMessage });

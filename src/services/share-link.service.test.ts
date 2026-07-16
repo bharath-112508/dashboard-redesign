@@ -334,12 +334,60 @@ describe('resolveLink', () => {
     /**
      * Project lookup chain: `findById(...).select(...)` returning a
      * promise of the project doc (or null for the deleted-project test).
+     * Records the projection arg so the allow-list can be asserted.
      */
+    const projectSelectArgs: string[] = [];
     const stubProjectFindById = (project: { _id: Types.ObjectId; toJSON: () => unknown } | null): void => {
         projectFindByIdMock.mockReturnValueOnce({
-            select: () => Promise.resolve(project),
+            select: (arg: string) => {
+                projectSelectArgs.push(arg);
+                return Promise.resolve(project);
+            },
         });
     };
+
+    // ─── Public payload projection (security) ───────────────────────────
+    //
+    // `resolveLink` is the PUBLIC, unauthenticated endpoint. Its projection
+    // must be an allow-list: a deny-list fails open, so any newly added
+    // Project field would be exposed by default — and merely renaming a
+    // denied field silently un-denies it. That is not hypothetical: this
+    // projection denied `client_ids` by name, so renaming it to
+    // `representative_ids` would have leaked every representative's user
+    // id to any token holder.
+
+    describe('project projection is an allow-list', () => {
+        beforeEach(() => {
+            projectSelectArgs.length = 0;
+        });
+
+        const runResolve = async (): Promise<void> => {
+            const link = makeLink();
+            linkFindOneMock.mockResolvedValueOnce(link);
+            stubProjectFindById({
+                _id: link.project_id,
+                toJSON: () => ({ id: link.project_id.toString(), name: 'Demo' }),
+            });
+            stubProjectChildren();
+            await svc.resolveLink('tok');
+        };
+
+        it('never uses exclusion (-field) syntax', async () => {
+            await runResolve();
+            expect(projectSelectArgs).toHaveLength(1);
+            expect(projectSelectArgs[0]).not.toMatch(/(^|\s)-/);
+        });
+
+        it.each([
+            ['representative_ids', 'the client-side roster'],
+            ['member_ids', 'internal staff'],
+            ['company_id', 'which company this project belongs to'],
+            ['created_by', 'admin bookkeeping'],
+        ])('omits %s (%s)', async (field) => {
+            await runResolve();
+            expect(projectSelectArgs[0].split(/\s+/)).not.toContain(field);
+        });
+    });
 
     it('returns 404 when the token is unknown', async () => {
         linkFindOneMock.mockResolvedValueOnce(null);
@@ -428,12 +476,15 @@ describe('resolveLink', () => {
     });
 
     it('strips enumeration ObjectId fields via .select() on the public payload (regression)', async () => {
-        // The public path must not echo `member_ids`, `client_ids`, or
-        // `created_by` from the project doc; nor `created_by` /
-        // `updated_by` from sprints/stories; nor `collaborator_ids` /
-        // `created_by` / `updated_by` from tasks. Verified by asserting
-        // each of those `.select(...)` calls received the negated
-        // projection string.
+        // The public path must not echo the project's rosters or
+        // bookkeeping; nor `created_by` / `updated_by` from
+        // sprints/stories; nor `collaborator_ids` / `created_by` /
+        // `updated_by` from tasks.
+        //
+        // The PROJECT projection is asserted as an allow-list (it must not
+        // name the sensitive fields at all). Sprints/stories/tasks still
+        // use deny-lists, so those are asserted as before — converting
+        // them is a follow-up, not part of this change.
         const link = makeLink();
         linkFindOneMock.mockResolvedValueOnce(link);
         const projectSelectArgs: string[] = [];
@@ -472,9 +523,16 @@ describe('resolveLink', () => {
 
         await svc.resolveLink('any-raw-token');
 
-        expect(projectSelectArgs[0]).toContain('-member_ids');
-        expect(projectSelectArgs[0]).toContain('-client_ids');
-        expect(projectSelectArgs[0]).toContain('-created_by');
+        // Allow-list: fails closed. Naming a field to DENY it (the old
+        // approach) means a rename silently un-denies it.
+        const projectFields = projectSelectArgs[0].split(/\s+/);
+        expect(projectSelectArgs[0]).not.toMatch(/(^|\s)-/);
+        expect(projectFields).not.toContain('member_ids');
+        expect(projectFields).not.toContain('representative_ids');
+        expect(projectFields).not.toContain('company_id');
+        expect(projectFields).not.toContain('created_by');
+        // ...but it must still return what the public viewer renders.
+        expect(projectFields).toContain('name');
         expect(sprintSelectArgs[0]).toContain('-created_by');
         expect(storySelectArgs[0]).toContain('-created_by');
         expect(storySelectArgs[0]).toContain('-updated_by');

@@ -236,8 +236,16 @@ describe('GET /api/v1/dashboard/client/analytics', () => {
 
         expect(res.status).toBe(200);
         expect(buildClientAnalyticsMock).toHaveBeenCalledOnce();
-        const [idArg, , rangeArg] = buildClientAnalyticsMock.mock.calls[0] as [Types.ObjectId, string[], string];
-        expect(idArg.toString()).toBe(userId.toString());
+        // Now takes the whole caller, not a bare id — a `client` is
+        // company-scoped, so the service needs role + company_id to build
+        // the visibility filter.
+        const [callerArg, , rangeArg] = buildClientAnalyticsMock.mock.calls[0] as [
+            { id: Types.ObjectId; role: string },
+            string[],
+            string,
+        ];
+        expect(callerArg.id.toString()).toBe(userId.toString());
+        expect(callerArg.role).toBe('client');
         expect(rangeArg).toBe('quarter');
     });
 

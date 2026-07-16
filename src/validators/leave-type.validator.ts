@@ -71,20 +71,22 @@ export type PatchLeaveTypeBody = z.infer<typeof patchLeaveTypeBodySchema>;
 
 // ─── GET /leave-types ─────────────────────────────────────────────────────
 
-export const listLeaveTypesQuerySchema = z.object({
-    is_active: z
-        .union([z.literal('true'), z.literal('false'), z.boolean()])
-        .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
-        .optional(),
-    // BUG-002 — when true, include soft-deleted (is_active=false) rows.
-    // Default false → active only. Controller scrubs to false when the
-    // caller lacks LEAVE_TYPE_WRITE.
-    show_deleted: z
-        .union([z.boolean(), z.literal('true'), z.literal('false')])
-        .transform((v) => v === true || v === 'true')
-        .optional()
-        .default(false),
-}).strict();
+export const listLeaveTypesQuerySchema = z
+    .object({
+        is_active: z
+            .union([z.literal('true'), z.literal('false'), z.boolean()])
+            .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
+            .optional(),
+        // BUG-002 — when true, include soft-deleted (is_active=false) rows.
+        // Default false → active only. Controller scrubs to false when the
+        // caller lacks LEAVE_TYPE_WRITE.
+        show_deleted: z
+            .union([z.boolean(), z.literal('true'), z.literal('false')])
+            .transform((v) => v === true || v === 'true')
+            .optional()
+            .default(false),
+    })
+    .strict();
 
 export type ListLeaveTypesQuery = z.infer<typeof listLeaveTypesQuerySchema>;
 

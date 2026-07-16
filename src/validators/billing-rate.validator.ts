@@ -50,19 +50,21 @@ export type PatchBillingRateBody = z.infer<typeof patchBillingRateBodySchema>;
 
 // ─── GET /billing-rates ──────────────────────────────────────────────────
 
-export const listBillingRatesQuerySchema = z.object({
-    user_id: objectIdSchema.optional(),
-    project_id: objectIdSchema.optional(),
-    task_id: objectIdSchema.optional(),
-    /**
-     * "Active on" filter — return only rows whose effective range
-     * contains this date. Useful for the FE rate-picker that wants
-     * "what rate applies on 2026-05-15 for this user/project".
-     */
-    active_on: isoDateSchema.optional(),
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(BILLING_RATE_LIST_MAX_LIMIT).default(BILLING_RATE_LIST_DEFAULT_LIMIT),
-}).strict();
+export const listBillingRatesQuerySchema = z
+    .object({
+        user_id: objectIdSchema.optional(),
+        project_id: objectIdSchema.optional(),
+        task_id: objectIdSchema.optional(),
+        /**
+         * "Active on" filter — return only rows whose effective range
+         * contains this date. Useful for the FE rate-picker that wants
+         * "what rate applies on 2026-05-15 for this user/project".
+         */
+        active_on: isoDateSchema.optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(BILLING_RATE_LIST_MAX_LIMIT).default(BILLING_RATE_LIST_DEFAULT_LIMIT),
+    })
+    .strict();
 export type ListBillingRatesQuery = z.infer<typeof listBillingRatesQuerySchema>;
 
 // ─── Path params ─────────────────────────────────────────────────────────

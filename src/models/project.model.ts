@@ -26,7 +26,11 @@ import { ISO_DATE_REGEX } from '../constants/holiday.js';
  *
  * Per Data_Model the project document carries three embedded arrays:
  *  - `member_ids[]`          — internal staff with explicit access
- *  - `client_ids[]`          — client users (role=client) the project is shared with
+ *  - `company_id`            — the client COMPANY this project belongs to
+ *                              (nullable — internal projects have none)
+ *  - `representative_ids[]`  — the project's client-side roster: the company's
+ *                              `representative`s assigned to it, PLUS the
+ *                              company's `client`s (see below)
  *  - `custom_task_statuses[]` — admin/manager-defined Kanban columns BEYOND
  *                               the implicit defaults (`to_do`, `in_progress`,
  *                               `review`, `done`)
@@ -35,6 +39,34 @@ import { ISO_DATE_REGEX } from '../constants/holiday.js';
  * patterns are dominated by "load the full project" and embedding keeps the
  * project visibility check (`member_ids ∋ user`) a single equality match
  * served by the `{ member_ids: 1 }` index.
+ *
+ * ── company_id vs representative_ids: which one is authoritative ──────────
+ *
+ * Both describe the client side of a project, so the winner must be stated:
+ *
+ *   - A `representative` sees a project iff `representative_ids ∋ them`.
+ *   - A `client` (the company-level role) sees a project iff
+ *     `company_id === their company`. **`company_id` is authoritative for
+ *     that role** — a Client's access does NOT depend on the roster.
+ *
+ * Clients are *also* listed in `representative_ids` so a project's
+ * client-side roster is one explicit field, but that entry is a
+ * denormalised convenience maintained by the service layer (creating a
+ * project seeds the roster with the company's clients). If it ever drifts,
+ * a Client still sees their projects via `company_id` — drift costs display
+ * accuracy, never access. The inverse design (deriving Client visibility
+ * FROM the roster) would let one missed auto-add silently blind someone to
+ * a project, so the denormalised field is deliberately the one that can be
+ * wrong.
+ *
+ * A Client is company-scoped rather than roster-scoped because their job is
+ * to assign representatives to their company's projects — they cannot staff
+ * a project they cannot see, so roster-scoping them would deadlock every
+ * newly created project.
+ *
+ * Invariant: every id in `representative_ids` must be a `client` or
+ * `representative` whose `client_profile.company_id === this.company_id`.
+ * Enforced in the service on every roster write.
  *
  * `is_archived` is reserved for the Phase 2 archive UI — there is no archive
  * endpoint exposed yet, only the field + index so historic data filters work.
@@ -120,7 +152,8 @@ export interface ProjectDocument extends Document {
     status: ProjectStatus;
     is_archived: boolean;
     member_ids: Types.ObjectId[];
-    client_ids: Types.ObjectId[];
+    company_id: Types.ObjectId | null;
+    representative_ids: Types.ObjectId[];
     custom_task_statuses: Types.DocumentArray<CustomTaskStatus>;
     default_status_orders: Types.DocumentArray<DefaultStatusOrder>;
     created_by: Types.ObjectId;
@@ -174,12 +207,17 @@ const projectSchema = new Schema<ProjectDocument>(
                 message: `You can add at most ${PROJECT_MEMBERS_MAX} members to a project.`,
             },
         },
-        client_ids: {
+        company_id: {
+            type: Schema.Types.ObjectId,
+            ref: COLLECTIONS.COMPANIES,
+            default: null,
+        },
+        representative_ids: {
             type: [{ type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS }],
             default: [],
             validate: {
                 validator: (v: Types.ObjectId[]) => v.length <= PROJECT_CLIENTS_MAX,
-                message: `You can add at most ${PROJECT_CLIENTS_MAX} clients to a project.`,
+                message: `You can add at most ${PROJECT_CLIENTS_MAX} representatives to a project.`,
             },
         },
         custom_task_statuses: {
@@ -237,7 +275,11 @@ projectSchema.index({ status: 1, is_archived: 1 });
 // index across deployments is riskier than the modest write-amp cost.
 projectSchema.index({ status: 1, is_archived: 1, created_at: -1 });
 projectSchema.index({ member_ids: 1 });
-projectSchema.index({ client_ids: 1 });
+// A `representative`'s visibility is roster containment.
+projectSchema.index({ representative_ids: 1 });
+// A `client`'s visibility is company containment — THIS is the authoritative
+// filter for that role, not the roster above.
+projectSchema.index({ company_id: 1 });
 // Reverse-lookup for `PATCH /project-custom-statuses/:id` and friends —
 // the partial filter ignores projects with an empty array so the index is
 // only as wide as it needs to be.

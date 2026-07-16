@@ -33,9 +33,7 @@ import logger from './logger.js';
  * transaction in this codebase, so they retry too — that's
  * intentional, otherwise a retried tx would lose its audit row.
  */
-export const withTransaction = async <T>(
-    callback: (session: ClientSession | undefined) => Promise<T>
-): Promise<T> => {
+export const withTransaction = async <T>(callback: (session: ClientSession | undefined) => Promise<T>): Promise<T> => {
     // If we can't open a session at all (no connection / mocked
     // Mongoose in tests), run the callback without one. The caller
     // loses atomicity guarantees but keeps functional correctness —
@@ -55,10 +53,7 @@ export const withTransaction = async <T>(
     try {
         session = await mongoose.startSession();
     } catch (err) {
-        logger.warn(
-            { err },
-            'withTransaction: startSession failed; running callback without a session (no atomicity)'
-        );
+        logger.warn({ err }, 'withTransaction: startSession failed; running callback without a session (no atomicity)');
         return callback(undefined);
     }
 
@@ -91,13 +86,9 @@ export const withTransaction = async <T>(
         // the operator's stack trace pinpoints the tx, then re-throw
         // unchanged — service-layer handlers expect the original
         // AppError / Mongoose error.
-        logger.error(
-            { err },
-            'withTransaction: callback failed; transaction aborted'
-        );
+        logger.error({ err }, 'withTransaction: callback failed; transaction aborted');
         throw err;
     } finally {
         await session.endSession();
     }
 };
-

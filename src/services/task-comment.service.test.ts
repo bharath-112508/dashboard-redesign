@@ -95,7 +95,7 @@ const clientCaller = (id?: Types.ObjectId) => ({
 const makeProject = (overrides: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(),
     member_ids: [] as Types.ObjectId[],
-    client_ids: [] as Types.ObjectId[],
+    representative_ids: [] as Types.ObjectId[],
     ...overrides,
 });
 
@@ -218,7 +218,7 @@ describe('createComment', () => {
         const memberA = new Types.ObjectId();
         const memberB = new Types.ObjectId();
         const author = new Types.ObjectId();
-        const project = makeProject({ member_ids: [memberA, memberB], client_ids: [author] });
+        const project = makeProject({ member_ids: [memberA, memberB], representative_ids: [author] });
         const task = makeTaskRow(project._id);
         stubTaskLookup(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);
@@ -265,7 +265,7 @@ describe('createComment', () => {
 // pins the explicit cross-project scenarios from the spec.
 //
 // Architecture invariants under test:
-//   - The mention check uses ONLY `project.member_ids ∪ project.client_ids`.
+//   - The mention check uses ONLY `project.member_ids ∪ project.representative_ids`.
 //     Global role (admin / manager) does NOT exempt the user — admin@orgwide
 //     who isn't on this project's `member_ids` cannot be mentioned.
 //   - The check is symmetric across author roles: a client author trying to
@@ -285,7 +285,7 @@ describe('cross-project mention scoping (Step 26 exit criterion)', () => {
         const author = new Types.ObjectId();
         const projectAMember = new Types.ObjectId();
         const projectBMember = new Types.ObjectId();
-        const projectA = makeProject({ member_ids: [projectAMember], client_ids: [author] });
+        const projectA = makeProject({ member_ids: [projectAMember], representative_ids: [author] });
         const taskInA = makeTaskRow(projectA._id);
         stubTaskLookup(taskInA);
         loadProjectForCallerMock.mockResolvedValueOnce(projectA);
@@ -309,7 +309,7 @@ describe('cross-project mention scoping (Step 26 exit criterion)', () => {
         const author = new Types.ObjectId();
         const adminNotInProject = new Types.ObjectId();
         const projectMember = new Types.ObjectId();
-        const project = makeProject({ member_ids: [projectMember], client_ids: [author] });
+        const project = makeProject({ member_ids: [projectMember], representative_ids: [author] });
         const task = makeTaskRow(project._id);
         stubTaskLookup(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);
@@ -326,7 +326,7 @@ describe('cross-project mention scoping (Step 26 exit criterion)', () => {
     it('accepts the mention when the target IS a member of the same project (positive sanity)', async () => {
         const author = new Types.ObjectId();
         const fellowMember = new Types.ObjectId();
-        const project = makeProject({ member_ids: [fellowMember], client_ids: [author] });
+        const project = makeProject({ member_ids: [fellowMember], representative_ids: [author] });
         const task = makeTaskRow(project._id);
         stubTaskLookup(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);
@@ -345,10 +345,10 @@ describe('cross-project mention scoping (Step 26 exit criterion)', () => {
 
     it('client-to-client mention within the same project is allowed', async () => {
         // Two clients sharing a project — client A mentions client B.
-        // Both are in `client_ids`, so the membership-set gate accepts.
+        // Both are in `representative_ids`, so the membership-set gate accepts.
         const authorClient = new Types.ObjectId();
         const otherClient = new Types.ObjectId();
-        const project = makeProject({ member_ids: [], client_ids: [authorClient, otherClient] });
+        const project = makeProject({ member_ids: [], representative_ids: [authorClient, otherClient] });
         const task = makeTaskRow(project._id);
         stubTaskLookup(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);
@@ -372,7 +372,7 @@ describe('cross-project mention scoping (Step 26 exit criterion)', () => {
         const author = new Types.ObjectId();
         const insider = new Types.ObjectId();
         const outsider = new Types.ObjectId();
-        const project = makeProject({ member_ids: [insider], client_ids: [author] });
+        const project = makeProject({ member_ids: [insider], representative_ids: [author] });
         const task = makeTaskRow(project._id);
         stubTaskLookup(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);
@@ -399,7 +399,7 @@ describe('cross-project mention scoping (Step 26 exit criterion)', () => {
         // the same gate.
         const employeeAuthor = new Types.ObjectId();
         const otherProjectMember = new Types.ObjectId();
-        const project = makeProject({ member_ids: [employeeAuthor], client_ids: [] });
+        const project = makeProject({ member_ids: [employeeAuthor], representative_ids: [] });
         const task = makeTaskRow(project._id);
         stubTaskLookup(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);

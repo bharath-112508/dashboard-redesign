@@ -455,7 +455,7 @@ describe('notifyLeaveDecided', () => {
             requestId,
             expect.objectContaining({
                 slack_message: expect.objectContaining({ channel: 'CCHAN', ts: '1.1' }),
-            }),
+            })
         );
     });
 });
@@ -613,7 +613,7 @@ describe('Slack integration', () => {
             requestId,
             expect.objectContaining({
                 slack_message: expect.objectContaining({ channel: 'CCHAN', ts: '1.1' }),
-            }),
+            })
         );
     });
 

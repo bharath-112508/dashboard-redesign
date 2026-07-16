@@ -387,9 +387,7 @@ describe('disable — MFA_NOT_ENABLED guard (M7)', () => {
     it('throws MFA_NOT_ENABLED when mfa_enabled flag is true but the secret is gone', async () => {
         // Defensive branch: a partial earlier disable that wiped the
         // secret but left the flag set. Treat as not-enabled.
-        userFindByIdMock.mockReturnValueOnce(
-            selectStub(sampleUser({ mfa_enabled: true, mfa_secret_encrypted: null }))
-        );
+        userFindByIdMock.mockReturnValueOnce(selectStub(sampleUser({ mfa_enabled: true, mfa_secret_encrypted: null })));
 
         await expect(
             svc.disable({

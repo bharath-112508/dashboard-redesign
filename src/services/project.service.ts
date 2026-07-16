@@ -11,8 +11,10 @@ import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import {
     DEFAULT_TASK_STATUS_KEYS,
-    PROJECT_CLIENT_SCOPED_ROLES,
+    PROJECT_CLIENT_SIDE_ROLES,
+    PROJECT_COMPANY_SCOPED_ROLES,
     PROJECT_MEMBER_SCOPED_ROLES,
+    PROJECT_REPRESENTATIVE_SCOPED_ROLES,
     type ProjectStatus,
 } from '../constants/project.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
@@ -27,7 +29,7 @@ import type {
     ListProjectsQuery,
     PatchCustomStatusBody,
     PatchProjectBody,
-    ProjectClientsBulkBody,
+    ProjectRepresentativesBulkBody,
     ProjectMembersBulkBody,
 } from '../validators/project.validator.js';
 
@@ -40,10 +42,13 @@ import type {
  *    are best-effort, and unit tests would hate having to fabricate one), but
  *    we always fire when it's present.
  *  - Reads are scoped by `caller`. Admins/managers see everything; employees
- *    see projects where `member_ids ∋ caller.id`; clients see projects where
- *    `client_ids ∋ caller.id`. The single `buildVisibilityFilter` helper is
- *    the one place this rule lives — every read that must respect visibility
- *    composes it into its filter.
+ *    see projects where `member_ids ∋ caller.id`; a `client` (the company-level
+ *    role) sees every project where `company_id === their company`; a
+ *    `representative` sees only projects where `representative_ids ∋ caller.id`.
+ *    The single `buildVisibilityFilter` helper is the one place this rule
+ *    lives — every read that must respect visibility composes it into its
+ *    filter, and `assertCallerCanRead` must mirror it exactly or a list and a
+ *    get would answer differently for the same caller.
  *
  * Member/client semantics:
  *  - `add` and `remove` are computed against the existing array so the bulk
@@ -51,9 +56,11 @@ import type {
  *    same end-state. We dedupe + ignore unknown removes so the FE can fire
  *    "remove these 5 IDs" without having to inspect the current array first.
  *  - `add` candidates are validated against the `users` collection: members
- *    must be active internal users (admin/manager/employee), clients must be
- *    active client-role users. Mismatches throw 422 INVALID_PROJECT_*_ROLE
- *    so the admin sees exactly which IDs are wrong.
+ *    must be active internal users (admin/manager/employee); representatives
+ *    must be active client-side users **belonging to this project's company**
+ *    (the company half is what stops company B's person being rostered onto
+ *    company A's project). Mismatches throw 422 INVALID_PROJECT_*_ROLE so the
+ *    admin sees exactly which IDs are wrong.
  *
  * Custom statuses:
  *  - `key` collisions with the four implicit defaults (`to_do` / `in_progress`
@@ -98,26 +105,56 @@ export interface ProjectCaller {
 // ─── Visibility scoping ──────────────────────────────────────────────────
 
 /**
+ * A filter that matches nothing. Used for "this caller sees no projects"
+ * so an unmapped role — or a client-side caller with no company — gets
+ * zero rows rather than the whole collection.
+ */
+const DENY_ALL: Record<string, unknown> = { _id: new Types.ObjectId('000000000000000000000000') };
+
+/**
  * Step 47: Manager + Admin see every project; **Team Lead** + Employee
  * see only projects where they appear in `member_ids`. Team Leads are
  * project authors within projects they belong to (the legacy
  * project-member scoping is the same — the difference is purely
  * authoring permissions, which the route layer gates separately).
  */
-const buildVisibilityFilter = (caller: { id: Types.ObjectId; role: RoleType }): Record<string, unknown> => {
+const buildVisibilityFilter = (caller: ProjectCaller): Record<string, unknown> => {
     if (caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER) return {};
     if (PROJECT_MEMBER_SCOPED_ROLES.includes(caller.role)) return { member_ids: caller.id };
-    if (PROJECT_CLIENT_SCOPED_ROLES.includes(caller.role)) return { client_ids: caller.id };
+    // A `client` is the company-level role: every project of their company,
+    // authoritatively by company_id (NOT by roster containment).
+    if (PROJECT_COMPANY_SCOPED_ROLES.includes(caller.role)) {
+        // A client-side caller with no company can see nothing. Falling back
+        // to `{}` here would hand them the whole org.
+        if (!caller.company_id) return DENY_ALL;
+        return { company_id: caller.company_id };
+    }
+    // A `representative` is roster-scoped: only projects they're assigned to.
+    if (PROJECT_REPRESENTATIVE_SCOPED_ROLES.includes(caller.role)) {
+        return { representative_ids: caller.id };
+    }
     // Defence in depth — any future role we forget to map gets no visibility
     // rather than implicit access to everything.
-    return { _id: new Types.ObjectId('000000000000000000000000') };
+    return DENY_ALL;
 };
 
-const assertCallerCanRead = (project: ProjectDocument, caller: { id: Types.ObjectId; role: RoleType }): void => {
+const assertCallerCanRead = (project: ProjectDocument, caller: ProjectCaller): void => {
     if (caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER) return;
     const has = (arr: Types.ObjectId[]): boolean => arr.some((u) => u.equals(caller.id));
     if (PROJECT_MEMBER_SCOPED_ROLES.includes(caller.role) && has(project.member_ids)) return;
-    if (PROJECT_CLIENT_SCOPED_ROLES.includes(caller.role) && has(project.client_ids)) return;
+    // Mirrors buildVisibilityFilter exactly — if these two ever disagree, a
+    // list and a get would answer differently for the same caller.
+    if (
+        PROJECT_COMPANY_SCOPED_ROLES.includes(caller.role) &&
+        caller.company_id &&
+        project.company_id &&
+        project.company_id.equals(caller.company_id)
+    ) {
+        return;
+    }
+    if (PROJECT_REPRESENTATIVE_SCOPED_ROLES.includes(caller.role) && has(project.representative_ids)) {
+        return;
+    }
     throw AppError.forbidden('You do not have access to this project', ERROR_CODES.FORBIDDEN);
 };
 
@@ -148,20 +185,67 @@ const validateMemberCandidates = async (ids: Types.ObjectId[]): Promise<void> =>
     }
 };
 
-const validateClientCandidates = async (ids: Types.ObjectId[]): Promise<void> => {
+/**
+ * Roster invariant: every id on `representative_ids` must be an ACTIVE
+ * client-side user (`client` or `representative`) belonging to THIS
+ * project's company.
+ *
+ * The company check is the load-bearing half. Without it, a project could
+ * roster a representative from another company — handing company B's
+ * person access to company A's project.
+ */
+const validateRepresentativeCandidates = async (
+    ids: Types.ObjectId[],
+    companyId: Types.ObjectId | null
+): Promise<void> => {
     if (ids.length === 0) return;
-    const found = await User.find({ _id: { $in: ids }, status: USER_STATUSES.ACTIVE, role: ROLES.CLIENT })
+
+    if (!companyId) {
+        throw AppError.unprocessable(
+            'This project has no client company, so it cannot have representatives. Set company_id first.',
+            ERROR_CODES.INVALID_PROJECT_CLIENT_ROLE,
+            { invalid_user_ids: ids.map((id) => id.toString()) }
+        );
+    }
+
+    const found = await User.find({
+        _id: { $in: ids },
+        status: USER_STATUSES.ACTIVE,
+        role: { $in: PROJECT_CLIENT_SIDE_ROLES },
+        'client_profile.company_id': companyId,
+    })
         .select('_id')
         .lean<{ _id: Types.ObjectId }[]>();
     const okIds = new Set<string>(found.map((u) => String(u._id)));
     const bad = ids.filter((id) => !okIds.has(String(id))).map((id) => id.toString());
     if (bad.length > 0) {
         throw AppError.unprocessable(
-            'One or more user_ids are not active client users',
+            "One or more user_ids aren't active representatives of this project's company",
             ERROR_CODES.INVALID_PROJECT_CLIENT_ROLE,
             { invalid_user_ids: bad }
         );
     }
+};
+
+/**
+ * The company's `client`-role people, who are auto-rostered onto every
+ * project of their company.
+ *
+ * This keeps the project's client-side roster explicit in one field. It is
+ * a denormalised convenience only — a Client's ACCESS comes from
+ * `company_id` (see the model docblock), so if this seeding is ever missed
+ * they still see the project. Display accuracy can drift; access cannot.
+ */
+const companyClientIds = async (companyId: Types.ObjectId | null): Promise<Types.ObjectId[]> => {
+    if (!companyId) return [];
+    const rows = await User.find({
+        role: ROLES.CLIENT,
+        status: USER_STATUSES.ACTIVE,
+        'client_profile.company_id': companyId,
+    })
+        .select('_id')
+        .lean<{ _id: Types.ObjectId }[]>();
+    return rows.map((r) => r._id);
 };
 
 const dedupeObjectIds = (ids: string[]): Types.ObjectId[] => {
@@ -190,7 +274,8 @@ export const createProject = async (
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
     const memberIds = dedupeObjectIds(input.member_ids);
-    const clientIds = dedupeObjectIds(input.client_ids);
+    const companyId = input.company_id ? new Types.ObjectId(input.company_id) : null;
+    const representativeIds = dedupeObjectIds(input.representative_ids);
 
     // BUG-007 — visibility for non-admin/manager callers is scoped to
     // `member_ids` (team_lead / employee). If a Team Lead creates a
@@ -205,7 +290,15 @@ export const createProject = async (
     }
 
     await validateMemberCandidates(memberIds);
-    await validateClientCandidates(clientIds);
+    await validateRepresentativeCandidates(representativeIds, companyId);
+
+    // Seed the roster with the company's `client`-role people so the
+    // project's client-side roster is complete from the moment it exists.
+    // Access-wise this is redundant (they're company-scoped), which is
+    // exactly why a miss here is survivable — see the model docblock.
+    for (const id of await companyClientIds(companyId)) {
+        if (!representativeIds.some((r) => r.equals(id))) representativeIds.push(id);
+    }
 
     let created: ProjectDocument;
     try {
@@ -217,7 +310,8 @@ export const createProject = async (
             end_date: input.end_date,
             status: input.status,
             member_ids: memberIds,
-            client_ids: clientIds,
+            company_id: companyId,
+            representative_ids: representativeIds,
             custom_task_statuses: input.custom_task_statuses,
             created_by: caller.id,
         });
@@ -254,7 +348,7 @@ export const listProjects = async (
 
     // Admins/managers can additionally filter by membership.
     if (query.member_id) filter.member_ids = new Types.ObjectId(query.member_id);
-    if (query.client_id) filter.client_ids = new Types.ObjectId(query.client_id);
+    if (query.company_id) filter.company_id = new Types.ObjectId(query.company_id);
 
     if (query.q) {
         const safe = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -531,46 +625,51 @@ export const removeProjectMember = async (
     return updateProjectMembers(id, { add: [], remove: [userId.toString()] }, caller);
 };
 
-// ─── POST /projects/:id/clients  (bulk) ──────────────────────────────────
+// ─── POST /projects/:id/representatives  (bulk) ──────────────────────────
 
-export const updateProjectClients = async (
+export const updateProjectRepresentatives = async (
     id: Types.ObjectId,
-    body: ProjectClientsBulkBody,
+    body: ProjectRepresentativesBulkBody,
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
 
+    // A `client` may only staff their OWN company's projects. RBAC says
+    // "may assign representatives"; it does not say "anywhere" — that scope
+    // check has to live here.
+    assertCallerCanRead(doc, caller);
+
     const addIds = dedupeObjectIds(body.add);
     const removeIds = body.remove.map((r) => new Types.ObjectId(r));
 
     // Same idempotency guard as members: only validate the truly new IDs.
-    const existingClientSet = new Set(doc.client_ids.map((u) => u.toString()));
-    const newAddIds = addIds.filter((a) => !existingClientSet.has(a.toString()));
-    await validateClientCandidates(newAddIds);
+    const existingSet = new Set(doc.representative_ids.map((u) => u.toString()));
+    const newAddIds = addIds.filter((a) => !existingSet.has(a.toString()));
+    await validateRepresentativeCandidates(newAddIds, doc.company_id);
 
-    const before = doc.client_ids.map((u) => u.toString());
+    const before = doc.representative_ids.map((u) => u.toString());
 
     // F4 — atomic list mutation; see `updateProjectMembers` for rationale.
     const updated = await withTransaction(async (session) => {
         if (removeIds.length > 0) {
-            await Project.updateOne({ _id: id }, { $pull: { client_ids: { $in: removeIds } } }, { session });
+            await Project.updateOne({ _id: id }, { $pull: { representative_ids: { $in: removeIds } } }, { session });
         }
         if (addIds.length > 0) {
-            await Project.updateOne({ _id: id }, { $addToSet: { client_ids: { $each: addIds } } }, { session });
+            await Project.updateOne({ _id: id }, { $addToSet: { representative_ids: { $each: addIds } } }, { session });
         }
         const next = await Project.findById(id, null, { session });
         if (!next) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
         return next;
     });
-    const after = updated.client_ids.map((u) => u.toString());
+    const after = updated.representative_ids.map((u) => u.toString());
 
     if (caller.audit) {
         await recordAudit(caller.audit, {
-            action: AUDIT_ACTIONS.PROJECT_CLIENTS_UPDATE,
+            action: AUDIT_ACTIONS.PROJECT_REPRESENTATIVES_UPDATE,
             target: { kind: AUDIT_TARGET_KINDS.PROJECT, id: updated._id },
-            before: { client_ids: before },
-            after: { client_ids: after },
+            before: { representative_ids: before },
+            after: { representative_ids: after },
             metadata: {
                 added: addIds.map((a) => a.toString()).filter((a) => !before.includes(a)),
                 removed: before.filter((b) => !after.includes(b)),
@@ -581,61 +680,54 @@ export const updateProjectClients = async (
     return toPublic(updated);
 };
 
-export const listProjectClients = async (
+export const listProjectRepresentatives = async (
     id: Types.ObjectId,
     caller: ProjectCaller
-): Promise<Array<{ id: string; full_name: string; email: string; status: string; company_name: string | null }>> => {
+): Promise<Array<{ id: string; full_name: string; email: string; status: string; role: string }>> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
     assertCallerCanRead(doc, caller);
 
-    if (doc.client_ids.length === 0) return [];
+    if (doc.representative_ids.length === 0) return [];
 
-    const users = await User.find({ _id: { $in: doc.client_ids } })
-        .select('_id full_name email status client_profile')
-        .lean<
-            {
-                _id: Types.ObjectId;
-                full_name: string;
-                email: string;
-                status: string;
-                client_profile?: { company_name?: string };
-            }[]
-        >();
+    // `company_name` is gone from this payload: the company is now the
+    // project's own `company_id`, so repeating it per person was noise.
+    // `role` replaces it — it's what distinguishes a company-level `client`
+    // from an assigned-only `representative` on the roster.
+    type RosterRow = {
+        _id: Types.ObjectId;
+        full_name: string;
+        email: string;
+        status: string;
+        role: string;
+    };
+    const users = await User.find({ _id: { $in: doc.representative_ids } })
+        .select('_id full_name email status role')
+        .lean<RosterRow[]>();
     const byId = new Map(users.map((u) => [String(u._id), u]));
-    return doc.client_ids
-        .map((cid) => byId.get(String(cid)))
-        .filter(
-            (
-                u
-            ): u is {
-                _id: Types.ObjectId;
-                full_name: string;
-                email: string;
-                status: string;
-                client_profile?: { company_name?: string };
-            } => Boolean(u)
-        )
+    return doc.representative_ids
+        .map((rid) => byId.get(String(rid)))
+        .filter((u): u is RosterRow => Boolean(u))
         .map((u) => ({
             id: u._id.toString(),
             full_name: u.full_name,
             email: u.email,
             status: u.status,
-            company_name: u.client_profile?.company_name ?? null,
+            role: u.role,
         }));
 };
 
-export const removeProjectClient = async (
+export const removeProjectRepresentative = async (
     id: Types.ObjectId,
     userId: Types.ObjectId,
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
-    if (!doc.client_ids.some((u) => u.equals(userId))) {
-        throw AppError.notFound('User is not a client of this project', ERROR_CODES.PROJECT_CLIENT_NOT_FOUND);
+    if (!doc.representative_ids.some((u) => u.equals(userId))) {
+        throw AppError.notFound('User is not a representative of this project', ERROR_CODES.PROJECT_CLIENT_NOT_FOUND);
     }
-    return updateProjectClients(id, { add: [], remove: [userId.toString()] }, caller);
+    return updateProjectRepresentatives(id, { add: [], remove: [userId.toString()] }, caller);
 };
 
 // ─── Custom-task-statuses ────────────────────────────────────────────────

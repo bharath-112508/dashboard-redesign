@@ -23,7 +23,7 @@ import {
  *  - Dates are wire-strings `YYYY-MM-DD` to match Data_Model.md §5.1; the
  *    service does the chronological end >= start check (Zod doesn't get to
  *    cross-field-compare gracefully without a `.refine`, which we use).
- *  - `member_ids` and `client_ids` are *whole-set replacements* on POST/PATCH;
+ *  - `member_ids` and `representative_ids` are *whole-set replacements* on POST/PATCH;
  *    the bulk add/remove endpoint (`POST /projects/:id/members`) lives in its
  *    own schema below so the FE can do a delta without re-shipping the world.
  *  - `custom_task_statuses` keys are validated against `DEFAULT_TASK_STATUS_KEYS`
@@ -90,10 +90,9 @@ export const patchDefaultStatusOrdersBodySchema = z.object({
         .length(DEFAULT_TASK_STATUS_KEYS.length, {
             message: `orders must contain exactly ${DEFAULT_TASK_STATUS_KEYS.length} entries`,
         })
-        .refine(
-            (arr) => new Set(arr.map((o) => o.key)).size === DEFAULT_TASK_STATUS_KEYS.length,
-            { message: 'each default-status key must appear exactly once' }
-        ),
+        .refine((arr) => new Set(arr.map((o) => o.key)).size === DEFAULT_TASK_STATUS_KEYS.length, {
+            message: 'each default-status key must appear exactly once',
+        }),
 });
 
 export type PatchDefaultStatusOrdersBody = z.infer<typeof patchDefaultStatusOrdersBodySchema>;
@@ -115,7 +114,10 @@ export const createProjectBodySchema = z
         end_date: isoDateSchema.nullable().default(null),
         status: z.enum(PROJECT_STATUS_VALUES as unknown as [string, ...string[]]).optional(),
         member_ids: z.array(objectIdSchema).max(PROJECT_MEMBERS_MAX).default([]),
-        client_ids: z.array(objectIdSchema).max(PROJECT_CLIENTS_MAX).default([]),
+        // The client company this project belongs to. Null/absent = an
+        // internal project with no client side.
+        company_id: objectIdSchema.nullable().optional(),
+        representative_ids: z.array(objectIdSchema).max(PROJECT_CLIENTS_MAX).default([]),
         custom_task_statuses: z
             .array(createCustomStatusBodySchema)
             .max(CUSTOM_STATUSES_PER_PROJECT_MAX)
@@ -133,7 +135,7 @@ export type CreateProjectBody = z.infer<typeof createProjectBodySchema>;
 
 // ─── PATCH /projects/:id ──────────────────────────────────────────────────
 //
-// Whole-document patch — `member_ids` / `client_ids` / `custom_task_statuses`
+// Whole-document patch — `member_ids` / `representative_ids` / `custom_task_statuses`
 // are deliberately NOT included here. Use the dedicated bulk endpoints
 // (members, clients, custom-statuses) so the partial update never silently
 // truncates a 50-person member list to zero because the FE forgot to send it.
@@ -162,19 +164,23 @@ export type PatchProjectBody = z.infer<typeof patchProjectBodySchema>;
 
 // ─── GET /projects ────────────────────────────────────────────────────────
 
-export const listProjectsQuerySchema = z.object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(PROJECT_LIST_MAX_LIMIT).default(PROJECT_LIST_DEFAULT_LIMIT),
-    status: z.enum(PROJECT_STATUS_VALUES as unknown as [string, ...string[]]).optional(),
-    is_archived: z
-        .union([z.literal('true'), z.literal('false'), z.boolean()])
-        .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
-        .optional(),
-    member_id: objectIdSchema.optional(),
-    client_id: objectIdSchema.optional(),
-    // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
-    q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
-}).strict();
+export const listProjectsQuerySchema = z
+    .object({
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(PROJECT_LIST_MAX_LIMIT).default(PROJECT_LIST_DEFAULT_LIMIT),
+        status: z.enum(PROJECT_STATUS_VALUES as unknown as [string, ...string[]]).optional(),
+        is_archived: z
+            .union([z.literal('true'), z.literal('false'), z.boolean()])
+            .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
+            .optional(),
+        member_id: objectIdSchema.optional(),
+        // Was `client_id` (a client USER). Projects now belong to a company,
+        // so the filter is by company.
+        company_id: objectIdSchema.optional(),
+        // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
+        q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
+    })
+    .strict();
 
 export type ListProjectsQuery = z.infer<typeof listProjectsQuerySchema>;
 
@@ -191,9 +197,9 @@ export const projectMembersBulkBodySchema = z
 
 export type ProjectMembersBulkBody = z.infer<typeof projectMembersBulkBodySchema>;
 
-// ─── POST /projects/:id/clients  (bulk add/remove) ────────────────────────
+// ─── POST /projects/:id/representatives  (bulk add/remove) ────────────────
 
-export const projectClientsBulkBodySchema = z
+export const projectRepresentativesBulkBodySchema = z
     .object({
         add: z.array(objectIdSchema).max(PROJECT_CLIENTS_MAX).default([]),
         remove: z.array(objectIdSchema).max(PROJECT_CLIENTS_MAX).default([]),
@@ -202,7 +208,7 @@ export const projectClientsBulkBodySchema = z
         message: 'At least one of `add` or `remove` must be non-empty',
     });
 
-export type ProjectClientsBulkBody = z.infer<typeof projectClientsBulkBodySchema>;
+export type ProjectRepresentativesBulkBody = z.infer<typeof projectRepresentativesBulkBodySchema>;
 
 // ─── Path params ──────────────────────────────────────────────────────────
 
@@ -215,11 +221,11 @@ export const projectMemberIdParamSchema = z.object({
 });
 export type ProjectMemberIdParam = z.infer<typeof projectMemberIdParamSchema>;
 
-export const projectClientIdParamSchema = z.object({
+export const projectRepresentativeIdParamSchema = z.object({
     id: objectIdSchema,
     user_id: objectIdSchema,
 });
-export type ProjectClientIdParam = z.infer<typeof projectClientIdParamSchema>;
+export type ProjectRepresentativeIdParam = z.infer<typeof projectRepresentativeIdParamSchema>;
 
 export const customStatusIdParamSchema = z.object({ id: objectIdSchema });
 export type CustomStatusIdParam = z.infer<typeof customStatusIdParamSchema>;

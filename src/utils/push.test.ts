@@ -87,7 +87,9 @@ describe('sendPushNotification', () => {
         sendNotificationMock.mockResolvedValueOnce({ statusCode: 201 });
 
         const result = await push.sendPushNotification({
-            subscription: makeSubscription() as unknown as Parameters<typeof push.sendPushNotification>[0]['subscription'],
+            subscription: makeSubscription() as unknown as Parameters<
+                typeof push.sendPushNotification
+            >[0]['subscription'],
             payload: { title: 'T', body: 'B', link_url: '/x', type: 'system' },
             context: 'test-event',
         });
@@ -106,7 +108,9 @@ describe('sendPushNotification', () => {
         sendNotificationMock.mockRejectedValueOnce(err);
 
         const result = await push.sendPushNotification({
-            subscription: makeSubscription() as unknown as Parameters<typeof push.sendPushNotification>[0]['subscription'],
+            subscription: makeSubscription() as unknown as Parameters<
+                typeof push.sendPushNotification
+            >[0]['subscription'],
             payload: { title: 'T', body: 'B', link_url: '/x', type: 'system' },
             context: 'test-event',
         });
@@ -124,7 +128,9 @@ describe('sendPushNotification', () => {
         sendNotificationMock.mockRejectedValueOnce(err);
 
         await push.sendPushNotification({
-            subscription: makeSubscription() as unknown as Parameters<typeof push.sendPushNotification>[0]['subscription'],
+            subscription: makeSubscription() as unknown as Parameters<
+                typeof push.sendPushNotification
+            >[0]['subscription'],
             payload: { title: 'T', body: 'B', link_url: '/x', type: 'system' },
             context: 'test-event',
         });
@@ -137,7 +143,9 @@ describe('sendPushNotification', () => {
         sendNotificationMock.mockRejectedValueOnce(err);
 
         const result = await push.sendPushNotification({
-            subscription: makeSubscription() as unknown as Parameters<typeof push.sendPushNotification>[0]['subscription'],
+            subscription: makeSubscription() as unknown as Parameters<
+                typeof push.sendPushNotification
+            >[0]['subscription'],
             payload: { title: 'T', body: 'B', link_url: '/x', type: 'system' },
             context: 'test-event',
         });
@@ -148,9 +156,6 @@ describe('sendPushNotification', () => {
             expect.objectContaining({ _id: expect.any(Object) }),
             expect.objectContaining({ $set: expect.objectContaining({ last_error_at: expect.any(Date) }) })
         );
-        expect(loggerWarnMock).toHaveBeenCalledWith(
-            expect.objectContaining({ status: 502 }),
-            'Push send failed'
-        );
+        expect(loggerWarnMock).toHaveBeenCalledWith(expect.objectContaining({ status: 502 }), 'Push send failed');
     });
 });

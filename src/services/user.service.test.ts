@@ -509,7 +509,8 @@ describe('listAssignable', () => {
         const adminId = new Types.ObjectId();
         projectFindByIdMock.mockReturnValueOnce({
             select: () => ({
-                lean: () => Promise.resolve({ member_ids: [memberA, memberB], client_ids: [] }),
+                lean: () =>
+                    Promise.resolve({ member_ids: [memberA, memberB], company_id: null, representative_ids: [] }),
             }),
         });
         userFindMock.mockReturnValueOnce(buildUserChain([]));
@@ -530,7 +531,7 @@ describe('listAssignable', () => {
         const outsider = new Types.ObjectId();
         projectFindByIdMock.mockReturnValueOnce({
             select: () => ({
-                lean: () => Promise.resolve({ member_ids: [otherMember], client_ids: [] }),
+                lean: () => Promise.resolve({ member_ids: [otherMember], company_id: null, representative_ids: [] }),
             }),
         });
 
@@ -548,7 +549,7 @@ describe('listAssignable', () => {
         const other = new Types.ObjectId();
         projectFindByIdMock.mockReturnValueOnce({
             select: () => ({
-                lean: () => Promise.resolve({ member_ids: [me, other], client_ids: [] }),
+                lean: () => Promise.resolve({ member_ids: [me, other], company_id: null, representative_ids: [] }),
             }),
         });
         userFindMock.mockReturnValueOnce(buildUserChain([]));
@@ -558,22 +559,69 @@ describe('listAssignable', () => {
         expect(userFindMock).toHaveBeenCalled();
     });
 
-    it('client caller who IS in client_ids: gets the project members', async () => {
-        // Even clients can use the picker — e.g. to @-mention members
-        // in comments — provided they're attached to the project.
+    it('client caller of the project company: gets the project members', async () => {
+        // Client-side users can use the picker — e.g. to @-mention members
+        // in comments. A `client` is COMPANY-scoped, so company match is
+        // what grants access; they need not be on the roster.
         const projectId = new Types.ObjectId();
+        const companyId = new Types.ObjectId();
         const me = new Types.ObjectId();
         const member = new Types.ObjectId();
         projectFindByIdMock.mockReturnValueOnce({
             select: () => ({
-                lean: () => Promise.resolve({ member_ids: [member], client_ids: [me] }),
+                lean: () => Promise.resolve({ member_ids: [member], company_id: companyId, representative_ids: [] }),
             }),
         });
         userFindMock.mockReturnValueOnce(buildUserChain([]));
 
-        await svc.listAssignable({ project_id: projectId.toString() }, { id: me, role: ROLES.CLIENT });
+        await svc.listAssignable(
+            { project_id: projectId.toString() },
+            { id: me, role: ROLES.CLIENT, company_id: companyId }
+        );
 
         expect(userFindMock).toHaveBeenCalled();
+    });
+
+    it('client caller of ANOTHER company: throws FORBIDDEN', async () => {
+        const projectId = new Types.ObjectId();
+        const me = new Types.ObjectId();
+        projectFindByIdMock.mockReturnValueOnce({
+            select: () => ({
+                lean: () =>
+                    Promise.resolve({
+                        member_ids: [],
+                        company_id: new Types.ObjectId(),
+                        representative_ids: [],
+                    }),
+            }),
+        });
+
+        await expect(
+            svc.listAssignable(
+                { project_id: projectId.toString() },
+                { id: me, role: ROLES.CLIENT, company_id: new Types.ObjectId() }
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it('representative caller NOT on the roster: throws FORBIDDEN even in the same company', async () => {
+        // A representative is roster-scoped — company membership alone
+        // must not grant access, or they'd see every project of their
+        // company like a `client` does.
+        const projectId = new Types.ObjectId();
+        const companyId = new Types.ObjectId();
+        projectFindByIdMock.mockReturnValueOnce({
+            select: () => ({
+                lean: () => Promise.resolve({ member_ids: [], company_id: companyId, representative_ids: [] }),
+            }),
+        });
+
+        await expect(
+            svc.listAssignable(
+                { project_id: projectId.toString() },
+                { id: new Types.ObjectId(), role: ROLES.REPRESENTATIVE, company_id: companyId }
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
     });
 
     it('unknown project_id: throws 404 (no enumeration of project existence)', async () => {
@@ -596,7 +644,7 @@ describe('listAssignable', () => {
         const member = new Types.ObjectId();
         projectFindByIdMock.mockReturnValueOnce({
             select: () => ({
-                lean: () => Promise.resolve({ member_ids: [member], client_ids: [] }),
+                lean: () => Promise.resolve({ member_ids: [member], company_id: null, representative_ids: [] }),
             }),
         });
         userFindMock.mockReturnValueOnce(buildUserChain([]));

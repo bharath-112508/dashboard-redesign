@@ -51,22 +51,24 @@ export type CreateShareLinkBody = z.infer<typeof createShareLinkBodySchema>;
 
 // ─── GET /projects/:project_id/share-links ───────────────────────────────
 
-export const listShareLinksQuerySchema = z.object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(SHARE_LINK_LIST_MAX_LIMIT).default(SHARE_LINK_LIST_DEFAULT_LIMIT),
-    /**
-     * `active_only=true` filters out revoked + expired rows. Default is
-     * "show everything" so the admin UI can render the audit trail of
-     * past links on the project settings screen without a second call.
-     *
-     * H4: was `z.coerce.boolean()`, which is `Boolean(value)` and
-     * makes the literal string `"false"` truthy. The FE rewrote
-     * around it; external API consumers (curl, Postman) still hit
-     * the bug. `booleanish` accepts only "true"/"false"/boolean and
-     * fails-loud on anything else — no silent flips.
-     */
-    active_only: booleanish.optional().default(false),
-}).strict();
+export const listShareLinksQuerySchema = z
+    .object({
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(SHARE_LINK_LIST_MAX_LIMIT).default(SHARE_LINK_LIST_DEFAULT_LIMIT),
+        /**
+         * `active_only=true` filters out revoked + expired rows. Default is
+         * "show everything" so the admin UI can render the audit trail of
+         * past links on the project settings screen without a second call.
+         *
+         * H4: was `z.coerce.boolean()`, which is `Boolean(value)` and
+         * makes the literal string `"false"` truthy. The FE rewrote
+         * around it; external API consumers (curl, Postman) still hit
+         * the bug. `booleanish` accepts only "true"/"false"/boolean and
+         * fails-loud on anything else — no silent flips.
+         */
+        active_only: booleanish.optional().default(false),
+    })
+    .strict();
 export type ListShareLinksQuery = z.infer<typeof listShareLinksQuerySchema>;
 
 // ─── Path params ─────────────────────────────────────────────────────────

@@ -167,7 +167,7 @@ const makeTemplate = (overrides: Record<string, unknown> = {}) => {
 
 beforeEach(() => {
     vi.resetAllMocks();
-    loadProjectForCallerMock.mockResolvedValue({ _id: new Types.ObjectId(), member_ids: [], client_ids: [] });
+    loadProjectForCallerMock.mockResolvedValue({ _id: new Types.ObjectId(), member_ids: [], representative_ids: [] });
     recordAuditMock.mockResolvedValue(undefined);
     recordSystemAuditMock.mockResolvedValue(undefined);
 });

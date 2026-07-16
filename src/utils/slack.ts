@@ -436,7 +436,11 @@ export const openSlackModal = async (ctx: SlackContext, triggerId: string, view:
         });
         if (!response.ok) {
             logger.warn(
-                { code: ERROR_CODES.SLACK_DISPATCH_FAILED, dispatch_event: 'apply-leave-modal-open', http_status: response.status },
+                {
+                    code: ERROR_CODES.SLACK_DISPATCH_FAILED,
+                    dispatch_event: 'apply-leave-modal-open',
+                    http_status: response.status,
+                },
                 'Slack views.open returned a non-2xx status'
             );
             return false;
@@ -444,7 +448,11 @@ export const openSlackModal = async (ctx: SlackContext, triggerId: string, view:
         const body = (await response.json()) as { ok: boolean; error?: string };
         if (!body.ok) {
             logger.warn(
-                { code: ERROR_CODES.SLACK_DISPATCH_FAILED, dispatch_event: 'apply-leave-modal-open', slack_error: body.error },
+                {
+                    code: ERROR_CODES.SLACK_DISPATCH_FAILED,
+                    dispatch_event: 'apply-leave-modal-open',
+                    slack_error: body.error,
+                },
                 'Slack views.open rejected the request'
             );
             return false;
@@ -453,7 +461,12 @@ export const openSlackModal = async (ctx: SlackContext, triggerId: string, view:
     } catch (err) {
         const isAbort = (err as { name?: string })?.name === 'AbortError';
         logger.warn(
-            { err, code: ERROR_CODES.SLACK_DISPATCH_FAILED, dispatch_event: 'apply-leave-modal-open', timed_out: isAbort },
+            {
+                err,
+                code: ERROR_CODES.SLACK_DISPATCH_FAILED,
+                dispatch_event: 'apply-leave-modal-open',
+                timed_out: isAbort,
+            },
             isAbort ? 'Slack views.open timed out' : 'Slack views.open threw'
         );
         return false;

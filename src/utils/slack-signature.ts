@@ -42,10 +42,7 @@ export const verifySlackSignature = (input: VerifyInput): boolean => {
     if (ageSeconds > REPLAY_WINDOW_SECONDS) return false;
 
     const base = `v0:${input.timestamp}:${input.body}`;
-    const computed = `v0=${crypto
-        .createHmac('sha256', input.secret)
-        .update(base)
-        .digest('hex')}`;
+    const computed = `v0=${crypto.createHmac('sha256', input.secret).update(base).digest('hex')}`;
 
     try {
         // `timingSafeEqual` throws if the buffers are different lengths —

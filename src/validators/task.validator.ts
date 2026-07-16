@@ -49,9 +49,7 @@ const todayIso = (): string => {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-const enforceNoFutureDoneDate = <
-    T extends { status?: string | undefined; due_date?: string | undefined },
->(
+const enforceNoFutureDoneDate = <T extends { status?: string | undefined; due_date?: string | undefined }>(
     data: T,
     ctx: z.RefinementCtx
 ): void => {
@@ -158,25 +156,27 @@ export type AddDependencyBody = z.infer<typeof addDependencyBodySchema>;
 
 // ─── GET /tasks (filters) ─────────────────────────────────────────────────
 
-export const listTasksQuerySchema = z.object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(TASK_LIST_MAX_LIMIT).default(TASK_LIST_DEFAULT_LIMIT),
-    project_id: objectIdSchema.optional(),
-    sprint_id: objectIdSchema.optional(),
-    /**
-     * `story_id=null` literal sentinel selects tasks with no story. Without
-     * the literal, `story_id=<ObjectId>` filters to that story. Without the
-     * param at all, no story filter is applied.
-     */
-    story_id: z.union([objectIdSchema, z.literal('null')]).optional(),
-    assignee_id: objectIdSchema.optional(),
-    status: z.string().trim().min(1).max(TASK_STATUS_KEY_MAX).optional(),
-    priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
-    due_before: isoDateSchema.optional(),
-    parent_task_id: z.union([objectIdSchema, z.literal('null')]).optional(),
-    // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
-    q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
-}).strict();
+export const listTasksQuerySchema = z
+    .object({
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(TASK_LIST_MAX_LIMIT).default(TASK_LIST_DEFAULT_LIMIT),
+        project_id: objectIdSchema.optional(),
+        sprint_id: objectIdSchema.optional(),
+        /**
+         * `story_id=null` literal sentinel selects tasks with no story. Without
+         * the literal, `story_id=<ObjectId>` filters to that story. Without the
+         * param at all, no story filter is applied.
+         */
+        story_id: z.union([objectIdSchema, z.literal('null')]).optional(),
+        assignee_id: objectIdSchema.optional(),
+        status: z.string().trim().min(1).max(TASK_STATUS_KEY_MAX).optional(),
+        priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
+        due_before: isoDateSchema.optional(),
+        parent_task_id: z.union([objectIdSchema, z.literal('null')]).optional(),
+        // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
+        q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
+    })
+    .strict();
 export type ListTasksQuery = z.infer<typeof listTasksQuerySchema>;
 
 // ─── Path params ──────────────────────────────────────────────────────────

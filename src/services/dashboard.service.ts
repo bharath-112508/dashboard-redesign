@@ -7,6 +7,7 @@ import { LeaveBalance } from '../models/leave-balance.model.js';
 import { LeaveType, type LeaveTypeDocument } from '../models/leave-type.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { Notification } from '../models/notification.model.js';
+import { buildProjectVisibilityFilter, type ProjectCaller } from './project.service.js';
 import { Project } from '../models/project.model.js';
 import { isAdminLike } from '../utils/role-check.js';
 import { resolveTeamLeadScope } from './dashboard-analytics.service.js';
@@ -464,12 +465,15 @@ export const buildEmployeeDashboard = async (user_id: Types.ObjectId): Promise<E
 
 // ─── Client dashboard (V2-BE-2) ────────────────────────────────────────────
 //
-// Clients see only the projects they're a client on (`client_ids ∋ caller.id`)
-// and tasks within those projects. The same `PROJECT_CLIENT_SCOPED_ROLES`
-// filter that `project.service` enforces gates everything below — we resolve
-// the visible project-id set once and pass it through to each card. If a
-// client is on zero projects, every card returns its empty fallback (no 500s,
-// no leaked data from other tenants' projects).
+// Serves both client-side roles. Visibility differs between them — a
+// `client` sees every project of their company; a `representative` sees only
+// projects they're rostered on — so this does NOT hard-code a filter. It
+// composes `buildProjectVisibilityFilter` from project.service, the single
+// source of truth, and passes the resolved id set through to each card.
+//
+// Composing rather than duplicating matters: the previous hard-coded
+// `{ client_ids: caller.id }` here would have silently returned ZERO
+// projects once the field was renamed — a dead dashboard with no error.
 
 const DASHBOARD_CLIENT_RECENT_PROJECTS = 5;
 const DASHBOARD_CLIENT_RECENT_ACTIVITY = 10;
@@ -505,10 +509,13 @@ interface ClientDashboardPayload {
     unread_notifications: number;
 }
 
-/** Resolve the set of project IDs visible to this client. Single source of
- *  truth — every card below scopes its query through this list. */
-const resolveClientProjectIds = async (user_id: Types.ObjectId): Promise<Types.ObjectId[]> => {
-    const rows = await Project.find({ client_ids: user_id }).select({ _id: 1 }).lean<{ _id: Types.ObjectId }[]>();
+/** Resolve the set of project IDs visible to this client-side caller. Every
+ *  card below scopes its query through this list. The role → filter rule
+ *  itself lives in `project.service` — never re-implement it here. */
+const resolveClientProjectIds = async (caller: ProjectCaller): Promise<Types.ObjectId[]> => {
+    const rows = await Project.find(buildProjectVisibilityFilter(caller))
+        .select({ _id: 1 })
+        .lean<{ _id: Types.ObjectId }[]>();
     return rows.map((r) => r._id);
 };
 
@@ -516,7 +523,7 @@ const resolveClientProjectIds = async (user_id: Types.ObjectId): Promise<Types.O
  *  One aggregation pipeline so we don't N+1 over projects.
  *
  *  M10 — accepts the pre-resolved `projectIds` from
- *  `resolveClientProjectIds` instead of re-running `{ client_ids: user_id }`.
+ *  `resolveClientProjectIds` instead of re-running the visibility filter.
  *  Pre-M10 the caller resolved the id list once and then this function
  *  queried with the same predicate again — two index hits, two passes.
  *  Using `_id: { $in: projectIds }` collapses the second query to a
@@ -657,21 +664,22 @@ const computeClientRecentTaskActivity = async (
     }));
 };
 
-export const buildClientDashboard = async (user_id: Types.ObjectId): Promise<ClientDashboardPayload> => {
+export const buildClientDashboard = async (caller: ProjectCaller): Promise<ClientDashboardPayload> => {
+    const user_id = caller.id;
     // Resolve visible projects once; pass the id list to dependent cards so
-    // we don't query `Project.find({ client_ids })` twice.
+    // we don't run the visibility query twice.
     const projectIds = await safeCard(
         'client.resolve_projects',
-        () => resolveClientProjectIds(user_id),
+        () => resolveClientProjectIds(caller),
         [] as Types.ObjectId[]
     );
 
     const [projects, recent_task_activity, unread_notifications] = await Promise.all([
         safeCard(
             'client.projects',
-            // M10 — pass the resolved projectIds (instead of re-running
-            // `{ client_ids: user_id }`) so the second query is a cheap
-            // `_id`-key lookup instead of a duplicate client-side scan.
+            // M10 — pass the resolved projectIds (instead of re-running the
+            // visibility query) so the second query is a cheap `_id`-key
+            // lookup instead of a duplicate scan.
             () => computeClientProjectCards(projectIds, DASHBOARD_CLIENT_RECENT_PROJECTS),
             { total: 0, recent: [] as ClientProjectCard[] }
         ),

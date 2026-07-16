@@ -377,16 +377,25 @@ export const resolveLink = async (token: string): Promise<ResolvedShareLinkPaylo
     link.last_accessed_at = now;
     await link.save();
 
-    // Field projections strip the *enumeration vectors* — the bulk
-    // ObjectId arrays of internal users (`member_ids`, `client_ids`,
-    // `collaborator_ids`) and admin-history bookkeeping (`created_by`,
-    // `updated_by`) — from the public payload. We keep
-    // `primary_assignee_id` because the FE renders an avatar tile for
-    // "who's working on this" and the cost is one ObjectId per task,
-    // not a bulk list. This is the public surface; an authenticated
-    // user reading the same project through `/projects/:id` gets the
-    // full document.
-    const project = await Project.findById(link.project_id).select('-member_ids -client_ids -created_by');
+    // ALLOW-list, deliberately — not a deny-list.
+    //
+    // This is the public, unauthenticated surface. The projection used to
+    // be `.select('-member_ids -client_ids -created_by')`, which fails
+    // OPEN: any field later added to `Project` is exposed by default, and
+    // merely RENAMING a denied field silently un-denies it. Renaming
+    // `client_ids` → `representative_ids` would have leaked every
+    // representative's user id to anyone holding a share token — exactly
+    // the "enumeration vector" the old comment said it was blocking.
+    //
+    // An allow-list fails CLOSED: a new field is invisible here until
+    // someone consciously adds it. `company_id` and `representative_ids`
+    // are both omitted on purpose.
+    //
+    // An authenticated user reading the same project via `/projects/:id`
+    // still gets the full document — this narrowing is public-only.
+    const project = await Project.findById(link.project_id).select(
+        'name code description status is_archived start_date end_date custom_task_statuses default_status_orders created_at updated_at'
+    );
     if (!project) {
         // Project deleted while a link still exists. Treat as a stale
         // pointer — `404 SHARE_LINK_NOT_FOUND` is more honest than 500.

@@ -51,19 +51,21 @@ export type PatchCommentBody = z.infer<typeof patchCommentBodySchema>;
 
 // ─── GET /tasks/:task_id/comments ─────────────────────────────────────────
 
-export const listCommentsQuerySchema = z.object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(COMMENT_LIST_MAX_LIMIT).default(COMMENT_LIST_DEFAULT_LIMIT),
-    /**
-     * `include_deleted` is admin/manager-only; the service silently
-     * ignores it for any other role. Default off so the bell + UI never
-     * accidentally render tombstones.
-     *
-     * H4: was `z.coerce.boolean()` which coerces "false" → true.
-     * `booleanish` is fail-loud on non-canonical values.
-     */
-    include_deleted: booleanish.optional().default(false),
-}).strict();
+export const listCommentsQuerySchema = z
+    .object({
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(COMMENT_LIST_MAX_LIMIT).default(COMMENT_LIST_DEFAULT_LIMIT),
+        /**
+         * `include_deleted` is admin/manager-only; the service silently
+         * ignores it for any other role. Default off so the bell + UI never
+         * accidentally render tombstones.
+         *
+         * H4: was `z.coerce.boolean()` which coerces "false" → true.
+         * `booleanish` is fail-loud on non-canonical values.
+         */
+        include_deleted: booleanish.optional().default(false),
+    })
+    .strict();
 export type ListCommentsQuery = z.infer<typeof listCommentsQuerySchema>;
 
 // ─── Path params ──────────────────────────────────────────────────────────

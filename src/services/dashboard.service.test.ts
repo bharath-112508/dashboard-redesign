@@ -445,15 +445,24 @@ describe('buildEmployeeDashboard', () => {
 // ─── Client dashboard (V2-BE-2) ────────────────────────────────────────────
 
 describe('buildClientDashboard', () => {
+    // A `client` is company-scoped — the dashboard composes
+    // `buildProjectVisibilityFilter`, so the caller must carry a company.
+    const companyId = new Types.ObjectId();
+
     it('returns empty cards for a client on zero projects', async () => {
         const userId = new Types.ObjectId();
 
         // Both `resolveClientProjectIds` and `computeClientProjectCards`
-        // call `Project.find({ client_ids })`. Both get an empty list.
+        // query Project.find(...). Both get an empty list.
         projectFindMock.mockReturnValueOnce(queryStub([])).mockReturnValueOnce(queryStub([]));
         notificationCountMock.mockResolvedValueOnce(0);
 
-        const result = await dashboard.buildClientDashboard(userId);
+        const result = await dashboard.buildClientDashboard({
+            id: userId,
+            role: ROLES.CLIENT,
+            company_id: companyId,
+            audit: undefined,
+        });
 
         expect(result.scope).toBe('client');
         expect(result.user_id).toBe(userId.toString());
@@ -550,7 +559,12 @@ describe('buildClientDashboard', () => {
         );
         notificationCountMock.mockResolvedValueOnce(7);
 
-        const result = await dashboard.buildClientDashboard(userId);
+        const result = await dashboard.buildClientDashboard({
+            id: userId,
+            role: ROLES.CLIENT,
+            company_id: companyId,
+            audit: undefined,
+        });
 
         expect(result.projects.total).toBe(2);
         expect(result.projects.recent).toHaveLength(2);
@@ -601,7 +615,12 @@ describe('buildClientDashboard', () => {
         taskFindMock.mockReturnValueOnce(queryStub([]));
         notificationCountMock.mockResolvedValueOnce(0);
 
-        const result = await dashboard.buildClientDashboard(userId);
+        const result = await dashboard.buildClientDashboard({
+            id: userId,
+            role: ROLES.CLIENT,
+            company_id: companyId,
+            audit: undefined,
+        });
 
         // Projects card fell back to the empty shape (NOT a 500).
         expect(result.projects).toEqual({ total: 0, recent: [] });

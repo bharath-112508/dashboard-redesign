@@ -81,10 +81,7 @@ describe('slackWebhookMiddleware', () => {
 
     it('rejects with 401 when signature header is missing', async () => {
         const app = buildApp();
-        const res = await request(app)
-            .post('/slack/echo')
-            .set('Content-Type', 'application/json')
-            .send('{}');
+        const res = await request(app).post('/slack/echo').set('Content-Type', 'application/json').send('{}');
         expect(res.status).toBe(401);
     });
 

@@ -5,9 +5,9 @@ import { createRequire } from 'node:module';
 // `tsx` ESM runtime. Re-introduce `require` via `createRequire` — same
 // runtime semantics as Node's classic loader, scoped to this module.
 const require = createRequire(import.meta.url);
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+
 const pdfmake = require('pdfmake');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+
 const vfsFonts = require('pdfmake/build/vfs_fonts.js') as Record<string, string>;
 
 import type { PdfGenerator } from './types.js';

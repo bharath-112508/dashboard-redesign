@@ -83,10 +83,7 @@ interface ActionsBlock {
 }
 export type LeaveBlock = HeaderBlock | SectionBlock | ContextBlock | ActionsBlock;
 
-export const buildLeaveMessageBlocks = (
-    leave: LeaveBlockInput,
-    args: BuilderArgs,
-): LeaveBlock[] => {
+export const buildLeaveMessageBlocks = (leave: LeaveBlockInput, args: BuilderArgs): LeaveBlock[] => {
     const range =
         leave.start_date === leave.end_date
             ? `${leave.start_date}${leave.is_half_day ? ' (half day)' : ''}`

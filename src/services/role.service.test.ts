@@ -621,14 +621,14 @@ describe('assignRolesToUser', () => {
             findChain([
                 { _id: employeeRoleId, key: SYSTEM_ROLE_KEYS.EMPLOYEE },
                 { _id: teamLeadRoleId, key: SYSTEM_ROLE_KEYS.TEAM_LEAD },
-            ]),
+            ])
         );
         userUpdateOneMock.mockResolvedValueOnce({ matchedCount: 1, modifiedCount: 1 });
 
         await service.assignRolesToUser(
             userId,
             { role_ids: [employeeRoleId.toString(), teamLeadRoleId.toString()] },
-            actorId,
+            actorId
         );
 
         const updateArg = userUpdateOneMock.mock.calls[0][1] as { $set: Record<string, unknown> };

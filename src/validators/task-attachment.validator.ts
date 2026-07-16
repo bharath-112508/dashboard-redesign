@@ -54,19 +54,21 @@ export type FinalizeAttachmentBody = z.infer<typeof finalizeAttachmentBodySchema
 
 // ─── GET /tasks/:task_id/attachments ─────────────────────────────────────
 
-export const listAttachmentsQuerySchema = z.object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(ATTACHMENT_LIST_MAX_LIMIT).default(ATTACHMENT_LIST_DEFAULT_LIMIT),
-    /**
-     * Mirrors the comments endpoint — admin/manager can opt into seeing
-     * soft-deleted rows for moderation tooling. Default off; service
-     * silently ignores for non-admin/manager.
-     *
-     * H4: was `z.coerce.boolean()` which coerces "false" → true.
-     * `booleanish` is fail-loud on non-canonical values.
-     */
-    include_deleted: booleanish.optional().default(false),
-}).strict();
+export const listAttachmentsQuerySchema = z
+    .object({
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(ATTACHMENT_LIST_MAX_LIMIT).default(ATTACHMENT_LIST_DEFAULT_LIMIT),
+        /**
+         * Mirrors the comments endpoint — admin/manager can opt into seeing
+         * soft-deleted rows for moderation tooling. Default off; service
+         * silently ignores for non-admin/manager.
+         *
+         * H4: was `z.coerce.boolean()` which coerces "false" → true.
+         * `booleanish` is fail-loud on non-canonical values.
+         */
+        include_deleted: booleanish.optional().default(false),
+    })
+    .strict();
 export type ListAttachmentsQuery = z.infer<typeof listAttachmentsQuerySchema>;
 
 // ─── Path params ─────────────────────────────────────────────────────────

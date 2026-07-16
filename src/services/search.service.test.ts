@@ -253,10 +253,13 @@ describe('search (client)', () => {
         expect(userFindMock).not.toHaveBeenCalled();
     });
 
-    it('still searches projects/sprints/tasks scoped to client_ids', async () => {
+    it('still searches projects/sprints/tasks scoped to the client company', async () => {
         const client = clientCaller();
+        const clientCompanyId = new Types.ObjectId();
         const visibleId = new Types.ObjectId();
-        buildProjectVisibilityFilterMock.mockReturnValue({ client_ids: client.id });
+        // A `client` is company-scoped; search composes whatever
+        // buildProjectVisibilityFilter returns rather than rolling its own.
+        buildProjectVisibilityFilterMock.mockReturnValue({ company_id: clientCompanyId });
         projectFindMock
             .mockReturnValueOnce(queryStub([{ _id: visibleId }])) // resolveVisibleProjectIds
             .mockReturnValueOnce(queryStub([])); // projects bucket
@@ -264,7 +267,7 @@ describe('search (client)', () => {
         await svc.search(baseQuery() as never, client);
 
         const projectsBucketFilter = projectFindMock.mock.calls[1][0] as Record<string, unknown>;
-        expect(projectsBucketFilter.client_ids).toEqual(client.id);
+        expect(projectsBucketFilter.company_id).toEqual(clientCompanyId);
     });
 });
 

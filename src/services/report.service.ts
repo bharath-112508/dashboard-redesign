@@ -134,20 +134,24 @@ export const buildBillingReport = async (query: BillingReportQuery): Promise<Bil
     // M14 — `client_id` was previously accepted by the validator but
     // ignored by the service, so a caller passing it got the same data
     // as one omitting it. The billing report has no row-level
-    // `client_id` to filter on (clients are external, they don't log
-    // timesheets), so the meaningful interpretation is a gate: assert
-    // the project actually belongs to that client. If not, refuse —
-    // the report is per-client meaningless. The check runs before any
+    // company field to filter on (client-side users are external, they
+    // don't log timesheets), so the meaningful interpretation is a gate:
+    // assert the project actually belongs to that company. If not, refuse —
+    // the report is per-company meaningless. The check runs before any
     // aggregation so an invalid pairing fails fast.
+    //
+    // Was `client_id` (a client USER, checked against `client_ids`).
+    // Projects belong to a COMPANY now, so the gate is a single equality
+    // on `company_id` rather than array containment.
     const projectSelectFields: string[] = ['_id', 'name'];
-    if (query.client_id) projectSelectFields.push('client_ids');
+    if (query.company_id) projectSelectFields.push('company_id');
     const project = await Project.findById(projectId)
         .select(projectSelectFields.join(' '))
-        .lean<{ _id: Types.ObjectId; name: string; client_ids?: Types.ObjectId[] } | null>();
+        .lean<{ _id: Types.ObjectId; name: string; company_id?: Types.ObjectId | null } | null>();
     if (!project) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
-    if (query.client_id) {
-        const clientId = new Types.ObjectId(query.client_id);
-        const onProject = (project.client_ids ?? []).some((id) => id.equals(clientId));
+    if (query.company_id) {
+        const companyId = new Types.ObjectId(query.company_id);
+        const onProject = Boolean(project.company_id && project.company_id.equals(companyId));
         if (!onProject) {
             // Same shape as the not-found path — operationally there's
             // nothing to report for this (project, client) pair.

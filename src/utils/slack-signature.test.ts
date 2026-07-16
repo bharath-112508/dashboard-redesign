@@ -26,9 +26,7 @@ describe('verifySlackSignature', () => {
     it('returns true for a valid signature within the replay window', () => {
         const ts = Math.floor(Date.now() / 1000).toString();
         const sig = signFor(ts, validBody);
-        expect(
-            verifySlackSignature({ secret: SECRET, signature: sig, timestamp: ts, body: validBody })
-        ).toBe(true);
+        expect(verifySlackSignature({ secret: SECRET, signature: sig, timestamp: ts, body: validBody })).toBe(true);
     });
 
     it('returns false when the body is tampered', () => {
@@ -48,17 +46,13 @@ describe('verifySlackSignature', () => {
         // 6 minutes in the past — beyond the 5-minute replay window.
         const ts = (Math.floor(Date.now() / 1000) - 6 * 60).toString();
         const sig = signFor(ts, validBody);
-        expect(
-            verifySlackSignature({ secret: SECRET, signature: sig, timestamp: ts, body: validBody })
-        ).toBe(false);
+        expect(verifySlackSignature({ secret: SECRET, signature: sig, timestamp: ts, body: validBody })).toBe(false);
     });
 
     it('returns false for missing or malformed signature headers', () => {
         const ts = Math.floor(Date.now() / 1000).toString();
         // Missing entirely
-        expect(
-            verifySlackSignature({ secret: SECRET, signature: '', timestamp: ts, body: validBody })
-        ).toBe(false);
+        expect(verifySlackSignature({ secret: SECRET, signature: '', timestamp: ts, body: validBody })).toBe(false);
         // Wrong scheme — doesn't start with `v0=`
         expect(
             verifySlackSignature({

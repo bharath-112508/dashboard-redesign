@@ -4,10 +4,7 @@ import * as ctrl from '../controllers/push.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
-import {
-    subscribePushBodySchema,
-    unsubscribePushBodySchema,
-} from '../validators/push-subscription.validator.js';
+import { subscribePushBodySchema, unsubscribePushBodySchema } from '../validators/push-subscription.validator.js';
 
 /**
  * Web Push routes (V2-BE-10).
@@ -21,11 +18,7 @@ import {
 const router = Router();
 router.use(authenticate);
 
-router.post(
-    '/subscribe',
-    validate({ body: subscribePushBodySchema }),
-    asyncHandler(ctrl.postSubscribe)
-);
+router.post('/subscribe', validate({ body: subscribePushBodySchema }), asyncHandler(ctrl.postSubscribe));
 
 // M21 — `POST /push/unsubscribe` is the canonical revoke verb.
 // `DELETE /push/subscribe` is kept as an alias for in-flight clients
@@ -34,16 +27,8 @@ router.post(
 // is fragile across fetch implementations (Service Worker `fetch`,
 // some CDN edges, certain interceptors silently strip DELETE bodies),
 // which is what motivated the swap.
-router.post(
-    '/unsubscribe',
-    validate({ body: unsubscribePushBodySchema }),
-    asyncHandler(ctrl.deleteSubscribe)
-);
+router.post('/unsubscribe', validate({ body: unsubscribePushBodySchema }), asyncHandler(ctrl.deleteSubscribe));
 
-router.delete(
-    '/subscribe',
-    validate({ body: unsubscribePushBodySchema }),
-    asyncHandler(ctrl.deleteSubscribe)
-);
+router.delete('/subscribe', validate({ body: unsubscribePushBodySchema }), asyncHandler(ctrl.deleteSubscribe));
 
 export default router;

@@ -13,8 +13,8 @@ import {
     listProjectsQuerySchema,
     patchDefaultStatusOrdersBodySchema,
     patchProjectBodySchema,
-    projectClientIdParamSchema,
-    projectClientsBulkBodySchema,
+    projectRepresentativeIdParamSchema,
+    projectRepresentativesBulkBodySchema,
     projectIdParamSchema,
     projectMemberIdParamSchema,
     projectMembersBulkBodySchema,
@@ -107,28 +107,30 @@ router.delete(
 // ─── Clients: /projects/:id/clients ──────────────────────────────────────
 
 router.get(
-    '/:id/clients',
+    '/:id/representatives',
     requirePermission(PERMISSIONS.PROJECT_READ),
     validate({ params: projectIdParamSchema }),
-    asyncHandler(ctrl.getClients)
+    asyncHandler(ctrl.getRepresentatives)
 );
 
 router.post(
-    '/:id/clients',
+    '/:id/representatives',
     // G1 — granular client-roster permission. Manager holds it,
     // Team Lead does NOT (per role-bundle catalog). Pre-G1 the gate
     // was `PROJECT_WRITE`, which Team Lead also held — so Team Lead
     // could mutate the client roster despite the bundle's intent.
+    // A `client` also holds this, but only for their OWN company's
+    // projects — RBAC can't express that, so the service scope-checks.
     requirePermission(PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE),
-    validate({ params: projectIdParamSchema, body: projectClientsBulkBodySchema }),
-    asyncHandler(ctrl.postClients)
+    validate({ params: projectIdParamSchema, body: projectRepresentativesBulkBodySchema }),
+    asyncHandler(ctrl.postRepresentatives)
 );
 
 router.delete(
-    '/:id/clients/:user_id',
+    '/:id/representatives/:user_id',
     requirePermission(PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE),
-    validate({ params: projectClientIdParamSchema }),
-    asyncHandler(ctrl.deleteClient)
+    validate({ params: projectRepresentativeIdParamSchema }),
+    asyncHandler(ctrl.deleteRepresentative)
 );
 
 // ─── Custom statuses: /projects/:id/custom-statuses ──────────────────────

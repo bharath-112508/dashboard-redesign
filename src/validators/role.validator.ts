@@ -82,12 +82,14 @@ export type PatchRoleBody = z.infer<typeof patchRoleBodySchema>;
 
 // ─── GET /roles ─────────────────────────────────────────────────────────
 
-export const listRolesQuerySchema = z.object({
-    is_system: z
-        .union([z.literal('true'), z.literal('false'), z.boolean()])
-        .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
-        .optional(),
-}).strict();
+export const listRolesQuerySchema = z
+    .object({
+        is_system: z
+            .union([z.literal('true'), z.literal('false'), z.boolean()])
+            .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
+            .optional(),
+    })
+    .strict();
 
 export type ListRolesQuery = z.infer<typeof listRolesQuerySchema>;
 

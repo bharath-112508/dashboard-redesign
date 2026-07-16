@@ -26,14 +26,15 @@ vi.mock('../config/server.config.js', async (orig) => {
     return { ...real, SLACK_SIGNING_SECRET: SIGNING_SECRET };
 });
 
-const { approveLeaveMock, rejectLeaveMock, findOneUserMock, findByIdAndUpdateUserMock, settingsMock } =
-    vi.hoisted(() => ({
+const { approveLeaveMock, rejectLeaveMock, findOneUserMock, findByIdAndUpdateUserMock, settingsMock } = vi.hoisted(
+    () => ({
         approveLeaveMock: vi.fn(),
         rejectLeaveMock: vi.fn(),
         findOneUserMock: vi.fn(),
         findByIdAndUpdateUserMock: vi.fn(),
         settingsMock: vi.fn(),
-    }));
+    })
+);
 
 vi.mock('../services/leave-request.service.js', () => ({
     approveLeave: approveLeaveMock,
@@ -59,10 +60,7 @@ const { buildTestApp } = await import('./_helpers/build-app.js');
 
 const signed = (body: string) => {
     const ts = Math.floor(Date.now() / 1000).toString();
-    const sig = `v0=${crypto
-        .createHmac('sha256', SIGNING_SECRET)
-        .update(`v0:${ts}:${body}`)
-        .digest('hex')}`;
+    const sig = `v0=${crypto.createHmac('sha256', SIGNING_SECRET).update(`v0:${ts}:${body}`).digest('hex')}`;
     return { ts, sig };
 };
 

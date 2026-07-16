@@ -10,9 +10,9 @@ afterEach(() => {
 
 describe('openSlackModal', () => {
     it('returns true and posts to views.open with trigger_id + view', async () => {
-        const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-            new Response(JSON.stringify({ ok: true }), { status: 200 })
-        );
+        const fetchMock = vi
+            .spyOn(globalThis, 'fetch')
+            .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
         const view = { type: 'modal' };
         const ok = await openSlackModal(ctx, 'trig-123', view);
         expect(ok).toBe(true);

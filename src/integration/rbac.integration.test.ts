@@ -195,13 +195,13 @@ describe('integration: RBAC route gates', () => {
 
     // ─── PROJECT_CLIENTS_WRITE — Team Lead exclusion (G1) ─────────────
 
-    it('G1 — POST /projects/:id/clients requires PROJECT_CLIENTS_WRITE; team_lead does NOT have it', async () => {
+    it('G1 — POST /projects/:id/representatives requires PROJECT_REPRESENTATIVES_WRITE; team_lead does NOT have it', async () => {
         // The G1 finding: team_lead has project.write but explicitly
-        // NOT project.clients_write per the role bundle. Pin that
+        // NOT project.representatives_write per the role bundle. Pin that
         // even with project.write, a team_lead can't mutate the
         // client roster.
         const res = await request(app)
-            .post(`/api/v1/projects/${new Types.ObjectId().toString()}/clients`)
+            .post(`/api/v1/projects/${new Types.ObjectId().toString()}/representatives`)
             .set('Authorization', `Bearer ${issueToken(['project.write'])}`)
             .send({ add: [], remove: [] });
 

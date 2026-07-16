@@ -24,9 +24,7 @@ describe('buildLeaveMessageBlocks', () => {
         const blocks = buildLeaveMessageBlocks(leave, { status: 'pending' });
         const actions = blocks.find((b) => b.type === 'actions');
         expect(actions).toBeDefined();
-        const ids = (actions as { elements: Array<{ action_id: string }> }).elements.map(
-            (e) => e.action_id
-        );
+        const ids = (actions as { elements: Array<{ action_id: string }> }).elements.map((e) => e.action_id);
         expect(ids).toEqual([`approve_leave_${leave._id}`, `reject_leave_${leave._id}`]);
     });
 

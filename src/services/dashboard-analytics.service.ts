@@ -8,6 +8,7 @@ import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { User } from '../models/user.model.js';
 import { Project } from '../models/project.model.js';
+import { buildProjectVisibilityFilter, type ProjectCaller } from './project.service.js';
 import { Task } from '../models/task.model.js';
 import { BillingRate } from '../models/billing-rate.model.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
@@ -789,12 +790,16 @@ export const buildEmployeeAnalytics = async (
 };
 
 export const buildClientAnalytics = async (
-    userId: Types.ObjectId,
+    caller: ProjectCaller,
     held: Held,
     rangeKey: DashboardRangeKey
 ): Promise<AnalyticsPayload> => {
     const range = resolveDashboardRange(rangeKey);
-    const projectRows = await Project.find({ client_ids: userId })
+    // Composed, not hard-coded: `client` is company-scoped and
+    // `representative` is roster-scoped, and that rule lives in
+    // project.service. A hard-coded filter here would silently return
+    // zero projects the moment the field changed.
+    const projectRows = await Project.find(buildProjectVisibilityFilter(caller))
         .select({ _id: 1 })
         .lean<{ _id: Types.ObjectId }[]>()
         .catch((err: unknown) => {

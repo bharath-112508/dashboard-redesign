@@ -42,26 +42,28 @@ export type PatchOfficeLocationBody = z.infer<typeof patchOfficeLocationBodySche
 
 // ─── GET /office-locations ────────────────────────────────────────────────
 
-export const listOfficeLocationsQuerySchema = z.object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
-    // Explicit narrowing: `is_active=false` lists only the deleted bucket
-    // (privileged surfaces), `is_active=true` lists only the active bucket.
-    is_active: z
-        .union([z.literal('true'), z.literal('false'), z.boolean()])
-        .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
-        .optional(),
-    // BUG-002 — when true, include soft-deleted (is_active=false) rows.
-    // Default false → active only. Controller scrubs to false when the
-    // caller lacks OFFICE_LOCATION_WRITE.
-    show_deleted: z
-        .union([z.boolean(), z.literal('true'), z.literal('false')])
-        .transform((v) => v === true || v === 'true')
-        .optional()
-        .default(false),
-    // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
-    q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
-}).strict();
+export const listOfficeLocationsQuerySchema = z
+    .object({
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(100).default(20),
+        // Explicit narrowing: `is_active=false` lists only the deleted bucket
+        // (privileged surfaces), `is_active=true` lists only the active bucket.
+        is_active: z
+            .union([z.literal('true'), z.literal('false'), z.boolean()])
+            .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
+            .optional(),
+        // BUG-002 — when true, include soft-deleted (is_active=false) rows.
+        // Default false → active only. Controller scrubs to false when the
+        // caller lacks OFFICE_LOCATION_WRITE.
+        show_deleted: z
+            .union([z.boolean(), z.literal('true'), z.literal('false')])
+            .transform((v) => v === true || v === 'true')
+            .optional()
+            .default(false),
+        // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
+        q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
+    })
+    .strict();
 
 export type ListOfficeLocationsQuery = z.infer<typeof listOfficeLocationsQuerySchema>;
 

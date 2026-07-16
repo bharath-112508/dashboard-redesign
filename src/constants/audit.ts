@@ -154,7 +154,7 @@ export const AUDIT_ACTIONS = {
     PROJECT_UPDATE: 'project.update',
     PROJECT_ARCHIVE: 'project.archive',
     PROJECT_MEMBERS_UPDATE: 'project.members_update',
-    PROJECT_CLIENTS_UPDATE: 'project.clients_update',
+    PROJECT_REPRESENTATIVES_UPDATE: 'project.representatives_update',
     PROJECT_CUSTOM_STATUS_CREATE: 'project.custom_status_create',
     PROJECT_CUSTOM_STATUS_UPDATE: 'project.custom_status_update',
     PROJECT_CUSTOM_STATUS_DELETE: 'project.custom_status_delete',

@@ -128,7 +128,7 @@ const assertMentionsBelongToProject = (mentions: Types.ObjectId[], project: Proj
 
     const projectUserSet = new Set<string>();
     for (const id of project.member_ids) projectUserSet.add(String(id));
-    for (const id of project.client_ids) projectUserSet.add(String(id));
+    for (const id of project.representative_ids) projectUserSet.add(String(id));
 
     // De-dupe while preserving order — a body that mentions @alice twice
     // shouldn't fan out two notifications.

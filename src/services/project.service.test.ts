@@ -101,9 +101,26 @@ const employeeCaller = (id: Types.ObjectId) => ({
     audit: undefined,
 });
 
-const clientCaller = (id: Types.ObjectId) => ({
+/**
+ * A `client` is the COMPANY-level role — scoped by `company_id`, not by
+ * roster containment. `authenticate` sets `company_id` from the DB row.
+ */
+const clientCaller = (id: Types.ObjectId, companyId: Types.ObjectId = new Types.ObjectId()) => ({
     id,
     role: ROLES.CLIENT,
+    company_id: companyId,
+    audit: undefined,
+});
+
+/**
+ * A `representative` is the project-scoped client-side role — visible only
+ * on projects whose `representative_ids` contain them. They carry a
+ * `company_id` too, but it must NOT widen their access.
+ */
+const representativeCaller = (id: Types.ObjectId, companyId: Types.ObjectId = new Types.ObjectId()) => ({
+    id,
+    role: ROLES.REPRESENTATIVE,
+    company_id: companyId,
     audit: undefined,
 });
 
@@ -137,7 +154,8 @@ interface FakeProject {
     status: string;
     is_archived: boolean;
     member_ids: Types.ObjectId[];
-    client_ids: Types.ObjectId[];
+    company_id: Types.ObjectId | null;
+    representative_ids: Types.ObjectId[];
     custom_task_statuses: FakeSubArray<{
         _id: Types.ObjectId;
         key: string;
@@ -162,7 +180,8 @@ const makeProject = (overrides: Partial<FakeProject> = {}): FakeProject => {
         status: 'active',
         is_archived: false,
         member_ids: [],
-        client_ids: [],
+        company_id: null,
+        representative_ids: [],
         custom_task_statuses: makeSubArray(),
         created_by: new Types.ObjectId(),
         save: vi.fn(),
@@ -178,7 +197,8 @@ const makeProject = (overrides: Partial<FakeProject> = {}): FakeProject => {
                 status: this.status,
                 is_archived: this.is_archived,
                 member_ids: this.member_ids.map((m) => m.toString()),
-                client_ids: this.client_ids.map((c) => c.toString()),
+                company_id: this.company_id ? this.company_id.toString() : null,
+                representative_ids: this.representative_ids.map((c) => c.toString()),
                 custom_task_statuses: this.custom_task_statuses.map((s) => ({
                     id: s._id.toString(),
                     key: s.key,
@@ -230,7 +250,7 @@ describe('createProject', () => {
                     start_date: '2026-01-01',
                     end_date: null,
                     member_ids: [],
-                    client_ids: [],
+                    representative_ids: [],
                     custom_task_statuses: [],
                 },
                 adminCaller()
@@ -252,7 +272,7 @@ describe('createProject', () => {
                     start_date: '2026-01-01',
                     end_date: null,
                     member_ids: [goodId.toString(), badId.toString()],
-                    client_ids: [],
+                    representative_ids: [],
                     custom_task_statuses: [],
                 },
                 adminCaller()
@@ -266,13 +286,15 @@ describe('createProject', () => {
         expect(projectCreateMock).not.toHaveBeenCalled();
     });
 
-    it('rejects client_ids that are not active client users with INVALID_PROJECT_CLIENT_ROLE', async () => {
-        const goodClient = new Types.ObjectId();
-        const wrongRole = new Types.ObjectId();
+    it('rejects representative_ids that do not belong to the project company', async () => {
+        const companyId = new Types.ObjectId();
+        const goodRep = new Types.ObjectId();
+        const otherCompanyRep = new Types.ObjectId();
         // members array is empty → validateMemberCandidates short-circuits
-        // without calling User.find. Only the client validation hits the
-        // mock, returning just the good client.
-        userFindMock.mockReturnValueOnce(mkUserChain([{ _id: goodClient, role: ROLES.CLIENT }]));
+        // without calling User.find. Only the representative validation hits
+        // the mock; the query filters on company_id, so the rep belonging to
+        // a DIFFERENT company simply isn't returned.
+        userFindMock.mockReturnValueOnce(mkUserChain([{ _id: goodRep, role: ROLES.REPRESENTATIVE }]));
 
         await expect(
             svc.createProject(
@@ -283,14 +305,15 @@ describe('createProject', () => {
                     start_date: '2026-01-01',
                     end_date: null,
                     member_ids: [],
-                    client_ids: [goodClient.toString(), wrongRole.toString()],
+                    company_id: companyId.toString(),
+                    representative_ids: [goodRep.toString(), otherCompanyRep.toString()],
                     custom_task_statuses: [],
                 },
                 adminCaller()
             )
         ).rejects.toMatchObject({
             code: ERROR_CODES.INVALID_PROJECT_CLIENT_ROLE,
-            details: { invalid_user_ids: [wrongRole.toString()] },
+            details: { invalid_user_ids: [otherCompanyRep.toString()] },
         });
     });
 
@@ -307,7 +330,7 @@ describe('createProject', () => {
                 start_date: '2026-01-01',
                 end_date: null,
                 member_ids: [],
-                client_ids: [],
+                representative_ids: [],
                 custom_task_statuses: [],
             },
             adminCaller()
@@ -355,11 +378,33 @@ describe('listProjects — visibility filter', () => {
         expect(projectFindMock).toHaveBeenCalledWith({ member_ids: empId });
     });
 
-    it('client filters by client_ids = caller.id', async () => {
+    it('client filters by company_id — every project of their company', async () => {
+        // NOT roster containment: a Client must see a project they aren't
+        // rostered on, or they could never staff a newly created one.
         stubFindChain();
-        const cliId = new Types.ObjectId();
-        await svc.listProjects({ page: 1, limit: 20 }, clientCaller(cliId));
-        expect(projectFindMock).toHaveBeenCalledWith({ client_ids: cliId });
+        const companyId = new Types.ObjectId();
+        await svc.listProjects({ page: 1, limit: 20 }, clientCaller(new Types.ObjectId(), companyId));
+        expect(projectFindMock).toHaveBeenCalledWith({ company_id: companyId });
+    });
+
+    it('representative filters by representative_ids = caller.id', async () => {
+        stubFindChain();
+        const repId = new Types.ObjectId();
+        await svc.listProjects({ page: 1, limit: 20 }, representativeCaller(repId));
+        expect(projectFindMock).toHaveBeenCalledWith({ representative_ids: repId });
+    });
+
+    it('a client with NO company sees nothing rather than everything', async () => {
+        // The dangerous failure mode: falling back to `{}` would hand a
+        // company-less client the entire org.
+        stubFindChain();
+        await svc.listProjects(
+            { page: 1, limit: 20 },
+            { id: new Types.ObjectId(), role: ROLES.CLIENT, company_id: undefined, audit: undefined }
+        );
+        const calledWith = projectFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(calledWith).not.toEqual({});
+        expect(calledWith._id).toBeDefined();
     });
 
     it('combines status / is_archived / q on top of the visibility filter', async () => {
@@ -407,12 +452,42 @@ describe('getProject — read access', () => {
         expect(out).toMatchObject({ id: proj._id.toString() });
     });
 
-    it('client NOT in client_ids gets 403 FORBIDDEN', async () => {
-        const proj = makeProject({ client_ids: [new Types.ObjectId()] });
+    it('client of ANOTHER company gets 403 FORBIDDEN', async () => {
+        const proj = makeProject({ company_id: new Types.ObjectId() });
         projectFindByIdMock.mockResolvedValueOnce(proj);
-        await expect(svc.getProject(proj._id, clientCaller(new Types.ObjectId()))).rejects.toMatchObject({
-            code: ERROR_CODES.FORBIDDEN,
-        });
+        await expect(
+            svc.getProject(proj._id, clientCaller(new Types.ObjectId(), new Types.ObjectId()))
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it('client of the project company passes WITHOUT being on the roster', async () => {
+        // Mirrors the list filter. If assertCallerCanRead and
+        // buildVisibilityFilter ever disagree, a list and a get would
+        // answer differently for the same caller.
+        const companyId = new Types.ObjectId();
+        const proj = makeProject({ company_id: companyId, representative_ids: [] });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        const out = await svc.getProject(proj._id, clientCaller(new Types.ObjectId(), companyId));
+        expect(out).toMatchObject({ id: proj._id.toString() });
+    });
+
+    it('representative NOT in representative_ids gets 403 FORBIDDEN', async () => {
+        const companyId = new Types.ObjectId();
+        // Same company — but not rostered. A representative is roster-scoped,
+        // so company membership alone must NOT grant access.
+        const proj = makeProject({ company_id: companyId, representative_ids: [new Types.ObjectId()] });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        await expect(
+            svc.getProject(proj._id, representativeCaller(new Types.ObjectId(), companyId))
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it('representative IN representative_ids passes', async () => {
+        const repId = new Types.ObjectId();
+        const proj = makeProject({ company_id: new Types.ObjectId(), representative_ids: [repId] });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        const out = await svc.getProject(proj._id, representativeCaller(repId));
+        expect(out).toMatchObject({ id: proj._id.toString() });
     });
 
     it('missing project → 404 PROJECT_NOT_FOUND', async () => {
@@ -520,18 +595,62 @@ describe('updateProjectMembers', () => {
     });
 });
 
-// ─── updateProjectClients (mirror of members, with role=client check) ────
+// ─── updateProjectRepresentatives (mirror of members + roster invariant) ──
 
-describe('updateProjectClients', () => {
-    it('rejects clients that are not role=client', async () => {
-        const proj = makeProject();
+describe('updateProjectRepresentatives', () => {
+    it('rejects a candidate who is not an active client-side user of this company', async () => {
+        const proj = makeProject({ company_id: new Types.ObjectId() });
         projectFindByIdMock.mockResolvedValueOnce(proj);
         const wrongRole = new Types.ObjectId();
         userFindMock.mockReturnValueOnce(mkUserChain([])); // no rows back
 
         await expect(
-            svc.updateProjectClients(proj._id, { add: [wrongRole.toString()], remove: [] }, adminCaller())
+            svc.updateProjectRepresentatives(proj._id, { add: [wrongRole.toString()], remove: [] }, adminCaller())
         ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PROJECT_CLIENT_ROLE });
+    });
+
+    it('refuses to roster anyone onto a project with no client company', async () => {
+        const proj = makeProject({ company_id: null });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await expect(
+            svc.updateProjectRepresentatives(
+                proj._id,
+                { add: [new Types.ObjectId().toString()], remove: [] },
+                adminCaller()
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PROJECT_CLIENT_ROLE });
+    });
+
+    it("scopes the candidate query to THIS project's company", async () => {
+        // The load-bearing half of the invariant: without the company
+        // filter, company B's person could be rostered onto company A's
+        // project.
+        const companyId = new Types.ObjectId();
+        const rep = new Types.ObjectId();
+        const proj = makeProject({ company_id: companyId });
+        projectFindByIdMock.mockResolvedValueOnce(proj).mockResolvedValueOnce(proj);
+        userFindMock.mockReturnValueOnce(mkUserChain([{ _id: rep, role: ROLES.REPRESENTATIVE }]));
+        projectUpdateOneMock.mockResolvedValue({ modifiedCount: 1 });
+
+        await svc.updateProjectRepresentatives(proj._id, { add: [rep.toString()], remove: [] }, adminCaller());
+
+        expect(userFindMock).toHaveBeenCalledWith(expect.objectContaining({ 'client_profile.company_id': companyId }));
+    });
+
+    it('a client of ANOTHER company cannot staff this project', async () => {
+        // RBAC says a Client "may assign representatives"; it does not say
+        // "anywhere". That scope check lives in the service.
+        const proj = makeProject({ company_id: new Types.ObjectId() });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await expect(
+            svc.updateProjectRepresentatives(
+                proj._id,
+                { add: [new Types.ObjectId().toString()], remove: [] },
+                clientCaller(new Types.ObjectId(), new Types.ObjectId())
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
     });
 });
 
@@ -662,7 +781,7 @@ describe('listProjects — task-completion rollup', () => {
             status: 'active',
             is_archived: false,
             member_ids: [],
-            client_ids: [],
+            representative_ids: [],
             custom_task_statuses: cts,
             toJSON() {
                 return {

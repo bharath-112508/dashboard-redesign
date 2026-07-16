@@ -2,6 +2,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Types } from 'mongoose';
 
+import { ROLES } from '../constants/roles.js';
+
 vi.mock('../models/attendance-record.model.js', () => ({ AttendanceRecord: { aggregate: vi.fn() } }));
 vi.mock('../models/leave-request.model.js', () => ({
     LeaveRequest: { aggregate: vi.fn(), find: vi.fn(), countDocuments: vi.fn() },
@@ -351,10 +353,18 @@ describe('buildClientAnalytics — zero-project scope', () => {
         vi.mocked(Project.find).mockReturnValue(projectFindStub as never);
 
         const userId = new Types.ObjectId();
-        const out = await buildClientAnalytics(userId, ['project.read', 'task.read'], 'month');
+        const companyId = new Types.ObjectId();
+        const out = await buildClientAnalytics(
+            { id: userId, role: ROLES.CLIENT, company_id: companyId, audit: undefined },
+            ['project.read', 'task.read'],
+            'month'
+        );
 
         // Project.find must be called with the tenant-isolation filter.
-        expect(vi.mocked(Project.find)).toHaveBeenCalledWith({ client_ids: userId });
+        // A `client` is COMPANY-scoped, so this is `company_id`, not roster
+        // containment — and it comes from `buildProjectVisibilityFilter`
+        // rather than being hard-coded here.
+        expect(vi.mocked(Project.find)).toHaveBeenCalledWith({ company_id: companyId });
 
         // Task.aggregate must NOT be called (no projects → no task query).
         expect(vi.mocked(Task.aggregate)).not.toHaveBeenCalled();

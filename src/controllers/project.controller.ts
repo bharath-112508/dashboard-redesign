@@ -11,7 +11,7 @@ import type {
     PatchCustomStatusBody,
     PatchDefaultStatusOrdersBody,
     PatchProjectBody,
-    ProjectClientsBulkBody,
+    ProjectRepresentativesBulkBody,
     ProjectMembersBulkBody,
 } from '../validators/project.validator.js';
 
@@ -68,24 +68,24 @@ export const deleteMember = async (req: Request, res: Response): Promise<Respons
     return ok(res, data);
 };
 
-// ─── Clients ─────────────────────────────────────────────────────────────
+// ─── Representatives (the project's client-side roster) ──────────────────
 
-export const getClients = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.listProjectClients(idOf(req), projectCallerFrom(req));
+export const getRepresentatives = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.listProjectRepresentatives(idOf(req), projectCallerFrom(req));
     return ok(res, data);
 };
 
-export const postClients = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.updateProjectClients(
+export const postRepresentatives = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.updateProjectRepresentatives(
         idOf(req),
-        req.body as ProjectClientsBulkBody,
+        req.body as ProjectRepresentativesBulkBody,
         projectCallerFrom(req)
     );
     return ok(res, data);
 };
 
-export const deleteClient = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.removeProjectClient(idOf(req), idOf(req, 'user_id'), projectCallerFrom(req));
+export const deleteRepresentative = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.removeProjectRepresentative(idOf(req), idOf(req, 'user_id'), projectCallerFrom(req));
     return ok(res, data);
 };
 

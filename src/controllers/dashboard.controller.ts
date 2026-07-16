@@ -5,6 +5,7 @@ import * as service from '../services/dashboard.service.js';
 import * as analytics from '../services/dashboard-analytics.service.js';
 import { ok } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
+import { projectCallerFrom } from '../utils/caller.js';
 import type { DashboardAnalyticsQuery } from '../validators/dashboard.validator.js';
 
 const callerId = (req: Request): Types.ObjectId => {
@@ -50,7 +51,7 @@ export const getEmployee = async (req: Request, res: Response): Promise<Response
 // ─── GET /dashboard/client (V2-BE-2) ──────────────────────────────────────
 
 export const getClient = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.buildClientDashboard(callerId(req));
+    const data = await service.buildClientDashboard(projectCallerFrom(req));
     return ok(res, data);
 };
 
@@ -84,4 +85,4 @@ export const getEmployeeAnalytics = async (req: Request, res: Response): Promise
 // ─── GET /dashboard/client/analytics ─────────────────────────────────────
 
 export const getClientAnalytics = async (req: Request, res: Response): Promise<Response> =>
-    ok(res, await analytics.buildClientAnalytics(callerId(req), heldPerms(req), rangeKey(req)));
+    ok(res, await analytics.buildClientAnalytics(projectCallerFrom(req), heldPerms(req), rangeKey(req)));

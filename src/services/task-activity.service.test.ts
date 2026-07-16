@@ -246,7 +246,7 @@ describe('listActivities', () => {
         const taskId = new Types.ObjectId();
         const actorId = new Types.ObjectId();
         stubTaskLookup({ _id: taskId, project_id: projectId });
-        loadProjectForCallerMock.mockResolvedValueOnce({ _id: projectId, member_ids: [], client_ids: [] });
+        loadProjectForCallerMock.mockResolvedValueOnce({ _id: projectId, member_ids: [], representative_ids: [] });
         // M38 — actor_id is now read off the doc (not its toJSON shape)
         // so the per-page hydration can batch-load `{id, full_name}`.
         // Stub matches that contract.
@@ -283,7 +283,7 @@ describe('listActivities', () => {
         const projectId = new Types.ObjectId();
         const taskId = new Types.ObjectId();
         stubTaskLookup({ _id: taskId, project_id: projectId });
-        loadProjectForCallerMock.mockResolvedValueOnce({ _id: projectId, member_ids: [], client_ids: [] });
+        loadProjectForCallerMock.mockResolvedValueOnce({ _id: projectId, member_ids: [], representative_ids: [] });
         stubFindForList([], 0);
 
         await svc.listActivities(taskId, { page: 2, limit: 10, include_subtasks: false }, adminCaller());

@@ -9,10 +9,10 @@ import { recordAudit } from '../services/audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
-import { type RoleType } from '../constants/roles.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { callerHasPermission } from '../middlewares/auth.middleware.js';
 import { buildAuditContext } from '../utils/audit-context.js';
+import { projectCallerFrom } from '../utils/caller.js';
 import type {
     AssignableQuery,
     ChangeRoleBody,
@@ -131,11 +131,9 @@ export const postChangeUserRole = async (req: Request, res: Response): Promise<R
 
 // ─── GET /users/assignable ──────────────────────────────────────────────────
 export const getAssignableUsers = async (req: Request, res: Response): Promise<Response> => {
-    if (!req.user?.role) throw AppError.unauthenticated();
-    const rows = await userService.listAssignable(req.query as unknown as AssignableQuery, {
-        id: callerId(req),
-        role: req.user.role as RoleType,
-    });
+    // Via the shared helper so `company_id` comes along — a `client` is
+    // company-scoped, and an inline literal here would silently omit it.
+    const rows = await userService.listAssignable(req.query as unknown as AssignableQuery, projectCallerFrom(req));
     return ok(res, rows);
 };
 
