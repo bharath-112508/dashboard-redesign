@@ -78,6 +78,20 @@ export interface ProjectCaller {
      * `req.user.role_keys` whenever the caller carries it.
      */
     role_keys?: readonly string[];
+    /**
+     * The caller's company — present only for client-side roles
+     * (`client` / `representative`). Sourced from the DB row that
+     * `authenticate` already reads, never from the JWT (a reassigned
+     * client would otherwise keep their old company until the token
+     * expired).
+     *
+     * A `client`'s project visibility is driven by THIS field, not by
+     * `representative_ids`. Clients are also listed on the roster so the
+     * project's client-side roster is one explicit field, but that entry
+     * is a denormalised convenience: if it ever drifts, the Client still
+     * sees their projects. Drift costs display accuracy, never access.
+     */
+    company_id?: Types.ObjectId;
     audit?: AuditContext;
 }
 
@@ -186,10 +200,7 @@ export const createProject = async (
     // role so they always see their own project in GET /projects.
     // Admins/Managers bypass the visibility filter, so we don't
     // pollute member_ids with their IDs.
-    if (
-        PROJECT_MEMBER_SCOPED_ROLES.includes(caller.role) &&
-        !memberIds.some((id) => id.equals(caller.id))
-    ) {
+    if (PROJECT_MEMBER_SCOPED_ROLES.includes(caller.role) && !memberIds.some((id) => id.equals(caller.id))) {
         memberIds.push(caller.id);
     }
 
@@ -441,18 +452,10 @@ export const updateProjectMembers = async (
     // with the remove applied but the add missing (member loss).
     const updated = await withTransaction(async (session) => {
         if (removeIds.length > 0) {
-            await Project.updateOne(
-                { _id: id },
-                { $pull: { member_ids: { $in: removeIds } } },
-                { session }
-            );
+            await Project.updateOne({ _id: id }, { $pull: { member_ids: { $in: removeIds } } }, { session });
         }
         if (addIds.length > 0) {
-            await Project.updateOne(
-                { _id: id },
-                { $addToSet: { member_ids: { $each: addIds } } },
-                { session }
-            );
+            await Project.updateOne({ _id: id }, { $addToSet: { member_ids: { $each: addIds } } }, { session });
         }
         const next = await Project.findById(id, null, { session });
         if (!next) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
@@ -551,18 +554,10 @@ export const updateProjectClients = async (
     // F4 — atomic list mutation; see `updateProjectMembers` for rationale.
     const updated = await withTransaction(async (session) => {
         if (removeIds.length > 0) {
-            await Project.updateOne(
-                { _id: id },
-                { $pull: { client_ids: { $in: removeIds } } },
-                { session }
-            );
+            await Project.updateOne({ _id: id }, { $pull: { client_ids: { $in: removeIds } } }, { session });
         }
         if (addIds.length > 0) {
-            await Project.updateOne(
-                { _id: id },
-                { $addToSet: { client_ids: { $each: addIds } } },
-                { session }
-            );
+            await Project.updateOne({ _id: id }, { $addToSet: { client_ids: { $each: addIds } } }, { session });
         }
         const next = await Project.findById(id, null, { session });
         if (!next) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);

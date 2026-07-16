@@ -72,9 +72,11 @@ const settingsWithFlag = (require_mfa_for_admins: boolean) => ({
 // that fetches the full user doc (PII bloat / perf cost) is caught at
 // the test layer, not by an audit reviewer noticing logs.
 //
-// T1: the middleware now reads `status` + `mfa_enabled` in a single
-// findById, so the mock factory accepts both fields and defaults to
-// `status: 'active'` (the dominant case).
+// T1: the middleware reads `status` + `mfa_enabled` in a single findById,
+// so the mock factory accepts both fields and defaults to `status:
+// 'active'` (the dominant case). The projection also carries
+// `client_profile.company_id`; the mock leaves it unset, which is the
+// staff-role case (undefined company scope).
 const userMfaSelectArgs: string[] = [];
 const userMfa = (mfa_enabled: boolean, status: string = 'active') => ({
     select: (arg: string) => {
@@ -169,7 +171,7 @@ describe('authenticate (flag ON — admin gate)', () => {
         // balloon the per-write payload. T1 changed the projection to
         // include `status` so the deactivate-but-token-still-valid
         // window is closed in the same query.
-        expect(userMfaSelectArgs).toEqual(['status mfa_enabled']);
+        expect(userMfaSelectArgs).toEqual(['status mfa_enabled client_profile.company_id']);
     });
 
     it('returns 401 UNAUTHENTICATED when the user row was deleted between JWT issue and middleware run', async () => {
@@ -339,15 +341,23 @@ describe('authenticate (T1 — user status gate)', () => {
         expect(getOrInitSettingsMock).not.toHaveBeenCalled();
     });
 
-    it('reads `status mfa_enabled` in ONE projection (cost-coalesced with the MFA gate)', async () => {
-        // The status check + admin-MFA gate share the same row; we
-        // pin the projection to ensure neither slot is dropped when
-        // either gate is touched.
+    it('reads status + mfa_enabled + company_id in ONE projection (cost-coalesced)', async () => {
+        // The T1 status check, the admin-MFA gate, and the client-side
+        // company scope all share this one row; we pin the projection so
+        // no slot is dropped when any of the three is touched, and so a
+        // regression that fetches the FULL user doc (PII bloat / perf)
+        // is caught here rather than by someone reading logs later.
+        //
+        // `client_profile.company_id` is a single scalar, added because a
+        // `client`'s project visibility is company-scoped and sourcing it
+        // from the JWT would go stale on reassignment (no token-version
+        // mechanism exists). It rides along on a read that already happens
+        // on every authenticated request — zero extra round-trips.
         userFindByIdMock.mockReturnValueOnce(userMfa(false, 'active'));
 
         await runAuthenticate(makeReq({ method: 'POST', path: '/users' }));
 
-        expect(userMfaSelectArgs).toEqual(['status mfa_enabled']);
+        expect(userMfaSelectArgs).toEqual(['status mfa_enabled client_profile.company_id']);
     });
 });
 
@@ -485,3 +495,65 @@ describe('requirePermission', () => {
 
 // Step 47 Phase B has dropped the `authorize(...)` compat shim. All
 // route gates now use `requirePermission(...)` exclusively.
+
+// ─── Company scope for client-side roles ─────────────────────────────────
+//
+// `req.caller_company_id` is the security boundary for the `client` role:
+// their project visibility is company-scoped, so if this silently fails to
+// land, the filter degrades. It is sourced from the DB row rather than the
+// JWT on purpose — see the note on the Request augmentation.
+
+describe('authenticate (company scope)', () => {
+    const companyId = new Types.ObjectId();
+
+    /** findById chain resolving a client-side user carrying a company. */
+    const userWithCompany = () => ({
+        select: (arg: string) => {
+            userMfaSelectArgs.push(arg);
+            return {
+                lean: () =>
+                    Promise.resolve({
+                        status: 'active',
+                        mfa_enabled: false,
+                        client_profile: { company_id: companyId },
+                    }),
+            };
+        },
+    });
+
+    it('sets caller_company_id from the user row', async () => {
+        userFindByIdMock.mockReturnValueOnce(userWithCompany());
+        const req = makeReq({ method: 'GET', path: '/projects' });
+
+        const result = await runAuthenticate(req);
+
+        expect(result.ok).toBe(true);
+        expect((req as { caller_company_id?: Types.ObjectId }).caller_company_id).toEqual(companyId);
+    });
+
+    it('leaves caller_company_id undefined for a staff user', async () => {
+        // Default mock has no client_profile — the staff case.
+        const req = makeReq({ method: 'GET', path: '/projects' });
+
+        const result = await runAuthenticate(req);
+
+        expect(result.ok).toBe(true);
+        expect((req as { caller_company_id?: Types.ObjectId }).caller_company_id).toBeUndefined();
+    });
+
+    it('ignores a company_id claimed by the JWT', async () => {
+        // Only the DB read may set company scope. A token claiming one —
+        // forged, or merely stale after a reassignment — must not grant it.
+        const forged = new Types.ObjectId();
+        verifyAccessTokenMock.mockReturnValueOnce({
+            user_id: adminId.toString(),
+            role: ROLES.CLIENT,
+            client_profile: { company_id: forged },
+        });
+        const req = makeReq({ method: 'GET', path: '/projects' });
+
+        await runAuthenticate(req);
+
+        expect((req as { caller_company_id?: Types.ObjectId }).caller_company_id).toBeUndefined();
+    });
+});

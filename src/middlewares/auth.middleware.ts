@@ -16,6 +16,21 @@ declare global {
     namespace Express {
         interface Request {
             user?: BaseJWTPayload;
+            /**
+             * The caller's company, for client-side roles (`client` /
+             * `representative`). Set by `authenticate` from the DB row it
+             * already reads for the T1 deactivation gate.
+             *
+             * Deliberately **not** a JWT claim and deliberately **not** on
+             * `req.user` (which is the decoded token, and must keep meaning
+             * exactly that). There is no token-version/invalidation
+             * mechanism here, so a client reassigned to another company
+             * would keep their old company_id until the token expired —
+             * a stale security boundary. Sourcing it from the row we are
+             * already fetching costs zero extra round-trips and is never
+             * stale.
+             */
+            caller_company_id?: Types.ObjectId;
         }
     }
 }
@@ -99,6 +114,8 @@ const isCallerAdmin = (payload: BaseJWTPayload): boolean => {
 interface AuthUserRow {
     status: string;
     mfa_enabled?: boolean;
+    /** Client-side users only (`client` / `representative`). See `req.caller_company_id`. */
+    client_profile?: { company_id?: Types.ObjectId };
 }
 
 const loadAuthUserRow = async (userPayload: BaseJWTPayload): Promise<AuthUserRow> => {
@@ -108,7 +125,9 @@ const loadAuthUserRow = async (userPayload: BaseJWTPayload): Promise<AuthUserRow
     } catch {
         throw AppError.unauthenticated();
     }
-    const row = await User.findById(userId).select('status mfa_enabled').lean<AuthUserRow | null>();
+    const row = await User.findById(userId)
+        .select('status mfa_enabled client_profile.company_id')
+        .lean<AuthUserRow | null>();
     if (!row) {
         throw AppError.unauthenticated();
     }
@@ -155,6 +174,10 @@ export const authenticate = async (req: Request, _res: Response, next: NextFunct
     // T1 — close the deactivate-but-token-still-valid window AND fetch
     // the row needed by the Step-28 admin-MFA gate in the same query.
     const userRow = await loadAuthUserRow(payload);
+
+    // Company scope for client-side roles, from the row above (not the
+    // JWT — see the `caller_company_id` note on the Request augmentation).
+    req.caller_company_id = userRow.client_profile?.company_id;
 
     // Step 28: enforce the admin-MFA policy when configured. This runs
     // for every authenticated request; cheap short-circuits keep the

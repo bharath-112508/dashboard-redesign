@@ -33,6 +33,11 @@ export const projectCallerFrom = (req: Request): ProjectCaller => {
         id: new Types.ObjectId(req.user.user_id),
         role: req.user.role as RoleType,
         role_keys: req.user.role_keys,
+        // Set by `authenticate` from the DB row; undefined for staff roles.
+        // This is the whole reason the eleven callerOf locals were collapsed
+        // into one — otherwise a copy that missed this field would silently
+        // scope a client's request to "no company" rather than fail to build.
+        company_id: req.caller_company_id,
         audit: buildAuditContext(req),
     };
 };
