@@ -140,6 +140,7 @@ Sub-modules with their own routers; grouped because they share `LeaveRequest`/`L
   - **Archive, never hard-delete** — projects carry `company_id`.
   - A client-side caller listing companies is **narrowed to their own**, or they'd get the full customer list.
 - **Migration** — [`scripts/migrate-companies.ts`](scripts/migrate-companies.ts), dry-run by default, `--commit` to apply. Re-runnable.
+- **FE surface** — `/companies` (renamed from `/clients` 2026-07-20; the old paths redirect).
 
 ### Project management
 
