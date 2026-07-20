@@ -212,7 +212,7 @@ export const listRepresentatives = async (
         role: { $in: PROJECT_CLIENT_SIDE_ROLES },
         'client_profile.company_id': id,
     })
-        .select('_id full_name email role status client_profile')
+        .select('_id full_name email role status')
         .sort({ full_name: 1 })
         .lean<
             {
@@ -221,7 +221,6 @@ export const listRepresentatives = async (
                 email: string;
                 role: string;
                 status: string;
-                client_profile?: { point_of_contact?: string };
             }[]
         >();
 
@@ -233,7 +232,6 @@ export const listRepresentatives = async (
         // distinction is the whole point of the roster, so it's surfaced.
         role: u.role,
         status: u.status,
-        point_of_contact: u.client_profile?.point_of_contact ?? null,
     }));
 };
 
@@ -290,7 +288,6 @@ export const createRepresentative = async (
         client_profile: {
             // From the URL + ownership check, never from the body.
             company_id: company._id,
-            point_of_contact: input.point_of_contact,
             access_type: 'login',
         },
         created_by: caller.id,

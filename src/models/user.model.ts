@@ -46,13 +46,11 @@ export type ClientAccessType = 'login' | 'readonly_link';
  * `company_name` (free text) is gone: it's what made two people at the
  * same company unrelated records. `company_id` points at `companies`.
  *
- * `point_of_contact` is retained as a free-text note on the person, but is
- * no longer how the contact is identified — the `client`-role users ARE the
- * contacts.
+ * There is no `point_of_contact`: the `client`-role users ARE the contacts,
+ * so a free-text note duplicating that was removed (2026-07-20).
  */
 export interface ClientProfile {
     company_id: Types.ObjectId;
-    point_of_contact?: string;
     access_type: ClientAccessType;
 }
 
@@ -161,7 +159,6 @@ const internalProfileSchema = new Schema<InternalProfile>(
 const clientProfileSchema = new Schema<ClientProfile>(
     {
         company_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.COMPANIES, required: true },
-        point_of_contact: { type: String, required: false, trim: true },
         access_type: { type: String, enum: ['login', 'readonly_link'], required: true },
     },
     { _id: false }

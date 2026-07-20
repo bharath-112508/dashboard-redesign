@@ -67,7 +67,6 @@ export const createRepresentativeBodySchema = z
         phone: z.string().trim().max(32).optional(),
         timezone: z.string().trim().optional(),
         initial_password: z.string().min(1),
-        point_of_contact: z.string().trim().max(200).optional(),
     })
     // `.strict()` is load-bearing here, not stylistic: it rejects a body
     // carrying `role` or `company_id` outright rather than silently ignoring

@@ -103,7 +103,6 @@ const internalProfileCreateSchema = z.object({
  */
 const clientProfileCreateSchema = z.object({
     company_id: z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId'),
-    point_of_contact: z.string().trim().optional(),
     access_type: z.enum(['login', 'readonly_link']),
 });
 

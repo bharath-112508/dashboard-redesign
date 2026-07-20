@@ -321,8 +321,9 @@ const buildAnonPayload = (user: UserDocument): Record<string, unknown> => {
         // joins don't fail on a missing sub-doc.
         'internal_profile.employee_id': `DEL-${stamp}`,
         'internal_profile.emergency_contact': null,
-        // Client profile carries company_name + point_of_contact PII.
-        'client_profile.point_of_contact': null,
+        // `client_profile` carries no free-text PII any more: `company_name`
+        // and `point_of_contact` are both gone (it holds only `company_id` +
+        // `access_type`), so there is nothing here to scrub.
         // Lock the account out so the synthetic email can't be used
         // for a password-reset flow.
         password_hash: 'erased',
