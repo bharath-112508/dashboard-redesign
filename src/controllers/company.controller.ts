@@ -8,6 +8,7 @@ import type {
     CreateCompanyBody,
     CreateRepresentativeBody,
     ListCompaniesQuery,
+    ListRepresentativesQuery,
     PatchCompanyBody,
 } from '../validators/company.validator.js';
 
@@ -49,7 +50,20 @@ export const postArchive = async (req: Request, res: Response): Promise<Response
 };
 
 export const getRepresentatives = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.listRepresentatives(idOf(req), projectCallerFrom(req));
+    const { data, meta } = await service.listRepresentatives(
+        idOf(req),
+        req.query as unknown as ListRepresentativesQuery,
+        projectCallerFrom(req)
+    );
+    return paginated(res, data, meta);
+};
+
+export const getRepresentative = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.getRepresentative(
+        idOf(req),
+        new Types.ObjectId(req.params.user_id as string),
+        projectCallerFrom(req)
+    );
     return ok(res, data);
 };
 

@@ -131,7 +131,7 @@ Sub-modules with their own routers; grouped because they share `LeaveRequest`/`L
 
 - **Purpose** — The client organisation. **"Client" IS the company**; a **"Representative"** is that company's project-scoped person. The company has **no login** — people hold the roles.
 - **Permissions** — `COMPANY_READ` (admin + manager), `COMPANY_WRITE` (admin), `REPRESENTATIVE_WRITE` (admin **and** a company's own `client`s)
-- **Routes** — [`routes/company.routes.ts`](src/routes/company.routes.ts). `GET|POST /companies`, `GET|PATCH /companies/:id`, `POST /companies/:id/archive`, `GET|POST /companies/:id/representatives`, `DELETE /companies/:id/representatives/:user_id`
+- **Routes** — [`routes/company.routes.ts`](src/routes/company.routes.ts). `GET|POST /companies`, `GET|PATCH /companies/:id`, `POST /companies/:id/archive`, `GET|POST /companies/:id/representatives` (list is **paginated**), `GET|DELETE /companies/:id/representatives/:user_id`
 - **Service** — [`services/company.service.ts`](src/services/company.service.ts) · **Model** — [`models/company.model.ts`](src/models/company.model.ts) · **Validator** — [`validators/company.validator.ts`](src/validators/company.validator.ts)
 - **Gotchas**:
   - 🔴 **`POST /companies/:id/representatives` accepts NO `role` and NO `company_id`.** Both are derived server-side (role hard-coded; company from the URL, pinned to the caller's own company for non-admins) and the body schema is `.strict()`, so sending either is a **400**, not a silent ignore. The endpoint exists precisely so a Client never needs `user.write` — that bit is admin-wide and would let them create **admins**.
@@ -139,6 +139,7 @@ Sub-modules with their own routers; grouped because they share `LeaveRequest`/`L
   - **`name` is unique case-insensitively** via a collated index (`locale: 'en', strength: 2`). Queries must pass the **same collation** or Mongo won't use it. Free-text `company_name` had no such guard, which is how near-duplicates ("TCS" / "TCS ") appeared.
   - **Archive, never hard-delete** — projects carry `company_id`.
   - A client-side caller listing companies is **narrowed to their own**, or they'd get the full customer list.
+  - **The people list is paginated** (`?page=&limit=`, default 20). Counts must come from `meta.total`, not `data.length`. `GET .../representatives/:user_id` exists *because* of this — a consumer that found its person by scanning the list broke for anyone past page 1.
   - 🔴 **`GET /companies/:id/representatives` returns each person's projects, scoped BY ROLE.** A `client` gets **every** project of the company (their access is the project's `company_id`); a `representative` gets only projects naming them in `representative_ids`. The response says which rule applied via `project_access: 'company' | 'assigned'` — consumers must not label a `company` list "assigned to". A client is *also* on `representative_ids`, but that entry is denormalised and may drift, so deriving their list from it would under-report projects they can genuinely open.
 - **Migration** — [`scripts/migrate-companies.ts`](scripts/migrate-companies.ts), dry-run by default, `--commit` to apply. Re-runnable.
 - **FE surface** — `/companies` (renamed from `/clients` 2026-07-20; the old paths redirect).

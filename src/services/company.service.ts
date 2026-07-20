@@ -19,6 +19,7 @@ import type {
     CreateCompanyBody,
     CreateRepresentativeBody,
     ListCompaniesQuery,
+    ListRepresentativesQuery,
     PatchCompanyBody,
 } from '../validators/company.validator.js';
 
@@ -203,20 +204,78 @@ export const archiveCompany = async (id: Types.ObjectId, caller: CompanyCaller):
 
 // ─── GET /companies/:id/representatives ──────────────────────────────────
 
+/** The people query for one company — shared by list and fetch-one so the
+ *  two can never disagree about who counts as "in" a company. */
+const peopleFilter = (companyId: Types.ObjectId): Filter => ({
+    role: { $in: PROJECT_CLIENT_SIDE_ROLES },
+    'client_profile.company_id': companyId,
+});
+
+type PersonRow = {
+    _id: Types.ObjectId;
+    full_name: string;
+    email: string;
+    role: string;
+    status: string;
+};
+
+type ProjectRow = {
+    _id: Types.ObjectId;
+    name: string;
+    code: string;
+    representative_ids?: Types.ObjectId[];
+};
+
+/**
+ * Shape one person + the projects they can open.
+ *
+ * ── The distinction this whole endpoint exists to express ──
+ *
+ * A company-level `client` gets access from the project's `company_id`, NOT
+ * from the roster — so their answer is EVERY project of the company. They're
+ * also seeded onto `representative_ids`, but that entry is denormalised and
+ * may drift; deriving their list from it would under-report projects they can
+ * genuinely open, i.e. the UI would contradict what happens when they click
+ * through.
+ *
+ * A `representative` is the opposite: the roster IS their access.
+ */
+const shapePerson = (u: PersonRow, projects: ProjectRow[]): Record<string, unknown> => {
+    const isCompanyLevel = u.role === ROLES.CLIENT;
+    const assigned = isCompanyLevel
+        ? projects
+        : projects.filter((p) => (p.representative_ids ?? []).some((rid) => rid.equals(u._id)));
+
+    return {
+        id: u._id.toString(),
+        full_name: u.full_name,
+        email: u.email,
+        // `client` = company-level, `representative` = assigned-only. The
+        // distinction is the whole point of the roster, so it's surfaced.
+        role: u.role,
+        status: u.status,
+        /** How `projects` was derived — the UI must not label a
+         *  company-level client's list as "assigned to". */
+        project_access: isCompanyLevel ? 'company' : 'assigned',
+        projects: assigned.map((p) => ({ id: p._id.toString(), name: p.name, code: p.code })),
+    };
+};
+
 export const listRepresentatives = async (
     id: Types.ObjectId,
+    query: ListRepresentativesQuery,
     caller: CompanyCaller
-): Promise<Record<string, unknown>[]> => {
+): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     await loadCompanyOrThrow(id);
     assertCallerOwnsCompany(id, caller);
 
-    const [rows, projects] = await Promise.all([
-        User.find({
-            role: { $in: PROJECT_CLIENT_SIDE_ROLES },
-            'client_profile.company_id': id,
-        })
+    const skip = (query.page - 1) * query.limit;
+    const [rows, total, projects] = await Promise.all([
+        User.find(peopleFilter(id))
             .select('_id full_name email role status')
             .sort({ full_name: 1 })
+            .skip(skip)
+            .limit(query.limit)
             .lean<
                 {
                     _id: Types.ObjectId;
@@ -226,55 +285,63 @@ export const listRepresentatives = async (
                     status: string;
                 }[]
             >(),
+        User.countDocuments(peopleFilter(id)),
         // Every project of THIS company, once. Each person's list is then a
         // pure in-memory derivation — no per-person query, so the response
-        // cost is flat in the number of people.
-        Project.find({ company_id: id }).select('_id name code representative_ids').sort({ name: 1 }).lean<
-            {
-                _id: Types.ObjectId;
-                name: string;
-                code: string;
-                representative_ids?: Types.ObjectId[];
-            }[]
-        >(),
+        // cost is flat in the number of people on the page.
+        Project.find({ company_id: id })
+            .select('_id name code representative_ids')
+            .sort({ name: 1 })
+            .lean<ProjectRow[]>(),
     ]);
 
-    const asSummary = (p: (typeof projects)[number]) => ({
-        id: p._id.toString(),
-        name: p.name,
-        code: p.code,
-    });
+    return {
+        data: rows.map((u) => shapePerson(u, projects)),
+        meta: {
+            page: query.page,
+            limit: query.limit,
+            total,
+            total_pages: Math.max(1, Math.ceil(total / query.limit)),
+        },
+    };
+};
 
-    return rows.map((u) => {
-        // ── The distinction this whole endpoint exists to express ──
-        //
-        // A company-level `client` gets access from the project's
-        // `company_id`, NOT from the roster — so their answer is EVERY
-        // project of the company. They're also seeded onto `representative_ids`,
-        // but that entry is denormalised and may drift; deriving their list
-        // from it would under-report projects they can genuinely open, i.e.
-        // the UI would contradict what happens when they click through.
-        //
-        // A `representative` is the opposite: the roster IS their access.
-        const isCompanyLevel = u.role === ROLES.CLIENT;
-        const assigned = isCompanyLevel
-            ? projects
-            : projects.filter((p) => (p.representative_ids ?? []).some((rid) => rid.equals(u._id)));
+// ─── GET /companies/:id/representatives/:user_id ─────────────────────────
 
-        return {
-            id: u._id.toString(),
-            full_name: u.full_name,
-            email: u.email,
-            // `client` = company-level, `representative` = assigned-only. The
-            // distinction is the whole point of the roster, so it's surfaced.
-            role: u.role,
-            status: u.status,
-            /** How `projects` was derived — the UI must not label a
-             *  company-level client's list as "assigned to". */
-            project_access: isCompanyLevel ? 'company' : 'assigned',
-            projects: assigned.map(asSummary),
-        };
-    });
+/**
+ * One person + the projects they can open.
+ *
+ * This exists BECAUSE the list is paginated. The profile page used to find
+ * its person by scanning the list response; once that returns 10 rows, anyone
+ * on page 2+ would have rendered "not found" on a direct link. Fetching by id
+ * is the only version that survives pagination.
+ *
+ * 404 (not 403) for someone in ANOTHER company: the caller already passed the
+ * company scope check, so a 403 here would confirm the id exists elsewhere.
+ */
+export const getRepresentative = async (
+    id: Types.ObjectId,
+    userId: Types.ObjectId,
+    caller: CompanyCaller
+): Promise<Record<string, unknown>> => {
+    await loadCompanyOrThrow(id);
+    assertCallerOwnsCompany(id, caller);
+
+    const [person, projects] = await Promise.all([
+        User.findOne({ _id: userId, ...peopleFilter(id) })
+            .select('_id full_name email role status')
+            .lean<PersonRow | null>(),
+        Project.find({ company_id: id })
+            .select('_id name code representative_ids')
+            .sort({ name: 1 })
+            .lean<ProjectRow[]>(),
+    ]);
+
+    if (!person) {
+        throw AppError.notFound('No such person in this company', ERROR_CODES.USER_NOT_FOUND);
+    }
+
+    return shapePerson(person, projects);
 };
 
 // ─── DELETE /companies/:id/representatives/:user_id ──────────────────────

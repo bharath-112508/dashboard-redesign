@@ -11,6 +11,7 @@ import {
     createCompanyBodySchema,
     createRepresentativeBodySchema,
     listCompaniesQuerySchema,
+    listRepresentativesQuerySchema,
     patchCompanyBodySchema,
 } from '../validators/company.validator.js';
 
@@ -74,8 +75,24 @@ router.post(
 router.get(
     '/:id/representatives',
     requirePermission(PERMISSIONS.REPRESENTATIVE_WRITE),
-    validate({ params: companyIdParamSchema }),
+    validate({ params: companyIdParamSchema, query: listRepresentativesQuerySchema }),
     asyncHandler(ctrl.getRepresentatives)
+);
+
+/**
+ * One person of the company.
+ *
+ * Exists because the list above is paginated — the profile page can't find
+ * someone on page 2 by scanning a 10-row response. Same gate as the list.
+ * Declared BEFORE the `POST`/`DELETE` on the same prefix is irrelevant (they
+ * differ by verb), but it must not shadow anything: `:user_id` is an id, and
+ * there are no literal sub-paths under `/representatives`.
+ */
+router.get(
+    '/:id/representatives/:user_id',
+    requirePermission(PERMISSIONS.REPRESENTATIVE_WRITE),
+    validate({ params: companyRepresentativeParamSchema }),
+    asyncHandler(ctrl.getRepresentative)
 );
 
 /**

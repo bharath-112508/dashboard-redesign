@@ -28,6 +28,8 @@ const {
     hashPasswordMock,
     deactivateUserMock,
     projectFindMock,
+    userCountMock,
+    userFindOneMock,
 } = vi.hoisted(() => ({
     companyCreateMock: vi.fn(),
     companyFindByIdMock: vi.fn(),
@@ -41,6 +43,8 @@ const {
     hashPasswordMock: vi.fn(),
     deactivateUserMock: vi.fn(),
     projectFindMock: vi.fn(),
+    userCountMock: vi.fn(),
+    userFindOneMock: vi.fn(),
 }));
 
 vi.mock('../models/company.model.js', () => ({
@@ -54,7 +58,14 @@ vi.mock('../models/company.model.js', () => ({
 }));
 
 vi.mock('../models/user.model.js', () => ({
-    User: { create: userCreateMock, exists: userExistsMock, find: userFindMock, findById: userFindByIdMock },
+    User: {
+        create: userCreateMock,
+        exists: userExistsMock,
+        find: userFindMock,
+        findOne: userFindOneMock,
+        findById: userFindByIdMock,
+        countDocuments: userCountMock,
+    },
 }));
 
 vi.mock('../models/project.model.js', () => ({
@@ -407,20 +418,44 @@ describe('listRepresentatives — project scoping per role', () => {
     // either, mirroring roster drift.
     const projB = { _id: new Types.ObjectId(), name: 'Depot Rollout', code: 'DEP', representative_ids: [] };
 
-    const chain = (rows: unknown[]) => ({
+    /** `Project.find().select().sort().lean()` */
+    const projectChain = (rows: unknown[]) => ({
         select: () => ({ sort: () => ({ lean: () => Promise.resolve(rows) }) }),
     });
 
-    const stub = (people: unknown[], projects: unknown[]) => {
+    /** `User.find().select().sort().skip().limit().lean()` — captures the
+     *  skip/limit so pagination can be asserted rather than assumed. */
+    const seen: { skip?: number; limit?: number } = {};
+    const userChain = (rows: unknown[]) => ({
+        select: () => ({
+            sort: () => ({
+                skip: (n: number) => {
+                    seen.skip = n;
+                    return {
+                        limit: (l: number) => {
+                            seen.limit = l;
+                            return { lean: () => Promise.resolve(rows) };
+                        },
+                    };
+                },
+            }),
+        }),
+    });
+
+    const PAGE = { page: 1, limit: 20 };
+
+    const stub = (people: unknown[], projects: unknown[], total = people.length) => {
         companyFindByIdMock.mockResolvedValueOnce(makeCompany());
-        userFindMock.mockReturnValueOnce(chain(people));
-        projectFindMock.mockReturnValueOnce(chain(projects));
+        userFindMock.mockReturnValueOnce(userChain(people));
+        userCountMock.mockResolvedValueOnce(total);
+        projectFindMock.mockReturnValueOnce(projectChain(projects));
     };
 
     it('gives a company-level client EVERY company project, roster or not', async () => {
         stub([client], [projA, projB]);
 
-        const [row] = await svc.listRepresentatives(companyId, adminCaller());
+        const { data } = await svc.listRepresentatives(companyId, PAGE, adminCaller());
+        const row = data[0];
 
         expect(row.project_access).toBe('company');
         expect((row.projects as { code: string }[]).map((p) => p.code).sort()).toEqual(['DEP', 'NFD']);
@@ -429,7 +464,8 @@ describe('listRepresentatives — project scoping per role', () => {
     it('gives a representative ONLY the projects naming them', async () => {
         stub([rep], [projA, projB]);
 
-        const [row] = await svc.listRepresentatives(companyId, adminCaller());
+        const { data } = await svc.listRepresentatives(companyId, PAGE, adminCaller());
+        const row = data[0];
 
         expect(row.project_access).toBe('assigned');
         expect((row.projects as { code: string }[]).map((p) => p.code)).toEqual(['NFD']);
@@ -439,27 +475,166 @@ describe('listRepresentatives — project scoping per role', () => {
         const lonely = { ...rep, _id: new Types.ObjectId() };
         stub([lonely], [projA, projB]);
 
-        const [row] = await svc.listRepresentatives(companyId, adminCaller());
+        const { data } = await svc.listRepresentatives(companyId, PAGE, adminCaller());
 
-        expect(row.projects).toEqual([]);
+        expect(data[0].projects).toEqual([]);
     });
 
     it('resolves both people from a single project query (no per-person N+1)', async () => {
         stub([client, rep], [projA, projB]);
 
-        const rows = await svc.listRepresentatives(companyId, adminCaller());
+        const { data } = await svc.listRepresentatives(companyId, PAGE, adminCaller());
 
         expect(projectFindMock).toHaveBeenCalledTimes(1);
-        expect(rows).toHaveLength(2);
-        expect((rows[0].projects as unknown[]).length).toBe(2); // client → all
-        expect((rows[1].projects as unknown[]).length).toBe(1); // rep → assigned
+        expect(data).toHaveLength(2);
+        expect((data[0].projects as unknown[]).length).toBe(2); // client → all
+        expect((data[1].projects as unknown[]).length).toBe(1); // rep → assigned
     });
 
     it("a client of ANOTHER company can't list this company's people", async () => {
         companyFindByIdMock.mockResolvedValueOnce(makeCompany());
 
-        await expect(svc.listRepresentatives(companyId, clientCaller(new Types.ObjectId()))).rejects.toMatchObject({
+        await expect(
+            svc.listRepresentatives(companyId, PAGE, clientCaller(new Types.ObjectId()))
+        ).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
+    });
+});
+
+// ─── listRepresentatives — pagination ────────────────────────────────────
+
+describe('listRepresentatives — pagination', () => {
+    const person = (n: number) => ({
+        _id: new Types.ObjectId(),
+        full_name: `Person ${n}`,
+        email: `p${n}@x.io`,
+        role: ROLES.REPRESENTATIVE,
+        status: 'active',
+    });
+
+    let seen: { skip?: number; limit?: number };
+
+    const stub = (rows: unknown[], total: number) => {
+        seen = {};
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindMock.mockReturnValueOnce({
+            select: () => ({
+                sort: () => ({
+                    skip: (n: number) => {
+                        seen.skip = n;
+                        return {
+                            limit: (l: number) => {
+                                seen.limit = l;
+                                return { lean: () => Promise.resolve(rows) };
+                            },
+                        };
+                    },
+                }),
+            }),
+        });
+        userCountMock.mockResolvedValueOnce(total);
+        projectFindMock.mockReturnValueOnce({
+            select: () => ({ sort: () => ({ lean: () => Promise.resolve([]) }) }),
+        });
+    };
+
+    it('translates page/limit into skip/limit at the DB layer', async () => {
+        // Slicing in memory would still "work" for the caller while loading
+        // every person into the process — this pins that it's a real query.
+        stub([person(11)], 24);
+
+        await svc.listRepresentatives(companyId, { page: 2, limit: 10 }, adminCaller());
+
+        expect(seen).toEqual({ skip: 10, limit: 10 });
+    });
+
+    it('reports total and total_pages from a count, not the page length', async () => {
+        stub([person(1), person(2)], 24);
+
+        const { meta } = await svc.listRepresentatives(companyId, { page: 1, limit: 10 }, adminCaller());
+
+        expect(meta).toMatchObject({ page: 1, limit: 10, total: 24, total_pages: 3 });
+    });
+
+    it('reports total_pages 1 for an empty company (never 0)', async () => {
+        // A 0 would make the pager render "Page 1 of 0".
+        stub([], 0);
+
+        const { meta } = await svc.listRepresentatives(companyId, { page: 1, limit: 10 }, adminCaller());
+
+        expect(meta.total_pages).toBe(1);
+        expect(meta.total).toBe(0);
+    });
+});
+
+// ─── getRepresentative — the fetch-one pagination forced ─────────────────
+
+describe('getRepresentative', () => {
+    const rep = {
+        _id: new Types.ObjectId(),
+        full_name: 'Sofia',
+        email: 's@x.io',
+        role: ROLES.REPRESENTATIVE,
+        status: 'active',
+    };
+    const proj = {
+        _id: new Types.ObjectId(),
+        name: 'Fleet Dashboard',
+        code: 'NFD',
+        representative_ids: [rep._id],
+    };
+
+    const stub = (found: unknown, projects: unknown[] = [proj]) => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindOneMock.mockReturnValueOnce({ select: () => ({ lean: () => Promise.resolve(found) }) });
+        projectFindMock.mockReturnValueOnce({
+            select: () => ({ sort: () => ({ lean: () => Promise.resolve(projects) }) }),
+        });
+    };
+
+    it('returns the person with the same project scoping as the list', async () => {
+        stub(rep);
+
+        const row = await svc.getRepresentative(companyId, rep._id, adminCaller());
+
+        expect(row).toMatchObject({ full_name: 'Sofia', project_access: 'assigned' });
+        expect((row.projects as { code: string }[]).map((p) => p.code)).toEqual(['NFD']);
+    });
+
+    it('scopes the lookup to THIS company, so a foreign id is 404 not 403', async () => {
+        // 403 would confirm the id exists in some other company.
+        stub(null);
+
+        await expect(svc.getRepresentative(companyId, new Types.ObjectId(), adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.USER_NOT_FOUND,
+        });
+    });
+
+    it('constrains the query itself by company + client-side role', async () => {
+        // Asserting the 404 above is not enough: the mock returns whatever
+        // it's told regardless of the filter, so a lookup that dropped the
+        // company scope would still pass it. This pins the filter, which is
+        // what actually stops company A reading company B's person.
+        const foreign = new Types.ObjectId();
+        stub(rep);
+
+        await svc.getRepresentative(companyId, rep._id, adminCaller());
+
+        const filter = userFindOneMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter).toMatchObject({
+            _id: rep._id,
+            'client_profile.company_id': companyId,
+        });
+        expect(filter.role).toBeDefined(); // client-side roles only
+        expect(filter['client_profile.company_id']).not.toEqual(foreign);
+    });
+
+    it("a client of ANOTHER company can't fetch a person here", async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(
+            svc.getRepresentative(companyId, rep._id, clientCaller(new Types.ObjectId()))
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
     });
 });
