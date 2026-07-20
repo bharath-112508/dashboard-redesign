@@ -107,6 +107,29 @@ const clientProfileCreateSchema = z.object({
 });
 
 const roleEnum = z.enum([ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE, ROLES.CLIENT]);
+
+/**
+ * Roles accepted by the LIST filters (`role`, `exclude_role`) — every role
+ * that exists, including `representative`.
+ *
+ * Deliberately separate from `roleEnum`, which gates the create/update BODY.
+ * `representative` was never added there and shouldn't be: a representative
+ * is created through `POST /companies/:id/representatives`, which derives the
+ * role and company server-side. Widening the write enum would open a second,
+ * parallel way to mint one that skips those guarantees.
+ *
+ * Missing `representative` here is what made the staff directory's
+ * `exclude_role=client` unable to hide them — the value was un-nameable, so
+ * they sat among the internal staff and inflated the headcount.
+ */
+const filterRoleEnum = z.enum([
+    ROLES.ADMIN,
+    ROLES.MANAGER,
+    ROLES.TEAM_LEAD,
+    ROLES.EMPLOYEE,
+    ROLES.CLIENT,
+    ROLES.REPRESENTATIVE,
+]);
 const statusEnum = z.enum([USER_STATUSES.ACTIVE, USER_STATUSES.DEACTIVATED]);
 
 // ─── POST /users ───────────────────────────────────────────────────────────
@@ -210,12 +233,26 @@ export const listUsersQuerySchema = z
     .object({
         page: z.coerce.number().int().min(1).default(1),
         limit: z.coerce.number().int().min(1).max(100).default(20),
-        role: roleEnum.optional(),
-        // Exclude users with this role. Used by surfaces that list "internal
-        // staff only" (e.g. team timesheets picker should hide clients).
+        role: filterRoleEnum.optional(),
+        // Exclude users with these roles. Used by surfaces that list "internal
+        // staff only" (e.g. the staff directory, the team timesheets picker).
         // Mutually exclusive with `role`: if both are set we 400 rather than
         // silently picking one.
-        exclude_role: roleEnum.optional(),
+        //
+        // Accepts a comma-separated list. It was a single value, which is why
+        // `exclude_role=client` silently left `representative` in the staff
+        // directory — there was no way to name the second client-side role.
+        // A bare single value still parses, so existing callers are unaffected.
+        exclude_role: z
+            .string()
+            .transform((v) =>
+                v
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+            )
+            .pipe(z.array(filterRoleEnum).min(1).max(10))
+            .optional(),
         status: statusEnum.optional(),
         // BUG-002 — when true, include soft-deleted (deactivated) users in the
         // result. Default false → list shows only active users. The controller

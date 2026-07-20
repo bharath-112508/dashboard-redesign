@@ -271,7 +271,7 @@ export const listUsers = async (
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const filter: Filter = {};
     if (query.role) filter.role = query.role;
-    else if (query.exclude_role) filter.role = { $ne: query.exclude_role };
+    else if (query.exclude_role?.length) filter.role = { $nin: query.exclude_role };
     if (query.status) filter.status = query.status;
     // BUG-002 — soft-delete UX: hide deactivated users by default.
     // Caller can opt-in via `show_deleted=true` if they hold USER_WRITE

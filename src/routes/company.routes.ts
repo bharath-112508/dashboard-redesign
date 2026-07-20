@@ -120,6 +120,21 @@ router.post(
  * The service additionally restricts a non-admin caller to removing
  * `representative`s within their own company.
  */
+/**
+ * Put a removed person back.
+ *
+ * Same gate as removal (`representative.write`), deliberately NOT
+ * `user.deactivate` — that bit also governs reactivating ANY user, so a
+ * Client holding it could revive a deactivated admin. The service restricts
+ * a non-admin to `representative`s within their own company.
+ */
+router.post(
+    '/:id/representatives/:user_id/restore',
+    requirePermission(PERMISSIONS.REPRESENTATIVE_WRITE),
+    validate({ params: companyRepresentativeParamSchema }),
+    asyncHandler(ctrl.postRestoreRepresentative)
+);
+
 router.delete(
     '/:id/representatives/:user_id',
     requirePermission(PERMISSIONS.REPRESENTATIVE_WRITE),

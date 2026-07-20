@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createUserBodySchema, updateUserBodySchema } from './user.validator.js';
+import { createUserBodySchema, updateUserBodySchema, listUsersQuerySchema } from './user.validator.js';
 
 /**
  * BUG-044 — phone field accepts only valid international (E.164) numbers,
@@ -177,5 +177,54 @@ describe('updateUserBodySchema — BUG-045 timezone validation', () => {
     it('rejects an unsupported zone on patch', () => {
         const r = updateUserBodySchema.safeParse({ timezone: 'Pluto/Equator' });
         expect(r.success).toBe(false);
+    });
+});
+
+// ─── exclude_role — multi-role exclusion ─────────────────────────────────
+//
+// This was a SINGLE role, which is why the staff directory sent
+// `exclude_role=client` and silently kept listing `representative`s among
+// the internal staff: there was no way to name the second client-side role.
+
+describe('listUsersQuerySchema — exclude_role', () => {
+    it('accepts a comma-separated list', () => {
+        const parsed = listUsersQuerySchema.parse({ exclude_role: 'client,representative' });
+        expect(parsed.exclude_role).toEqual(['client', 'representative']);
+    });
+
+    it('still accepts a bare single value, so existing callers keep working', () => {
+        const parsed = listUsersQuerySchema.parse({ exclude_role: 'client' });
+        expect(parsed.exclude_role).toEqual(['client']);
+    });
+
+    it('tolerates whitespace around the separator', () => {
+        const parsed = listUsersQuerySchema.parse({ exclude_role: 'client , representative' });
+        expect(parsed.exclude_role).toEqual(['client', 'representative']);
+    });
+
+    it('rejects an unknown role rather than silently ignoring it', () => {
+        // Silently dropping it would mean a typo'd exclusion quietly widens
+        // the result set.
+        expect(() => listUsersQuerySchema.parse({ exclude_role: 'client,wizard' })).toThrow();
+    });
+
+    it('still refuses role + exclude_role together', () => {
+        expect(() => listUsersQuerySchema.parse({ role: 'employee', exclude_role: 'client' })).toThrow();
+    });
+});
+
+// The write body must NOT gain `representative`: that role is created via
+// POST /companies/:id/representatives, which derives role + company
+// server-side. A second path through POST /users would skip those guards.
+describe('createUserBodySchema — representative is not creatable here', () => {
+    it('rejects role=representative on the generic user-create body', () => {
+        expect(() =>
+            createUserBodySchema.parse({
+                email: 'x@y.io',
+                full_name: 'X',
+                role: 'representative',
+                initial_password: 'Vilje@1234',
+            })
+        ).toThrow();
     });
 });

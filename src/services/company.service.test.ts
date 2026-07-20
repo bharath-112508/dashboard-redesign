@@ -27,6 +27,7 @@ const {
     recordAuditMock,
     hashPasswordMock,
     deactivateUserMock,
+    reactivateUserMock,
     projectFindMock,
     userCountMock,
     userFindOneMock,
@@ -42,6 +43,7 @@ const {
     recordAuditMock: vi.fn(),
     hashPasswordMock: vi.fn(),
     deactivateUserMock: vi.fn(),
+    reactivateUserMock: vi.fn(),
     projectFindMock: vi.fn(),
     userCountMock: vi.fn(),
     userFindOneMock: vi.fn(),
@@ -77,7 +79,10 @@ vi.mock('./audit.service.js', () => ({
     recordSystemAudit: vi.fn(),
 }));
 
-vi.mock('./user.service.js', () => ({ deactivateUser: deactivateUserMock }));
+vi.mock('./user.service.js', () => ({
+    deactivateUser: deactivateUserMock,
+    reactivateUser: reactivateUserMock,
+}));
 
 vi.mock('../utils/password.js', () => ({ hashPassword: hashPasswordMock }));
 vi.mock('../utils/password-policy.js', () => ({ assertPasswordPolicy: vi.fn() }));
@@ -700,5 +705,101 @@ describe('listRepresentatives — search', () => {
         await svc.listRepresentatives(companyId, { page: 1, limit: 10 }, adminCaller());
 
         expect(captured?.$or).toBeUndefined();
+    });
+});
+
+// ─── restoreRepresentative ───────────────────────────────────────────────
+//
+// Mirrors removal deliberately. The gate is `representative.write`, NOT
+// `user.deactivate`: that bit governs reactivating ANY user, so a Client
+// holding it could revive a deactivated admin.
+
+describe('restoreRepresentative', () => {
+    const memberChain = (row: unknown) => ({ select: () => ({ lean: () => Promise.resolve(row) }) });
+
+    const person = (overrides: Record<string, unknown> = {}) => ({
+        _id: new Types.ObjectId(),
+        role: ROLES.REPRESENTATIVE,
+        status: 'deactivated',
+        client_profile: { company_id: companyId },
+        ...overrides,
+    });
+
+    beforeEach(() => {
+        reactivateUserMock.mockResolvedValue({ id: 'x', status: 'active' });
+    });
+
+    it('reactivates a representative of this company', async () => {
+        const rep = person();
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(memberChain(rep));
+
+        await svc.restoreRepresentative(companyId, rep._id, clientCaller());
+
+        expect(reactivateUserMock).toHaveBeenCalledWith(rep._id, undefined);
+    });
+
+    it('a client canNOT restore a company-level client', async () => {
+        // Symmetric with removal — every company-level membership change
+        // stays with an admin.
+        const other = person({ role: ROLES.CLIENT });
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(memberChain(other));
+
+        await expect(svc.restoreRepresentative(companyId, other._id, clientCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+        expect(reactivateUserMock).not.toHaveBeenCalled();
+    });
+
+    it('an admin CAN restore a company-level client', async () => {
+        const other = person({ role: ROLES.CLIENT });
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(memberChain(other));
+
+        await svc.restoreRepresentative(companyId, other._id, adminCaller());
+
+        expect(reactivateUserMock).toHaveBeenCalledOnce();
+    });
+
+    it('refuses a target from ANOTHER company with 404, not 403', async () => {
+        const foreign = person({ client_profile: { company_id: new Types.ObjectId() } });
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(memberChain(foreign));
+
+        await expect(svc.restoreRepresentative(companyId, foreign._id, adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.USER_NOT_FOUND,
+        });
+        expect(reactivateUserMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses a STAFF target guessed at this route', async () => {
+        const staff = person({ role: ROLES.ADMIN, client_profile: undefined });
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(memberChain(staff));
+
+        await expect(svc.restoreRepresentative(companyId, staff._id, clientCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.USER_NOT_FOUND,
+        });
+        expect(reactivateUserMock).not.toHaveBeenCalled();
+    });
+
+    it("a client of ANOTHER company can't reach this company", async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(
+            svc.restoreRepresentative(companyId, new Types.ObjectId(), clientCaller(new Types.ObjectId()))
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it('refuses to restore into an ARCHIVED company', async () => {
+        // Mirrors createRepresentative: an archived company must not gain
+        // active logins.
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany({ status: 'archived' }));
+
+        await expect(svc.restoreRepresentative(companyId, new Types.ObjectId(), adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.VALIDATION_ERROR,
+        });
+        expect(reactivateUserMock).not.toHaveBeenCalled();
     });
 });

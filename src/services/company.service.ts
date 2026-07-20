@@ -13,7 +13,7 @@ import { hashPassword } from '../utils/password.js';
 import { assertPasswordPolicy } from '../utils/password-policy.js';
 import { isAdminLike } from '../utils/role-check.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
-import { deactivateUser } from './user.service.js';
+import { deactivateUser, reactivateUser } from './user.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     CreateCompanyBody,
@@ -362,6 +362,35 @@ export const getRepresentative = async (
     return shapePerson(person, projects);
 };
 
+/**
+ * Load a client-side person who belongs to THIS company, or 404.
+ *
+ * Shared by remove and restore so the two can't drift on who counts as "in"
+ * a company. The 404 (rather than 403) for someone in another company is
+ * deliberate: the caller has already passed the company scope check, so a 403
+ * would confirm the id exists elsewhere.
+ */
+const loadCompanyMemberOrThrow = async (
+    companyId: Types.ObjectId,
+    userId: Types.ObjectId
+): Promise<{ _id: Types.ObjectId; role: string; status: string }> => {
+    const target = await User.findById(userId).select('_id role status client_profile').lean<{
+        _id: Types.ObjectId;
+        role: string;
+        status: string;
+        client_profile?: { company_id?: Types.ObjectId };
+    } | null>();
+
+    if (
+        !target ||
+        !PROJECT_CLIENT_SIDE_ROLES.includes(target.role) ||
+        !target.client_profile?.company_id?.equals(companyId)
+    ) {
+        throw AppError.notFound('No such person in this company', ERROR_CODES.USER_NOT_FOUND);
+    }
+    return { _id: target._id, role: target.role, status: target.status };
+};
+
 // ─── DELETE /companies/:id/representatives/:user_id ──────────────────────
 
 /**
@@ -390,22 +419,7 @@ export const removeRepresentative = async (
     const company = await loadCompanyOrThrow(companyId);
     assertCallerOwnsCompany(company._id, caller);
 
-    const target = await User.findById(userId).select('_id role status client_profile').lean<{
-        _id: Types.ObjectId;
-        role: string;
-        status: string;
-        client_profile?: { company_id?: Types.ObjectId };
-    } | null>();
-
-    // Scope the 404 to this company: an id belonging to another company is
-    // "not found here", not "forbidden" — no cross-company enumeration.
-    if (
-        !target ||
-        !PROJECT_CLIENT_SIDE_ROLES.includes(target.role) ||
-        !target.client_profile?.company_id?.equals(company._id)
-    ) {
-        throw AppError.notFound('No such person in this company', ERROR_CODES.USER_NOT_FOUND);
-    }
+    const target = await loadCompanyMemberOrThrow(company._id, userId);
 
     if (!isAdminLike(caller) && target.role !== ROLES.REPRESENTATIVE) {
         throw AppError.forbidden('Only an administrator can remove a company-level client', ERROR_CODES.FORBIDDEN);
@@ -419,6 +433,48 @@ export const removeRepresentative = async (
         reason: 'removed_from_company',
         audit: caller.audit,
     });
+};
+
+// ─── POST /companies/:id/representatives/:user_id/restore ────────────────
+
+/**
+ * Put a removed person back.
+ *
+ * Gated on `representative.write`, NOT `user.deactivate` — exactly like
+ * removal. `user.deactivate` is the admin-wide bit that also governs
+ * reactivating ANY user, so granting it to a Client so they could undo their
+ * own removals would let them reactivate a deactivated admin.
+ *
+ * Same asymmetry as removal, for the same reason: a non-admin may restore
+ * `representative`s only. If a Client could restore company-level clients
+ * they'd still be unable to remove them, so the pair would be lopsided; more
+ * importantly it keeps every company-level membership change with an admin.
+ *
+ * Restoring an already-active person is a no-op, not an error — the button
+ * can lose a race with another admin and that shouldn't surface as a failure.
+ */
+export const restoreRepresentative = async (
+    companyId: Types.ObjectId,
+    userId: Types.ObjectId,
+    caller: CompanyCaller
+): Promise<Record<string, unknown>> => {
+    const company = await loadCompanyOrThrow(companyId);
+    assertCallerOwnsCompany(company._id, caller);
+
+    // Mirrors `createRepresentative`: an archived company must not gain
+    // active logins. Un-archive first, then restore.
+    if (company.status === 'archived') {
+        throw AppError.unprocessable('Cannot restore people in an archived company', ERROR_CODES.VALIDATION_ERROR);
+    }
+
+    const target = await loadCompanyMemberOrThrow(company._id, userId);
+
+    if (!isAdminLike(caller) && target.role !== ROLES.REPRESENTATIVE) {
+        throw AppError.forbidden('Only an administrator can restore a company-level client', ERROR_CODES.FORBIDDEN);
+    }
+
+    // `reactivateUser` re-runs the single-admin guard and writes the audit row.
+    return reactivateUser(target._id, caller.audit);
 };
 
 // ─── POST /companies/:id/representatives ─────────────────────────────────
