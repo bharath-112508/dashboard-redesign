@@ -58,6 +58,8 @@ export interface InternshipOfferRenderData {
     bodyParagraphs?: string[];
     responsibilities: string[];
     terms: string[];
+    /** Sign-off paragraphs, printed AFTER the terms and before the signature. */
+    closingParagraphs?: string[];
     closing?: string;
     signatoryName?: string;
     signatoryTitle?: string;
@@ -130,7 +132,21 @@ function defaultBody(d: InternshipOfferRenderData): string[] {
     return [
         `Dear ${name},`,
         `We are pleased to offer you an internship with ${company} as ${position}. This letter sets out the details of your internship, the responsibilities you will take on, and the terms that apply.`,
-        'We look forward to your contribution and hope this internship is a valuable learning experience for you.',
+    ];
+}
+
+/**
+ * Sign-off, after the terms.
+ *
+ * The company name is interpolated rather than hard-coded so the letter can't
+ * drift from the configured legal name in settings.
+ */
+export function defaultClosing(companyName?: string): string[] {
+    const company = companyName?.trim() || 'Vilja Tech';
+    return [
+        `We are excited to have you join ${company} and wish you a rewarding learning experience. We believe this internship will provide valuable exposure to real-world applications and help you build practical skills.`,
+        'Please confirm your acceptance of this offer by signing below and returning a copy of this letter.',
+        'We look forward to working with you.',
     ];
 }
 
@@ -157,6 +173,7 @@ export function renderInternshipOfferLetterHtml(d: InternshipOfferRenderData): s
     const paragraphs = d.bodyParagraphs?.length ? d.bodyParagraphs : defaultBody(d);
     const responsibilities = d.responsibilities?.length ? d.responsibilities : DEFAULT_INTERNSHIP_RESPONSIBILITIES;
     const terms = d.terms?.length ? d.terms : DEFAULT_INTERNSHIP_TERMS;
+    const closingParagraphs = d.closingParagraphs?.length ? d.closingParagraphs : defaultClosing(d.companyName);
     const closing = d.closing || 'Yours sincerely,';
     const signatoryName = d.signatoryName || 'Santhosh Reddy Panyala';
     const signatoryTitle = d.signatoryTitle || 'Human Resources';
@@ -186,10 +203,11 @@ export function renderInternshipOfferLetterHtml(d: InternshipOfferRenderData): s
 
     const listHtml = (items: string[]) => items.map((t) => `<li>${escape(t)}</li>`).join('');
 
+    // Just the deadline — the closing already carries the "please confirm your
+    // acceptance by signing and returning" ask, and printing both read as the
+    // letter asking twice.
     const validityHtml = d.offerValidUntil
-        ? `<p class="para">Please confirm your acceptance by signing and returning this letter on or before <strong>${escape(
-              d.offerValidUntil
-          )}</strong>.</p>`
+        ? `<p class="para">This offer is valid until <strong>${escape(d.offerValidUntil)}</strong>.</p>`
         : '';
 
     return `<!doctype html>
@@ -330,6 +348,7 @@ export function renderInternshipOfferLetterHtml(d: InternshipOfferRenderData): s
     <h2>General Terms and Conditions</h2>
     <ol class="clauses">${listHtml(terms)}</ol>
 
+    ${closingParagraphs.map((p) => `<p class="para">${escape(p)}</p>`).join('')}
     ${validityHtml}
 
     <div class="sign-row">

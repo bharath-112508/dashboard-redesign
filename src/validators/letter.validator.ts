@@ -103,6 +103,8 @@ export const generateLetterBodySchema = z
         stipend_note: z.string().trim().max(200).optional(),
         responsibilities: z.array(z.string().trim().min(1).max(500)).max(30).optional(),
         general_terms: z.array(z.string().trim().min(1).max(1000)).max(30).optional(),
+        /** Sign-off paragraphs printed after the terms. */
+        closing_paragraphs: z.array(z.string().trim().min(1).max(1000)).max(10).optional(),
     })
     .strict()
     .superRefine((val, ctx) => {

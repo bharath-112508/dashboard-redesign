@@ -246,6 +246,7 @@ const buildInternshipOfferRenderData = async (
         bodyParagraphs: input.body_paragraphs,
         responsibilities: input.responsibilities ?? [],
         terms: input.general_terms ?? [],
+        closingParagraphs: input.closing_paragraphs,
         closing: input.closing,
         signatoryName: input.signatory_name,
         signatoryTitle: input.signatory_title,
