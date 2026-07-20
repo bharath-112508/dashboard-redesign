@@ -59,7 +59,7 @@ export const listCompaniesQuerySchema = z
 export type ListCompaniesQuery = z.infer<typeof listCompaniesQuerySchema>;
 
 /** `GET /companies/:id/representatives` — a company's people, paginated.
- *  Default 20 matches the companies list; the UI asks for 10. */
+ *  Default 20 matches the companies list; the UI asks for 5. */
 export const listRepresentativesQuerySchema = z
     .object({
         page: z.coerce.number().int().min(1).default(1),
