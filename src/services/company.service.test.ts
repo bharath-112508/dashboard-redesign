@@ -23,8 +23,10 @@ const {
     userCreateMock,
     userExistsMock,
     userFindMock,
+    userFindByIdMock,
     recordAuditMock,
     hashPasswordMock,
+    deactivateUserMock,
 } = vi.hoisted(() => ({
     companyCreateMock: vi.fn(),
     companyFindByIdMock: vi.fn(),
@@ -33,8 +35,10 @@ const {
     userCreateMock: vi.fn(),
     userExistsMock: vi.fn(),
     userFindMock: vi.fn(),
+    userFindByIdMock: vi.fn(),
     recordAuditMock: vi.fn(),
     hashPasswordMock: vi.fn(),
+    deactivateUserMock: vi.fn(),
 }));
 
 vi.mock('../models/company.model.js', () => ({
@@ -48,13 +52,15 @@ vi.mock('../models/company.model.js', () => ({
 }));
 
 vi.mock('../models/user.model.js', () => ({
-    User: { create: userCreateMock, exists: userExistsMock, find: userFindMock },
+    User: { create: userCreateMock, exists: userExistsMock, find: userFindMock, findById: userFindByIdMock },
 }));
 
 vi.mock('./audit.service.js', () => ({
     recordAudit: recordAuditMock,
     recordSystemAudit: vi.fn(),
 }));
+
+vi.mock('./user.service.js', () => ({ deactivateUser: deactivateUserMock }));
 
 vi.mock('../utils/password.js', () => ({ hashPassword: hashPasswordMock }));
 vi.mock('../utils/password-policy.js', () => ({ assertPasswordPolicy: vi.fn() }));
@@ -263,6 +269,92 @@ describe('getCompany — client scope', () => {
         await expect(svc.getCompany(companyId, clientCaller(new Types.ObjectId()))).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
+    });
+});
+
+describe('removeRepresentative', () => {
+    const userFindByIdChain = (row: unknown) => ({
+        select: () => ({ lean: () => Promise.resolve(row) }),
+    });
+
+    const repRow = (overrides: Record<string, unknown> = {}) => ({
+        _id: new Types.ObjectId(),
+        role: ROLES.REPRESENTATIVE,
+        status: 'active',
+        client_profile: { company_id: companyId },
+        ...overrides,
+    });
+
+    beforeEach(() => {
+        deactivateUserMock.mockResolvedValue({ id: 'x', status: 'deactivated' });
+    });
+
+    it('a client can remove a representative of their own company', async () => {
+        const rep = repRow();
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(userFindByIdChain(rep));
+
+        await svc.removeRepresentative(companyId, rep._id, clientCaller());
+
+        expect(deactivateUserMock).toHaveBeenCalledWith(expect.objectContaining({ target_id: rep._id }));
+    });
+
+    it('a client canNOT remove a company-level client', async () => {
+        // Letting them would risk locking the company out of managing its
+        // own people — recoverable only by an admin.
+        const other = repRow({ role: ROLES.CLIENT });
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(userFindByIdChain(other));
+
+        await expect(svc.removeRepresentative(companyId, other._id, clientCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+
+        expect(deactivateUserMock).not.toHaveBeenCalled();
+    });
+
+    it('an admin CAN remove a company-level client', async () => {
+        const other = repRow({ role: ROLES.CLIENT });
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(userFindByIdChain(other));
+
+        await svc.removeRepresentative(companyId, other._id, adminCaller());
+
+        expect(deactivateUserMock).toHaveBeenCalledOnce();
+    });
+
+    it('refuses a target belonging to ANOTHER company', async () => {
+        // The load-bearing scope check: without it, a client could
+        // deactivate anyone whose id they guessed.
+        const foreign = repRow({ client_profile: { company_id: new Types.ObjectId() } });
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(userFindByIdChain(foreign));
+
+        await expect(svc.removeRepresentative(companyId, foreign._id, clientCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.USER_NOT_FOUND,
+        });
+
+        expect(deactivateUserMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses a STAFF target (an admin id guessed at this route)', async () => {
+        const staff = repRow({ role: ROLES.ADMIN, client_profile: undefined });
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(userFindByIdChain(staff));
+
+        await expect(svc.removeRepresentative(companyId, staff._id, clientCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.USER_NOT_FOUND,
+        });
+
+        expect(deactivateUserMock).not.toHaveBeenCalled();
+    });
+
+    it("a client of ANOTHER company can't reach this company at all", async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(
+            svc.removeRepresentative(companyId, new Types.ObjectId(), clientCaller(new Types.ObjectId()))
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
     });
 });
 

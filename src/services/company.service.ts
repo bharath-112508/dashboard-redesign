@@ -12,6 +12,7 @@ import { hashPassword } from '../utils/password.js';
 import { assertPasswordPolicy } from '../utils/password-policy.js';
 import { isAdminLike } from '../utils/role-check.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
+import { deactivateUser } from './user.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     CreateCompanyBody,
@@ -233,6 +234,65 @@ export const listRepresentatives = async (
         role: u.role,
         status: u.status,
     }));
+};
+
+// ─── DELETE /companies/:id/representatives/:user_id ──────────────────────
+
+/**
+ * Remove someone from a company.
+ *
+ * "Remove" means **deactivate** — `client_profile.company_id` is required,
+ * so a client-side user can't exist without a company; there is no unlink
+ * that leaves a valid account. Deactivation is the platform's soft-delete:
+ * login revoked, history kept, reversible by an admin.
+ *
+ * **Why this exists instead of `POST /users/:id/deactivate`:** that route is
+ * gated on `user.deactivate`, an admin-wide bit — giving it to a Client so
+ * they could remove their own people would let them deactivate **anyone**,
+ * admins included. Same shape of hazard as `user.write` on creation, same
+ * fix: a scoped route that can only reach this company.
+ *
+ * A non-admin caller may remove **representatives only**. Letting a Client
+ * remove other company-level Clients (or themselves) risks locking the
+ * company out of managing its own people, recoverable only by an admin.
+ */
+export const removeRepresentative = async (
+    companyId: Types.ObjectId,
+    userId: Types.ObjectId,
+    caller: CompanyCaller
+): Promise<Record<string, unknown>> => {
+    const company = await loadCompanyOrThrow(companyId);
+    assertCallerOwnsCompany(company._id, caller);
+
+    const target = await User.findById(userId).select('_id role status client_profile').lean<{
+        _id: Types.ObjectId;
+        role: string;
+        status: string;
+        client_profile?: { company_id?: Types.ObjectId };
+    } | null>();
+
+    // Scope the 404 to this company: an id belonging to another company is
+    // "not found here", not "forbidden" — no cross-company enumeration.
+    if (
+        !target ||
+        !PROJECT_CLIENT_SIDE_ROLES.includes(target.role) ||
+        !target.client_profile?.company_id?.equals(company._id)
+    ) {
+        throw AppError.notFound('No such person in this company', ERROR_CODES.USER_NOT_FOUND);
+    }
+
+    if (!isAdminLike(caller) && target.role !== ROLES.REPRESENTATIVE) {
+        throw AppError.forbidden('Only an administrator can remove a company-level client', ERROR_CODES.FORBIDDEN);
+    }
+
+    // `deactivateUser` also blocks self-removal, revokes refresh tokens,
+    // cascades share-link revocation for clients, and writes the audit row.
+    return deactivateUser({
+        target_id: target._id,
+        caller_id: caller.id,
+        reason: 'removed_from_company',
+        audit: caller.audit,
+    });
 };
 
 // ─── POST /companies/:id/representatives ─────────────────────────────────

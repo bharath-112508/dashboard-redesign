@@ -7,6 +7,7 @@ import { validate } from '../middlewares/validate.middleware.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import {
     companyIdParamSchema,
+    companyRepresentativeParamSchema,
     createCompanyBodySchema,
     createRepresentativeBodySchema,
     listCompaniesQuerySchema,
@@ -92,6 +93,21 @@ router.post(
     requirePermission(PERMISSIONS.REPRESENTATIVE_WRITE),
     validate({ params: companyIdParamSchema, body: createRepresentativeBodySchema }),
     asyncHandler(ctrl.postRepresentative)
+);
+
+/**
+ * Remove someone from the company — deactivates them.
+ *
+ * Gated on `representative.write`, NOT `user.deactivate`: that bit is
+ * admin-wide and would let a Client deactivate any user, admins included.
+ * The service additionally restricts a non-admin caller to removing
+ * `representative`s within their own company.
+ */
+router.delete(
+    '/:id/representatives/:user_id',
+    requirePermission(PERMISSIONS.REPRESENTATIVE_WRITE),
+    validate({ params: companyRepresentativeParamSchema }),
+    asyncHandler(ctrl.deleteRepresentative)
 );
 
 export default router;

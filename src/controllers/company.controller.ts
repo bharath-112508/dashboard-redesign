@@ -53,6 +53,15 @@ export const getRepresentatives = async (req: Request, res: Response): Promise<R
     return ok(res, data);
 };
 
+export const deleteRepresentative = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.removeRepresentative(
+        idOf(req),
+        new Types.ObjectId(req.params.user_id as string),
+        projectCallerFrom(req)
+    );
+    return ok(res, data);
+};
+
 export const postRepresentative = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.createRepresentative(
         idOf(req),

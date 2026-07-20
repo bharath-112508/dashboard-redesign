@@ -80,3 +80,9 @@ export type CreateRepresentativeBody = z.infer<typeof createRepresentativeBodySc
 
 export const companyIdParamSchema = z.object({ id: objectIdSchema });
 export type CompanyIdParam = z.infer<typeof companyIdParamSchema>;
+
+export const companyRepresentativeParamSchema = z.object({
+    id: objectIdSchema,
+    user_id: objectIdSchema,
+});
+export type CompanyRepresentativeParam = z.infer<typeof companyRepresentativeParamSchema>;
