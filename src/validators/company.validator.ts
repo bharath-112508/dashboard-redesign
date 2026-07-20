@@ -64,6 +64,9 @@ export const listRepresentativesQuerySchema = z
     .object({
         page: z.coerce.number().int().min(1).default(1),
         limit: z.coerce.number().int().min(1).max(100).default(20),
+        /** Matches name or email. Min 2 like every other `q` in the API —
+         *  a 1-char search is a full scan with a rank ordering nobody wants. */
+        q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
     })
     .strict();
 

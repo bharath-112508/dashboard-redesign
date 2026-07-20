@@ -40,6 +40,14 @@ type Filter = Record<string, unknown>;
 
 const NAME_COLLATION = { locale: 'en', strength: 2 } as const;
 
+/**
+ * Escape regex metacharacters before interpolating user input into `$regex`.
+ *
+ * Without this, searching `(` is an invalid regex — Mongo raises and the
+ * request 500s — and `.` silently matches any character.
+ */
+const escapeRegex = (v: string): string => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 export interface CompanyCaller {
     id: Types.ObjectId;
     role: string;
@@ -110,7 +118,7 @@ export const listCompanies = async (
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const filter: Filter = {};
     if (query.status) filter.status = query.status;
-    if (query.q) filter.name = { $regex: query.q, $options: 'i' };
+    if (query.q) filter.name = { $regex: escapeRegex(query.q), $options: 'i' };
 
     // A client-side caller only ever sees their own company. Without this
     // they'd get the full customer list — every other client's name.
@@ -269,9 +277,19 @@ export const listRepresentatives = async (
     await loadCompanyOrThrow(id);
     assertCallerOwnsCompany(id, caller);
 
+    // Search matches name OR email. Applied at the DB layer, not to the
+    // fetched page — filtering in the browser would only ever search the 10
+    // rows on screen and quietly miss the rest, which reads as "no results"
+    // rather than "not on this page".
+    const filter: Filter = { ...peopleFilter(id) };
+    if (query.q) {
+        const rx = { $regex: escapeRegex(query.q), $options: 'i' };
+        filter.$or = [{ full_name: rx }, { email: rx }];
+    }
+
     const skip = (query.page - 1) * query.limit;
     const [rows, total, projects] = await Promise.all([
-        User.find(peopleFilter(id))
+        User.find(filter)
             .select('_id full_name email role status')
             .sort({ full_name: 1 })
             .skip(skip)
@@ -285,7 +303,7 @@ export const listRepresentatives = async (
                     status: string;
                 }[]
             >(),
-        User.countDocuments(peopleFilter(id)),
+        User.countDocuments(filter),
         // Every project of THIS company, once. Each person's list is then a
         // pure in-memory derivation — no per-person query, so the response
         // cost is flat in the number of people on the page.

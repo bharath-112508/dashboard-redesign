@@ -638,3 +638,67 @@ describe('getRepresentative', () => {
         ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
     });
 });
+
+// ─── listRepresentatives — search ────────────────────────────────────────
+
+describe('listRepresentatives — search', () => {
+    let captured: Record<string, unknown> | undefined;
+
+    const stub = () => {
+        captured = undefined;
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindMock.mockImplementationOnce((f: Record<string, unknown>) => {
+            captured = f;
+            return {
+                select: () => ({
+                    sort: () => ({ skip: () => ({ limit: () => ({ lean: () => Promise.resolve([]) }) }) }),
+                }),
+            };
+        });
+        userCountMock.mockResolvedValueOnce(0);
+        projectFindMock.mockReturnValueOnce({
+            select: () => ({ sort: () => ({ lean: () => Promise.resolve([]) }) }),
+        });
+    };
+
+    it('matches name OR email at the DB layer', async () => {
+        stub();
+
+        await svc.listRepresentatives(companyId, { page: 1, limit: 10, q: 'sofia' }, adminCaller());
+
+        expect(captured?.$or).toEqual([
+            { full_name: { $regex: 'sofia', $options: 'i' } },
+            { email: { $regex: 'sofia', $options: 'i' } },
+        ]);
+        // Still scoped to the company — search must narrow, never widen.
+        expect(captured?.['client_profile.company_id']).toEqual(companyId);
+    });
+
+    it('counts the FILTERED set, not the whole company', async () => {
+        // Counting unfiltered would make the pager promise pages of results
+        // that don't exist for this search.
+        stub();
+
+        await svc.listRepresentatives(companyId, { page: 1, limit: 10, q: 'sofia' }, adminCaller());
+
+        expect(userCountMock).toHaveBeenCalledWith(expect.objectContaining({ $or: expect.any(Array) }));
+    });
+
+    it('escapes regex metacharacters instead of 500ing on them', async () => {
+        // `(` is an invalid regex; unescaped it makes Mongo raise.
+        stub();
+
+        await svc.listRepresentatives(companyId, { page: 1, limit: 10, q: 'a(b' }, adminCaller());
+
+        const or = captured?.$or as { full_name: { $regex: string } }[];
+        expect(or[0].full_name.$regex).toBe('a\\(b');
+    });
+
+    it('omits the $or entirely when no search is given', async () => {
+        stub();
+
+        await svc.listRepresentatives(companyId, { page: 1, limit: 10 }, adminCaller());
+
+        expect(captured?.$or).toBeUndefined();
+    });
+});
