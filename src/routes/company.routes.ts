@@ -19,12 +19,16 @@ router.use(authenticate);
 
 // ─── Collection ──────────────────────────────────────────────────────────
 
-// Read is `company.read` (admin + manager). A `client` also reaches these
-// via COMPANY_READ? No — they don't hold it. They reach their OWN company
-// through the item routes below, which are scope-checked in the service.
+// `requirePermission` is OR-semantics across its args.
+//
+// `company.read` (admin + manager) is the full directory. A `client` holds
+// only `representative.write` and must reach their OWN company — the service
+// narrows their result set to it. Gating on COMPANY_READ alone made that
+// narrowing UNREACHABLE: the route 403'd before the service ever ran, so the
+// client-scoping branch in `listCompanies` was dead code.
 router.get(
     '/',
-    requirePermission(PERMISSIONS.COMPANY_READ),
+    requirePermission(PERMISSIONS.COMPANY_READ, PERMISSIONS.REPRESENTATIVE_WRITE),
     validate({ query: listCompaniesQuerySchema }),
     asyncHandler(ctrl.getList)
 );
@@ -38,9 +42,12 @@ router.post(
 
 // ─── Item ────────────────────────────────────────────────────────────────
 
+// Same as the list: a `client` reads their own company here, and
+// `assertCallerOwnsCompany` in the service is what pins it to theirs.
+// COMPANY_READ alone made that assertion unreachable too.
 router.get(
     '/:id',
-    requirePermission(PERMISSIONS.COMPANY_READ),
+    requirePermission(PERMISSIONS.COMPANY_READ, PERMISSIONS.REPRESENTATIVE_WRITE),
     validate({ params: companyIdParamSchema }),
     asyncHandler(ctrl.getById)
 );

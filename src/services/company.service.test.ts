@@ -245,6 +245,27 @@ describe('listCompanies', () => {
     });
 });
 
+describe('getCompany — client scope', () => {
+    it('a client can read their OWN company', async () => {
+        // This path was UNREACHABLE before the route gate was widened:
+        // GET /companies/:id required company.read, which a client doesn't
+        // hold, so assertCallerOwnsCompany never ran.
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        const out = await svc.getCompany(companyId, clientCaller());
+
+        expect(out).toMatchObject({ id: companyId.toString() });
+    });
+
+    it('a client canNOT read ANOTHER company', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(svc.getCompany(companyId, clientCaller(new Types.ObjectId()))).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+});
+
 describe('createCompany', () => {
     it('maps a duplicate-name E11000 to 409 DUPLICATE_RESOURCE', async () => {
         // The case-insensitive unique index is what stops "TCS" and "tcs"
