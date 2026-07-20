@@ -68,9 +68,12 @@ describe('defaultClosing', () => {
 describe('renderInternshipOfferLetterHtml', () => {
     it('places the closing AFTER the terms and before the signature', () => {
         const html = renderInternshipOfferLetterHtml(base);
-        const terms = html.indexOf('General Terms and Conditions');
+        // Anchor on MARKUP, not prose: a CSS comment mentioning "Yours
+        // sincerely," matched ahead of the real sign-off and made this pass
+        // for the wrong reason.
+        const terms = html.indexOf('<h2>General Terms and Conditions</h2>');
         const closing = html.indexOf('We look forward to working with you.');
-        const signature = html.indexOf('Yours sincerely');
+        const signature = html.indexOf('class="sign-row"');
         expect(terms).toBeGreaterThan(-1);
         expect(closing).toBeGreaterThan(terms);
         expect(signature).toBeGreaterThan(closing);
@@ -102,6 +105,35 @@ describe('renderInternshipOfferLetterHtml', () => {
         expect(html).not.toContain('<script>alert(1)</script>');
         expect(html).toContain('&lt;script&gt;');
         expect(html).not.toContain('Clause with <b>markup</b>');
+    });
+
+    it('crops the stamp through a frame instead of scaling the whole sheet', () => {
+        // stamp.png is a 375x666 SHEET. Rendering it directly at a fixed
+        // height produced a 38x68 sliver in the page margin instead of a
+        // seal. The frame + negative offsets crop the stamp out of it.
+        const html = renderInternshipOfferLetterHtml(base);
+        // Assert the MARKUP wraps the image, not merely that a .stamp-frame
+        // rule exists in the stylesheet — the CSS is present either way, so
+        // a `toContain('stamp-frame')` check passed even with the image
+        // rendered bare.
+        expect(html).toMatch(/<div class="stamp-frame"><img src="data:image\/png/);
+        expect(html).not.toMatch(/<img class="stamp"/);
+        expect(html).toMatch(/\.stamp-frame\s*\{[^}]*overflow:\s*hidden/);
+        expect(html).toMatch(/\.stamp-frame img\s*\{[^}]*left:\s*-38px/);
+        expect(html).toMatch(/\.stamp-frame img\s*\{[^}]*top:\s*-98px/);
+    });
+
+    it('layers the signature above the stamp', () => {
+        // A signed document has ink over the seal, not under it.
+        const html = renderInternshipOfferLetterHtml(base);
+        expect(html).toMatch(/\.signature\s*\{[^}]*z-index:\s*2/);
+    });
+
+    it('keeps the sign-off from splitting across a page break', () => {
+        // It used to orphan "Yours sincerely," at the foot of one page with
+        // the signature at the head of the next.
+        const html = renderInternshipOfferLetterHtml(base);
+        expect(html).toMatch(/\.sign-row\s*\{[^}]*break-inside:\s*avoid/);
     });
 
     it('renders every internship detail the letter promises', () => {

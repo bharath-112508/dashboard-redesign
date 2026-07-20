@@ -282,18 +282,28 @@ export function renderInternshipOfferLetterHtml(d: InternshipOfferRenderData): s
     ol.clauses li, ul.duties li {
       font-size: 10px; line-height: 1.7; margin-bottom: 6px; text-align: justify;
     }
-    .sign-row {
-      display: flex; justify-content: space-between; align-items: flex-end;
-      gap: 24px; margin-top: 26px;
-    }
+    /* Keep the sign-off whole: it used to split across the page break,
+       orphaning "Yours sincerely," at the foot of one page with the
+       signature at the head of the next. */
+    .sign-row { margin-top: 26px; break-inside: avoid; page-break-inside: avoid; }
     .sign-block { font-size: 10px; line-height: 1.6; }
-    .sign-img { height: 42px; display: block; margin-bottom: 2px; }
-    .stamp { height: 68px; opacity: .9; }
-    .sign-name { font-weight: 700; font-size: 10.5px; }
+    .closing-line { margin-bottom: 4px; }
+    /* stamp.png is a 375x666 SHEET, not a cropped stamp — rendering it
+       whole produced a 38x68 sliver. These offsets crop the stamp out of it
+       and are copied verbatim from the offer letter so every letter type
+       stamps identically; changing one without the other makes them drift.
+       The signature is layered ON TOP (z-index), as on a signed document. */
+    .sign-stage { position: relative; width: 230px; height: 96px; }
+    .stamp-frame { position: absolute; left: 60px; top: 0; width: 96px; height: 96px; overflow: hidden; }
+    .stamp-frame img { position: absolute; width: 172px; height: auto; left: -38px; top: -98px; opacity: 0.92; }
+    .signature { position: absolute; left: 0; top: 14px; height: 80px; width: 150px; object-fit: contain; z-index: 2; }
+    .sign-line { width: 210px; height: 1px; background: rgba(15, 23, 42, 0.3); }
+    .sign-name { margin-top: 2px; font-weight: 700; font-size: 10.5px; }
     .sign-title { color: var(--muted); font-size: 9.5px; }
     .accept {
       margin-top: 22px; padding: 12px 14px; border: 1px dashed var(--border);
       border-radius: 8px; background: var(--slate-50);
+      break-inside: avoid; page-break-inside: avoid;
     }
     .accept-h { font-size: 10px; font-weight: 700; margin-bottom: 14px; }
     .accept-line { display: flex; gap: 26px; font-size: 9.5px; color: var(--muted); }
@@ -353,13 +363,15 @@ export function renderInternshipOfferLetterHtml(d: InternshipOfferRenderData): s
 
     <div class="sign-row">
       <div class="sign-block">
-        <div>${escape(closing)}</div>
-        ${SIG_DATA ? `<img class="sign-img" src="${SIG_DATA}" alt="" />` : '<div style="height:42px"></div>'}
+        <div class="closing-line">${escape(closing)}</div>
+        <div class="sign-stage">
+          ${STAMP_DATA ? `<div class="stamp-frame"><img src="${STAMP_DATA}" alt="" /></div>` : ''}
+          ${SIG_DATA ? `<img class="signature" src="${SIG_DATA}" alt="" />` : ''}
+        </div>
+        <div class="sign-line"></div>
         <div class="sign-name">${escape(signatoryName)}</div>
-        <div class="sign-title">${escape(signatoryTitle)}</div>
-        <div class="sign-title">${escape(d.companyName)}</div>
+        <div class="sign-title">${escape(signatoryTitle)} &middot; ${escape(d.companyName)}</div>
       </div>
-      ${STAMP_DATA ? `<img class="stamp" src="${STAMP_DATA}" alt="" />` : ''}
     </div>
 
     <div class="accept">
