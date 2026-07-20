@@ -86,6 +86,23 @@ export const generateLetterBodySchema = z
         terms_paragraphs: z.array(z.string().min(1)).optional(),
         // offer / joining — extra per-employee clauses appended to Terms & Conditions.
         additional_terms: z.array(z.string().min(1).max(500)).max(20).optional(),
+
+        // internship_offer — the internship OFFER letter (issued at the
+        // start). Distinct from `internship`, the experience letter issued at
+        // the end. Sourced entirely from the body, like `offer`.
+        position: z.string().trim().min(1).max(120).optional(),
+        internship_start_date: isoDateSchema.optional(),
+        internship_end_date: isoDateSchema.optional(),
+        /** Free text so "3 Months", "12 Weeks" and "3.5 Months" all work. */
+        internship_duration: z.string().trim().min(1).max(60).optional(),
+        work_mode: z.string().trim().min(1).max(60).optional(),
+        /** Explicit rather than inferred from a zero stipend: "unpaid" is a
+         *  deliberate statement on the letter, not the absence of a number. */
+        is_paid: z.boolean().optional(),
+        stipend_amount: z.number().min(0).max(10_000_000).optional(),
+        stipend_note: z.string().trim().max(200).optional(),
+        responsibilities: z.array(z.string().trim().min(1).max(500)).max(30).optional(),
+        general_terms: z.array(z.string().trim().min(1).max(1000)).max(30).optional(),
     })
     .strict()
     .superRefine((val, ctx) => {
@@ -93,7 +110,12 @@ export const generateLetterBodySchema = z
         // (appointment) letter can be issued either for an existing employee
         // (user_id → auto-sourced record/salary) OR manually for a not-yet-
         // added person (candidate_name), but it needs at least one of the two.
-        if (val.type !== 'joining') {
+        // `internship_offer` joins `joining` here: an intern is typically not
+        // a platform user when the offer goes out, and requiring one would
+        // mean onboarding every applicant before you could offer them
+        // anything.
+        const MANUAL_NAME_TYPES = ['joining', 'internship_offer'];
+        if (!MANUAL_NAME_TYPES.includes(val.type)) {
             if (!val.user_id) {
                 ctx.addIssue({
                     code: z.ZodIssueCode.custom,
@@ -105,7 +127,7 @@ export const generateLetterBodySchema = z
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
                 path: ['candidate_name'],
-                message: 'Select an employee or enter a name for the joining letter',
+                message: `Select a person or enter a name for the ${val.type.replace('_', ' ')} letter`,
             });
         }
 
@@ -136,6 +158,54 @@ export const generateLetterBodySchema = z
                     code: z.ZodIssueCode.custom,
                     path: ['ctc_breakdown'],
                     message: 'ctc_breakdown must have at least one row for an offer letter',
+                });
+            }
+        }
+
+        if (val.type === 'internship_offer') {
+            // Same reasoning as the offer-letter block above: every field is
+            // optional at the flat-schema level, so without this an
+            // internship offer generates with a blank position, no dates and
+            // no stated compensation.
+            if (!val.position || val.position.trim() === '') {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['position'],
+                    message: 'position is required for an internship offer',
+                });
+            }
+            if (!val.internship_start_date) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['internship_start_date'],
+                    message: 'internship_start_date is required for an internship offer',
+                });
+            }
+            if (!val.internship_end_date) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['internship_end_date'],
+                    message: 'internship_end_date is required for an internship offer',
+                });
+            }
+            if (
+                val.internship_start_date &&
+                val.internship_end_date &&
+                val.internship_end_date < val.internship_start_date
+            ) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['internship_end_date'],
+                    message: 'internship_end_date must be on or after internship_start_date',
+                });
+            }
+            // A paid internship with no amount would render "Stipend of ₹0
+            // per month", which is worse than saying nothing.
+            if (val.is_paid === true && !(val.stipend_amount && val.stipend_amount > 0)) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['stipend_amount'],
+                    message: 'stipend_amount is required for a paid internship',
                 });
             }
         }

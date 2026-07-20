@@ -17,6 +17,10 @@ import {
     type OfferCtcRow,
     type OfferLetterRenderData,
 } from './payroll/offer-letter-template.js';
+import {
+    renderInternshipOfferLetterHtml,
+    type InternshipOfferRenderData,
+} from './payroll/internship-offer-letter-template.js';
 import { htmlToPdf } from './payroll/pdf.service.js';
 import { putBlob, mintDownloadSas, deleteBlob } from '../utils/azure-blob.js';
 import { AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER } from '../config/server.config.js';
@@ -25,6 +29,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
+import { User } from '../models/user.model.js';
 import type { GenerateLetterBody, ListLettersQuery } from '../validators/letter.validator.js';
 
 /**
@@ -76,6 +81,7 @@ const safeFileNameOf = (name: string | undefined): string => (name ?? 'Letter').
 const LETTER_KIND: Record<LetterType, string> = {
     offer: 'Offer_Letter',
     joining: 'Appointment_Letter',
+    internship_offer: 'Internship_Offer_Letter',
     relieving: 'Relieving_Letter',
     experience: 'Experience_Letter',
     internship: 'Internship_Experience_Letter',
@@ -181,35 +187,122 @@ const buildOfferRenderData = async (input: GenerateLetterBody): Promise<OfferLet
     };
 };
 
+/**
+ * Build the internship-offer render data.
+ *
+ * Sourced from the request body like `offer`, for the same reason: the
+ * subject is usually a candidate with no `User` row, no salary structure and
+ * no employment profile to read from. `user_id` is optional — when present
+ * it's stored on the `Letter` row so the document is findable under that
+ * person, and their name/email seed the letter, but nothing else is
+ * auto-derived.
+ */
+const buildInternshipOfferRenderData = async (
+    input: GenerateLetterBody,
+    userId?: Types.ObjectId
+): Promise<InternshipOfferRenderData> => {
+    const company = await getCompanyBlock();
+
+    // When an existing user was picked, their name/email seed the letter but
+    // an explicitly typed name still wins — the operator is looking at the
+    // form and we shouldn't silently overwrite what they entered.
+    let seededName = '';
+    let seededEmail = '';
+    if (userId) {
+        const u = await User.findById(userId).select('full_name email').lean<{
+            full_name?: string;
+            email?: string;
+        } | null>();
+        seededName = u?.full_name ?? '';
+        seededEmail = u?.email ?? '';
+    }
+
+    return {
+        companyName: company.companyName,
+        companyAddress: company.companyAddress,
+        companyEmail: company.companyEmail,
+        cinNo: company.cinNo,
+        iecCode: company.iecCode,
+
+        issueDate: formatRenderDate(input.issue_date),
+        reference: input.reference,
+        offerValidUntil: input.offer_valid_until ? formatRenderDate(input.offer_valid_until) : undefined,
+
+        internName: input.candidate_name?.trim() || seededName,
+        internAddress: input.candidate_address ?? [],
+        internEmail: input.candidate_email?.trim() || seededEmail,
+        internPhone: input.candidate_phone,
+
+        position: input.position ?? '',
+        startDate: formatRenderDate(input.internship_start_date),
+        endDate: formatRenderDate(input.internship_end_date),
+        durationLabel: input.internship_duration ?? '',
+        workMode: input.work_mode ?? '',
+
+        isPaid: input.is_paid === true,
+        stipendAmount: input.stipend_amount,
+        stipendNote: input.stipend_note,
+
+        bodyParagraphs: input.body_paragraphs,
+        responsibilities: input.responsibilities ?? [],
+        terms: input.general_terms ?? [],
+        closing: input.closing,
+        signatoryName: input.signatory_name,
+        signatoryTitle: input.signatory_title,
+    };
+};
+
+/**
+ * Pick the template + build its data for a request.
+ *
+ * One function because `generateLetter`, `previewLetter` and
+ * `previewLetterHtml` all need exactly this and previously each carried
+ * their own copy of the if/else. Three copies meant a new letter type could
+ * be wired into two of them and silently render the WRONG template in the
+ * live preview — a failure you'd only notice by eyeballing the page.
+ */
+const resolveRender = async (
+    input: GenerateLetterBody
+): Promise<{ html: string; data: unknown; subjectName?: string }> => {
+    const userId = input.user_id ? new Types.ObjectId(input.user_id) : undefined;
+
+    if (input.type === 'offer') {
+        const data = await buildOfferRenderData(input);
+        return { html: renderOfferLetterHtml(data), data, subjectName: data.candidateName };
+    }
+    if (input.type === 'joining') {
+        const data = userId
+            ? await buildJoiningRenderData(userId, buildJoiningOverrides(input))
+            : await buildManualJoiningRenderData(buildJoiningOverrides(input));
+        return { html: renderOfferLetterHtml(data), data, subjectName: data.candidateName };
+    }
+    if (input.type === 'internship_offer') {
+        const data = await buildInternshipOfferRenderData(input, userId);
+        return {
+            html: renderInternshipOfferLetterHtml(data),
+            data,
+            subjectName: data.internName,
+        };
+    }
+    // Validated: every remaining type requires user_id.
+    const data = await buildLetterRenderData(userId!, input.type, buildEmployeeOverrides(input));
+    return {
+        html: renderLetterHtml(data as Parameters<typeof renderLetterHtml>[0]),
+        data,
+        subjectName: (data as { employeeName?: string }).employeeName,
+    };
+};
+
 // ─── POST /letters ────────────────────────────────────────────────────────
 
 export const generateLetter = async (
     input: GenerateLetterBody,
     caller: PayrollCaller
 ): Promise<Record<string, unknown>> => {
-    // `user_id` is optional only for a manually-entered joining letter.
+    // `user_id` is optional for the types that may name a person manually.
     const userId = input.user_id ? new Types.ObjectId(input.user_id) : undefined;
 
-    let html: string;
-    let data: unknown;
-    let subjectName: string | undefined;
-
-    if (input.type === 'offer') {
-        data = await buildOfferRenderData(input);
-        html = renderOfferLetterHtml(data as OfferLetterRenderData);
-        subjectName = (data as OfferLetterRenderData).candidateName;
-    } else if (input.type === 'joining') {
-        data = userId
-            ? await buildJoiningRenderData(userId, buildJoiningOverrides(input))
-            : await buildManualJoiningRenderData(buildJoiningOverrides(input));
-        html = renderOfferLetterHtml(data as OfferLetterRenderData);
-        subjectName = (data as OfferLetterRenderData).candidateName;
-    } else {
-        // Validated: every non-joining type requires user_id.
-        data = await buildLetterRenderData(userId!, input.type, buildEmployeeOverrides(input));
-        html = renderLetterHtml(data as Parameters<typeof renderLetterHtml>[0]);
-        subjectName = (data as { employeeName?: string }).employeeName;
-    }
+    const { html, data, subjectName } = await resolveRender(input);
 
     const pdf = await htmlToPdf(html);
     const contentHash = crypto.createHash('sha256').update(pdf).digest('hex');
@@ -258,26 +351,7 @@ export const generateLetter = async (
  * trail. Lets an admin eyeball the render before committing to generation.
  */
 export const previewLetter = async (input: GenerateLetterBody): Promise<{ pdf_base64: string; filename: string }> => {
-    const userId = input.user_id ? new Types.ObjectId(input.user_id) : undefined;
-
-    let html: string;
-    let subjectName: string | undefined;
-
-    if (input.type === 'offer') {
-        const data = await buildOfferRenderData(input);
-        html = renderOfferLetterHtml(data);
-        subjectName = data.candidateName;
-    } else if (input.type === 'joining') {
-        const data = userId
-            ? await buildJoiningRenderData(userId, buildJoiningOverrides(input))
-            : await buildManualJoiningRenderData(buildJoiningOverrides(input));
-        html = renderOfferLetterHtml(data);
-        subjectName = data.candidateName;
-    } else {
-        const data = await buildLetterRenderData(userId!, input.type, buildEmployeeOverrides(input));
-        html = renderLetterHtml(data as Parameters<typeof renderLetterHtml>[0]);
-        subjectName = (data as { employeeName?: string }).employeeName;
-    }
+    const { html, subjectName } = await resolveRender(input);
 
     const pdf = await htmlToPdf(html);
 
@@ -293,26 +367,7 @@ export const previewLetter = async (input: GenerateLetterBody): Promise<{ pdf_ba
  * template the PDF is rendered from.
  */
 export const previewLetterHtml = async (input: GenerateLetterBody): Promise<{ html: string; filename: string }> => {
-    const userId = input.user_id ? new Types.ObjectId(input.user_id) : undefined;
-
-    let html: string;
-    let subjectName: string | undefined;
-
-    if (input.type === 'offer') {
-        const data = await buildOfferRenderData(input);
-        html = renderOfferLetterHtml(data);
-        subjectName = data.candidateName;
-    } else if (input.type === 'joining') {
-        const data = userId
-            ? await buildJoiningRenderData(userId, buildJoiningOverrides(input))
-            : await buildManualJoiningRenderData(buildJoiningOverrides(input));
-        html = renderOfferLetterHtml(data);
-        subjectName = data.candidateName;
-    } else {
-        const data = await buildLetterRenderData(userId!, input.type, buildEmployeeOverrides(input));
-        html = renderLetterHtml(data as Parameters<typeof renderLetterHtml>[0]);
-        subjectName = (data as { employeeName?: string }).employeeName;
-    }
+    const { html, subjectName } = await resolveRender(input);
 
     return { html, filename: filenameFor(input.type, subjectName) };
 };

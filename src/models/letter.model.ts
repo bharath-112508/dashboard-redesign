@@ -20,7 +20,21 @@ import { COLLECTIONS } from '../constants/collections.js';
  * check. Downloads are always short-lived SAS URLs.
  */
 
-export const LETTER_TYPES = ['offer', 'joining', 'relieving', 'experience', 'internship', 'hike', 'promotion'] as const;
+/**
+ * `internship` is the EXPERIENCE letter, issued when an internship ends;
+ * `internship_offer` is issued at the start. Two different documents — don't
+ * collapse them.
+ */
+export const LETTER_TYPES = [
+    'offer',
+    'joining',
+    'internship_offer',
+    'relieving',
+    'experience',
+    'internship',
+    'hike',
+    'promotion',
+] as const;
 export type LetterType = (typeof LETTER_TYPES)[number];
 
 export interface LetterDocument extends Document {
