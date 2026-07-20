@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 
 import { Company, type CompanyDocument } from '../models/company.model.js';
+import { Project } from '../models/project.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -209,31 +210,71 @@ export const listRepresentatives = async (
     await loadCompanyOrThrow(id);
     assertCallerOwnsCompany(id, caller);
 
-    const rows = await User.find({
-        role: { $in: PROJECT_CLIENT_SIDE_ROLES },
-        'client_profile.company_id': id,
-    })
-        .select('_id full_name email role status')
-        .sort({ full_name: 1 })
-        .lean<
+    const [rows, projects] = await Promise.all([
+        User.find({
+            role: { $in: PROJECT_CLIENT_SIDE_ROLES },
+            'client_profile.company_id': id,
+        })
+            .select('_id full_name email role status')
+            .sort({ full_name: 1 })
+            .lean<
+                {
+                    _id: Types.ObjectId;
+                    full_name: string;
+                    email: string;
+                    role: string;
+                    status: string;
+                }[]
+            >(),
+        // Every project of THIS company, once. Each person's list is then a
+        // pure in-memory derivation — no per-person query, so the response
+        // cost is flat in the number of people.
+        Project.find({ company_id: id }).select('_id name code representative_ids').sort({ name: 1 }).lean<
             {
                 _id: Types.ObjectId;
-                full_name: string;
-                email: string;
-                role: string;
-                status: string;
+                name: string;
+                code: string;
+                representative_ids?: Types.ObjectId[];
             }[]
-        >();
+        >(),
+    ]);
 
-    return rows.map((u) => ({
-        id: u._id.toString(),
-        full_name: u.full_name,
-        email: u.email,
-        // `client` = company-level, `representative` = assigned-only. The
-        // distinction is the whole point of the roster, so it's surfaced.
-        role: u.role,
-        status: u.status,
-    }));
+    const asSummary = (p: (typeof projects)[number]) => ({
+        id: p._id.toString(),
+        name: p.name,
+        code: p.code,
+    });
+
+    return rows.map((u) => {
+        // ── The distinction this whole endpoint exists to express ──
+        //
+        // A company-level `client` gets access from the project's
+        // `company_id`, NOT from the roster — so their answer is EVERY
+        // project of the company. They're also seeded onto `representative_ids`,
+        // but that entry is denormalised and may drift; deriving their list
+        // from it would under-report projects they can genuinely open, i.e.
+        // the UI would contradict what happens when they click through.
+        //
+        // A `representative` is the opposite: the roster IS their access.
+        const isCompanyLevel = u.role === ROLES.CLIENT;
+        const assigned = isCompanyLevel
+            ? projects
+            : projects.filter((p) => (p.representative_ids ?? []).some((rid) => rid.equals(u._id)));
+
+        return {
+            id: u._id.toString(),
+            full_name: u.full_name,
+            email: u.email,
+            // `client` = company-level, `representative` = assigned-only. The
+            // distinction is the whole point of the roster, so it's surfaced.
+            role: u.role,
+            status: u.status,
+            /** How `projects` was derived — the UI must not label a
+             *  company-level client's list as "assigned to". */
+            project_access: isCompanyLevel ? 'company' : 'assigned',
+            projects: assigned.map(asSummary),
+        };
+    });
 };
 
 // ─── DELETE /companies/:id/representatives/:user_id ──────────────────────

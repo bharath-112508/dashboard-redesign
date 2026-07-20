@@ -27,6 +27,7 @@ const {
     recordAuditMock,
     hashPasswordMock,
     deactivateUserMock,
+    projectFindMock,
 } = vi.hoisted(() => ({
     companyCreateMock: vi.fn(),
     companyFindByIdMock: vi.fn(),
@@ -39,6 +40,7 @@ const {
     recordAuditMock: vi.fn(),
     hashPasswordMock: vi.fn(),
     deactivateUserMock: vi.fn(),
+    projectFindMock: vi.fn(),
 }));
 
 vi.mock('../models/company.model.js', () => ({
@@ -53,6 +55,10 @@ vi.mock('../models/company.model.js', () => ({
 
 vi.mock('../models/user.model.js', () => ({
     User: { create: userCreateMock, exists: userExistsMock, find: userFindMock, findById: userFindByIdMock },
+}));
+
+vi.mock('../models/project.model.js', () => ({
+    Project: { find: projectFindMock },
 }));
 
 vi.mock('./audit.service.js', () => ({
@@ -366,6 +372,94 @@ describe('createCompany', () => {
 
         await expect(svc.createCompany({ name: 'TCS' }, adminCaller())).rejects.toMatchObject({
             code: ERROR_CODES.DUPLICATE_RESOURCE,
+        });
+    });
+});
+
+// ─── listRepresentatives — whose projects are whose ──────────────────────
+//
+// The rule this pins: a company-level `client` gets access from the
+// project's `company_id`, so their list is EVERY project of the company.
+// A `representative` gets access from the roster, so theirs is only the
+// projects naming them. Deriving a client's list from the roster instead
+// would under-report — the roster entry for a client is a denormalised
+// mirror that may drift, and the UI would then contradict what they can
+// actually open.
+
+describe('listRepresentatives — project scoping per role', () => {
+    const client = {
+        _id: new Types.ObjectId(),
+        full_name: 'Henrik',
+        email: 'h@x.io',
+        role: ROLES.CLIENT,
+        status: 'active',
+    };
+    const rep = {
+        _id: new Types.ObjectId(),
+        full_name: 'Sofia',
+        email: 's@x.io',
+        role: ROLES.REPRESENTATIVE,
+        status: 'active',
+    };
+
+    const projA = { _id: new Types.ObjectId(), name: 'Fleet Dashboard', code: 'NFD', representative_ids: [rep._id] };
+    // Deliberately does NOT name the rep — and does not name the client
+    // either, mirroring roster drift.
+    const projB = { _id: new Types.ObjectId(), name: 'Depot Rollout', code: 'DEP', representative_ids: [] };
+
+    const chain = (rows: unknown[]) => ({
+        select: () => ({ sort: () => ({ lean: () => Promise.resolve(rows) }) }),
+    });
+
+    const stub = (people: unknown[], projects: unknown[]) => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindMock.mockReturnValueOnce(chain(people));
+        projectFindMock.mockReturnValueOnce(chain(projects));
+    };
+
+    it('gives a company-level client EVERY company project, roster or not', async () => {
+        stub([client], [projA, projB]);
+
+        const [row] = await svc.listRepresentatives(companyId, adminCaller());
+
+        expect(row.project_access).toBe('company');
+        expect((row.projects as { code: string }[]).map((p) => p.code).sort()).toEqual(['DEP', 'NFD']);
+    });
+
+    it('gives a representative ONLY the projects naming them', async () => {
+        stub([rep], [projA, projB]);
+
+        const [row] = await svc.listRepresentatives(companyId, adminCaller());
+
+        expect(row.project_access).toBe('assigned');
+        expect((row.projects as { code: string }[]).map((p) => p.code)).toEqual(['NFD']);
+    });
+
+    it('a representative on no project gets an empty list, not every project', async () => {
+        const lonely = { ...rep, _id: new Types.ObjectId() };
+        stub([lonely], [projA, projB]);
+
+        const [row] = await svc.listRepresentatives(companyId, adminCaller());
+
+        expect(row.projects).toEqual([]);
+    });
+
+    it('resolves both people from a single project query (no per-person N+1)', async () => {
+        stub([client, rep], [projA, projB]);
+
+        const rows = await svc.listRepresentatives(companyId, adminCaller());
+
+        expect(projectFindMock).toHaveBeenCalledTimes(1);
+        expect(rows).toHaveLength(2);
+        expect((rows[0].projects as unknown[]).length).toBe(2); // client → all
+        expect((rows[1].projects as unknown[]).length).toBe(1); // rep → assigned
+    });
+
+    it("a client of ANOTHER company can't list this company's people", async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(svc.listRepresentatives(companyId, clientCaller(new Types.ObjectId()))).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
         });
     });
 });
