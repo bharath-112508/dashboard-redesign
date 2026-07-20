@@ -19,7 +19,10 @@ import connectDB, { disconnectDB } from '../src/config/database.config.js';
 import { COLLECTIONS } from '../src/constants/collections.js';
 
 // Safelist — refuse to wipe anything in production-shaped DB names.
-const SAFE_DB_NAMES = new Set(['timesheets', 'timesheets_dev', 'timesheets_test']);
+// `vilje-platform-demo` is the demo dataset the team resets between demos;
+// it is NOT production. Anything not named here is refused outright, which
+// is the whole point — widen this list deliberately, never reflexively.
+const SAFE_DB_NAMES = new Set(['timesheets', 'timesheets_dev', 'timesheets_test', 'vilje-platform-demo']);
 
 // Collections left completely untouched.
 const KEEP_COLLECTIONS = new Set<string>([COLLECTIONS.SYSTEM_SETTINGS, COLLECTIONS.ROLES, COLLECTIONS.LEAVE_TYPES]);

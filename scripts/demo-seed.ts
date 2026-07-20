@@ -148,14 +148,32 @@ interface UserSpec {
     key: string;
     email: string;
     full_name: string;
-    role: 'manager' | 'team_lead' | 'employee' | 'client';
+    role: 'manager' | 'team_lead' | 'employee' | 'client' | 'representative';
     employee_id?: string;
     job_title?: string;
     department?: string;
     date_of_joining?: string;
     reports_to?: string; // key of manager
-    company_name?: string;
+    /** Client-side users only — key into COMPANIES. */
+    company?: string;
 }
+
+/**
+ * Client COMPANIES. "Client" IS the company; a "Representative" is that
+ * company's project-scoped person. Seeded before users, because a client-side
+ * user needs an existing `company_id`.
+ */
+interface CompanySpec {
+    key: string;
+    name: string;
+}
+
+const COMPANIES: CompanySpec[] = [
+    { key: 'nordmark', name: 'Nordmark Logistics AS' },
+    { key: 'aurora', name: 'Aurora Foods AB' },
+];
+
+const companyId: Record<string, string> = {};
 
 const USERS: UserSpec[] = [
     {
@@ -266,23 +284,34 @@ const USERS: UserSpec[] = [
         date_of_joining: '2024-12-09',
         reports_to: 'arjun',
     },
+    // Company-level clients — each sees EVERY project of their company.
     {
         key: 'henrik',
         email: 'henrik@viljetech.com',
         full_name: 'Henrik Larsen',
         role: 'client',
-        company_name: 'Nordmark Logistics AS',
+        company: 'nordmark',
     },
     {
         key: 'emma',
         email: 'emma@viljetech.com',
         full_name: 'Emma Lindqvist',
         role: 'client',
-        company_name: 'Aurora Foods AB',
+        company: 'aurora',
+    },
+    // A representative — sees ONLY the projects they're rostered on. Seeded so
+    // the demo actually exercises the difference between the two roles.
+    {
+        key: 'sofia',
+        email: 'sofia@viljetech.com',
+        full_name: 'Sofia Nordmark',
+        role: 'representative',
+        company: 'nordmark',
     },
 ];
 
-const INTERNAL_KEYS = USERS.filter((u) => u.role !== 'client').map((u) => u.key);
+const CLIENT_SIDE_ROLES = new Set(['client', 'representative']);
+const INTERNAL_KEYS = USERS.filter((u) => !CLIENT_SIDE_ROLES.has(u.role)).map((u) => u.key);
 
 interface TaskSpec {
     title: string;
@@ -317,7 +346,7 @@ const PROJECTS: ProjectSpec[] = [
         start_date: '2026-02-02',
         end_date: '2026-09-30',
         members: ['kavya', 'ananya', 'vikram', 'aditya'],
-        clients: ['henrik'],
+        clients: ['henrik', 'sofia'],
         stories: [
             'Driver live-location view',
             'Route playback & history',
@@ -795,9 +824,82 @@ async function findUserIdByEmail(email: string): Promise<string | null> {
     return hit ? idOf(hit) : null;
 }
 
+/**
+ * Companies must exist before any client-side user, because
+ * `client_profile.company_id` references one.
+ */
+/**
+ * A project belongs to exactly ONE company. `p.clients` lists client-side user
+ * keys; they must all belong to the same company (the BE's roster invariant
+ * would reject a mix anyway), so the first one decides it. `null` = an
+ * internal project with no client side.
+ */
+function companyOfProject(p: { clients: string[] }): string | null {
+    for (const key of p.clients) {
+        const spec = USERS.find((u) => u.key === key);
+        if (spec?.company) return companyId[spec.company] ?? null;
+    }
+    return null;
+}
+
+async function seedCompanies(): Promise<void> {
+    console.log('\n── Companies ──');
+    for (const c of COMPANIES) {
+        const r = await api('POST', '/companies', { name: c.name }, adminToken);
+        if (r.status === 201) {
+            companyId[c.key] = idOf(r.body.data);
+            bump('companies_created');
+            console.log(`  created ${c.name}`);
+            continue;
+        }
+        if (r.status === 409) {
+            // Name is unique case-insensitively — find the existing row.
+            const list = await api('GET', `/companies?q=${encodeURIComponent(c.name)}`, undefined, adminToken);
+            const hit = (list.body?.data ?? []).find(
+                (row: any) => String(row.name).toLowerCase() === c.name.toLowerCase()
+            );
+            if (!hit) throw new Error(`company ${c.name} 409 but lookup failed`);
+            companyId[c.key] = idOf(hit);
+            console.log(`  exists  ${c.name}`);
+            continue;
+        }
+        throw new Error(`company ${c.name} create failed: ${r.status} ${JSON.stringify(r.body)}`);
+    }
+}
+
 async function seedUsers(): Promise<void> {
     console.log('\n── Users ──');
     for (const u of USERS) {
+        // A `representative` is NOT creatable via POST /users — that would
+        // need `user.write`, the admin-wide bit. It goes through the scoped
+        // company route, which derives the role and company server-side.
+        if (u.role === 'representative') {
+            const cid = companyId[u.company!];
+            const rr = await api(
+                'POST',
+                `/companies/${cid}/representatives`,
+                {
+                    email: u.email,
+                    full_name: u.full_name,
+                    timezone: 'Asia/Kolkata',
+                    initial_password: DEMO_PASSWORD,
+                },
+                adminToken
+            );
+            if (rr.status === 201) {
+                userId[u.key] = idOf(rr.body.data);
+                bump('users_created');
+                console.log(`  created ${u.email} (representative)`);
+            } else if (rr.status === 409) {
+                const existing = await findUserIdByEmail(u.email);
+                if (existing) userId[u.key] = existing;
+                console.log(`  exists  ${u.email} (representative)`);
+            } else {
+                throw new Error(`representative ${u.email} failed: ${rr.status} ${JSON.stringify(rr.body)}`);
+            }
+            continue;
+        }
+
         const body: any = {
             email: u.email,
             full_name: u.full_name,
@@ -806,7 +908,7 @@ async function seedUsers(): Promise<void> {
             initial_password: DEMO_PASSWORD,
         };
         if (u.role === 'client') {
-            body.client_profile = { company_name: u.company_name, access_type: 'login' };
+            body.client_profile = { company_id: companyId[u.company!], access_type: 'login' };
         } else {
             body.internal_profile = {
                 employee_id: u.employee_id,
@@ -865,7 +967,14 @@ async function seedProjects(): Promise<void> {
                 end_date: p.end_date,
                 status: 'active',
                 member_ids: p.members.map((m) => userId[m]),
-                client_ids: p.clients.map((c) => userId[c]),
+                // One company per project. `p.clients` lists client-side user
+                // keys; the project's company is theirs. Company-level clients
+                // are auto-rostered by the service, so only representatives
+                // need listing explicitly.
+                company_id: companyOfProject(p),
+                representative_ids: p.clients
+                    .filter((c) => USERS.find((u) => u.key === c)?.role === 'representative')
+                    .map((c) => userId[c]),
             },
             adminToken
         );
@@ -1471,6 +1580,7 @@ async function main(): Promise<void> {
     console.log(`Demo seed starting — today (IST) = ${TODAY}`);
     adminToken = await login(ADMIN_EMAIL, ADMIN_PASSWORD);
 
+    await seedCompanies();
     await seedUsers();
     await seedProjects();
     await seedBillingRates();
