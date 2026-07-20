@@ -36,6 +36,7 @@ const {
     taskCountDocumentsMock,
     taskAggregateMock,
     projectUpdateOneMock,
+    companyFindMock,
 } = vi.hoisted(() => ({
     projectCreateMock: vi.fn(),
     projectFindByIdMock: vi.fn(),
@@ -49,6 +50,7 @@ const {
     taskCountDocumentsMock: vi.fn(),
     taskAggregateMock: vi.fn(),
     projectUpdateOneMock: vi.fn(),
+    companyFindMock: vi.fn(),
 }));
 
 vi.mock('../models/project.model.js', () => ({
@@ -64,6 +66,13 @@ vi.mock('../models/project.model.js', () => ({
 
 vi.mock('../models/user.model.js', () => ({
     User: { find: userFindMock, findById: vi.fn() },
+}));
+
+// listProjects/getProject resolve `company_id` → `{id, name}` for the
+// response. Unmocked, the chainable stub never settles and the test times
+// out rather than failing loudly — hence an explicit default in beforeEach.
+vi.mock('../models/company.model.js', () => ({
+    Company: { find: companyFindMock },
 }));
 
 vi.mock('../models/sprint.model.js', () => ({
@@ -231,6 +240,10 @@ beforeEach(() => {
     taskCountDocumentsMock.mockResolvedValue(0);
     // Task.aggregate used by listProjects rollup — default to empty (no tasks).
     taskAggregateMock.mockResolvedValue([]);
+    // Company.find backs the `company_id` → `{id, name}` resolution on
+    // listProjects/getProject. Default to "no companies found", which is the
+    // internal-project shape; tests that care override per-call.
+    companyFindMock.mockReturnValue(mkUserChain([]));
 });
 
 // ─── createProject ────────────────────────────────────────────────────────
@@ -815,12 +828,14 @@ describe('listProjects — task-completion rollup', () => {
         overrides: Partial<{
             _id: Types.ObjectId;
             custom_task_statuses: { key: string; is_terminal: boolean }[];
+            company_id: Types.ObjectId | null;
         }> = {}
     ) => {
         const id = overrides._id ?? new Types.ObjectId();
         const cts = overrides.custom_task_statuses ?? [];
         return {
             _id: id,
+            company_id: overrides.company_id ?? null,
             name: 'P',
             code: 'P-1',
             description: '',
@@ -908,6 +923,58 @@ describe('listProjects — task-completion rollup', () => {
         // Should NOT throw — failure-isolation wraps the rollup
         const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
         expect(result.data[0]).toMatchObject({ task_count: 0, done_task_count: 0 });
+    });
+
+    // ─── company resolution ──────────────────────────────────────────────
+    //
+    // The list is the only place that can distinguish a client project from
+    // internal work, because `company.read` is Manager+ — a Team Lead or
+    // Employee cannot resolve the name themselves.
+
+    it('resolves company_id to {id, name} on the row', async () => {
+        const companyId = new Types.ObjectId();
+        stubFindWithRows([makeRowDoc({ company_id: companyId })]);
+        companyFindMock.mockReturnValueOnce(mkUserChain([{ _id: companyId, name: 'Nordmark Logistics AS' } as never]));
+
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+        expect(result.data[0]).toMatchObject({
+            company: { id: companyId.toString(), name: 'Nordmark Logistics AS' },
+        });
+    });
+
+    it('returns company: null for an internal project (no company_id)', async () => {
+        stubFindWithRows([makeRowDoc({ company_id: null })]);
+
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+        expect(result.data[0]).toMatchObject({ company: null });
+        // No company_ids on the page → no lookup at all.
+        expect(companyFindMock).not.toHaveBeenCalled();
+    });
+
+    it('batches one lookup for a page sharing a company (no N+1)', async () => {
+        const companyId = new Types.ObjectId();
+        stubFindWithRows([
+            makeRowDoc({ company_id: companyId }),
+            makeRowDoc({ company_id: companyId }),
+            makeRowDoc({ company_id: null }),
+        ]);
+        companyFindMock.mockReturnValueOnce(mkUserChain([{ _id: companyId, name: 'Aurora Foods AB' } as never]));
+
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+        expect(companyFindMock).toHaveBeenCalledTimes(1);
+        expect(result.data[0]).toMatchObject({ company: { name: 'Aurora Foods AB' } });
+        expect(result.data[1]).toMatchObject({ company: { name: 'Aurora Foods AB' } });
+        expect(result.data[2]).toMatchObject({ company: null });
+    });
+
+    it('degrades a dangling company_id to null rather than throwing', async () => {
+        // Companies are archived, never hard-deleted, so this shouldn't
+        // happen — but a stale pointer must not take down the whole list.
+        stubFindWithRows([makeRowDoc({ company_id: new Types.ObjectId() })]);
+        companyFindMock.mockReturnValueOnce(mkUserChain([]));
+
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+        expect(result.data[0]).toMatchObject({ company: null });
     });
 });
 

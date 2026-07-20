@@ -1,5 +1,6 @@
 import { Types } from 'mongoose';
 
+import { Company } from '../models/company.model.js';
 import { Project, type ProjectDocument, type CustomTaskStatus } from '../models/project.model.js';
 import { Sprint } from '../models/sprint.model.js';
 import { Story } from '../models/story.model.js';
@@ -161,6 +162,44 @@ const assertCallerCanRead = (project: ProjectDocument, caller: ProjectCaller): v
 // ─── Serialisation ───────────────────────────────────────────────────────
 
 const toPublic = (doc: ProjectDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
+
+/**
+ * Resolve `company_id` → `company: {id, name} | null` for a page of projects.
+ *
+ * This has to happen server-side. `company_id` alone is useless to most of
+ * the UI because `company.read` is Manager+ — a Team Lead or Employee asking
+ * the companies endpoint for the name would get a 403, so the projects list
+ * would silently lose the client column for exactly the roles that live in
+ * it. Shipping the name with the row is also what keeps this from becoming
+ * an N+1: one `$in` covers the whole page.
+ *
+ * `null` is a real, expected value — an internal project has no client
+ * company — and is NOT the same as "company deleted". A company is archived,
+ * never hard-deleted (projects point at it), so a dangling id would be a bug;
+ * it degrades to `null` here rather than throwing, since a stale pointer
+ * shouldn't take down the whole list.
+ */
+const attachCompanies = async (rows: ProjectDocument[]): Promise<Map<string, { id: string; name: string }>> => {
+    const ids = [
+        ...new Set(
+            rows
+                .map((r) => r.company_id)
+                .filter((id): id is Types.ObjectId => Boolean(id))
+                .map(String)
+        ),
+    ];
+    if (ids.length === 0) return new Map();
+    const companies = await Company.find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) } })
+        .select('_id name')
+        .lean<{ _id: Types.ObjectId; name: string }[]>();
+    return new Map(companies.map((c) => [String(c._id), { id: String(c._id), name: c.name }]));
+};
+
+/** The `company` field as it appears on a project response. */
+const companyOf = (
+    doc: ProjectDocument,
+    byId: Map<string, { id: string; name: string }>
+): { id: string; name: string } | null => (doc.company_id ? (byId.get(String(doc.company_id)) ?? null) : null);
 
 // ─── Member / client role validation ─────────────────────────────────────
 
@@ -414,11 +453,14 @@ export const listProjects = async (
         }
     }
 
+    const companyById = await attachCompanies(rows);
+
     return {
         data: rows.map((r) => {
             const counts = rollupById.get(r._id.toString()) ?? { task_count: 0, done_task_count: 0 };
             return {
                 ...toPublic(r),
+                company: companyOf(r, companyById),
                 task_count: counts.task_count,
                 done_task_count: counts.done_task_count,
             };
@@ -438,7 +480,11 @@ export const getProject = async (id: Types.ObjectId, caller: ProjectCaller): Pro
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
     assertCallerCanRead(doc, caller);
-    return toPublic(doc);
+    // Resolved here too, so `company` isn't a field that exists on the list
+    // response but vanishes on the detail one — that asymmetry is the kind
+    // of thing a consumer only discovers at runtime.
+    const companyById = await attachCompanies([doc]);
+    return { ...toPublic(doc), company: companyOf(doc, companyById) };
 };
 
 /**
