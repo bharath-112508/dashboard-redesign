@@ -14,7 +14,7 @@ This file is the **quick-reference**. For the per-module deep-dive — data mode
 | [`leave-management.md`](docs/modules/leave-management.md) | Leave types, balances, requests (preview/apply/approve/reject/cancel), C4 SL replay, comp-off, year rollover cron |
 | [`attendance.md`](docs/modules/attendance.md) | Check-in/out (multi-segment BUG-040), geofence + WiFi, QR, corrections, EOD finalizer cron |
 | [`holidays-locations.md`](docs/modules/holidays-locations.md) | Holiday calendar + bulk import, office locations + QR tokens |
-| [`project-management.md`](docs/modules/project-management.md) | Projects + members + clients + custom statuses + sprints + stories + tasks (incl. subtasks/dependencies) + comments + activity + attachments + templates + share links + timeline (**all in one file**) |
+| [`project-management.md`](docs/modules/project-management.md) | Projects + members + representatives + custom statuses + sprints + stories + tasks (incl. subtasks/dependencies) + comments + activity + attachments + templates + share links + timeline (**all in one file**) |
 | [`timesheets-billing.md`](docs/modules/timesheets-billing.md) | Daily entries + weekly view + manager approval + billing rates with forward-extension invariants + reminder cron |
 | [`reports-exports.md`](docs/modules/reports-exports.md) | Sync report reads + async export pipeline (Azure Blob + inline fallback) + presets + subscriptions + cleanup cron |
 | [`audit-compliance.md`](docs/modules/audit-compliance.md) | `audit_logs` + `audit_archives` (daily WORM + SHA-256 chain) + `audit_log_mirrors` (P1-7 hourly) |
@@ -44,12 +44,18 @@ Role keys ([`constants/role-keys.ts:22-28`](src/constants/role-keys.ts#L22-L28))
 | Role | Slug | Audience | Permission baseline |
 |---|---|---|---|
 | Admin | `admin` | Everything | `system.admin` wildcard — every `requirePermission` short-circuits true |
-| Manager | `manager` | Team Lead bundle + 6 more | Adds `project.clients_write`, `billing_rate.read`, `report.read`, `report_export.write`, `leave_balance.read_team`, `timesheet.edit_out_of_window` |
+| Manager | `manager` | Team Lead bundle + 6 more | Adds `company.read`, `project.representatives_write`, `billing_rate.read`, `report.read`, `report_export.write`, `leave_balance.read_team`, `timesheet.edit_out_of_window` |
 | Team Lead | `team_lead` | Employee bundle + 12 more | Adds `leave_request.read_team`/`approve`, `attendance.read_team`/`correction_approve`, `timesheet.read`, `project.write`/`archive`/`members_write`, `sprint.write`, `story.write`, `task_template.write`, `share_link.write`, `role.read`, `dashboard.manager` |
 | Employee | `employee` | Bulk of the user base | 19 perms — own task/timesheet/attendance/leave + project read + dashboard.employee |
-| Client | `client` | External, project-scoped read-only | 8 perms — `project.read`, `task.read`, `task_comment.write`, `task_attachment.write`, `holiday.read`, `leave_type.read`, `settings.read`, `dashboard.client`. **No leave / attendance / timesheets / billing / reports.** |
+| Client | `client` | The client **company**, at the person level | `CLIENT_SIDE_BASE` (8) + `representative.write` + `project.representatives_write`. Sees **every** project of their company. **No leave / attendance / timesheets / billing / reports.** |
+| Representative | `representative` | A client company's project-scoped person | `CLIENT_SIDE_BASE` (8) — `project.read`, `task.read`, `task_comment.write`, `task_attachment.write`, `holiday.read`, `leave_type.read`, `settings.read`, `dashboard.client`. Sees **only** projects they're rostered on. |
 
-Permission constants live in [`constants/permissions.ts`](src/constants/permissions.ts) (60 total, grouped by domain prefix: `user.*`, `role.*`, `project.*`, `task.*`, `timesheet.*`, `billing_rate.*`, `attendance.*`, `leave_type.*`, `leave_balance.*`, `leave_request.*`, `comp_off.*`, `holiday.*`, `office_location.*`, `report.*`, `audit_log.*`, `audit_archive.*`, `settings.*`, `share_link.*`, `dashboard.*`, `system.admin`). **BE is the source of truth.** The FE mirrors it in [`src/lib/permissions.ts`](../viljetech-platform-frontend/src/lib/permissions.ts) — zero drift today.
+> **Vocabulary — this trips people up.** **"Client" IS the company** (the
+> company-level role); a **"Representative"** is that company's project-scoped
+> person. The two hold nearly identical *permissions* and differ almost entirely
+> in **visibility scope**, which is service-layer, not RBAC. See §Companies.
+
+Permission constants live in [`constants/permissions.ts`](src/constants/permissions.ts) (67 total, grouped by domain prefix: `user.*`, `role.*`, `company.*`, `representative.*`, `project.*`, `task.*`, `timesheet.*`, `billing_rate.*`, `attendance.*`, `leave_type.*`, `leave_balance.*`, `leave_request.*`, `comp_off.*`, `holiday.*`, `office_location.*`, `report.*`, `audit_log.*`, `audit_archive.*`, `settings.*`, `share_link.*`, `dashboard.*`, `system.admin`). **BE is the source of truth.** The FE mirrors it in [`src/lib/permissions.ts`](../viljetech-platform-frontend/src/lib/permissions.ts) — zero drift today.
 
 [`requirePermissionOrSelf(perm, paramName?)`](src/middlewares/auth.middleware.ts#L235-L260) lets a caller through if **either** they hold `perm` (or wildcard) **or** the URL param matches their JWT `user_id`. Currently used only on `PATCH /users/:id` ([`user.routes.ts:77-82`](src/routes/user.routes.ts#L77-L82)).
 
@@ -121,15 +127,29 @@ Sub-modules with their own routers; grouped because they share `LeaveRequest`/`L
 - **Routes** — [`routes/office-location.routes.ts`](src/routes/office-location.routes.ts). CRUD + `POST /office-locations/:id/regenerate-qr`.
 - **Service** — [`services/office-location.service.ts`](src/services/office-location.service.ts) · **Model** — [`models/office-location.model.ts`](src/models/office-location.model.ts)
 
+### Companies (clients)
+
+- **Purpose** — The client organisation. **"Client" IS the company**; a **"Representative"** is that company's project-scoped person. The company has **no login** — people hold the roles.
+- **Permissions** — `COMPANY_READ` (admin + manager), `COMPANY_WRITE` (admin), `REPRESENTATIVE_WRITE` (admin **and** a company's own `client`s)
+- **Routes** — [`routes/company.routes.ts`](src/routes/company.routes.ts). `GET|POST /companies`, `GET|PATCH /companies/:id`, `POST /companies/:id/archive`, `GET|POST /companies/:id/representatives`
+- **Service** — [`services/company.service.ts`](src/services/company.service.ts) · **Model** — [`models/company.model.ts`](src/models/company.model.ts) · **Validator** — [`validators/company.validator.ts`](src/validators/company.validator.ts)
+- **Gotchas**:
+  - 🔴 **`POST /companies/:id/representatives` accepts NO `role` and NO `company_id`.** Both are derived server-side (role hard-coded; company from the URL, pinned to the caller's own company for non-admins) and the body schema is `.strict()`, so sending either is a **400**, not a silent ignore. The endpoint exists precisely so a Client never needs `user.write` — that bit is admin-wide and would let them create **admins**.
+  - **No `owner_id`** — several people may hold `client` for one company, so it survives any one of them leaving.
+  - **`name` is unique case-insensitively** via a collated index (`locale: 'en', strength: 2`). Queries must pass the **same collation** or Mongo won't use it. Free-text `company_name` had no such guard, which is how near-duplicates ("TCS" / "TCS ") appeared.
+  - **Archive, never hard-delete** — projects carry `company_id`.
+  - A client-side caller listing companies is **narrowed to their own**, or they'd get the full customer list.
+- **Migration** — [`scripts/migrate-companies.ts`](scripts/migrate-companies.ts), dry-run by default, `--commit` to apply. Re-runnable.
+
 ### Project management
 
-Projects own the sprints/stories/tasks tree. Member/client rosters are arrays of user-ids on `Project` (employee/team-lead roster vs. client roster — see roles). Per-project custom task statuses are stored on the project doc.
+Projects own the sprints/stories/tasks tree. `member_ids` is the internal-staff roster; the client side is `company_id` + `representative_ids` (see Companies above). Per-project custom task statuses are stored on the project doc.
 
 The full surface — projects + members + clients + custom statuses + sprints + stories + tasks + subtasks + dependencies + comments + activity + attachments + templates + share links + timeline — is documented in a single deep-dive at [`docs/modules/project-management.md`](docs/modules/project-management.md). Highlights below.
 
 - **Purpose** — Projects, members, clients, custom task statuses, sprints (time-boxed windows), stories (grouping layer with derived status from task rollup), tasks (subtasks + dependencies), task collaboration (comments / activity / attachments), task templates, share links, timeline (Gantt)
-- **Roles & visibility** — Admin/Manager: see all. Team Lead/Employee: see projects where `member_ids ∋ caller`. Client: see projects where `client_ids ∋ caller`. Service-layer scoping in [`loadProjectForCaller`](src/services/project.service.ts) — every project read funnels through it. **All sub-resources reuse this engine** (sprint, story, task, comment, attachment, template, timeline services all import `loadProjectForCaller`/`buildProjectVisibilityFilter`).
-- **Permissions** — `PROJECT_READ`/`WRITE`/`ARCHIVE`/`MEMBERS_WRITE`/`CLIENTS_WRITE`, `SPRINT_WRITE`, `STORY_WRITE`, `TASK_READ`/`WRITE`, `TASK_COMMENT_WRITE`, `TASK_ATTACHMENT_WRITE`, `TASK_TEMPLATE_READ`/`WRITE`, `SHARE_LINK_WRITE`
+- **Roles & visibility** — Admin/Manager: see all. Team Lead/Employee: see projects where `member_ids ∋ caller`. **Client: every project where `company_id` = their company** (NOT roster containment — they must be able to see a new project in order to staff it). **Representative: only projects where `representative_ids ∋ caller`.** Service-layer scoping in [`loadProjectForCaller`](src/services/project.service.ts) — every project read funnels through it. **All sub-resources reuse this engine** (sprint, story, task, comment, attachment, template, timeline services all import `loadProjectForCaller`/`buildProjectVisibilityFilter`).
+- **Permissions** — `PROJECT_READ`/`WRITE`/`ARCHIVE`/`MEMBERS_WRITE`/`REPRESENTATIVES_WRITE`, `SPRINT_WRITE`, `STORY_WRITE`, `TASK_READ`/`WRITE`, `TASK_COMMENT_WRITE`, `TASK_ATTACHMENT_WRITE`, `TASK_TEMPLATE_READ`/`WRITE`, `SHARE_LINK_WRITE`
 - **Routes** (top-level entry points, all under `/api/v1`):
   - Projects + custom statuses + bulk member/client roster — [`routes/project.routes.ts`](src/routes/project.routes.ts). `PATCH|DELETE /project-custom-statuses/:id` are on the [`customStatusRouter`](src/routes/sprint.routes.ts#L71-L90) exported from `sprint.routes.ts`.
   - Nested sprint/story/template/share-link list+create on the project router.
@@ -142,8 +162,11 @@ The full surface — projects + members + clients + custom statuses + sprints + 
   - Task templates — [`routes/task-template.routes.ts`](src/routes/task-template.routes.ts).
   - Share links — [`routes/share-link.routes.ts`](src/routes/share-link.routes.ts) (three sub-routers, with the **public no-auth `GET /share-links/resolve/:token`** mounted last so it doesn't shadow authed routes).
   - Timeline — [`routes/timeline.routes.ts`](src/routes/timeline.routes.ts).
+  - Client-side roster — `GET|POST /projects/:id/representatives`, `DELETE /projects/:id/representatives/:user_id` (was `/clients`).
 - **Gotchas** (per-area summary; full table in the module doc):
-  - **G1** — `PROJECT_MEMBERS_WRITE` vs. `PROJECT_CLIENTS_WRITE` are split (Team Lead can manage members; only Manager+ manages clients). `PROJECT_ARCHIVE` (not `PROJECT_WRITE`) gates `DELETE /projects/:id`.
+  - **G1** — `PROJECT_MEMBERS_WRITE` vs. `PROJECT_REPRESENTATIVES_WRITE` are split (Team Lead can manage members; Manager+ and a company's own `client`s manage the client-side roster). `PROJECT_ARCHIVE` (not `PROJECT_WRITE`) gates `DELETE /projects/:id`.
+  - **`company_id` is authoritative for a `client`'s access, not `representative_ids`.** Clients are *also* listed on the roster so it's one explicit field, but that entry is **denormalised** — if it drifts, a client still sees the project. Drift costs display accuracy, never access.
+  - **Roster invariant** — every `representative_id` must be an active client-side user of THIS project's company. The company half is what stops company B's person being rostered onto company A's project. Changing `company_id` **resets** the roster.
   - **F4** — Member/client bulk add/remove uses two atomic updates (`$pull` then `$addToSet`) inside `withTransaction` to avoid lost-write races between concurrent admin callers.
   - **R3** — Hard-delete project / sprint / custom-status refuses with `RESOURCE_HAS_DEPENDENTS` when anything still references it. Archive is the escape hatch.
   - **BUG-007** — Team Lead/Employee creating a project is auto-added to `member_ids` so they don't lose visibility of their own project.
