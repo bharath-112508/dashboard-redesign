@@ -110,3 +110,74 @@ describe('patchTaskBodySchema — BUG-041 done+future-date guard', () => {
         expect(r.success).toBe(true);
     });
 });
+
+/**
+ * Phase-1 Jira-workflow fields on `/tasks`:
+ *  - `issue_type` — enum (task | bug | improvement).
+ *  - `story_points` — Fibonacci set or `null`; free numbers rejected.
+ *  - `task_number` — server-owned; must be stripped from client input.
+ */
+
+const validCreate = (overrides: Record<string, unknown> = {}) => ({
+    project_id: VALID_OID,
+    title: 'New task',
+    due_date: '2026-05-10',
+    ...overrides,
+});
+
+describe('createTaskBodySchema — issue_type', () => {
+    it('accepts each valid issue type', () => {
+        for (const t of ['task', 'bug', 'improvement']) {
+            expect(createTaskBodySchema.parse(validCreate({ issue_type: t })).issue_type).toBe(t);
+        }
+    });
+
+    it('rejects an unknown issue type', () => {
+        expect(createTaskBodySchema.safeParse(validCreate({ issue_type: 'epic' })).success).toBe(false);
+    });
+
+    it('is optional (defaults handled by the service)', () => {
+        expect(createTaskBodySchema.safeParse(validCreate()).success).toBe(true);
+    });
+});
+
+describe('createTaskBodySchema — story_points', () => {
+    it('accepts each Fibonacci value', () => {
+        for (const p of [1, 2, 3, 5, 8, 13, 21]) {
+            expect(createTaskBodySchema.parse(validCreate({ story_points: p })).story_points).toBe(p);
+        }
+    });
+
+    it('accepts null (unestimated)', () => {
+        expect(createTaskBodySchema.parse(validCreate({ story_points: null })).story_points).toBeNull();
+    });
+
+    it('rejects a non-Fibonacci number', () => {
+        expect(createTaskBodySchema.safeParse(validCreate({ story_points: 4 })).success).toBe(false);
+        expect(createTaskBodySchema.safeParse(validCreate({ story_points: 100 })).success).toBe(false);
+    });
+});
+
+describe('createTaskBodySchema — task_number is server-owned', () => {
+    it('strips a client-supplied task_number', () => {
+        const parsed = createTaskBodySchema.parse(validCreate({ task_number: 999 }));
+        expect('task_number' in parsed).toBe(false);
+    });
+});
+
+describe('patchTaskBodySchema — Phase-1 fields', () => {
+    it('accepts issue_type and story_points patches', () => {
+        expect(patchTaskBodySchema.safeParse({ issue_type: 'bug' }).success).toBe(true);
+        expect(patchTaskBodySchema.safeParse({ story_points: 8 }).success).toBe(true);
+        expect(patchTaskBodySchema.safeParse({ story_points: null }).success).toBe(true);
+    });
+
+    it('rejects a non-Fibonacci story_points patch', () => {
+        expect(patchTaskBodySchema.safeParse({ story_points: 7 }).success).toBe(false);
+    });
+
+    it('strips a client-supplied task_number on patch', () => {
+        const parsed = patchTaskBodySchema.parse({ task_number: 3, issue_type: 'bug' });
+        expect('task_number' in parsed).toBe(false);
+    });
+});

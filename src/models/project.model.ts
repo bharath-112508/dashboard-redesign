@@ -156,6 +156,9 @@ export interface ProjectDocument extends Document {
     representative_ids: Types.ObjectId[];
     custom_task_statuses: Types.DocumentArray<CustomTaskStatus>;
     default_status_orders: Types.DocumentArray<DefaultStatusOrder>;
+    /** Monotonic per-project issue-key counter. Incremented atomically on task
+     *  create (task.service); never decremented, so keys are never reused. */
+    task_seq: number;
     created_by: Types.ObjectId;
     created_at: Date;
     updated_at: Date;
@@ -256,6 +259,7 @@ const projectSchema = new Schema<ProjectDocument>(
                 message: 'Each built-in status must appear exactly once in the order.',
             },
         },
+        task_seq: { type: Number, required: true, default: 0, min: 0 },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
     },
     {

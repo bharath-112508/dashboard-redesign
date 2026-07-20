@@ -4,7 +4,7 @@ import { Task, type TaskDocument } from '../models/task.model.js';
 import { Story } from '../models/story.model.js';
 import { Sprint } from '../models/sprint.model.js';
 import { User } from '../models/user.model.js';
-import type { ProjectDocument } from '../models/project.model.js';
+import { Project, type ProjectDocument } from '../models/project.model.js';
 import { AppError } from '../utils/app-error.js';
 import { isAdminLike } from '../utils/role-check.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -15,6 +15,7 @@ import {
     DEFAULT_TASK_STATUS_VALUES,
     TASK_DEPENDENCIES_MAX,
     TASK_EMPLOYEE_PATCH_FIELDS,
+    TASK_ISSUE_TYPES,
     TASK_MAX_SUBTASK_DEPTH,
     TASK_PRIORITIES,
 } from '../constants/task.js';
@@ -356,8 +357,24 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
 
     const position = input.position ?? (await nextPositionInColumn(projectId, status));
 
+    // Reserve the issue-key number atomically BEFORE creating the task. The
+    // `$inc` is a single-document atomic op, so two concurrent creates get
+    // distinct numbers with no transaction. `new: true` returns the
+    // post-increment value, which becomes this task's `task_number`.
+    const counter = await Project.findOneAndUpdate(
+        { _id: projectId },
+        { $inc: { task_seq: 1 } },
+        { new: true, projection: { task_seq: 1 } }
+    ).lean<{ task_seq: number } | null>();
+    if (!counter) {
+        // Project was deleted between the visibility load and here — treat as
+        // not-found rather than minting an orphan task.
+        throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    }
+
     const created = await Task.create({
         project_id: projectId,
+        task_number: counter.task_seq,
         sprint_id: sprintId,
         story_id: storyId,
         parent_task_id: parentId,
@@ -365,6 +382,8 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
         description: input.description,
         status,
         priority: input.priority ?? TASK_PRIORITIES.MEDIUM,
+        issue_type: input.issue_type ?? TASK_ISSUE_TYPES.TASK,
+        story_points: input.story_points ?? null,
         due_date: input.due_date,
         estimated_hours: input.estimated_hours ?? 0,
         primary_assignee_id: assigneeId,
@@ -540,6 +559,8 @@ export const updateTask = async (
     const prev = {
         status: task.status,
         priority: task.priority,
+        issue_type: task.issue_type,
+        story_points: task.story_points,
         due_date: task.due_date,
         estimated_hours: task.estimated_hours,
         sprint_id: task.sprint_id,
@@ -551,6 +572,8 @@ export const updateTask = async (
     if (patch.title !== undefined) task.title = patch.title;
     if (patch.description !== undefined) task.description = patch.description;
     if (patch.priority !== undefined) task.priority = patch.priority as TaskDocument['priority'];
+    if (patch.issue_type !== undefined) task.issue_type = patch.issue_type as TaskDocument['issue_type'];
+    if (patch.story_points !== undefined) task.story_points = patch.story_points;
     if (patch.due_date !== undefined) task.due_date = patch.due_date;
     if (patch.estimated_hours !== undefined) task.estimated_hours = patch.estimated_hours;
 
@@ -638,6 +661,8 @@ const emitPatchActivities = async (
     prev: {
         status: string;
         priority: string;
+        issue_type: string;
+        story_points: number | null;
         due_date: string;
         estimated_hours: number;
         sprint_id: Types.ObjectId | null;
@@ -647,6 +672,24 @@ const emitPatchActivities = async (
     },
     actorId: Types.ObjectId
 ): Promise<void> => {
+    if (task.issue_type !== prev.issue_type) {
+        await recordActivity({
+            task_id: task._id,
+            actor_id: actorId,
+            activity_type: TASK_ACTIVITY_TYPES.ISSUE_TYPE_CHANGED,
+            from_value: prev.issue_type,
+            to_value: task.issue_type,
+        });
+    }
+    if (task.story_points !== prev.story_points) {
+        await recordActivity({
+            task_id: task._id,
+            actor_id: actorId,
+            activity_type: TASK_ACTIVITY_TYPES.STORY_POINTS_CHANGED,
+            from_value: prev.story_points,
+            to_value: task.story_points,
+        });
+    }
     if (task.status !== prev.status) {
         await recordActivity({
             task_id: task._id,

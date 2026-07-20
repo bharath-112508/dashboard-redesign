@@ -6,10 +6,12 @@ import {
     TASK_DEPENDENCIES_MAX,
     TASK_DESCRIPTION_MAX,
     TASK_ESTIMATED_HOURS_MAX,
+    TASK_ISSUE_TYPE_VALUES,
     TASK_LIST_DEFAULT_LIMIT,
     TASK_LIST_MAX_LIMIT,
     TASK_PRIORITY_VALUES,
     TASK_STATUS_KEY_MAX,
+    TASK_STORY_POINT_VALUES,
     TASK_TITLE_MAX,
 } from '../constants/task.js';
 
@@ -68,6 +70,18 @@ const enforceNoFutureDoneDate = <T extends { status?: string | undefined; due_da
 // level) — coercing to `undefined` would lose the user's intent to detach.
 const optionalNullableObjectId = z.union([objectIdSchema, z.null()]).optional();
 
+// Issue type + story points. `story_points` accepts `null` (unestimated) or a
+// value from the Fibonacci set — a free number is rejected so board sums stay
+// meaningful. `task_number` is intentionally absent from every schema: it is
+// server-assigned and would be stripped from any client payload.
+const issueTypeSchema = z.enum(TASK_ISSUE_TYPE_VALUES as unknown as [string, ...string[]]);
+const storyPointsSchema = z.union([
+    z.number().refine((v) => TASK_STORY_POINT_VALUES.includes(v), {
+        message: `story_points must be one of ${TASK_STORY_POINT_VALUES.join(', ')}`,
+    }),
+    z.null(),
+]);
+
 // ─── POST /tasks ──────────────────────────────────────────────────────────
 
 export const createTaskBodySchema = z
@@ -80,6 +94,8 @@ export const createTaskBodySchema = z
         description: z.string().trim().max(TASK_DESCRIPTION_MAX).default(''),
         status: z.string().trim().min(1).max(TASK_STATUS_KEY_MAX).optional(),
         priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
+        issue_type: issueTypeSchema.optional(),
+        story_points: storyPointsSchema.optional(),
         due_date: isoDateSchema,
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX).optional(),
         primary_assignee_id: optionalNullableObjectId,
@@ -104,6 +120,8 @@ export const patchTaskBodySchema = z
         description: z.string().trim().max(TASK_DESCRIPTION_MAX),
         status: z.string().trim().min(1).max(TASK_STATUS_KEY_MAX),
         priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]),
+        issue_type: issueTypeSchema,
+        story_points: storyPointsSchema,
         due_date: isoDateSchema,
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX),
         primary_assignee_id: optionalNullableObjectId,

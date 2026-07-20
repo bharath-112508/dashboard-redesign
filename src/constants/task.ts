@@ -41,6 +41,33 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[keyof typeof TASK_PRIORITIES
 
 export const TASK_PRIORITY_VALUES: readonly TaskPriority[] = Object.values(TASK_PRIORITIES);
 
+// ─── Issue types ─────────────────────────────────────────────────────────
+//
+// A lightweight classification on the task (Jira "issue type"). Deliberately
+// NOT Epic/Story — those would collide with the separate `stories` entity and
+// the `parent_task_id` subtask hierarchy. Keeping three flat types (task /
+// bug / improvement) gives the Jira "typed issue" feel without touching the
+// hierarchy. Default `task`.
+
+export const TASK_ISSUE_TYPES = {
+    TASK: 'task',
+    BUG: 'bug',
+    IMPROVEMENT: 'improvement',
+} as const;
+
+export type TaskIssueType = (typeof TASK_ISSUE_TYPES)[keyof typeof TASK_ISSUE_TYPES];
+
+export const TASK_ISSUE_TYPE_VALUES: readonly TaskIssueType[] = Object.values(TASK_ISSUE_TYPES);
+
+// ─── Story points ────────────────────────────────────────────────────────
+//
+// The classic Fibonacci-ish estimation scale. Stored as a plain number (one
+// of these values) or `null` for "unestimated". Constrained to the set at
+// the validator + schema so the board's per-column / per-sprint sums stay
+// meaningful and free-typed junk can't leak in.
+
+export const TASK_STORY_POINT_VALUES: readonly number[] = [1, 2, 3, 5, 8, 13, 21];
+
 // ─── Field caps ──────────────────────────────────────────────────────────
 
 export const TASK_TITLE_MAX = 200;

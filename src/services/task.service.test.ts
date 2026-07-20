@@ -31,6 +31,7 @@ const {
     loadProjectForCallerMock,
     buildProjectVisibilityFilterMock,
     recordAuditMock,
+    projectFindOneAndUpdateMock,
 } = vi.hoisted(() => ({
     taskCreateMock: vi.fn(),
     taskFindByIdMock: vi.fn(),
@@ -44,6 +45,7 @@ const {
     loadProjectForCallerMock: vi.fn(),
     buildProjectVisibilityFilterMock: vi.fn(),
     recordAuditMock: vi.fn(),
+    projectFindOneAndUpdateMock: vi.fn(),
 }));
 
 vi.mock('../models/task.model.js', () => ({
@@ -74,6 +76,7 @@ vi.mock('../models/project.model.js', () => ({
         find: vi.fn().mockReturnValue({
             select: () => ({ limit: () => ({ lean: () => Promise.resolve([]) }) }),
         }),
+        findOneAndUpdate: projectFindOneAndUpdateMock,
     },
 }));
 
@@ -179,8 +182,23 @@ const stubSprintLookup = (project_id: Types.ObjectId | null): void => {
     });
 };
 
+/**
+ * Stub the atomic issue-key reservation `Project.findOneAndUpdate(...).lean()`.
+ * Returns `{ task_seq }` — the post-`$inc` counter that becomes the new task's
+ * `task_number`. `null` simulates the project vanishing mid-create.
+ */
+const stubReserveKey = (taskSeq: number | null): void => {
+    projectFindOneAndUpdateMock.mockReturnValueOnce({
+        lean: () => Promise.resolve(taskSeq === null ? null : { task_seq: taskSeq }),
+    });
+};
+
 beforeEach(() => {
     vi.resetAllMocks();
+    // Default: every create reserves key #1 unless a test overrides it.
+    projectFindOneAndUpdateMock.mockReturnValue({
+        lean: () => Promise.resolve({ task_seq: 1 }),
+    });
 });
 
 // ─── createTask — RBAC + cross-doc validation ────────────────────────────
@@ -226,6 +244,77 @@ describe('createTask', () => {
 
         await svc.createTask({ ...baseInput(project._id), status: 'qa_passed' }, adminCaller());
         expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ status: 'qa_passed' }));
+    });
+
+    it('assigns task_number from the atomically reserved counter', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition(null);
+        stubReserveKey(42);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
+
+        await svc.createTask(baseInput(project._id), adminCaller());
+
+        // Reserved via a single-doc atomic $inc, then written as task_number.
+        expect(projectFindOneAndUpdateMock).toHaveBeenCalledWith(
+            { _id: project._id },
+            { $inc: { task_seq: 1 } },
+            expect.objectContaining({ new: true })
+        );
+        expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ task_number: 42 }));
+    });
+
+    it('gives concurrent creates distinct numbers (atomic counter)', async () => {
+        const project = makeProject();
+        // Two creates; the atomic $inc returns increasing values, so the two
+        // tasks get distinct numbers even when issued back-to-back.
+        loadProjectForCallerMock.mockResolvedValue(project);
+        stubFindOneForLastPosition(null);
+        stubReserveKey(1);
+        stubFindOneForLastPosition(null);
+        stubReserveKey(2);
+        taskCreateMock.mockResolvedValue(makeTask({ project_id: project._id }));
+
+        await svc.createTask(baseInput(project._id), adminCaller());
+        await svc.createTask(baseInput(project._id), adminCaller());
+
+        const numbers = taskCreateMock.mock.calls.map((c) => (c[0] as { task_number: number }).task_number);
+        expect(new Set(numbers).size).toBe(2);
+        expect(numbers).toEqual([1, 2]);
+    });
+
+    it('defaults issue_type to task and story_points to null', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition(null);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
+
+        await svc.createTask(baseInput(project._id), adminCaller());
+        expect(taskCreateMock).toHaveBeenCalledWith(
+            expect.objectContaining({ issue_type: 'task', story_points: null })
+        );
+    });
+
+    it('passes through issue_type and story_points when supplied', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition(null);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
+
+        await svc.createTask({ ...baseInput(project._id), issue_type: 'bug', story_points: 5 }, adminCaller());
+        expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ issue_type: 'bug', story_points: 5 }));
+    });
+
+    it('throws PROJECT_NOT_FOUND when the counter reservation returns null', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition(null);
+        stubReserveKey(null);
+
+        await expect(svc.createTask(baseInput(project._id), adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.PROJECT_NOT_FOUND,
+        });
+        expect(taskCreateMock).not.toHaveBeenCalled();
     });
 
     it('rejects sprint from a different project with TASK_SPRINT_PROJECT_MISMATCH', async () => {

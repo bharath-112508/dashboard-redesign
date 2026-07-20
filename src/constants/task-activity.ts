@@ -37,6 +37,8 @@ export const TASK_ACTIVITY_TYPES = {
     COLLABORATOR_REMOVED: 'collaborator_removed',
     SPRINT_CHANGED: 'sprint_changed',
     STORY_CHANGED: 'story_changed',
+    ISSUE_TYPE_CHANGED: 'issue_type_changed',
+    STORY_POINTS_CHANGED: 'story_points_changed',
     DEPENDENCY_ADDED: 'dependency_added',
     DEPENDENCY_REMOVED: 'dependency_removed',
     SUBTASK_ADDED: 'subtask_added',
