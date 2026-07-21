@@ -249,16 +249,16 @@ echo "── GET /leave-types (employee can read) ──────────
 code=$(req GET /leave-types '' "$EMP_ACCESS")
 check "list 200" 200 "$code"
 TYPE_COUNT=$(jqx "b.data.length")
-[[ "$TYPE_COUNT" -ge 7 ]] && pass=$((pass+1)) || { fail=$((fail+1)); printf "  \e[31mFAIL\e[0m at least 7 seeded types (got %s)\n" "$TYPE_COUNT"; }
+[[ "$TYPE_COUNT" -ge 4 ]] && pass=$((pass+1)) || { fail=$((fail+1)); printf "  \e[31mFAIL\e[0m at least 4 seeded types (got %s)\n" "$TYPE_COUNT"; }
 
 CL_ID=$(jqx "(b.data.find(t => t.code==='CL')||{}).id")
 SL_ID=$(jqx "(b.data.find(t => t.code==='SL')||{}).id")
 WFH_ID=$(jqx "(b.data.find(t => t.code==='WFH')||{}).id")
-UNPAID_ID=$(jqx "(b.data.find(t => t.code==='UNPAID')||{}).id")
+COMP_OFF_ID=$(jqx "(b.data.find(t => t.code==='COMP_OFF')||{}).id")
 [[ -n "$CL_ID" && "$CL_ID" != "undefined" ]] && pass=$((pass+1)) || { fail=$((fail+1)); printf "  \e[31mFAIL\e[0m CL seed present\n"; }
 [[ -n "$SL_ID" && "$SL_ID" != "undefined" ]] && pass=$((pass+1)) || { fail=$((fail+1)); printf "  \e[31mFAIL\e[0m SL seed present\n"; }
 [[ -n "$WFH_ID" && "$WFH_ID" != "undefined" ]] && pass=$((pass+1)) || { fail=$((fail+1)); printf "  \e[31mFAIL\e[0m WFH seed present\n"; }
-[[ -n "$UNPAID_ID" && "$UNPAID_ID" != "undefined" ]] && pass=$((pass+1)) || { fail=$((fail+1)); printf "  \e[31mFAIL\e[0m UNPAID seed present\n"; }
+[[ -n "$COMP_OFF_ID" && "$COMP_OFF_ID" != "undefined" ]] && pass=$((pass+1)) || { fail=$((fail+1)); printf "  \e[31mFAIL\e[0m COMP_OFF seed present\n"; }
 
 echo ""
 echo "── POST /leave-types as employee → 403 ─────────────────────────"

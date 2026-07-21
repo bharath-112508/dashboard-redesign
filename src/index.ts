@@ -322,7 +322,7 @@ const startServer = async () => {
     try {
         await connectDB();
 
-        // Make sure the seven canonical leave types exist (idempotent).
+        // Make sure the four canonical leave types exist (idempotent).
         // Admin-tweaked rows are preserved via $setOnInsert.
         await seedDefaultLeaveTypes();
 

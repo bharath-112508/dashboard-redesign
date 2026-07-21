@@ -14,8 +14,7 @@ import { runJob, type JobContext, type RunJobOptions, type RunJobResult } from '
  *  - **CL / SL** — `carry_forward = false` on the type. New row gets a fresh
  *    `allocated` from `computeAllocation()` (which knows about pro-rata for
  *    mid-year joiners) and zeros for `used / pending / monthly_forfeited`.
- *  - **WFH / Maternity / Paternity / Unpaid** — unlimited or event-based,
- *    `allocated = 0` by `computeAllocation`. Untouched.
+ *  - **WFH** — unlimited, `allocated = 0` by `computeAllocation`. Untouched.
  *  - **Comp-off** — `is_earned = true`. `computeAllocation` returns 0 for
  *    the new row; the source of truth is `comp_off_ledger` which is
  *    timeless and not touched by the rollover. The cached

@@ -140,7 +140,7 @@ describe('computeAllocation', () => {
         ).toBe(0);
     });
 
-    it('returns 0 when default_allocation_days is 0 (e.g. WFH/Maternity)', () => {
+    it('returns 0 when default_allocation_days is 0 (e.g. WFH)', () => {
         expect(
             svc.computeAllocation({
                 leaveType: fullType({ default_allocation_days: 0 }),

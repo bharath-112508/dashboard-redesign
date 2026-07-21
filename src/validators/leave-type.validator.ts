@@ -5,9 +5,9 @@ import { LEAVE_CODE_VALUES, PRO_RATA_STRATEGIES } from '../constants/leave.js';
 /**
  * Zod schemas for `/leave-types` (API_Contract.md §5.1, Data_Model.md §3.1).
  *
- * `code` is canonical (CL/SL/MATERNITY/PATERNITY/WFH/COMP_OFF/UNPAID by
- * default, but admin may register custom uppercase tokens). PATCH cannot
- * change `code` — only mutable policy fields are exposed.
+ * `code` is canonical (CL/SL/WFH/COMP_OFF by default, but admin may register
+ * custom uppercase tokens). PATCH cannot change `code` — only mutable policy
+ * fields are exposed.
  */
 
 const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId');

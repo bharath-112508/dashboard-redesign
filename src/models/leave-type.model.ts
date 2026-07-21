@@ -7,12 +7,12 @@ import { PRO_RATA_STRATEGIES, type LeaveCode, type ProRataStrategy } from '../co
 /**
  * `leave_types` — Data_Model.md §3.1.
  *
- * Master configuration table for the leave engine. Default rows (CL/SL/
- * MATERNITY/PATERNITY/WFH/COMP_OFF/UNPAID) are seeded on every boot from
- * `LEAVE_TYPE_SEEDS` in `constants/leave.ts` (idempotent upsert keyed on
- * `code`). Admins can additionally insert custom types via
- * `POST /leave-types`, but the seed defaults will continue to be re-asserted
- * on each restart so the engine always finds the seven canonical codes.
+ * Master configuration table for the leave engine. Default rows
+ * (CL/SL/WFH/COMP_OFF) are seeded on every boot from `LEAVE_TYPE_SEEDS` in
+ * `constants/leave.ts` (idempotent upsert keyed on `code`). Admins can
+ * additionally insert custom types via `POST /leave-types`, but the seed
+ * defaults will continue to be re-asserted on each restart so the engine
+ * always finds the four canonical codes.
  *
  * Policy fields drive runtime behaviour:
  *  - `monthly_cap` + `monthly_forfeiture` → SL "use it or lose it" rules
@@ -21,8 +21,9 @@ import { PRO_RATA_STRATEGIES, type LeaveCode, type ProRataStrategy } from '../co
  *  - `is_unlimited` (WFH) skips the balance check entirely.
  *  - `is_earned` (COMP_OFF) means there is no annual `allocated` figure —
  *    balance is reconstructed from `comp_off_ledger`.
- *  - `is_event_based` (MATERNITY/PATERNITY) means no annual cycle; admin
- *    grants a one-shot allocation per event.
+ *  - `is_event_based` means no annual cycle; admin grants a one-shot
+ *    allocation per event. (No default type uses this today; it remains for
+ *    admin-created custom types.)
  *
  * `is_active = false` hides a type from the apply form but does not delete
  * historical balance/segment rows. We never hard-delete a leave type because
