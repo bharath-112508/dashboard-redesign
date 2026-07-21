@@ -102,13 +102,17 @@ export type PatchDefaultStatusOrdersBody = z.infer<typeof patchDefaultStatusOrde
 export const createProjectBodySchema = z
     .object({
         name: z.string().trim().min(1).max(PROJECT_NAME_MAX),
+        // Optional — when omitted the service auto-generates a unique code
+        // from the name (initials, deduped). Still accepted + validated if a
+        // caller supplies one explicitly (API back-compat / imports).
         code: z
             .string()
             .trim()
             .min(1)
             .max(PROJECT_CODE_MAX)
             .transform((v) => v.toUpperCase())
-            .pipe(z.string().regex(PROJECT_CODE_REGEX, 'code must be A-Z, 0-9, -, _ starting with a letter')),
+            .pipe(z.string().regex(PROJECT_CODE_REGEX, 'code must be A-Z, 0-9, -, _ starting with a letter'))
+            .optional(),
         description: z.string().trim().max(PROJECT_DESCRIPTION_MAX).default(''),
         start_date: isoDateSchema,
         end_date: isoDateSchema.nullable().default(null),

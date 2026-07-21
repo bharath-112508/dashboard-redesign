@@ -7,6 +7,7 @@ import { Story } from '../models/story.model.js';
 import { Task } from '../models/task.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
+import { deriveProjectCodeBase, pickProjectCode } from '../utils/project-code.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
@@ -306,6 +307,21 @@ const isCodeDuplicateError = (err: unknown): boolean => {
     return e.code === 11000 && Boolean(e.keyPattern?.code);
 };
 
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Derive a unique project `code` from the name. Reads the codes already
+ * using this base prefix (`WR`, `WR2`, …) in one query, then picks the first
+ * free one. A concurrent create could still race us to the same code — the
+ * unique index is the real guard, and `createProject` retries on that 11000.
+ */
+const generateUniqueProjectCode = async (name: string): Promise<string> => {
+    const base = deriveProjectCodeBase(name);
+    const prefixRegex = new RegExp(`^${escapeRegExp(base)}[0-9]*$`, 'i');
+    const rows = await Project.find({ code: prefixRegex }).select('code').lean<{ code: string }[]>();
+    return pickProjectCode(base, new Set(rows.map((r) => r.code)));
+};
+
 // ─── POST /projects ──────────────────────────────────────────────────────
 
 export const createProject = async (
@@ -339,28 +355,46 @@ export const createProject = async (
         if (!representativeIds.some((r) => r.equals(id))) representativeIds.push(id);
     }
 
-    let created: ProjectDocument;
-    try {
-        created = await Project.create({
-            name: input.name,
-            code: input.code,
-            description: input.description,
-            start_date: input.start_date,
-            end_date: input.end_date,
-            status: input.status,
-            member_ids: memberIds,
-            company_id: companyId,
-            representative_ids: representativeIds,
-            custom_task_statuses: input.custom_task_statuses,
-            created_by: caller.id,
-        });
-    } catch (err) {
-        if (isCodeDuplicateError(err)) {
-            throw AppError.conflict('A project with this code already exists', ERROR_CODES.PROJECT_CODE_TAKEN, {
-                code: input.code,
+    // Code is auto-generated from the name when the caller omits it (the
+    // common path — the create form no longer asks for one). An explicitly
+    // supplied code is honoured and its collision surfaces to the user.
+    const autoCode = !input.code;
+    let code = input.code ?? (await generateUniqueProjectCode(input.name));
+
+    let created: ProjectDocument | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+            created = await Project.create({
+                name: input.name,
+                code,
+                description: input.description,
+                start_date: input.start_date,
+                end_date: input.end_date,
+                status: input.status,
+                member_ids: memberIds,
+                company_id: companyId,
+                representative_ids: representativeIds,
+                custom_task_statuses: input.custom_task_statuses,
+                created_by: caller.id,
             });
+            break;
+        } catch (err) {
+            if (!isCodeDuplicateError(err)) throw err;
+            // A user-supplied code that clashes is a real conflict to report.
+            if (!autoCode) {
+                throw AppError.conflict('A project with this code already exists', ERROR_CODES.PROJECT_CODE_TAKEN, {
+                    code,
+                });
+            }
+            // An auto-generated code lost a race — recompute against the now
+            // newer set and retry.
+            code = await generateUniqueProjectCode(input.name);
         }
-        throw err;
+    }
+    if (!created) {
+        throw AppError.conflict('Could not allocate a unique project code', ERROR_CODES.PROJECT_CODE_TAKEN, {
+            code,
+        });
     }
 
     if (caller.audit) {
