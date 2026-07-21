@@ -97,7 +97,11 @@ const taskSchema = new Schema<TaskDocument>(
         story_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.STORIES, default: null },
         parent_task_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.TASKS, default: null },
         title: { type: String, required: true, trim: true, maxlength: TASK_TITLE_MAX },
-        description: { type: String, required: true, default: '', maxlength: TASK_DESCRIPTION_MAX },
+        // Optional free text. NOT `required` — Mongoose treats a String's
+        // `required: true` as failing on '' (empty string), so a task created
+        // without a description was rejected with "Path `description` is
+        // required." `default: ''` keeps the field a string when omitted.
+        description: { type: String, required: false, default: '', maxlength: TASK_DESCRIPTION_MAX },
         status: {
             type: String,
             required: true,
