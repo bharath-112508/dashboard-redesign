@@ -151,6 +151,24 @@ export const reorderTaskBodySchema = z.object({
 });
 export type ReorderTaskBody = z.infer<typeof reorderTaskBodySchema>;
 
+// ─── POST /tasks/:id/rank ─────────────────────────────────────────────────
+//
+// Phase 2 Backlog — reorder a task within the per-project `backlog_rank`
+// ordering. The body names the neighbour the task should land AFTER or
+// BEFORE. Both omitted / null ⇒ move to the top. At most one may be set —
+// providing both is contradictory.
+
+export const rankTaskBodySchema = z
+    .object({
+        after_task_id: optionalNullableObjectId,
+        before_task_id: optionalNullableObjectId,
+    })
+    .refine((d) => !(d.after_task_id && d.before_task_id), {
+        message: 'Provide at most one of after_task_id or before_task_id',
+        path: ['before_task_id'],
+    });
+export type RankTaskBody = z.infer<typeof rankTaskBodySchema>;
+
 // ─── POST /tasks/:id/assign-story ─────────────────────────────────────────
 
 export const assignStoryBodySchema = z.object({

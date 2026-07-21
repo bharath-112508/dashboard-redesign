@@ -4,7 +4,12 @@ import { Types } from 'mongoose';
 import * as service from '../services/sprint.service.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { projectCallerFrom } from '../utils/caller.js';
-import type { CreateSprintBody, ListSprintsQuery, PatchSprintBody } from '../validators/sprint.validator.js';
+import type {
+    CompleteSprintBody,
+    CreateSprintBody,
+    ListSprintsQuery,
+    PatchSprintBody,
+} from '../validators/sprint.validator.js';
 
 const idOf = (req: Request, key = 'id'): Types.ObjectId => new Types.ObjectId(req.params[key] as string);
 
@@ -55,5 +60,18 @@ export const postArchive = async (req: Request, res: Response): Promise<Response
 
 export const postUnarchive = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.unarchiveSprint(idOf(req), projectCallerFrom(req));
+    return ok(res, data);
+};
+
+// Phase 2 Backlog — lifecycle transitions. POST /sprints/:id/start moves a
+// planned sprint to active (single-active rule); POST /sprints/:id/complete
+// moves an active sprint to completed and relocates unfinished tasks.
+export const postStart = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.startSprint(idOf(req), projectCallerFrom(req));
+    return ok(res, data);
+};
+
+export const postComplete = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.completeSprint(idOf(req), req.body as CompleteSprintBody, projectCallerFrom(req));
     return ok(res, data);
 };

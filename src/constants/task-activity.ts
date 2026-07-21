@@ -37,6 +37,8 @@ export const TASK_ACTIVITY_TYPES = {
     COLLABORATOR_REMOVED: 'collaborator_removed',
     SPRINT_CHANGED: 'sprint_changed',
     STORY_CHANGED: 'story_changed',
+    /** Phase 2 Backlog — task manually re-ranked within the project order. */
+    RANK_CHANGED: 'rank_changed',
     ISSUE_TYPE_CHANGED: 'issue_type_changed',
     STORY_POINTS_CHANGED: 'story_points_changed',
     DEPENDENCY_ADDED: 'dependency_added',

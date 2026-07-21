@@ -12,6 +12,7 @@ import {
     listTasksQuerySchema,
     moveSprintBodySchema,
     patchTaskBodySchema,
+    rankTaskBodySchema,
     reorderTaskBodySchema,
     taskDependencyParamsSchema,
     taskIdParamSchema,
@@ -90,6 +91,16 @@ router.post(
     requirePermission(PERMISSIONS.TASK_READ),
     validate({ params: taskIdParamSchema, body: reorderTaskBodySchema }),
     asyncHandler(ctrl.postReorder)
+);
+
+// Phase 2 Backlog — reorder within the per-project backlog_rank ordering.
+// Gated on TASK_WRITE (employees hold it); the service further restricts to
+// admin/manager/team_lead OR the task's assignee, mirroring reorder.
+router.post(
+    '/:id/rank',
+    requirePermission(PERMISSIONS.TASK_WRITE),
+    validate({ params: taskIdParamSchema, body: rankTaskBodySchema }),
+    asyncHandler(ctrl.postRank)
 );
 
 router.post(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createTaskBodySchema, patchTaskBodySchema } from './task.validator.js';
+import { createTaskBodySchema, patchTaskBodySchema, rankTaskBodySchema } from './task.validator.js';
 
 /**
  * BUG-041 — when status === 'done', due_date must be <= today.
@@ -179,5 +179,33 @@ describe('patchTaskBodySchema — Phase-1 fields', () => {
     it('strips a client-supplied task_number on patch', () => {
         const parsed = patchTaskBodySchema.parse({ task_number: 3, issue_type: 'bug' });
         expect('task_number' in parsed).toBe(false);
+    });
+});
+
+describe('rankTaskBodySchema — Phase 2 Backlog', () => {
+    it('accepts an empty body (move to top)', () => {
+        expect(rankTaskBodySchema.safeParse({}).success).toBe(true);
+    });
+
+    it('accepts a single after_task_id', () => {
+        expect(rankTaskBodySchema.safeParse({ after_task_id: VALID_OID }).success).toBe(true);
+    });
+
+    it('accepts a single before_task_id', () => {
+        expect(rankTaskBodySchema.safeParse({ before_task_id: VALID_OID }).success).toBe(true);
+    });
+
+    it('accepts explicit nulls', () => {
+        expect(rankTaskBodySchema.safeParse({ after_task_id: null, before_task_id: null }).success).toBe(true);
+    });
+
+    it('rejects supplying BOTH after and before', () => {
+        expect(rankTaskBodySchema.safeParse({ after_task_id: VALID_OID, before_task_id: VALID_OID }).success).toBe(
+            false
+        );
+    });
+
+    it('rejects a malformed ObjectId', () => {
+        expect(rankTaskBodySchema.safeParse({ after_task_id: 'not-an-id' }).success).toBe(false);
     });
 });

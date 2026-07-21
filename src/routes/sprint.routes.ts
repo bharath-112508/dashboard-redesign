@@ -6,7 +6,11 @@ import { asyncHandler } from '../utils/async-handler.js';
 import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { PERMISSIONS } from '../constants/permissions.js';
-import { patchSprintBodySchema, sprintIdParamSchema } from '../validators/sprint.validator.js';
+import {
+    completeSprintBodySchema,
+    patchSprintBodySchema,
+    sprintIdParamSchema,
+} from '../validators/sprint.validator.js';
 import { customStatusIdParamSchema, patchCustomStatusBodySchema } from '../validators/project.validator.js';
 
 /**
@@ -63,6 +67,24 @@ router.post(
     requirePermission(PERMISSIONS.SPRINT_WRITE),
     validate({ params: sprintIdParamSchema }),
     asyncHandler(ctrl.postUnarchive)
+);
+
+// Phase 2 Backlog — lifecycle transitions.
+//  - start:    planned → active (single-active rule enforced in the service).
+//  - complete: active → completed + relocate unfinished tasks (backlog or a
+//              target planned/active sprint), all in one transaction.
+router.post(
+    '/:id/start',
+    requirePermission(PERMISSIONS.SPRINT_WRITE),
+    validate({ params: sprintIdParamSchema }),
+    asyncHandler(ctrl.postStart)
+);
+
+router.post(
+    '/:id/complete',
+    requirePermission(PERMISSIONS.SPRINT_WRITE),
+    validate({ params: sprintIdParamSchema, body: completeSprintBodySchema }),
+    asyncHandler(ctrl.postComplete)
 );
 
 export default router;

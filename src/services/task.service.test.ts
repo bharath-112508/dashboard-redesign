@@ -140,6 +140,7 @@ const makeTask = (overrides: Record<string, unknown> = {}) => {
         collaborator_ids: [] as Types.ObjectId[],
         depends_on_task_ids: [] as Types.ObjectId[],
         position: 0,
+        backlog_rank: 0,
         created_by: new Types.ObjectId(),
         updated_by: null as Types.ObjectId | null,
         created_at: new Date(),
@@ -157,6 +158,7 @@ const makeTask = (overrides: Record<string, unknown> = {}) => {
         title: task.title,
         status: task.status,
         position: task.position,
+        backlog_rank: task.backlog_rank,
     }));
     return task;
 };
@@ -165,6 +167,24 @@ const makeTask = (overrides: Record<string, unknown> = {}) => {
 const stubFindOneForLastPosition = (returns: { position: number } | null): void => {
     taskFindOneMock.mockReturnValueOnce({
         sort: () => ({ select: () => ({ lean: () => Promise.resolve(returns) }) }),
+    });
+};
+
+/**
+ * Stub `Task.findOne(...).sort().select().lean()` for nextBacklogRank /
+ * shiftBacklogNeighbours. Same chain shape as the position stub but returns
+ * a `{ backlog_rank }` row.
+ */
+const stubFindOneForLastRank = (returns: { backlog_rank: number } | null): void => {
+    taskFindOneMock.mockReturnValueOnce({
+        sort: () => ({ select: () => ({ lean: () => Promise.resolve(returns) }) }),
+    });
+};
+
+/** Stub `Task.findOne(...).select().lean()` for the rank neighbour lookup. */
+const stubFindOneForNeighbour = (returns: { backlog_rank: number } | null): void => {
+    taskFindOneMock.mockReturnValueOnce({
+        select: () => ({ lean: () => Promise.resolve(returns) }),
     });
 };
 
@@ -239,6 +259,7 @@ describe('createTask', () => {
         });
         loadProjectForCallerMock.mockResolvedValueOnce(project);
         stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
         const created = makeTask({ project_id: project._id, status: 'qa_passed', position: 0 });
         taskCreateMock.mockResolvedValueOnce(created);
 
@@ -251,6 +272,7 @@ describe('createTask', () => {
         loadProjectForCallerMock.mockResolvedValueOnce(project);
         stubFindOneForLastPosition(null);
         stubReserveKey(42);
+        stubFindOneForLastRank(null);
         taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
 
         await svc.createTask(baseInput(project._id), adminCaller());
@@ -270,8 +292,10 @@ describe('createTask', () => {
         // tasks get distinct numbers even when issued back-to-back.
         loadProjectForCallerMock.mockResolvedValue(project);
         stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
         stubReserveKey(1);
         stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
         stubReserveKey(2);
         taskCreateMock.mockResolvedValue(makeTask({ project_id: project._id }));
 
@@ -287,6 +311,7 @@ describe('createTask', () => {
         const project = makeProject();
         loadProjectForCallerMock.mockResolvedValueOnce(project);
         stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
         taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
 
         await svc.createTask(baseInput(project._id), adminCaller());
@@ -299,6 +324,7 @@ describe('createTask', () => {
         const project = makeProject();
         loadProjectForCallerMock.mockResolvedValueOnce(project);
         stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
         taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
 
         await svc.createTask({ ...baseInput(project._id), issue_type: 'bug', story_points: 5 }, adminCaller());
@@ -367,12 +393,13 @@ describe('createTask', () => {
         const project = makeProject();
         loadProjectForCallerMock.mockResolvedValueOnce(project);
         stubFindOneForLastPosition({ position: 4 });
+        stubFindOneForLastRank({ backlog_rank: 4 });
         const created = makeTask({ project_id: project._id, position: 5 });
         taskCreateMock.mockResolvedValueOnce(created);
 
         await svc.createTask(baseInput(project._id), adminCaller());
 
-        expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ position: 5 }));
+        expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ position: 5, backlog_rank: 5 }));
     });
 
     it('rejects unknown assignee with TASK_INVALID_ASSIGNEE', async () => {
@@ -547,6 +574,110 @@ describe('reorderTask', () => {
             { project_id: task.project_id, status: 'to_do', position: { $gt: 1 } },
             { $inc: { position: -1 } }
         );
+    });
+});
+
+// ─── rankTask — backlog ordering (Phase 2 Backlog) ───────────────────────
+
+describe('rankTask', () => {
+    it('rejects a non-assignee employee with TASK_WRITE_FORBIDDEN', async () => {
+        const project = makeProject();
+        const task = makeTask({
+            project_id: project._id,
+            primary_assignee_id: new Types.ObjectId(),
+            created_by: new Types.ObjectId(),
+        });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await expect(svc.rankTask(task._id, { after_task_id: null }, employeeCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.TASK_WRITE_FORBIDDEN,
+        });
+    });
+
+    it('lands a task AFTER a lower-ranked neighbour (moving up shifts neighbours down-list)', async () => {
+        const project = makeProject();
+        // task at rank 0, neighbour at rank 2 → moving DOWN the list.
+        const task = makeTask({ project_id: project._id, backlog_rank: 0 });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForNeighbour({ backlog_rank: 2 }); // neighbour lookup
+        stubFindOneForLastRank({ backlog_rank: 3 }); // max rank for shift clamp
+
+        const neighbourId = new Types.ObjectId();
+        await svc.rankTask(task._id, { after_task_id: neighbourId.toString() }, adminCaller());
+
+        // movingDown && after → target = neighbour.rank = 2.
+        // newRank(2) > oldRank(0) → decrement ranks in (0, 2].
+        expect(taskUpdateManyMock).toHaveBeenCalledWith(
+            {
+                project_id: task.project_id,
+                _id: { $ne: task._id },
+                backlog_rank: { $gt: 0, $lte: 2 },
+            },
+            { $inc: { backlog_rank: -1 } }
+        );
+        expect(task.backlog_rank).toBe(2);
+        expect(task.save).toHaveBeenCalled();
+    });
+
+    it('lands a task BEFORE a higher-ranked neighbour (moving up shifts neighbours up-list)', async () => {
+        const project = makeProject();
+        // task at rank 3, neighbour at rank 1 → moving UP the list.
+        const task = makeTask({ project_id: project._id, backlog_rank: 3 });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForNeighbour({ backlog_rank: 1 });
+        stubFindOneForLastRank({ backlog_rank: 3 });
+
+        const neighbourId = new Types.ObjectId();
+        await svc.rankTask(task._id, { before_task_id: neighbourId.toString() }, adminCaller());
+
+        // !movingDown && before → target = neighbour.rank = 1.
+        // newRank(1) < oldRank(3) → increment ranks in [1, 3).
+        expect(taskUpdateManyMock).toHaveBeenCalledWith(
+            {
+                project_id: task.project_id,
+                _id: { $ne: task._id },
+                backlog_rank: { $gte: 1, $lt: 3 },
+            },
+            { $inc: { backlog_rank: 1 } }
+        );
+        expect(task.backlog_rank).toBe(1);
+    });
+
+    it('moves the task to the top when neither neighbour is supplied', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, backlog_rank: 4 });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastRank({ backlog_rank: 5 }); // max rank for shift clamp
+
+        await svc.rankTask(task._id, {}, adminCaller());
+
+        // target = 0; newRank(0) < oldRank(4) → increment ranks in [0, 4).
+        expect(taskUpdateManyMock).toHaveBeenCalledWith(
+            {
+                project_id: task.project_id,
+                _id: { $ne: task._id },
+                backlog_rank: { $gte: 0, $lt: 4 },
+            },
+            { $inc: { backlog_rank: 1 } }
+        );
+        expect(task.backlog_rank).toBe(0);
+    });
+
+    it('rejects a neighbour that is not in the same project', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, backlog_rank: 0 });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForNeighbour(null); // scoped lookup finds nothing
+
+        await expect(
+            svc.rankTask(task._id, { after_task_id: new Types.ObjectId().toString() }, adminCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_NOT_FOUND });
+        expect(taskUpdateManyMock).not.toHaveBeenCalled();
     });
 });
 

@@ -33,6 +33,7 @@ import type {
     ListTasksQuery,
     MoveSprintBody,
     PatchTaskBody,
+    RankTaskBody,
     ReorderTaskBody,
 } from '../validators/task.validator.js';
 
@@ -289,6 +290,65 @@ const shiftNeighboursInColumn = async (task: TaskDocument, newPositionRaw: numbe
     task.position = newPosition;
 };
 
+// ─── Backlog-rank helpers (Phase 2 Backlog screen) ───────────────────────
+//
+// `backlog_rank` is a dense integer scoped to `project_id` only — it orders
+// the Backlog + every sprint list in one continuous sequence, independent of
+// the per-(project,status) `position` used by the Kanban board. These helpers
+// mirror `nextPositionInColumn` / `shiftNeighboursInColumn` but drop the
+// `status` dimension.
+
+/**
+ * Append rank for a new task — one past the current max rank in the project.
+ * Pre-backfill rows may lack `backlog_rank`; a missing value sorts as null
+ * (lowest) so the desc sort still surfaces the true max, and we fall back to
+ * 0 when no ranked row exists yet.
+ */
+const nextBacklogRank = async (projectId: Types.ObjectId): Promise<number> => {
+    const last = await Task.findOne({ project_id: projectId })
+        .sort({ backlog_rank: -1 })
+        .select('backlog_rank')
+        .lean<{ backlog_rank?: number } | null>();
+    return last && typeof last.backlog_rank === 'number' ? last.backlog_rank + 1 : 0;
+};
+
+/**
+ * Shift neighbours in the same project to make room for `task` at
+ * `newRankRaw`. Mutates `task.backlog_rank`; caller saves. Mirrors
+ * `shiftNeighboursInColumn`, but scoped to `project_id` only (not status).
+ */
+const shiftBacklogNeighbours = async (task: TaskDocument, newRankRaw: number): Promise<void> => {
+    const last = await Task.findOne({ project_id: task.project_id })
+        .sort({ backlog_rank: -1 })
+        .select('backlog_rank')
+        .lean<{ backlog_rank?: number } | null>();
+    const maxRank = last && typeof last.backlog_rank === 'number' ? last.backlog_rank : 0;
+    const newRank = Math.max(0, Math.min(newRankRaw, maxRank));
+    const oldRank = task.backlog_rank;
+    if (newRank === oldRank) return;
+
+    if (newRank > oldRank) {
+        await Task.updateMany(
+            {
+                project_id: task.project_id,
+                _id: { $ne: task._id },
+                backlog_rank: { $gt: oldRank, $lte: newRank },
+            },
+            { $inc: { backlog_rank: -1 } }
+        );
+    } else {
+        await Task.updateMany(
+            {
+                project_id: task.project_id,
+                _id: { $ne: task._id },
+                backlog_rank: { $gte: newRank, $lt: oldRank },
+            },
+            { $inc: { backlog_rank: 1 } }
+        );
+    }
+    task.backlog_rank = newRank;
+};
+
 // ─── Serialisation ───────────────────────────────────────────────────────
 
 const toPublic = (doc: TaskDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
@@ -372,6 +432,10 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
         throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
     }
 
+    // Backlog ordering — append to the end of the project's continuous rank
+    // sequence (spans the backlog + every sprint). Independent of `position`.
+    const backlogRank = await nextBacklogRank(projectId);
+
     const created = await Task.create({
         project_id: projectId,
         task_number: counter.task_seq,
@@ -390,6 +454,7 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
         collaborator_ids: collabIds,
         depends_on_task_ids: depIds,
         position,
+        backlog_rank: backlogRank,
         created_by: caller.id,
         updated_by: caller.id,
     });
@@ -891,6 +956,85 @@ export const reorderTask = async (
             activity_type: TASK_ACTIVITY_TYPES.STATUS_CHANGED,
             from_value: prevStatus,
             to_value: task.status,
+        });
+    }
+
+    return toPublic(task);
+};
+
+// ─── POST /tasks/:id/rank ────────────────────────────────────────────────
+//
+// Phase 2 Backlog — reorder a task within the per-project `backlog_rank`
+// ordering (the Backlog/sprint lists). The body names the neighbour to land
+// after/before; both omitted ⇒ move to the top. Same writer rule as reorder
+// — admin/manager/team_lead OR the task's assignee — so a person can rank
+// their own work without a manager round-trip.
+
+export const rankTask = async (
+    taskId: Types.ObjectId,
+    body: RankTaskBody,
+    caller: ProjectCaller
+): Promise<Record<string, unknown>> => {
+    const { task, project } = await loadTaskAndProject(taskId, caller);
+
+    const isAssignee = !!task.primary_assignee_id && task.primary_assignee_id.equals(caller.id);
+    if (!isManagerOrAdmin(caller) && !isAssignee) {
+        throw AppError.forbidden(
+            'Only admins, managers, or the task assignee can rank this task',
+            ERROR_CODES.TASK_WRITE_FORBIDDEN
+        );
+    }
+
+    const prevRank = task.backlog_rank;
+
+    // Resolve the target rank from the neighbour. Because ranks are dense and
+    // the moved task occupies one of them, the target index depends on the
+    // direction of travel (classic off-by-one when moving down past a gap the
+    // task itself will vacate).
+    let targetRank: number;
+    if (body.before_task_id || body.after_task_id) {
+        const neighbourId = new Types.ObjectId((body.before_task_id ?? body.after_task_id) as string);
+        const neighbour = await Task.findOne({ _id: neighbourId, project_id: task.project_id })
+            .select('backlog_rank')
+            .lean<{ backlog_rank?: number } | null>();
+        if (!neighbour || typeof neighbour.backlog_rank !== 'number') {
+            throw AppError.unprocessable(
+                'The neighbour task was not found in this project.',
+                ERROR_CODES.TASK_NOT_FOUND
+            );
+        }
+        const movingDown = task.backlog_rank < neighbour.backlog_rank;
+        if (body.before_task_id) {
+            targetRank = movingDown ? neighbour.backlog_rank - 1 : neighbour.backlog_rank;
+        } else {
+            targetRank = movingDown ? neighbour.backlog_rank : neighbour.backlog_rank + 1;
+        }
+    } else {
+        // Neither neighbour supplied → move to the top of the project order.
+        targetRank = 0;
+    }
+
+    await shiftBacklogNeighbours(task, targetRank);
+    task.updated_by = caller.id;
+    await task.save();
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.TASK_RANK,
+            target: { kind: AUDIT_TARGET_KINDS.TASK, id: task._id },
+            before: { id: task._id.toString(), backlog_rank: prevRank },
+            after: { id: task._id.toString(), backlog_rank: task.backlog_rank },
+            metadata: { project_id: project._id.toString() },
+        });
+    }
+
+    if (task.backlog_rank !== prevRank) {
+        await recordActivity({
+            task_id: task._id,
+            actor_id: caller.id,
+            activity_type: TASK_ACTIVITY_TYPES.RANK_CHANGED,
+            from_value: prevRank,
+            to_value: task.backlog_rank,
         });
     }
 

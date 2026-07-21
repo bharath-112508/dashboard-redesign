@@ -68,6 +68,15 @@ export interface TaskDocument extends Document {
     collaborator_ids: Types.ObjectId[];
     depends_on_task_ids: Types.ObjectId[];
     position: number;
+    /**
+     * Per-project manual ordering value spanning the backlog AND every sprint
+     * (Jira ranks issues in one continuous order regardless of sprint). Dense
+     * integer scoped to `project_id`, mirroring the board `position` approach
+     * but independent of it (`position` orders Kanban columns per status;
+     * `backlog_rank` orders the Backlog/sprint lists). Assigned by the service
+     * on create (appended to the end); reordered via `POST /tasks/:id/rank`.
+     */
+    backlog_rank: number;
     created_by: Types.ObjectId;
     updated_by: Types.ObjectId | null;
     created_at: Date;
@@ -121,6 +130,10 @@ const taskSchema = new Schema<TaskDocument>(
         collaborator_ids: { type: [Schema.Types.ObjectId], ref: COLLECTIONS.USERS, default: [] },
         depends_on_task_ids: { type: [Schema.Types.ObjectId], ref: COLLECTIONS.TASKS, default: [] },
         position: { type: Number, required: true, default: 0, min: 0 },
+        // Server-assigned (see task.service.createTask + rankTask). `required`
+        // is NOT set so the backfill migration can run before every row has one;
+        // new rows always get a value appended to the end of the project order.
+        backlog_rank: { type: Number, min: 0 },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
         updated_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
     },
@@ -150,6 +163,9 @@ taskSchema.index(
 );
 taskSchema.index({ project_id: 1, sprint_id: 1 });
 taskSchema.index({ project_id: 1, status: 1, position: 1 });
+// Backlog/sprint list ordering (Phase 2 Backlog screen) — the manual rank
+// spans the whole project, so this is scoped by project_id only (not status).
+taskSchema.index({ project_id: 1, backlog_rank: 1 });
 taskSchema.index({ project_id: 1, story_id: 1 });
 taskSchema.index({ story_id: 1 });
 taskSchema.index({ primary_assignee_id: 1, status: 1 });

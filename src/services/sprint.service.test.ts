@@ -20,16 +20,20 @@ const {
     sprintCreateMock,
     sprintFindByIdMock,
     sprintFindMock,
+    sprintFindOneMock,
     sprintCountDocumentsMock,
     taskCountDocumentsMock,
+    taskUpdateManyMock,
     loadProjectForCallerMock,
     recordAuditMock,
 } = vi.hoisted(() => ({
     sprintCreateMock: vi.fn(),
     sprintFindByIdMock: vi.fn(),
     sprintFindMock: vi.fn(),
+    sprintFindOneMock: vi.fn(),
     sprintCountDocumentsMock: vi.fn(),
     taskCountDocumentsMock: vi.fn(),
+    taskUpdateManyMock: vi.fn(),
     loadProjectForCallerMock: vi.fn(),
     recordAuditMock: vi.fn(),
 }));
@@ -39,6 +43,7 @@ vi.mock('../models/sprint.model.js', () => ({
         create: sprintCreateMock,
         findById: sprintFindByIdMock,
         find: sprintFindMock,
+        findOne: sprintFindOneMock,
         countDocuments: sprintCountDocumentsMock,
     },
 }));
@@ -50,6 +55,7 @@ vi.mock('../models/project.model.js', () => ({
 vi.mock('../models/task.model.js', () => ({
     Task: {
         countDocuments: taskCountDocumentsMock,
+        updateMany: taskUpdateManyMock,
     },
 }));
 
@@ -404,5 +410,169 @@ describe('listSprints', () => {
             project_id: proj._id,
             is_archived: false,
         });
+    });
+});
+
+// ─── startSprint (Phase 2 Backlog) ───────────────────────────────────────
+
+/** Stub `Sprint.findOne(...).select().lean()` for the single-active check. */
+const stubActiveLookup = (returns: { _id: Types.ObjectId } | null): void => {
+    sprintFindOneMock.mockReturnValueOnce({
+        select: () => ({ lean: () => Promise.resolve(returns) }),
+    });
+};
+
+describe('startSprint', () => {
+    it('non-manager (employee) is forbidden', async () => {
+        await expect(svc.startSprint(new Types.ObjectId(), employeeCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+
+    it('happy path: planned → active when no other sprint is active', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, status: 'planned' });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        stubActiveLookup(null);
+
+        const out = await svc.startSprint(sprint._id, adminCaller());
+
+        expect(sprint.status).toBe('active');
+        expect(sprint.save).toHaveBeenCalled();
+        expect(out).toMatchObject({ status: 'active' });
+    });
+
+    it('rejects with SPRINT_ALREADY_ACTIVE when another sprint in the project is active', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, status: 'planned' });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        stubActiveLookup({ _id: new Types.ObjectId() });
+
+        await expect(svc.startSprint(sprint._id, adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.SPRINT_ALREADY_ACTIVE,
+        });
+        expect(sprint.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a non-planned sprint with SPRINT_INVALID_TRANSITION', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, status: 'active' });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await expect(svc.startSprint(sprint._id, adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.SPRINT_INVALID_TRANSITION,
+        });
+        // The single-active lookup must not even run for a bad transition.
+        expect(sprintFindOneMock).not.toHaveBeenCalled();
+    });
+});
+
+// ─── completeSprint (Phase 2 Backlog) ────────────────────────────────────
+
+/** Stub `Sprint.findById(...).select().lean()` for the target-sprint lookup. */
+const stubTargetLookup = (returns: { project_id: Types.ObjectId; status: string } | null): void => {
+    sprintFindByIdMock.mockReturnValueOnce({
+        select: () => ({ lean: () => Promise.resolve(returns) }),
+    });
+};
+
+describe('completeSprint', () => {
+    it('rejects a non-active sprint with SPRINT_INVALID_TRANSITION', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, status: 'planned' });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await expect(
+            svc.completeSprint(sprint._id, { move_unfinished_to: 'backlog' }, adminCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.SPRINT_INVALID_TRANSITION });
+    });
+
+    it('moves only unfinished tasks to the backlog and completes the sprint', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, status: 'active' });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        taskCountDocumentsMock.mockResolvedValueOnce(2); // two unfinished tasks
+
+        const out = await svc.completeSprint(sprint._id, { move_unfinished_to: 'backlog' }, adminCaller());
+
+        // Unfinished = status NOT in the terminal set (default: `done`).
+        expect(taskUpdateManyMock).toHaveBeenCalledWith(
+            { sprint_id: sprint._id, status: { $nin: ['done'] } },
+            { $set: { sprint_id: null } },
+            expect.anything()
+        );
+        expect(sprint.status).toBe('completed');
+        expect(sprint.save).toHaveBeenCalled();
+        expect(out).toMatchObject({ moved_task_count: 2 });
+        expect(out.sprint).toMatchObject({ status: 'completed' });
+    });
+
+    it('honours project custom terminal statuses when deciding what is unfinished', async () => {
+        const proj = makeProject({
+            custom_task_statuses: [
+                { key: 'qa_passed', is_terminal: true },
+                { key: 'blocked', is_terminal: false },
+            ],
+        });
+        const sprint = makeSprint({ project_id: proj._id, status: 'active' });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        taskCountDocumentsMock.mockResolvedValueOnce(0);
+
+        await svc.completeSprint(sprint._id, { move_unfinished_to: 'backlog' }, adminCaller());
+
+        const filter = taskCountDocumentsMock.mock.calls[0][0] as { status: { $nin: string[] } };
+        expect(new Set(filter.status.$nin)).toEqual(new Set(['done', 'qa_passed']));
+        // No unfinished tasks → the bulk move is skipped entirely.
+        expect(taskUpdateManyMock).not.toHaveBeenCalled();
+    });
+
+    it('moves unfinished tasks to a valid target planned sprint in the same project', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, status: 'active' });
+        const targetId = new Types.ObjectId();
+        sprintFindByIdMock.mockResolvedValueOnce(sprint); // loadSprintAndProject
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        stubTargetLookup({ project_id: proj._id, status: 'planned' }); // target lookup
+        taskCountDocumentsMock.mockResolvedValueOnce(1);
+
+        const out = await svc.completeSprint(sprint._id, { move_unfinished_to: targetId.toString() }, adminCaller());
+
+        expect(taskUpdateManyMock).toHaveBeenCalledWith(
+            { sprint_id: sprint._id, status: { $nin: ['done'] } },
+            { $set: { sprint_id: targetId } },
+            expect.anything()
+        );
+        expect(out).toMatchObject({ moved_task_count: 1 });
+    });
+
+    it('rejects a target sprint from a different project with TASK_SPRINT_PROJECT_MISMATCH', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, status: 'active' });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        stubTargetLookup({ project_id: new Types.ObjectId(), status: 'planned' }); // different project
+
+        await expect(
+            svc.completeSprint(sprint._id, { move_unfinished_to: new Types.ObjectId().toString() }, adminCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_SPRINT_PROJECT_MISMATCH });
+        expect(taskUpdateManyMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a completed target sprint with TASK_SPRINT_PROJECT_MISMATCH', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, status: 'active' });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        stubTargetLookup({ project_id: proj._id, status: 'completed' }); // not planned/active
+
+        await expect(
+            svc.completeSprint(sprint._id, { move_unfinished_to: new Types.ObjectId().toString() }, adminCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_SPRINT_PROJECT_MISMATCH });
     });
 });

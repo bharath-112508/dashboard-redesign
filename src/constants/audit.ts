@@ -172,6 +172,11 @@ export const AUDIT_ACTIONS = {
     SPRINT_ARCHIVE: 'sprint.archive',
     /** T11 — archived sprint restored (is_archived flipped to false). */
     SPRINT_UNARCHIVE: 'sprint.unarchive',
+    /** Phase 2 Backlog — sprint started (planned → active). */
+    SPRINT_START: 'sprint.start',
+    /** Phase 2 Backlog — sprint completed (active → completed); unfinished
+     *  tasks moved to backlog or a target sprint (`metadata.moved_task_count`). */
+    SPRINT_COMPLETE: 'sprint.complete',
 
     // Story lifecycle (Phase 2 Step 17). `STORY_DELETE` records the list of
     // task IDs whose `story_id` was unset in `metadata.unset_task_ids` so a
@@ -193,6 +198,8 @@ export const AUDIT_ACTIONS = {
     TASK_UPDATE: 'task.update',
     TASK_DELETE: 'task.delete',
     TASK_REORDER: 'task.reorder',
+    /** Phase 2 Backlog — task manually re-ranked within the project order. */
+    TASK_RANK: 'task.rank',
     TASK_ASSIGN_STORY: 'task.assign_story',
     TASK_MOVE_SPRINT: 'task.move_sprint',
     TASK_DEPENDENCY_ADD: 'task.dependency_add',

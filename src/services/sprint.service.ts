@@ -7,13 +7,20 @@ import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { type RoleType } from '../constants/roles.js';
 import { isProjectAuthor } from '../utils/role-check.js';
-import { type SprintStatus } from '../constants/project.js';
+import { SPRINT_STATUSES, type SprintStatus } from '../constants/project.js';
+import { DEFAULT_TASK_STATUSES } from '../constants/task.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import { withTransaction } from '../utils/with-transaction.js';
 import { recordAudit } from './audit.service.js';
 import { loadProjectForCaller } from './project.service.js';
 import type { ProjectCaller } from './project.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
-import type { CreateSprintBody, ListSprintsQuery, PatchSprintBody } from '../validators/sprint.validator.js';
+import type {
+    CompleteSprintBody,
+    CreateSprintBody,
+    ListSprintsQuery,
+    PatchSprintBody,
+} from '../validators/sprint.validator.js';
 
 /**
  * Sprint service — Data_Model.md §5.2 / API_Contract.md §7.3.
@@ -295,4 +302,157 @@ export const unarchiveSprint = async (
     }
 
     return toPublic(sprint);
+};
+
+// ─── POST /sprints/:id/start (Phase 2 Backlog) ───────────────────────────
+//
+// Move a sprint planned → active. Enforces the **single-active** rule: a
+// project may have at most one active sprint at a time. Only a `planned`
+// sprint can be started — completing a cancelled/completed sprint is a
+// separate concern the schema deliberately leaves open, but the Backlog
+// lifecycle buttons drive the strict planned → active → completed path.
+
+export const startSprint = async (
+    sprintId: Types.ObjectId,
+    caller: ProjectCaller
+): Promise<Record<string, unknown>> => {
+    // H2 — Team Lead holds `sprint.write`; defence-in-depth behind the route.
+    if (!isProjectAuthor(caller)) {
+        throw AppError.forbidden();
+    }
+
+    const { sprint, project } = await loadSprintAndProject(sprintId, caller);
+
+    if (sprint.status !== SPRINT_STATUSES.PLANNED) {
+        throw AppError.unprocessable('Only a planned sprint can be started.', ERROR_CODES.SPRINT_INVALID_TRANSITION, {
+            status: sprint.status,
+        });
+    }
+
+    // Single-active rule — another active sprint in the same project blocks
+    // the start (the FE disables the button, the service is the enforcer).
+    const activeExists = await Sprint.findOne({
+        project_id: sprint.project_id,
+        status: SPRINT_STATUSES.ACTIVE,
+        _id: { $ne: sprint._id },
+    })
+        .select('_id')
+        .lean<{ _id: Types.ObjectId } | null>();
+    if (activeExists) {
+        throw AppError.conflict(
+            'Another sprint in this project is already active. Complete it before starting a new one.',
+            ERROR_CODES.SPRINT_ALREADY_ACTIVE,
+            { active_sprint_id: activeExists._id.toString() }
+        );
+    }
+
+    const before = { status: sprint.status };
+    sprint.status = SPRINT_STATUSES.ACTIVE;
+    await sprint.save();
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.SPRINT_START,
+            target: { kind: AUDIT_TARGET_KINDS.SPRINT, id: sprint._id },
+            before,
+            after: { status: sprint.status },
+            metadata: { project_id: project._id.toString() },
+        });
+    }
+
+    return toPublic(sprint);
+};
+
+// ─── POST /sprints/:id/complete (Phase 2 Backlog) ────────────────────────
+//
+// Move a sprint active → completed and relocate its **unfinished** tasks —
+// anything whose status is NOT in the project's terminal set (default `done`
+// plus any custom status flagged `is_terminal`). Finished tasks stay on the
+// completed sprint (the historical record); unfinished ones move to the
+// backlog (`sprint_id = null`) or to a target planned/active sprint. The
+// status flip + task moves ride one transaction so a mid-move failure can't
+// leave the sprint completed with tasks half-relocated.
+
+export const completeSprint = async (
+    sprintId: Types.ObjectId,
+    body: CompleteSprintBody,
+    caller: ProjectCaller
+): Promise<{ sprint: Record<string, unknown>; moved_task_count: number }> => {
+    // H2 — Team Lead holds `sprint.write`; defence-in-depth behind the route.
+    if (!isProjectAuthor(caller)) {
+        throw AppError.forbidden();
+    }
+
+    const { sprint, project } = await loadSprintAndProject(sprintId, caller);
+
+    if (sprint.status !== SPRINT_STATUSES.ACTIVE) {
+        throw AppError.unprocessable('Only an active sprint can be completed.', ERROR_CODES.SPRINT_INVALID_TRANSITION, {
+            status: sprint.status,
+        });
+    }
+
+    // Resolve the move target — backlog (null) or a validated planned/active
+    // sprint in the SAME project.
+    let targetSprintId: Types.ObjectId | null;
+    if (body.move_unfinished_to === 'backlog') {
+        targetSprintId = null;
+    } else {
+        const targetId = new Types.ObjectId(body.move_unfinished_to);
+        if (targetId.equals(sprint._id)) {
+            throw AppError.unprocessable(
+                'Cannot move unfinished tasks to the sprint being completed.',
+                ERROR_CODES.TASK_SPRINT_PROJECT_MISMATCH
+            );
+        }
+        const target = await Sprint.findById(targetId)
+            .select('project_id status')
+            .lean<{ project_id: Types.ObjectId; status: SprintStatus } | null>();
+        const validStatus = target?.status === SPRINT_STATUSES.PLANNED || target?.status === SPRINT_STATUSES.ACTIVE;
+        if (!target || !target.project_id.equals(project._id) || !validStatus) {
+            throw AppError.unprocessable(
+                'The target sprint must be a planned or active sprint in the same project.',
+                ERROR_CODES.TASK_SPRINT_PROJECT_MISMATCH
+            );
+        }
+        targetSprintId = targetId;
+    }
+
+    // Terminal statuses: default `done` ∪ project custom statuses flagged
+    // `is_terminal`. Unfinished = status NOT in this set.
+    const terminalKeys = new Set<string>([DEFAULT_TASK_STATUSES.DONE]);
+    for (const s of project.custom_task_statuses ?? []) {
+        if (s.is_terminal) terminalKeys.add(s.key);
+    }
+
+    const before = { status: sprint.status };
+
+    const movedCount = await withTransaction(async (session) => {
+        const unfinishedFilter = {
+            sprint_id: sprint._id,
+            status: { $nin: [...terminalKeys] },
+        };
+        const count = await Task.countDocuments(unfinishedFilter, { session });
+        if (count > 0) {
+            await Task.updateMany(unfinishedFilter, { $set: { sprint_id: targetSprintId } }, { session });
+        }
+        sprint.status = SPRINT_STATUSES.COMPLETED;
+        await sprint.save({ session });
+        return count;
+    });
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.SPRINT_COMPLETE,
+            target: { kind: AUDIT_TARGET_KINDS.SPRINT, id: sprint._id },
+            before,
+            after: { status: sprint.status },
+            metadata: {
+                project_id: project._id.toString(),
+                moved_task_count: movedCount,
+                move_unfinished_to: targetSprintId ? targetSprintId.toString() : 'backlog',
+            },
+        });
+    }
+
+    return { sprint: toPublic(sprint), moved_task_count: movedCount };
 };

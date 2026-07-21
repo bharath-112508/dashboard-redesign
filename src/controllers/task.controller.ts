@@ -11,6 +11,7 @@ import type {
     ListTasksQuery,
     MoveSprintBody,
     PatchTaskBody,
+    RankTaskBody,
     ReorderTaskBody,
 } from '../validators/task.validator.js';
 
@@ -57,6 +58,11 @@ export const deleteOne = async (req: Request, res: Response): Promise<Response> 
 
 export const postReorder = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.reorderTask(idOf(req), req.body as ReorderTaskBody, projectCallerFrom(req));
+    return ok(res, data);
+};
+
+export const postRank = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.rankTask(idOf(req), req.body as RankTaskBody, projectCallerFrom(req));
     return ok(res, data);
 };
 

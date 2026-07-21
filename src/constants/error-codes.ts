@@ -83,6 +83,9 @@ export const ERROR_CODES = {
     INSUFFICIENT_LEAVE_BALANCE: 'INSUFFICIENT_LEAVE_BALANCE',
     CONCURRENT_UPDATE_CONFLICT: 'CONCURRENT_UPDATE_CONFLICT',
     DUPLICATE_RESOURCE: 'DUPLICATE_RESOURCE',
+    /** Phase 2 Backlog — a project may have at most one `active` sprint; starting
+     *  a second one is refused. */
+    SPRINT_ALREADY_ACTIVE: 'SPRINT_ALREADY_ACTIVE',
     /** Refused to delete because dependant rows would be orphaned. (BACKEND_AUDIT.md R3) */
     RESOURCE_HAS_DEPENDENTS: 'RESOURCE_HAS_DEPENDENTS',
 
@@ -114,6 +117,9 @@ export const ERROR_CODES = {
     MENTION_NOT_PROJECT_MEMBER: 'MENTION_NOT_PROJECT_MEMBER',
     SPRINT_DATE_INVALID: 'SPRINT_DATE_INVALID',
     SPRINT_PROJECT_MISMATCH: 'SPRINT_PROJECT_MISMATCH',
+    /** Phase 2 Backlog — the requested sprint lifecycle move is illegal (e.g.
+     *  starting a non-planned sprint or completing a non-active one). */
+    SPRINT_INVALID_TRANSITION: 'SPRINT_INVALID_TRANSITION',
     PROJECT_DATE_INVALID: 'PROJECT_DATE_INVALID',
     CUSTOM_STATUS_KEY_RESERVED: 'CUSTOM_STATUS_KEY_RESERVED',
     INVALID_PROJECT_MEMBER_ROLE: 'INVALID_PROJECT_MEMBER_ROLE',

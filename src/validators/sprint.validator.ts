@@ -59,6 +59,19 @@ export const patchSprintBodySchema = z
 
 export type PatchSprintBody = z.infer<typeof patchSprintBodySchema>;
 
+// ─── POST /sprints/:id/complete ───────────────────────────────────────────
+//
+// Phase 2 Backlog — completing an active sprint moves its unfinished tasks
+// somewhere. `move_unfinished_to` accepts the literal `'backlog'` (default —
+// detach to no sprint) or a target sprint's ObjectId. The service validates
+// the target belongs to the same project and is planned/active.
+
+export const completeSprintBodySchema = z.object({
+    move_unfinished_to: z.union([z.literal('backlog'), objectIdSchema]).default('backlog'),
+});
+
+export type CompleteSprintBody = z.infer<typeof completeSprintBodySchema>;
+
 // ─── GET /projects/:project_id/sprints ────────────────────────────────────
 
 export const listSprintsQuerySchema = z
