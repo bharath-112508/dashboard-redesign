@@ -16,9 +16,13 @@ const caller = (req: Request): { id: Types.ObjectId; role: RoleType } => {
 };
 
 export const getMine = async (req: Request, res: Response): Promise<Response> => {
-    const { data, meta, balance } = await service.listOwnCompOff(req.query as unknown as MyCompOffQuery, caller(req));
-    // Custom envelope: ledger items + cached comp-off balance + pagination.
-    return res.status(StatusCodes.OK).json({ data, meta, balance });
+    const { data, meta, balance, earned_total, consumed_total } = await service.listOwnCompOff(
+        req.query as unknown as MyCompOffQuery,
+        caller(req)
+    );
+    // Custom envelope: ledger items + cached comp-off balance + all-time
+    // earned/consumed totals + pagination.
+    return res.status(StatusCodes.OK).json({ data, meta, balance, earned_total, consumed_total });
 };
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {

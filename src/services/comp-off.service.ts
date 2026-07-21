@@ -43,7 +43,10 @@ const toPublic = (doc: CompOffLedgerDocument): Record<string, unknown> => doc.to
  * Exported so the cron can call it; the implementation is unchanged
  * from pre-M42 except for the session-optional behaviour.
  */
-export const recomputeBalance = async (user_id: Types.ObjectId, session?: ClientSession | null): Promise<number> => {
+export const recomputeBalance = async (
+    user_id: Types.ObjectId,
+    session?: ClientSession | null
+): Promise<{ balance: number; earned: number; consumed: number }> => {
     // Aggregate must run on the same session when a transaction is
     // active so the read sees in-txn writes (e.g. the just-inserted
     // ledger row from `adjustCompOff`'s post-CAS step). When no
@@ -67,7 +70,7 @@ export const recomputeBalance = async (user_id: Types.ObjectId, session?: Client
     } else {
         await User.updateOne({ _id: user_id }, { $set: { comp_off_balance: balance } });
     }
-    return balance;
+    return { balance, earned, consumed };
 };
 
 /**
@@ -140,10 +143,13 @@ export const listOwnCompOff = async (
     data: Record<string, unknown>[];
     meta: PaginationMeta;
     balance: number;
+    /** All-time totals across the whole ledger (not just this page). */
+    earned_total: number;
+    consumed_total: number;
 }> => {
     const filter: Filter = { user_id: caller.id };
     const skip = (query.page - 1) * query.limit;
-    const [rows, total, balance] = await Promise.all([
+    const [rows, total, totals] = await Promise.all([
         CompOffLedger.find(filter).sort({ created_at: -1 }).skip(skip).limit(query.limit),
         CompOffLedger.countDocuments(filter),
         recomputeBalance(caller.id),
@@ -156,7 +162,9 @@ export const listOwnCompOff = async (
             total,
             total_pages: Math.max(1, Math.ceil(total / query.limit)),
         },
-        balance,
+        balance: totals.balance,
+        earned_total: totals.earned,
+        consumed_total: totals.consumed,
     };
 };
 
