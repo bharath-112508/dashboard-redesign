@@ -89,6 +89,15 @@ export const TASK_ESTIMATED_HOURS_MAX = 1_000;
 // Step 18: "subtask depth = 1").
 export const TASK_MAX_SUBTASK_DEPTH = 1;
 
+// ─── Labels (Phase 3c — Jira-style freeform tags) ────────────────────────
+//
+// Freeform string labels on a task, exactly like Jira. A single label is
+// capped to keep the chip readable and the multikey index entries small; the
+// per-task count is capped so one task can't carry an unbounded tag list
+// (defends the `{project_id, labels}` index + audit-row size).
+export const TASK_LABEL_MAX_LEN = 40;
+export const TASK_LABELS_MAX = 20;
+
 // ─── Pagination ──────────────────────────────────────────────────────────
 
 export const TASK_LIST_DEFAULT_LIMIT = 50;

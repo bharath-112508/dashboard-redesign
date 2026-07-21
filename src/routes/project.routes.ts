@@ -3,6 +3,7 @@ import { Router } from 'express';
 import * as ctrl from '../controllers/project.controller.js';
 import * as sprintCtrl from '../controllers/sprint.controller.js';
 import * as storyCtrl from '../controllers/story.controller.js';
+import * as taskCtrl from '../controllers/task.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
@@ -159,6 +160,19 @@ router.patch(
     requirePermission(PERMISSIONS.PROJECT_WRITE),
     validate({ params: projectIdParamSchema, body: patchDefaultStatusOrdersBodySchema }),
     asyncHandler(ctrl.patchDefaultStatusOrders)
+);
+
+// ─── Task labels: /projects/:id/task-labels ──────────────────────────────
+//
+// Distinct freeform labels across the project's tasks (Phase 3c), for the
+// task-label autocomplete + board label filter. Gated on TASK_READ; the
+// service scopes visibility via `loadProjectForCaller`. Returns { data: string[] }.
+
+router.get(
+    '/:id/task-labels',
+    requirePermission(PERMISSIONS.TASK_READ),
+    validate({ params: projectIdParamSchema }),
+    asyncHandler(taskCtrl.getProjectTaskLabels)
 );
 
 // ─── Sprints (nested create + list) ──────────────────────────────────────

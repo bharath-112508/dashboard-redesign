@@ -8,6 +8,7 @@ import {
     TASK_ESTIMATED_HOURS_MAX,
     TASK_ISSUE_TYPES,
     TASK_ISSUE_TYPE_VALUES,
+    TASK_LABEL_MAX_LEN,
     TASK_PRIORITIES,
     TASK_PRIORITY_VALUES,
     TASK_STATUS_KEY_MAX,
@@ -61,6 +62,8 @@ export interface TaskDocument extends Document {
     issue_type: TaskIssueType;
     /** Fibonacci estimate (`TASK_STORY_POINT_VALUES`) or `null` = unestimated. */
     story_points: number | null;
+    /** Freeform Jira-style labels — trimmed, deduped, capped by the validator. */
+    labels: string[];
     /** Local-calendar `YYYY-MM-DD` per Data_Model §5.4. */
     due_date: string;
     estimated_hours: number;
@@ -124,6 +127,12 @@ const taskSchema = new Schema<TaskDocument>(
                 message: 'story_points must be null or one of the Fibonacci estimate values',
             },
         },
+        // Freeform labels. Trim + per-label length cap here as defence-in-depth
+        // behind the Zod validator (which also dedupes case-insensitively).
+        labels: {
+            type: [{ type: String, trim: true, maxlength: TASK_LABEL_MAX_LEN }],
+            default: [],
+        },
         due_date: { type: String, required: true },
         estimated_hours: { type: Number, required: true, default: 0, min: 0, max: TASK_ESTIMATED_HOURS_MAX },
         primary_assignee_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
@@ -166,6 +175,10 @@ taskSchema.index({ project_id: 1, status: 1, position: 1 });
 // Backlog/sprint list ordering (Phase 2 Backlog screen) — the manual rank
 // spans the whole project, so this is scoped by project_id only (not status).
 taskSchema.index({ project_id: 1, backlog_rank: 1 });
+// Labels (Phase 3c) — multikey index powers the per-project label-suggestions
+// `distinct` and future label filters. Scoped by project_id since labels are
+// always queried within a single project.
+taskSchema.index({ project_id: 1, labels: 1 });
 taskSchema.index({ project_id: 1, story_id: 1 });
 taskSchema.index({ story_id: 1 });
 taskSchema.index({ primary_assignee_id: 1, status: 1 });

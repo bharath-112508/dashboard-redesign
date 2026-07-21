@@ -41,6 +41,8 @@ export const TASK_ACTIVITY_TYPES = {
     RANK_CHANGED: 'rank_changed',
     ISSUE_TYPE_CHANGED: 'issue_type_changed',
     STORY_POINTS_CHANGED: 'story_points_changed',
+    /** Phase 3c — the freeform label set on the task changed. */
+    LABELS_CHANGED: 'labels_changed',
     DEPENDENCY_ADDED: 'dependency_added',
     DEPENDENCY_REMOVED: 'dependency_removed',
     SUBTASK_ADDED: 'subtask_added',

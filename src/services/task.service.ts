@@ -448,6 +448,7 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
         priority: input.priority ?? TASK_PRIORITIES.MEDIUM,
         issue_type: input.issue_type ?? TASK_ISSUE_TYPES.TASK,
         story_points: input.story_points ?? null,
+        labels: input.labels ?? [],
         due_date: input.due_date,
         estimated_hours: input.estimated_hours ?? 0,
         primary_assignee_id: assigneeId,
@@ -488,6 +489,21 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
     }
 
     return toPublic(created);
+};
+
+// ─── GET /projects/:id/task-labels (label suggestions) ───────────────────
+//
+// Distinct labels across every task in the project, sorted alpha — powers the
+// autocomplete in the task create/edit label input and the board's label
+// filter. Visibility is enforced via `loadProjectForCaller` (404 → 403 for a
+// project the caller can't see), same as every other project-scoped read.
+
+export const listProjectTaskLabels = async (projectId: Types.ObjectId, caller: ProjectCaller): Promise<string[]> => {
+    await loadProjectForCaller(projectId, caller);
+    const labels = await Task.distinct('labels', { project_id: projectId });
+    return (labels as unknown[])
+        .filter((l): l is string => typeof l === 'string' && l.length > 0)
+        .sort((a, b) => a.localeCompare(b));
 };
 
 // ─── GET /tasks ──────────────────────────────────────────────────────────
@@ -626,6 +642,7 @@ export const updateTask = async (
         priority: task.priority,
         issue_type: task.issue_type,
         story_points: task.story_points,
+        labels: [...task.labels],
         due_date: task.due_date,
         estimated_hours: task.estimated_hours,
         sprint_id: task.sprint_id,
@@ -639,6 +656,7 @@ export const updateTask = async (
     if (patch.priority !== undefined) task.priority = patch.priority as TaskDocument['priority'];
     if (patch.issue_type !== undefined) task.issue_type = patch.issue_type as TaskDocument['issue_type'];
     if (patch.story_points !== undefined) task.story_points = patch.story_points;
+    if (patch.labels !== undefined) task.labels = patch.labels;
     if (patch.due_date !== undefined) task.due_date = patch.due_date;
     if (patch.estimated_hours !== undefined) task.estimated_hours = patch.estimated_hours;
 
@@ -728,6 +746,7 @@ const emitPatchActivities = async (
         priority: string;
         issue_type: string;
         story_points: number | null;
+        labels: string[];
         due_date: string;
         estimated_hours: number;
         sprint_id: Types.ObjectId | null;
@@ -753,6 +772,19 @@ const emitPatchActivities = async (
             activity_type: TASK_ACTIVITY_TYPES.STORY_POINTS_CHANGED,
             from_value: prev.story_points,
             to_value: task.story_points,
+        });
+    }
+    // Labels — compare as case-insensitive SETS so a reorder or a case-only
+    // rewrite of the same tags is treated as a no-op (no activity row). The
+    // validator already deduped case-insensitively, but the incoming spelling
+    // may differ from what's stored.
+    if (!labelSetsEqual(task.labels, prev.labels)) {
+        await recordActivity({
+            task_id: task._id,
+            actor_id: actorId,
+            activity_type: TASK_ACTIVITY_TYPES.LABELS_CHANGED,
+            from_value: prev.labels,
+            to_value: [...task.labels],
         });
     }
     if (task.status !== prev.status) {
@@ -849,6 +881,18 @@ const objectIdEq = (a: Types.ObjectId | null, b: Types.ObjectId | null): boolean
     if (a == null && b == null) return true;
     if (a == null || b == null) return false;
     return a.equals(b);
+};
+
+/**
+ * Compare two label lists as case-insensitive sets — order-independent, so a
+ * pure reorder isn't a "change", and case-insensitive, matching the validator's
+ * dedupe semantics.
+ */
+const labelSetsEqual = (a: string[], b: string[]): boolean => {
+    if (a.length !== b.length) return false;
+    const setA = new Set(a.map((s) => s.toLowerCase()));
+    for (const label of b) if (!setA.has(label.toLowerCase())) return false;
+    return true;
 };
 
 // ─── DELETE /tasks/:id ───────────────────────────────────────────────────

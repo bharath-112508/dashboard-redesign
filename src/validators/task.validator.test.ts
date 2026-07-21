@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { createTaskBodySchema, patchTaskBodySchema, rankTaskBodySchema } from './task.validator.js';
+import { createTaskBodySchema, labelsSchema, patchTaskBodySchema, rankTaskBodySchema } from './task.validator.js';
+import { TASK_LABELS_MAX, TASK_LABEL_MAX_LEN } from '../constants/task.js';
 
 /**
  * BUG-041 — when status === 'done', due_date must be <= today.
@@ -179,6 +180,57 @@ describe('patchTaskBodySchema — Phase-1 fields', () => {
     it('strips a client-supplied task_number on patch', () => {
         const parsed = patchTaskBodySchema.parse({ task_number: 3, issue_type: 'bug' });
         expect('task_number' in parsed).toBe(false);
+    });
+});
+
+/**
+ * Phase 3c — freeform labels (`labelsSchema`).
+ *  - trims each label
+ *  - drops empty / whitespace-only entries (NOT rejected)
+ *  - dedupes case-insensitively, first spelling wins
+ *  - rejects any label longer than TASK_LABEL_MAX_LEN
+ *  - caps the raw array at TASK_LABELS_MAX
+ */
+describe('labelsSchema — Phase 3c', () => {
+    it('trims surrounding whitespace on each label', () => {
+        expect(labelsSchema.parse(['  frontend  ', ' bug'])).toEqual(['frontend', 'bug']);
+    });
+
+    it('drops empty and whitespace-only entries', () => {
+        expect(labelsSchema.parse(['keep', '', '   ', 'also'])).toEqual(['keep', 'also']);
+    });
+
+    it('dedupes case-insensitively, first spelling wins', () => {
+        expect(labelsSchema.parse(['Bug', 'bug', 'BUG', 'Frontend'])).toEqual(['Bug', 'Frontend']);
+    });
+
+    it('rejects a label longer than TASK_LABEL_MAX_LEN', () => {
+        expect(labelsSchema.safeParse(['a'.repeat(TASK_LABEL_MAX_LEN + 1)]).success).toBe(false);
+        expect(labelsSchema.safeParse(['a'.repeat(TASK_LABEL_MAX_LEN)]).success).toBe(true);
+    });
+
+    it('caps the array at TASK_LABELS_MAX', () => {
+        const under = Array.from({ length: TASK_LABELS_MAX }, (_, i) => `l${i}`);
+        const over = Array.from({ length: TASK_LABELS_MAX + 1 }, (_, i) => `l${i}`);
+        expect(labelsSchema.safeParse(under).success).toBe(true);
+        expect(labelsSchema.safeParse(over).success).toBe(false);
+    });
+
+    it('accepts an empty array', () => {
+        expect(labelsSchema.parse([])).toEqual([]);
+    });
+});
+
+describe('createTaskBodySchema / patchTaskBodySchema — labels wiring', () => {
+    it('is optional on create and transforms when supplied', () => {
+        expect(createTaskBodySchema.safeParse(validCreate()).success).toBe(true);
+        const parsed = createTaskBodySchema.parse(validCreate({ labels: [' UI ', 'ui', 'api'] }));
+        expect(parsed.labels).toEqual(['UI', 'api']);
+    });
+
+    it('is accepted (and transformed) on patch', () => {
+        const parsed = patchTaskBodySchema.parse({ labels: ['X', 'x', ' y '] });
+        expect(parsed.labels).toEqual(['X', 'y']);
     });
 });
 

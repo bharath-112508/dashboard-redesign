@@ -37,6 +37,13 @@ export const getList = async (req: Request, res: Response): Promise<Response> =>
     return paginated(res, data, meta);
 };
 
+// ─── Nested under /projects/:id/task-labels (label suggestions) ──────────
+
+export const getProjectTaskLabels = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.listProjectTaskLabels(idOf(req), projectCallerFrom(req));
+    return ok(res, data);
+};
+
 // ─── /tasks/:id ──────────────────────────────────────────────────────────
 
 export const getOne = async (req: Request, res: Response): Promise<Response> => {

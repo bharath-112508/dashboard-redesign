@@ -25,12 +25,14 @@ const {
     taskFindOneMock,
     taskCountDocumentsMock,
     taskUpdateManyMock,
+    taskDistinctMock,
     storyFindByIdMock,
     sprintFindByIdMock,
     userFindMock,
     loadProjectForCallerMock,
     buildProjectVisibilityFilterMock,
     recordAuditMock,
+    recordActivityMock,
     projectFindOneAndUpdateMock,
 } = vi.hoisted(() => ({
     taskCreateMock: vi.fn(),
@@ -39,12 +41,14 @@ const {
     taskFindOneMock: vi.fn(),
     taskCountDocumentsMock: vi.fn(),
     taskUpdateManyMock: vi.fn(),
+    taskDistinctMock: vi.fn(),
     storyFindByIdMock: vi.fn(),
     sprintFindByIdMock: vi.fn(),
     userFindMock: vi.fn(),
     loadProjectForCallerMock: vi.fn(),
     buildProjectVisibilityFilterMock: vi.fn(),
     recordAuditMock: vi.fn(),
+    recordActivityMock: vi.fn(),
     projectFindOneAndUpdateMock: vi.fn(),
 }));
 
@@ -56,6 +60,7 @@ vi.mock('../models/task.model.js', () => ({
         findOne: taskFindOneMock,
         countDocuments: taskCountDocumentsMock,
         updateMany: taskUpdateManyMock,
+        distinct: taskDistinctMock,
     },
 }));
 
@@ -97,7 +102,7 @@ vi.mock('./audit.service.js', () => ({
 // Activity hooks are best-effort fire-and-forget; stub them out so tests
 // don't have to thread `TaskActivity` mocks through every fixture.
 vi.mock('./task-activity.service.js', () => ({
-    recordActivity: vi.fn(),
+    recordActivity: recordActivityMock,
     recordActivityIfChanged: vi.fn(),
 }));
 
@@ -105,6 +110,7 @@ const svc = await import('./task.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
 import { DEFAULT_TASK_STATUSES, TASK_PRIORITIES } from '../constants/task.js';
+import { TASK_ACTIVITY_TYPES } from '../constants/task-activity.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
@@ -134,6 +140,7 @@ const makeTask = (overrides: Record<string, unknown> = {}) => {
         description: '',
         status: DEFAULT_TASK_STATUSES.TO_DO as string,
         priority: TASK_PRIORITIES.MEDIUM as string,
+        labels: [] as string[],
         due_date: '2026-05-10',
         estimated_hours: 0,
         primary_assignee_id: null as Types.ObjectId | null,
@@ -331,6 +338,28 @@ describe('createTask', () => {
         expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ issue_type: 'bug', story_points: 5 }));
     });
 
+    it('defaults labels to [] when omitted', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
+
+        await svc.createTask(baseInput(project._id), adminCaller());
+        expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ labels: [] }));
+    });
+
+    it('persists labels when supplied', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
+
+        await svc.createTask({ ...baseInput(project._id), labels: ['frontend', 'bug'] }, adminCaller());
+        expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ labels: ['frontend', 'bug'] }));
+    });
+
     it('throws PROJECT_NOT_FOUND when the counter reservation returns null', async () => {
         const project = makeProject();
         loadProjectForCallerMock.mockResolvedValueOnce(project);
@@ -504,6 +533,72 @@ describe('updateTask', () => {
         await expect(svc.updateTask(task._id, { status: 'nope' }, adminCaller())).rejects.toMatchObject({
             code: ERROR_CODES.TASK_INVALID_STATUS,
         });
+    });
+});
+
+// ─── updateTask — labels activity (Phase 3c) ─────────────────────────────
+
+describe('updateTask — labels', () => {
+    const wasLabelsChangedEmitted = (): boolean =>
+        recordActivityMock.mock.calls.some(
+            (c) => (c[0] as { activity_type: string }).activity_type === TASK_ACTIVITY_TYPES.LABELS_CHANGED
+        );
+
+    it('emits LABELS_CHANGED when the label set changes', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, labels: ['frontend'] });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await svc.updateTask(task._id, { labels: ['frontend', 'bug'] }, adminCaller());
+
+        expect(task.labels).toEqual(['frontend', 'bug']);
+        expect(wasLabelsChangedEmitted()).toBe(true);
+        expect(recordActivityMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                activity_type: TASK_ACTIVITY_TYPES.LABELS_CHANGED,
+                from_value: ['frontend'],
+                to_value: ['frontend', 'bug'],
+            })
+        );
+    });
+
+    it('does NOT emit LABELS_CHANGED on a reorder / case-only no-op', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, labels: ['UI', 'api'] });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        // Same set, reordered + different case — must be treated as unchanged.
+        await svc.updateTask(task._id, { labels: ['api', 'ui'] }, adminCaller());
+
+        expect(wasLabelsChangedEmitted()).toBe(false);
+    });
+});
+
+// ─── listProjectTaskLabels — suggestions (Phase 3c) ──────────────────────
+
+describe('listProjectTaskLabels', () => {
+    it('returns distinct labels sorted alphabetically', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        taskDistinctMock.mockResolvedValueOnce(['zebra', 'apple', 'Mango', '']);
+
+        const out = await svc.listProjectTaskLabels(project._id, adminCaller());
+
+        expect(taskDistinctMock).toHaveBeenCalledWith('labels', { project_id: project._id });
+        // Empty string filtered out; case-insensitive alpha order.
+        expect(out).toEqual(['apple', 'Mango', 'zebra']);
+    });
+
+    it('propagates 403 from loadProjectForCaller (visibility gate)', async () => {
+        loadProjectForCallerMock.mockRejectedValueOnce(
+            Object.assign(new Error('forbidden'), { code: ERROR_CODES.FORBIDDEN })
+        );
+        await expect(svc.listProjectTaskLabels(new Types.ObjectId(), employeeCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+        expect(taskDistinctMock).not.toHaveBeenCalled();
     });
 });
 

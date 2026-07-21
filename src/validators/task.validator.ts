@@ -7,6 +7,8 @@ import {
     TASK_DESCRIPTION_MAX,
     TASK_ESTIMATED_HOURS_MAX,
     TASK_ISSUE_TYPE_VALUES,
+    TASK_LABELS_MAX,
+    TASK_LABEL_MAX_LEN,
     TASK_LIST_DEFAULT_LIMIT,
     TASK_LIST_MAX_LIMIT,
     TASK_PRIORITY_VALUES,
@@ -82,6 +84,30 @@ const storyPointsSchema = z.union([
     z.null(),
 ]);
 
+// Freeform Jira-style labels (Phase 3c). Each label is trimmed and length-
+// capped at the element level (so an over-long tag is a clean 400), then the
+// array-level transform drops empty/whitespace-only entries and dedupes
+// case-insensitively — the FIRST spelling of a label wins (so `["Bug", "bug"]`
+// collapses to `["Bug"]`). The raw-array `.max` cap rejects an over-stuffed
+// payload before the transform runs. `.min(1)` is intentionally NOT applied to
+// the element so empties are DROPPED (per contract) rather than rejected.
+export const labelsSchema = z
+    .array(z.string().trim().max(TASK_LABEL_MAX_LEN))
+    .max(TASK_LABELS_MAX)
+    .transform((labels) => {
+        const out: string[] = [];
+        const seen = new Set<string>();
+        for (const raw of labels) {
+            const label = raw.trim();
+            if (label.length === 0) continue;
+            const key = label.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(label);
+        }
+        return out;
+    });
+
 // ─── POST /tasks ──────────────────────────────────────────────────────────
 
 export const createTaskBodySchema = z
@@ -96,6 +122,7 @@ export const createTaskBodySchema = z
         priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
         issue_type: issueTypeSchema.optional(),
         story_points: storyPointsSchema.optional(),
+        labels: labelsSchema.optional(),
         due_date: isoDateSchema,
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX).optional(),
         primary_assignee_id: optionalNullableObjectId,
@@ -122,6 +149,7 @@ export const patchTaskBodySchema = z
         priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]),
         issue_type: issueTypeSchema,
         story_points: storyPointsSchema,
+        labels: labelsSchema,
         due_date: isoDateSchema,
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX),
         primary_assignee_id: optionalNullableObjectId,
