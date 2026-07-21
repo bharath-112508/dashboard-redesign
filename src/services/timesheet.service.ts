@@ -123,14 +123,23 @@ const totalMinutesOf = (input: {
     billable_minutes: number;
     non_billable_hours: number;
     non_billable_minutes: number;
+    idle_hours?: number;
+    idle_minutes?: number;
 }): number =>
-    input.billable_hours * 60 + input.billable_minutes + input.non_billable_hours * 60 + input.non_billable_minutes;
+    input.billable_hours * 60 +
+    input.billable_minutes +
+    input.non_billable_hours * 60 +
+    input.non_billable_minutes +
+    (input.idle_hours ?? 0) * 60 +
+    (input.idle_minutes ?? 0);
 
 const assertNonZero = (input: {
     billable_hours: number;
     billable_minutes: number;
     non_billable_hours: number;
     non_billable_minutes: number;
+    idle_hours?: number;
+    idle_minutes?: number;
 }): void => {
     if (totalMinutesOf(input) <= 0) {
         throw AppError.unprocessable(
@@ -155,6 +164,8 @@ const assertEntryUnderDailyCap = (input: {
     billable_minutes: number;
     non_billable_hours: number;
     non_billable_minutes: number;
+    idle_hours?: number;
+    idle_minutes?: number;
 }): void => {
     const total = totalMinutesOf(input);
     if (total > TIMESHEET_PER_ENTRY_MAX_MINUTES) {
@@ -292,6 +303,8 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
         billable_minutes: input.billable_minutes,
         non_billable_hours: input.non_billable_hours,
         non_billable_minutes: input.non_billable_minutes,
+        idle_hours: input.idle_hours,
+        idle_minutes: input.idle_minutes,
         ...totals,
         description: input.description ?? '',
         last_edited_by: caller.id,
@@ -353,6 +366,8 @@ export const patchEntry = async (
     if (patch.billable_minutes !== undefined) entry.billable_minutes = patch.billable_minutes;
     if (patch.non_billable_hours !== undefined) entry.non_billable_hours = patch.non_billable_hours;
     if (patch.non_billable_minutes !== undefined) entry.non_billable_minutes = patch.non_billable_minutes;
+    if (patch.idle_hours !== undefined) entry.idle_hours = patch.idle_hours;
+    if (patch.idle_minutes !== undefined) entry.idle_minutes = patch.idle_minutes;
     if (patch.description !== undefined) entry.description = patch.description;
 
     if (entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL && patch.general_category !== undefined) {
@@ -392,6 +407,8 @@ export const patchEntry = async (
         billable_minutes: entry.billable_minutes,
         non_billable_hours: entry.non_billable_hours,
         non_billable_minutes: entry.non_billable_minutes,
+        idle_hours: entry.idle_hours,
+        idle_minutes: entry.idle_minutes,
     };
     assertNonZero(post);
     assertEntryUnderDailyCap(post);
@@ -399,6 +416,7 @@ export const patchEntry = async (
     const totals = computeTimesheetTotals(post);
     entry.billable_total_minutes = totals.billable_total_minutes;
     entry.non_billable_total_minutes = totals.non_billable_total_minutes;
+    entry.idle_total_minutes = totals.idle_total_minutes;
     entry.total_minutes = totals.total_minutes;
 
     entry.last_edited_by = caller.id;
@@ -696,6 +714,7 @@ export const summary = async (query: SummaryQuery, caller: Caller): Promise<Arra
         _id: Record<string, unknown>;
         billable_total_minutes: number;
         non_billable_total_minutes: number;
+        idle_total_minutes: number;
         total_minutes: number;
         entry_count: number;
     }>([
@@ -705,6 +724,7 @@ export const summary = async (query: SummaryQuery, caller: Caller): Promise<Arra
                 _id: groupKeyForBy(query.group_by),
                 billable_total_minutes: { $sum: '$billable_total_minutes' },
                 non_billable_total_minutes: { $sum: '$non_billable_total_minutes' },
+                idle_total_minutes: { $sum: '$idle_total_minutes' },
                 total_minutes: { $sum: '$total_minutes' },
                 entry_count: { $sum: 1 },
             },
@@ -742,6 +762,7 @@ export const summary = async (query: SummaryQuery, caller: Caller): Promise<Arra
             group_key: r._id,
             billable_total_minutes: r.billable_total_minutes,
             non_billable_total_minutes: r.non_billable_total_minutes,
+            idle_total_minutes: r.idle_total_minutes,
             total_minutes: r.total_minutes,
             entry_count: r.entry_count,
         };
