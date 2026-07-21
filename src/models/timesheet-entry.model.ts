@@ -48,6 +48,9 @@ export interface TimesheetEntryDocument extends Document {
     non_billable_hours: number;
     non_billable_minutes: number;
     non_billable_total_minutes: number;
+    idle_hours: number;
+    idle_minutes: number;
+    idle_total_minutes: number;
     total_minutes: number;
 
     description: string;
@@ -84,6 +87,9 @@ const timesheetEntrySchema = new Schema<TimesheetEntryDocument>(
         non_billable_hours: { type: Number, required: true, min: 0, max: TIMESHEET_HOURS_MAX, default: 0 },
         non_billable_minutes: { type: Number, required: true, min: 0, max: TIMESHEET_MINUTES_MAX, default: 0 },
         non_billable_total_minutes: { type: Number, required: true, default: 0 },
+        idle_hours: { type: Number, required: true, min: 0, max: TIMESHEET_HOURS_MAX, default: 0 },
+        idle_minutes: { type: Number, required: true, min: 0, max: TIMESHEET_MINUTES_MAX, default: 0 },
+        idle_total_minutes: { type: Number, required: true, default: 0 },
         total_minutes: { type: Number, required: true, default: 0 },
 
         description: { type: String, default: '', trim: true, maxlength: TIMESHEET_DESCRIPTION_MAX },
@@ -107,13 +113,22 @@ export const computeTimesheetTotals = (input: {
     billable_minutes: number;
     non_billable_hours: number;
     non_billable_minutes: number;
-}): { billable_total_minutes: number; non_billable_total_minutes: number; total_minutes: number } => {
+    idle_hours?: number;
+    idle_minutes?: number;
+}): {
+    billable_total_minutes: number;
+    non_billable_total_minutes: number;
+    idle_total_minutes: number;
+    total_minutes: number;
+} => {
     const billable_total_minutes = input.billable_hours * 60 + input.billable_minutes;
     const non_billable_total_minutes = input.non_billable_hours * 60 + input.non_billable_minutes;
+    const idle_total_minutes = (input.idle_hours ?? 0) * 60 + (input.idle_minutes ?? 0);
     return {
         billable_total_minutes,
         non_billable_total_minutes,
-        total_minutes: billable_total_minutes + non_billable_total_minutes,
+        idle_total_minutes,
+        total_minutes: billable_total_minutes + non_billable_total_minutes + idle_total_minutes,
     };
 };
 

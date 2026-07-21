@@ -141,6 +141,9 @@ const makeEntry = (overrides: Record<string, unknown> = {}) => {
         non_billable_minutes: 0,
         billable_total_minutes: 60,
         non_billable_total_minutes: 0,
+        idle_hours: 0,
+        idle_minutes: 0,
+        idle_total_minutes: 0,
         total_minutes: 60,
         description: 'work',
         last_edited_by: new Types.ObjectId(),
@@ -183,6 +186,8 @@ describe('createEntry', () => {
         billable_minutes: 0,
         non_billable_hours: 0,
         non_billable_minutes: 0,
+        idle_hours: 0,
+        idle_minutes: 0,
         description: 'work',
         ...overrides,
     });
@@ -309,6 +314,8 @@ describe('createEntry', () => {
                 billable_minutes: 0,
                 non_billable_hours: 0,
                 non_billable_minutes: 0,
+                idle_hours: 0,
+                idle_minutes: 0,
                 description: '',
             },
             employeeCaller()
@@ -318,6 +325,38 @@ describe('createEntry', () => {
             expect.objectContaining({ entry_type: 'general', general_category: 'meeting' })
         );
         expect(taskFindByIdMock).not.toHaveBeenCalled();
+    });
+
+    it('rolls idle time into the persisted totals (idle_total_minutes + total_minutes)', async () => {
+        const projectId = new Types.ObjectId();
+        const taskId = new Types.ObjectId();
+        stubTaskLookup({ _id: taskId, project_id: projectId, sprint_id: null });
+        loadProjectForCallerMock.mockResolvedValueOnce({ _id: projectId });
+        entryCreateMock.mockResolvedValueOnce(makeEntry({ project_id: projectId, task_id: taskId }));
+        stubAggregate(150);
+
+        await svc.createEntry(
+            baseTaskLinkedBody({
+                project_id: projectId.toString(),
+                task_id: taskId.toString(),
+                billable_hours: 1, // 60
+                billable_minutes: 0,
+                non_billable_hours: 0,
+                non_billable_minutes: 30, // 30
+                idle_hours: 1, // 60
+                idle_minutes: 0,
+            }),
+            employeeCaller()
+        );
+
+        expect(entryCreateMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                idle_hours: 1,
+                idle_minutes: 0,
+                idle_total_minutes: 60,
+                total_minutes: 150,
+            })
+        );
     });
 });
 

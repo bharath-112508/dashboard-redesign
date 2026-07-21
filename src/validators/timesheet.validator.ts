@@ -31,12 +31,17 @@ import {
 const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId');
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a YYYY-MM-DD date');
 
-// Shared duration shape — same on create and patch.
+// Shared duration shape — same on create and patch. Every entry splits its
+// time across three parallel buckets: billable, non-billable, and idle
+// (non-productive downtime). Idle fields default to 0 so existing clients
+// that don't send them keep working.
 const durationSchema = z.object({
     billable_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
     billable_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
     non_billable_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
     non_billable_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
+    idle_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX).default(0),
+    idle_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX).default(0),
 });
 
 // ─── POST /timesheets ────────────────────────────────────────────────────
@@ -83,6 +88,8 @@ export const patchTimesheetBodySchema = z
         billable_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
         non_billable_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
         non_billable_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
+        idle_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
+        idle_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
         description: z.string().trim().max(TIMESHEET_DESCRIPTION_MAX),
         general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX),
         project_id: objectIdSchema.nullable(),
