@@ -8,6 +8,7 @@ import { Task } from '../models/task.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { deriveProjectCodeBase, pickProjectCode } from '../utils/project-code.js';
+import { pickCustomStatusKey, slugifyCustomStatusKey } from '../utils/custom-status-key.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
@@ -889,14 +890,25 @@ export const addCustomStatus = async (
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
 
-    if (doc.custom_task_statuses.some((s) => s.key === body.key)) {
+    // Key is auto-derived from the label when the caller omits it (the common
+    // path — the create dialog no longer asks for one). The slug is deduped
+    // against the built-ins and this project's existing custom keys, so an
+    // auto key never collides; an explicitly-supplied key still can.
+    const key =
+        body.key ??
+        pickCustomStatusKey(
+            slugifyCustomStatusKey(body.label),
+            new Set(doc.custom_task_statuses.map((s) => s.key))
+        );
+
+    if (doc.custom_task_statuses.some((s) => s.key === key)) {
         throw AppError.conflict('A custom status with this key already exists', ERROR_CODES.CUSTOM_STATUS_KEY_TAKEN, {
-            key: body.key,
+            key,
         });
     }
 
     const sub = doc.custom_task_statuses.create({
-        key: body.key,
+        key,
         label: body.label,
         order: body.order,
         is_terminal: body.is_terminal,
@@ -909,7 +921,16 @@ export const addCustomStatus = async (
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.PROJECT_CUSTOM_STATUS_CREATE,
             target: { kind: AUDIT_TARGET_KINDS.PROJECT, id: doc._id },
-            after: { custom_status: { id: sub._id.toString(), ...body } },
+            after: {
+                custom_status: {
+                    id: sub._id.toString(),
+                    key,
+                    label: body.label,
+                    order: body.order,
+                    is_terminal: body.is_terminal,
+                    is_active: body.is_active,
+                },
+            },
         });
     }
 

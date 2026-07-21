@@ -47,7 +47,9 @@ const customStatusKeySchema = z
     });
 
 export const createCustomStatusBodySchema = z.object({
-    key: customStatusKeySchema,
+    // Optional — when omitted the service derives a unique key from the
+    // label (slugified, deduped). Still accepted + validated if supplied.
+    key: customStatusKeySchema.optional(),
     label: z.string().trim().min(1).max(CUSTOM_STATUS_LABEL_MAX),
     order: z.number().int().min(0).max(99_999).default(0),
     is_terminal: z.boolean().default(false),
