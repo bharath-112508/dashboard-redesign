@@ -38,6 +38,7 @@ const {
     runStuckJobMock,
     runAuditLogMirrorMock,
     runCompOffReconciliationMock,
+    runCompOffAccrualMock,
     runCheckinNudgeMock,
     runCheckoutReminderMock,
     getOrInitSettingsMock,
@@ -58,6 +59,7 @@ const {
     runStuckJobMock: vi.fn(),
     runAuditLogMirrorMock: vi.fn(),
     runCompOffReconciliationMock: vi.fn(),
+    runCompOffAccrualMock: vi.fn(),
     runCheckinNudgeMock: vi.fn(),
     runCheckoutReminderMock: vi.fn(),
     getOrInitSettingsMock: vi.fn(),
@@ -126,6 +128,9 @@ vi.mock('./audit-log-mirror.job.js', () => ({
 vi.mock('./comp-off-reconciliation.job.js', () => ({
     runCompOffReconciliation: runCompOffReconciliationMock,
 }));
+vi.mock('./comp-off-accrual.job.js', () => ({
+    runCompOffAccrual: runCompOffAccrualMock,
+}));
 vi.mock('./attendance-slack-nudge.job.js', () => ({
     runAttendanceCheckinNudge: runCheckinNudgeMock,
     runAttendanceCheckoutReminder: runCheckoutReminderMock,
@@ -175,6 +180,7 @@ beforeEach(() => {
     runStuckJobMock.mockResolvedValue(undefined);
     runAuditLogMirrorMock.mockResolvedValue(undefined);
     runCompOffReconciliationMock.mockResolvedValue(undefined);
+    runCompOffAccrualMock.mockResolvedValue(undefined);
     runCheckinNudgeMock.mockResolvedValue(undefined);
     runCheckoutReminderMock.mockResolvedValue(undefined);
     // No nudge override → scheduler uses the static JOB_SCHEDULES defaults.

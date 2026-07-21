@@ -85,7 +85,7 @@ export const recomputeBalance = async (
  * requested leave's year. If a user wants to spend comp-off in a year
  * other than the current one, that's a separate gap from this bug.
  */
-const syncLeaveBalanceForCompOff = async (
+export const syncLeaveBalanceForCompOff = async (
     user_id: Types.ObjectId,
     balance: number,
     session?: ClientSession | null

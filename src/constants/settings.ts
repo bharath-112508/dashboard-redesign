@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS = {
     leave_policy: {
         cl_carry_forward_cap: 5,
         comp_off_hours_per_day: 8,
+        comp_off_auto_accrual_enabled: false,
         cl_advance_notice_days: 14,
         pro_rata_for_joiners: true,
     },

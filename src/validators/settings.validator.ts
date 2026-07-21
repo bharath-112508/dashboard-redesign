@@ -44,6 +44,7 @@ const leavePolicySchema = z
     .object({
         cl_carry_forward_cap: z.number().int().min(0),
         comp_off_hours_per_day: z.number().min(0).max(24),
+        comp_off_auto_accrual_enabled: z.boolean(),
         cl_advance_notice_days: z.number().int().min(0),
         pro_rata_for_joiners: z.boolean(),
     })

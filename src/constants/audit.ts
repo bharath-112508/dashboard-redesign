@@ -89,6 +89,10 @@ export const AUDIT_ACTIONS = {
     // ran with no audit trail; H3-style fix records the signed delta,
     // operator-supplied `remarks`, and the resulting balance.
     COMP_OFF_ADJUST: 'comp_off.adjust',
+    // Automatic comp-off grant from the nightly accrual job (overtime bank
+    // or weekend/holiday work). System actor; metadata carries the source
+    // day + rule + days granted.
+    COMP_OFF_ACCRUE: 'comp_off.accrue',
 
     // Holiday calendar admin CRUD (I1). Org-wide working-day calendar —
     // every user's leave-day count and attendance roll-ups depend on the

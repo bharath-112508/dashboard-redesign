@@ -86,6 +86,10 @@ export interface AttendanceRecordDocument extends Document {
     break_minutes_by_type: { lunch: number; tea: number; other: number };
     status: AttendanceStatus;
     flagged_for_correction: boolean;
+    /** Idempotency flag for automatic comp-off accrual — set once the
+     *  nightly job has processed this day for this user so re-runs never
+     *  double-grant. */
+    comp_off_accrued: boolean;
     wfh: boolean;
     notes: string;
     last_corrected_by: Types.ObjectId | null;
@@ -165,6 +169,7 @@ const attendanceRecordSchema = new Schema<AttendanceRecordDocument>(
         },
         status: { type: String, enum: ATTENDANCE_STATUSES, required: true, default: 'present' },
         flagged_for_correction: { type: Boolean, required: true, default: false },
+        comp_off_accrued: { type: Boolean, required: true, default: false },
         wfh: { type: Boolean, required: true, default: false },
         notes: { type: String, default: '' },
         last_corrected_by: {

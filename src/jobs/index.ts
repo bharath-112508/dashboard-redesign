@@ -26,6 +26,7 @@ import { runReportSubscriptionSweepJob } from './report-subscription.job.js';
 import { runStuckJobSweeperJob } from './stuck-job-sweeper.job.js';
 import { runAuditLogMirror } from './audit-log-mirror.job.js';
 import { runCompOffReconciliation } from './comp-off-reconciliation.job.js';
+import { runCompOffAccrual } from './comp-off-accrual.job.js';
 import { runAttendanceCheckinNudge, runAttendanceCheckoutReminder } from './attendance-slack-nudge.job.js';
 
 /**
@@ -79,6 +80,7 @@ const REGISTRY: Record<JobName, JobRunner> = {
     [JOB_NAMES.STUCK_JOB_SWEEPER]: () => runStuckJobSweeperJob(),
     [JOB_NAMES.AUDIT_LOG_MIRROR]: () => runAuditLogMirror(),
     [JOB_NAMES.COMP_OFF_RECONCILIATION]: () => runCompOffReconciliation(),
+    [JOB_NAMES.COMP_OFF_ACCRUAL]: () => runCompOffAccrual(),
     [JOB_NAMES.ATTENDANCE_CHECKIN_NUDGE]: () => runAttendanceCheckinNudge(),
     [JOB_NAMES.ATTENDANCE_CHECKOUT_REMINDER]: () => runAttendanceCheckoutReminder(),
 };

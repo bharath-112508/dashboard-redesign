@@ -104,6 +104,11 @@ export const JOB_NAMES = {
     // trusts the CAS `$inc` for balance maintenance; this cron is
     // the safety net.
     COMP_OFF_RECONCILIATION: 'comp_off_reconciliation',
+    // Automatic comp-off accrual — converts a finalized day's overtime
+    // (running bank) + weekend/holiday work into comp-off ledger grants.
+    // Runs just after the finalizer; gated on
+    // `settings.leave_policy.comp_off_auto_accrual_enabled`.
+    COMP_OFF_ACCRUAL: 'comp_off_accrual',
     // Slack attendance nudges — DM eligible employees a check-in button in
     // the morning and a "forgot to check out" reminder in the evening.
     // Fire times come from `settings.slack.attendance_nudges` (read at
@@ -122,6 +127,10 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // Daily 23:00 IST — closes yesterday's open records (we compute "yesterday"
     // inside the job at call time so a manual trigger is also correct).
     [JOB_NAMES.ATTENDANCE_FINALIZER]: '0 23 * * *',
+
+    // Daily 23:15 IST — right after the finalizer, so it accrues against the
+    // same closed day. No-op unless the accrual setting is enabled.
+    [JOB_NAMES.COMP_OFF_ACCRUAL]: '15 23 * * *',
 
     // 00:05 IST on Jan 1.
     [JOB_NAMES.LEAVE_YEAR_ROLLOVER]: '5 0 1 1 *',
@@ -281,6 +290,11 @@ export const auditLogMirrorRunKey = (now: Date = new Date()): string => {
 export const compOffReconciliationRunKey = (now: Date = new Date()): string => {
     return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
 };
+
+/** Comp-off accrual processes the same finalized day as the finalizer —
+ *  "yesterday" (IST) — and the run-key doubles as that target date. */
+export const compOffAccrualRunKey = (now: Date = new Date()): string =>
+    dayjs(now).tz(JOB_TIMEZONE).subtract(1, 'day').format('YYYY-MM-DD');
 
 /** Both attendance nudge jobs key off **today** (IST) — one fire per day. */
 export const attendanceCheckinNudgeRunKey = (now: Date = new Date()): string =>

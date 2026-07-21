@@ -28,7 +28,12 @@ export interface WorkScheduleSettings {
 
 export interface LeavePolicySettings {
     cl_carry_forward_cap: number;
+    /** Hours of qualifying work that equal one comp-off day. Also the
+     *  overtime-bank threshold for automatic accrual (default 8). */
     comp_off_hours_per_day: number;
+    /** Master switch for the nightly automatic comp-off accrual job
+     *  (overtime bank + weekend/holiday grants). Off by default. */
+    comp_off_auto_accrual_enabled: boolean;
     cl_advance_notice_days: number;
     pro_rata_for_joiners: boolean;
 }
@@ -194,6 +199,7 @@ const leavePolicySchema = new Schema<LeavePolicySettings>(
     {
         cl_carry_forward_cap: { type: Number, required: true, min: 0 },
         comp_off_hours_per_day: { type: Number, required: true, min: 0, max: 24 },
+        comp_off_auto_accrual_enabled: { type: Boolean, required: true, default: false },
         cl_advance_notice_days: { type: Number, required: true, min: 0 },
         pro_rata_for_joiners: { type: Boolean, required: true },
     },

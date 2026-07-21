@@ -109,6 +109,10 @@ export interface UserDocument extends Document {
      */
     push_notifications_enabled: boolean;
     comp_off_balance: number;
+    /** Un-converted overtime remainder (minutes) for automatic comp-off
+     *  accrual. Every `overtime_hours_per_comp_off` accumulated earns 1
+     *  comp-off; the leftover carries here. See comp-off accrual job. */
+    comp_off_overtime_bank_minutes: number;
 
     // Role-specific
     internal_profile?: InternalProfile;
@@ -228,6 +232,7 @@ const userSchema = new Schema<UserDocument>(
         slack_notifications_enabled: { type: Boolean, required: true, default: true },
         push_notifications_enabled: { type: Boolean, required: true, default: true },
         comp_off_balance: { type: Number, default: 0, min: 0 },
+        comp_off_overtime_bank_minutes: { type: Number, default: 0, min: 0 },
 
         internal_profile: { type: internalProfileSchema, required: false },
         client_profile: { type: clientProfileSchema, required: false },
