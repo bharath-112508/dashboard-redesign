@@ -195,6 +195,7 @@ describe('attendanceOverviewFor', () => {
 
         expect(out).toMatchObject({
             present: 9,
+            present_days: 9,
             on_leave: 2,
             correction_requests: 1,
             incomplete: 0,
@@ -234,6 +235,7 @@ describe('attendanceOverviewFor', () => {
 
         expect(out.is_single_day).toBe(false);
         expect(out.present).toBe(7); // round(27/4) = 6.75 → 7
+        expect(out.present_days).toBe(27); // raw count, not averaged
         expect(out.on_leave).toBe(4);
         expect(out.incomplete).toBe(2);
         expect(out.correction_requests).toBe(5);
@@ -286,6 +288,17 @@ describe('attendanceOverviewFor', () => {
         expect(correctionFilter.user_id).toBeUndefined();
     });
 
+    it('excludes both clients and representatives from the total_internal_active denominator', async () => {
+        attendanceAggregateMock.mockResolvedValueOnce([{ _id: 'present', count: 2 }]);
+        correctionCountMock.mockResolvedValueOnce(0);
+        userCountMock.mockResolvedValueOnce(2);
+
+        await overview.attendanceOverviewFor('2026-07-22', '2026-07-22', null);
+
+        const userFilter = userCountMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(userFilter.role).toEqual({ $nin: [ROLES.CLIENT, ROLES.REPRESENTATIVE] });
+    });
+
     it('falls back to a zero shape (preserving is_single_day) when the status aggregate throws', async () => {
         attendanceAggregateMock.mockRejectedValueOnce(new Error('boom'));
 
@@ -293,6 +306,7 @@ describe('attendanceOverviewFor', () => {
 
         expect(out).toEqual({
             present: 0,
+            present_days: 0,
             on_leave: 0,
             correction_requests: 0,
             incomplete: 0,
@@ -348,7 +362,7 @@ describe('buildAdminOverview', () => {
                 if (roleFilter.$in.length === 1 && roleFilter.$in[0] === ROLES.CLIENT) return Promise.resolve(4);
                 return Promise.resolve(50);
             }
-            return Promise.resolve(20); // total_internal_active (role: {$ne: CLIENT})
+            return Promise.resolve(20); // total_internal_active (role: {$nin: [CLIENT, REPRESENTATIVE]})
         });
         projectAggregateMock.mockResolvedValueOnce([
             { _id: PROJECT_STATUSES.ACTIVE, count: 5 },
@@ -422,21 +436,30 @@ describe('buildManagerOverview', () => {
 describe('buildEmployeeOverview', () => {
     const caller = { id: new Types.ObjectId(), role: ROLES.EMPLOYEE } as const;
 
-    it('reports present-days/projects/open-tasks scoped to the caller only', async () => {
+    it('reports present-DAY COUNT (not the averaged present) for "My present days", scoped to the caller only', async () => {
+        // Range spans 22 working days; the employee was present on 18 of them.
+        // If the card used the averaged `present` (round(18/22) = 1), the bug
+        // would be invisible — this fixture makes presentTotal != average so
+        // a regression to `attendance.present` fails the assertion below.
         const filter = { member_ids: caller.id };
         buildProjectVisibilityFilterMock.mockReturnValueOnce(filter);
         projectAggregateMock.mockResolvedValueOnce([{ _id: PROJECT_STATUSES.ACTIVE, count: 2 }]);
-        attendanceAggregateMock.mockResolvedValueOnce([{ _id: 'present', count: 1 }]);
+        attendanceAggregateMock.mockResolvedValueOnce([{ _id: 'present', count: 18 }]);
+        attendanceDistinctMock.mockResolvedValueOnce(
+            Array.from({ length: 22 }, (_, i) => `2026-07-${String(i + 1).padStart(2, '0')}`)
+        );
         correctionCountMock.mockResolvedValueOnce(0);
         userCountMock.mockResolvedValueOnce(1); // total_internal_active
         taskCountMock.mockResolvedValueOnce(5);
 
-        const out = await overview.buildEmployeeOverview(caller, '2026-07-22', '2026-07-22');
+        const out = await overview.buildEmployeeOverview(caller, '2026-07-01', '2026-07-31');
 
         expect(buildProjectVisibilityFilterMock).toHaveBeenCalledWith(caller);
         expect(out.scope).toBe('employee');
+        expect(out.attendance?.present).toBe(1); // round(18/22) = 0.8 → 1 — the range average, unrelated to the card
+        expect(out.attendance?.present_days).toBe(18); // raw count — what the card must use
         expect(out.summary).toEqual([
-            { label: 'My present days', value: 1 },
+            { label: 'My present days', value: 18 },
             { label: 'My Projects', value: 2 },
             { label: 'My open tasks', value: 5 },
         ]);

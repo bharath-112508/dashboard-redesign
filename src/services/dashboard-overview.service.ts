@@ -73,6 +73,9 @@ export interface ProjectStatusBreakdown {
 export interface AttendanceOverview {
     /** Single day: that day's present count. Range: avg present per working day (rounded). */
     present: number;
+    /** Raw count of `present` attendance records in the window (single-day or range alike) —
+     *  use this for "days present" summaries; `present` above is an average for ranges. */
+    present_days: number;
     /** Single day: on-leave count. Range: total leave-days in window. */
     on_leave: number;
     /** Correction requests created in the window (scoped). */
@@ -157,7 +160,7 @@ const attendanceOverviewForImpl = async (
 
     const totalInternalFilter: Record<string, unknown> = {
         status: USER_STATUSES.ACTIVE,
-        role: { $ne: ROLES.CLIENT },
+        role: { $nin: [ROLES.CLIENT, ROLES.REPRESENTATIVE] },
     };
     if (userIds !== null) totalInternalFilter._id = { $in: userIds };
 
@@ -188,6 +191,7 @@ const attendanceOverviewForImpl = async (
 
     return {
         present,
+        present_days: presentTotal,
         on_leave: onLeaveTotal,
         correction_requests: correctionRequests,
         incomplete,
@@ -208,6 +212,7 @@ export const attendanceOverviewFor = (
 ): Promise<AttendanceOverview> =>
     safeCard('overview.attendance', () => attendanceOverviewForImpl(from, to, userIds), {
         present: 0,
+        present_days: 0,
         on_leave: 0,
         correction_requests: 0,
         incomplete: 0,
@@ -359,7 +364,7 @@ export const buildEmployeeOverview = async (
         scope: 'employee',
         range: buildRange(from, to),
         summary: [
-            { label: 'My present days', value: attendance.present },
+            { label: 'My present days', value: attendance.present_days },
             { label: 'My Projects', value: projects.total },
             { label: 'My open tasks', value: openTasks },
         ],
