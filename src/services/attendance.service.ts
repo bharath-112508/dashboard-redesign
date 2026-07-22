@@ -574,6 +574,64 @@ const attachTimesheetTotals = async (user_id: Types.ObjectId, rows: Record<strin
     }
 };
 
+/**
+ * Team-view variant of {@link attachTimesheetTotals}: the rows span MANY users,
+ * so each row is matched to its own `(user_id, local_date)` timesheet aggregate.
+ * Reads `row.user_id` (string) + `row.local_date` off each JSON row. `null` =
+ * that user had no timesheet entries that day. Mutates `rows` in place.
+ */
+const attachTeamTimesheetTotals = async (rows: Record<string, unknown>[]): Promise<void> => {
+    const userIds: Types.ObjectId[] = [];
+    const seenUsers = new Set<string>();
+    const dates = new Set<string>();
+    for (const r of rows) {
+        const u = r.user_id;
+        const d = r.local_date;
+        if (typeof d === 'string' && (typeof u === 'string' || u instanceof Types.ObjectId)) {
+            const us = String(u);
+            if (!seenUsers.has(us) && Types.ObjectId.isValid(us)) {
+                seenUsers.add(us);
+                userIds.push(new Types.ObjectId(us));
+            }
+            dates.add(d);
+        }
+    }
+    if (userIds.length === 0 || dates.size === 0) {
+        for (const row of rows) row.timesheet_totals = null;
+        return;
+    }
+
+    const agg = await TimesheetEntry.aggregate<{
+        _id: { u: Types.ObjectId; d: string };
+        billable: number;
+        non_billable: number;
+        idle: number;
+    }>([
+        { $match: { user_id: { $in: userIds }, local_date: { $in: Array.from(dates) } } },
+        {
+            $group: {
+                _id: { u: '$user_id', d: '$local_date' },
+                billable: { $sum: '$billable_total_minutes' },
+                non_billable: { $sum: '$non_billable_total_minutes' },
+                idle: { $sum: '$idle_total_minutes' },
+            },
+        },
+    ]);
+
+    const key = (u: unknown, d: unknown) => `${String(u)}:${String(d)}`;
+    const byKey = new Map(agg.map((a) => [key(a._id.u, a._id.d), a]));
+    for (const row of rows) {
+        const t = byKey.get(key(row.user_id, row.local_date));
+        row.timesheet_totals = t
+            ? {
+                  billable_minutes: t.billable,
+                  non_billable_minutes: t.non_billable,
+                  idle_minutes: t.idle,
+              }
+            : null;
+    }
+};
+
 // ─── GET /attendance/me/today ────────────────────────────────────────────
 
 export const getMyToday = async (user_id: Types.ObjectId): Promise<Record<string, unknown> | null> => {
@@ -709,8 +767,10 @@ const listAttendanceRoster = async (
 
     const total = combined.length;
     const skip = (query.page - 1) * query.limit;
+    const pageRows = combined.slice(skip, skip + query.limit);
+    await attachTeamTimesheetTotals(pageRows);
     return {
-        data: combined.slice(skip, skip + query.limit),
+        data: pageRows,
         meta: {
             page: query.page,
             limit: query.limit,
@@ -758,15 +818,18 @@ export const listAttendance = async (
     const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
     const userMap = await loadUserDisplays(userIds);
 
+    const data = rows.map((r) => {
+        const obj = r.toJSON() as unknown as Record<string, unknown>;
+        obj.user = userMap.get(r.user_id.toString()) ?? {
+            id: r.user_id.toString(),
+            full_name: null,
+        };
+        return obj;
+    });
+    await attachTeamTimesheetTotals(data);
+
     return {
-        data: rows.map((r) => {
-            const obj = r.toJSON() as unknown as Record<string, unknown>;
-            obj.user = userMap.get(r.user_id.toString()) ?? {
-                id: r.user_id.toString(),
-                full_name: null,
-            };
-            return obj;
-        }),
+        data,
         meta: {
             page: query.page,
             limit: query.limit,
