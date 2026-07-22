@@ -306,13 +306,59 @@ const assertNoWildcard = (perms: readonly Permission[]): void => {
     }
 };
 
+const isDuplicateKeyError = (err: unknown): boolean =>
+    err instanceof Error && 'code' in err && (err as { code: number }).code === 11000;
+
+/**
+ * Slugify a role's display name into a valid role key: lowercase, non-
+ * alphanumeric runs collapsed to `_`, trimmed, guaranteed to start with a
+ * letter (the model regex requires it) and capped at the 40-char limit.
+ * Falls back to `role` for a name with no usable characters (e.g. "!!!").
+ */
+export const slugifyRoleKey = (displayName: string): string => {
+    let base = displayName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_') // non-alphanumeric runs → underscore
+        .replace(/^[_-]+|[_-]+$/g, ''); // trim leading/trailing separators
+    // The key regex requires a leading letter; prefix if it starts with a digit.
+    if (!/^[a-z]/.test(base)) base = base ? `role_${base}` : 'role';
+    // Cap at 40 chars, then re-trim any separator left dangling at the cut.
+    base = base.slice(0, 40).replace(/[_-]+$/g, '');
+    return base || 'role';
+};
+
+/**
+ * Derive a role key from `display_name` that doesn't collide with any
+ * existing role (system or custom). On a clash the base slug is suffixed
+ * `-2`, `-3`, … (respecting the 40-char cap). A pre-write query can still
+ * race two concurrent creates, so the create path also retries on the
+ * unique-index `E11000` — this just keeps the common case suffix-clean.
+ */
+export const generateUniqueRoleKey = async (displayName: string): Promise<string> => {
+    const base = slugifyRoleKey(displayName);
+    const rows = await Role.find({}).select('key').lean<{ key: string }[]>();
+    const taken = new Set(rows.map((r) => r.key));
+    if (!taken.has(base)) return base;
+    for (let i = 2; i < 1000; i++) {
+        const suffix = `-${i}`;
+        const trimmed = base.slice(0, 40 - suffix.length).replace(/[_-]+$/g, '');
+        const candidate = `${trimmed}${suffix}`;
+        if (!taken.has(candidate)) return candidate;
+    }
+    // Practically unreachable (999 same-named roles); let the unique index catch it.
+    return `${base.slice(0, 36)}-${taken.size}`;
+};
+
 /**
  * `POST /roles` — admin creates a custom role.
  *
- * Custom roles are non-system by construction: `is_system: false`.
- * The unique-`key` index is the source of truth for collisions; we
- * map the `E11000` to `DUPLICATE_RESOURCE` rather than relying on a
- * pre-write existence check (which races).
+ * Custom roles are non-system by construction: `is_system: false`. The
+ * `key` is normally auto-derived from `display_name` (the UI doesn't ask
+ * for it); an explicit `input.key` is honoured when supplied. Either way
+ * the unique-`key` index is the source of truth for collisions — we map
+ * `E11000` to `DUPLICATE_RESOURCE`, and for a generated key we retry with
+ * a fresh suffix so a create-race resolves itself instead of erroring.
  */
 export const createCustomRole = async (
     input: CreateRoleBody,
@@ -321,22 +367,39 @@ export const createCustomRole = async (
 ): Promise<Record<string, unknown>> => {
     assertNoWildcard(input.permissions);
 
-    let doc: RoleDocument;
-    try {
-        doc = await Role.create({
-            key: input.key,
-            display_name: input.display_name,
-            description: input.description,
-            permissions: input.permissions,
-            is_system: false,
-            created_by: actor_id,
-            updated_by: actor_id,
-        });
-    } catch (err) {
-        if (err instanceof Error && 'code' in err && (err as { code: number }).code === 11000) {
-            throw AppError.conflict(`Role key "${input.key}" already exists`, ERROR_CODES.DUPLICATE_RESOURCE);
+    const MAX_ATTEMPTS = 5;
+    let doc: RoleDocument | undefined;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        const key = input.key ?? (await generateUniqueRoleKey(input.display_name));
+        try {
+            doc = await Role.create({
+                key,
+                display_name: input.display_name,
+                description: input.description,
+                permissions: input.permissions,
+                is_system: false,
+                created_by: actor_id,
+                updated_by: actor_id,
+            });
+            break;
+        } catch (err) {
+            if (isDuplicateKeyError(err)) {
+                // An explicit key that clashes is a user error — surface it.
+                // A generated key that raced another create just retries.
+                if (input.key) {
+                    throw AppError.conflict(`Role key "${input.key}" already exists`, ERROR_CODES.DUPLICATE_RESOURCE);
+                }
+                continue;
+            }
+            throw err;
         }
-        throw err;
+    }
+
+    if (!doc) {
+        throw AppError.conflict(
+            'Could not generate a unique role key — please try again',
+            ERROR_CODES.DUPLICATE_RESOURCE
+        );
     }
 
     if (audit) {

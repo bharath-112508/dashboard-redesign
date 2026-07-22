@@ -374,6 +374,50 @@ describe('createCustomRole', () => {
             code: 'DUPLICATE_RESOURCE',
         });
     });
+
+    it('auto-generates a key from the display name when none is supplied', async () => {
+        // The UI no longer asks for a key — the service slugifies the
+        // display name and, on a clash, suffixes it. Here nothing is taken.
+        roleFindMock.mockReturnValue(findChain([{ key: 'admin' }, { key: 'manager' }]));
+        roleCreateMock.mockImplementationOnce((d: Record<string, unknown>) => ({
+            _id: new Types.ObjectId(),
+            ...d,
+        }));
+
+        const { key: _omit, ...noKey } = validInput;
+        void _omit;
+        const out = await service.createCustomRole({ ...noKey, display_name: 'Regional Manager' }, actorId);
+
+        expect(roleCreateMock).toHaveBeenCalledTimes(1);
+        expect(roleCreateMock.mock.calls[0][0]).toMatchObject({ key: 'regional_manager' });
+        expect(out).toMatchObject({ key: 'regional_manager' });
+    });
+
+    it('suffixes the generated key when the slug is already taken', async () => {
+        roleFindMock.mockReturnValue(findChain([{ key: 'auditor' }, { key: 'auditor-2' }]));
+        roleCreateMock.mockImplementationOnce((d: Record<string, unknown>) => ({
+            _id: new Types.ObjectId(),
+            ...d,
+        }));
+
+        const { key: _omit, ...noKey } = validInput;
+        void _omit;
+        await service.createCustomRole({ ...noKey, display_name: 'Auditor' }, actorId);
+
+        expect(roleCreateMock.mock.calls[0][0]).toMatchObject({ key: 'auditor-3' });
+    });
+});
+
+describe('slugifyRoleKey', () => {
+    it('lowercases and underscores a normal name', () =>
+        expect(service.slugifyRoleKey('Regional Manager')).toBe('regional_manager'));
+    it('collapses punctuation runs and trims separators', () =>
+        expect(service.slugifyRoleKey('  Ops — Lead!! ')).toBe('ops_lead'));
+    it('prefixes a leading digit so it starts with a letter', () =>
+        expect(service.slugifyRoleKey('2024 Squad')).toBe('role_2024_squad'));
+    it('falls back to "role" for a name with no usable characters', () =>
+        expect(service.slugifyRoleKey('!!!')).toBe('role'));
+    it('caps at 40 characters', () => expect(service.slugifyRoleKey('a'.repeat(60)).length).toBeLessThanOrEqual(40));
 });
 
 // ─── Phase C: updateRole ─────────────────────────────────────────────────

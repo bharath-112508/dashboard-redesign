@@ -51,7 +51,11 @@ const permissionListSchema = z
 // ─── POST /roles ────────────────────────────────────────────────────────
 
 export const createRoleBodySchema = z.object({
-    key: roleKeySchema,
+    // `key` is optional — the service auto-derives a unique slug from
+    // `display_name` when it's omitted (the normal path; the UI no longer
+    // asks for it). An explicit key is still accepted and validated for
+    // any programmatic caller that wants to pin one.
+    key: roleKeySchema.optional(),
     display_name: displayNameSchema,
     description: descriptionSchema.optional().default(''),
     permissions: permissionListSchema,
