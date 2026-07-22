@@ -489,7 +489,12 @@ export const deleteEntry = async (id: Types.ObjectId, caller: Caller): Promise<{
     if (caller.audit) {
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.TIMESHEET_DELETE,
-            target: { kind: AUDIT_TARGET_KINDS.TIMESHEET_ENTRY, id: entry._id },
+            // A timesheet entry has no name — label it with its date + hours.
+            target: {
+                kind: AUDIT_TARGET_KINDS.TIMESHEET_ENTRY,
+                id: entry._id,
+                label: `${entry.local_date} · ${(entry.total_minutes / 60).toFixed(1)}h`,
+            },
             before,
             metadata: {
                 user_id: entry.user_id.toString(),

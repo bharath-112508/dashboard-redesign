@@ -680,7 +680,12 @@ export const revokeSession = async (input: {
         if (input.audit) {
             await recordAudit(input.audit, {
                 action: AUDIT_ACTIONS.AUTH_SESSION_REVOKE,
-                target: { kind: AUDIT_TARGET_KINDS.SESSION, id: updated._id },
+                // A session has no name — label it with the device / IP it ran on.
+                target: {
+                    kind: AUDIT_TARGET_KINDS.SESSION,
+                    id: updated._id,
+                    label: updated.device_info || updated.ip_address || 'Session',
+                },
                 metadata: {
                     user_id: input.user_id.toString(),
                     device_info: updated.device_info,

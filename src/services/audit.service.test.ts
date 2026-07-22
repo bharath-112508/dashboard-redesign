@@ -81,7 +81,7 @@ describe('recordAudit — basic shape', () => {
         expect(arg.actor_id).toBe(actorId);
         expect(arg.actor_role).toBe(ROLES.ADMIN);
         expect(arg.action).toBe(AUDIT_ACTIONS.USER_DEACTIVATE);
-        expect(arg.target_entity).toEqual({ kind: AUDIT_TARGET_KINDS.USER, id: targetId });
+        expect(arg.target_entity).toEqual({ kind: AUDIT_TARGET_KINDS.USER, id: targetId, label: null });
         expect(arg.before).toEqual({ status: 'active' });
         expect(arg.after).toEqual({ status: 'deactivated' });
         expect(arg.metadata).toEqual({
@@ -116,7 +116,43 @@ describe('recordAudit — basic shape', () => {
         expect(arg.target_entity).toEqual({
             kind: AUDIT_TARGET_KINDS.SYSTEM_SETTINGS,
             id: null,
+            label: null,
         });
+    });
+});
+
+describe('deriveTargetLabel', () => {
+    const base = {
+        action: 'x.y',
+        target: { kind: 'user', id: null },
+    };
+
+    it('prefers an explicit target.label', () => {
+        expect(audit.deriveTargetLabel({ ...base, target: { ...base.target, label: '  Jane  ' } })).toBe('Jane');
+    });
+
+    it('reads full_name from the after snapshot', () => {
+        expect(audit.deriveTargetLabel({ ...base, after: { full_name: 'Jane Doe', email: 'j@x.com' } })).toBe(
+            'Jane Doe'
+        );
+    });
+
+    it('falls back to the before snapshot (deletes)', () => {
+        expect(audit.deriveTargetLabel({ ...base, before: { display_name: 'Auditor' } })).toBe('Auditor');
+    });
+
+    it('falls back to a metadata label when snapshots have no name', () => {
+        expect(
+            audit.deriveTargetLabel({ ...base, after: { status: 'x' }, metadata: { key: 'regional_manager' } })
+        ).toBe('regional_manager');
+    });
+
+    it('uses file_name for attachments', () => {
+        expect(audit.deriveTargetLabel({ ...base, before: { file_name: 'contract.pdf' } })).toBe('contract.pdf');
+    });
+
+    it('returns null when nothing usable is present', () => {
+        expect(audit.deriveTargetLabel({ ...base, after: { status: 'active' } })).toBeNull();
     });
 });
 

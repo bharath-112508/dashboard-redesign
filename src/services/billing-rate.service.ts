@@ -353,7 +353,12 @@ export const deleteRate = async (id: Types.ObjectId, caller: BillingRateCaller):
     if (caller.audit) {
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.BILLING_RATE_DELETE,
-            target: { kind: AUDIT_TARGET_KINDS.BILLING_RATE, id: rate._id },
+            // A billing rate has no name — label it with its amount + start date.
+            target: {
+                kind: AUDIT_TARGET_KINDS.BILLING_RATE,
+                id: rate._id,
+                label: `${rate.hourly_rate}/hr from ${rate.effective_from}`,
+            },
             before,
         });
     }
