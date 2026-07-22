@@ -567,6 +567,8 @@ describe('listAttendance — single-day roster', () => {
             }),
         });
         userCountMock.mockResolvedValue(2);
+        // Team timesheet join runs on every page; default to "no timesheets".
+        timesheetAggregateMock.mockResolvedValue([]);
     };
 
     it('adds a synthetic absent row for an active employee with no record', async () => {
@@ -602,6 +604,31 @@ describe('listAttendance — single-day roster', () => {
 
         expect(res.meta.total).toBe(1);
         expect(res.data.every((r) => r.status === 'present')).toBe(true);
+    });
+
+    it('joins each row to its own (user_id, local_date) timesheet totals', async () => {
+        setupRoster();
+        // Present person has a timesheet; the synthetic absent row does not.
+        timesheetAggregateMock.mockResolvedValue([
+            { _id: { u: present, d: date }, billable: 300, non_billable: 60, idle: 20 },
+        ]);
+
+        const res = await svc.listAttendance({
+            from_date: date,
+            to_date: date,
+            include_absent: true,
+            page: 1,
+            limit: 20,
+        } as never);
+
+        const presentRow = res.data.find((r) => r.user_id === present.toString());
+        expect(presentRow?.timesheet_totals).toEqual({
+            billable_minutes: 300,
+            non_billable_minutes: 60,
+            idle_minutes: 20,
+        });
+        const absentRow = res.data.find((r) => r.user_id === absent.toString());
+        expect(absentRow?.timesheet_totals).toBeNull();
     });
 });
 
