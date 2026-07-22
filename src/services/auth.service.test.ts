@@ -849,7 +849,9 @@ describe('revokeSession', () => {
         expect(payload).toEqual(
             expect.objectContaining({
                 action: 'auth.session_revoke',
-                target: { kind: 'session', id: row._id },
+                // The audit target now carries a human label (device / IP) for
+                // the readable audit-log surface; device_info wins here.
+                target: { kind: 'session', id: row._id, label: 'curl/8.0' },
                 metadata: expect.objectContaining({
                     user_id: userId.toString(),
                     device_info: 'curl/8.0',
