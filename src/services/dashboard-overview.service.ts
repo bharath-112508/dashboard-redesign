@@ -93,23 +93,22 @@ export interface RepresentativesStatus {
     total: number;
 }
 
-// ─── headcountAsOf ────────────────────────────────────────────────────────
+// ─── currentHeadcount ─────────────────────────────────────────────────────
 
-const headcountAsOfImpl = async (date: string, roles: RoleType[]): Promise<number> => {
-    const endOfDay = toRangeEnd(date);
-    return User.countDocuments({
-        role: { $in: roles },
-        created_at: { $lte: endOfDay },
-        $or: [{ deactivated_at: null }, { deactivated_at: { $gt: endOfDay } }],
-    });
-};
+const currentHeadcountImpl = (roles: RoleType[]): Promise<number> =>
+    User.countDocuments({ role: { $in: roles }, status: USER_STATUSES.ACTIVE });
 
-/** Headcount for the given roles "as of" a date — created on/before it, and
- *  not yet deactivated (or deactivated after it). Lets a range-picker ask
- *  "how many employees existed on 2026-06-01" without a separate snapshot
- *  collection. */
-export const headcountAsOf = (date: string, roles: RoleType[]): Promise<number> =>
-    safeCard('overview.headcount_as_of', () => headcountAsOfImpl(date, roles), 0);
+/**
+ * Current active headcount for the given roles. The "Total Employees / Total
+ * Clients" summary tiles are point-in-time totals ("how many do we have"),
+ * NOT a historical as-of-date count — deliberately period-independent so they
+ * agree with the current-count attendance denominator and the project totals.
+ * (An earlier as-of-date version keyed on `created_at`, which is the DB seed
+ * date, not employment history — it made "1 employee, 10 of 11 present" for a
+ * past range.)
+ */
+export const currentHeadcount = (roles: RoleType[]): Promise<number> =>
+    safeCard('overview.headcount', () => currentHeadcountImpl(roles), 0);
 
 // ─── projectStatusFor ─────────────────────────────────────────────────────
 
@@ -279,8 +278,8 @@ const buildRange = (from: string, to: string): { from: string; to: string; is_si
 
 export const buildAdminOverview = async (from: string, to: string): Promise<DashboardOverviewPayload> => {
     const [totalEmployees, totalClients, projects, attendance] = await Promise.all([
-        headcountAsOf(to, [ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE]),
-        headcountAsOf(to, [ROLES.CLIENT]),
+        currentHeadcount([ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE]),
+        currentHeadcount([ROLES.CLIENT]),
         projectStatusFor({}),
         attendanceOverviewFor(from, to, null),
     ]);

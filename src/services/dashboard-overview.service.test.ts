@@ -118,32 +118,31 @@ beforeEach(() => {
     loggerWarnMock.mockReset();
 });
 
-// ─── headcountAsOf ─────────────────────────────────────────────────────
+// ─── currentHeadcount ──────────────────────────────────────────────────
 
-describe('headcountAsOf', () => {
-    it('counts users created on/before the date, active or deactivated after it', async () => {
+describe('currentHeadcount', () => {
+    it('counts CURRENT active users of the given roles (period-independent)', async () => {
         userCountMock.mockResolvedValueOnce(7);
 
-        const out = await overview.headcountAsOf('2026-07-22', [ROLES.EMPLOYEE, ROLES.TEAM_LEAD]);
+        const out = await overview.currentHeadcount([ROLES.EMPLOYEE, ROLES.TEAM_LEAD]);
 
         expect(out).toBe(7);
         const filter = userCountMock.mock.calls[0][0] as Record<string, unknown>;
         expect(filter.role).toEqual({ $in: [ROLES.EMPLOYEE, ROLES.TEAM_LEAD] });
-        expect(filter.created_at).toHaveProperty('$lte');
-        expect(filter.$or).toEqual([
-            { deactivated_at: null },
-            { deactivated_at: { $gt: (filter.created_at as { $lte: Date }).$lte } },
-        ]);
+        expect(filter.status).toBe(USER_STATUSES.ACTIVE);
+        // No created_at / deactivated_at date gating — it's a current snapshot.
+        expect(filter.created_at).toBeUndefined();
+        expect(filter.$or).toBeUndefined();
     });
 
     it('falls back to 0 and logs when the count throws', async () => {
         userCountMock.mockRejectedValueOnce(new Error('boom'));
 
-        const out = await overview.headcountAsOf('2026-07-22', [ROLES.EMPLOYEE]);
+        const out = await overview.currentHeadcount([ROLES.EMPLOYEE]);
 
         expect(out).toBe(0);
         expect(loggerWarnMock).toHaveBeenCalledWith(
-            expect.objectContaining({ card: 'overview.headcount_as_of' }),
+            expect.objectContaining({ card: 'overview.headcount' }),
             'Dashboard card aggregation failed'
         );
     });
