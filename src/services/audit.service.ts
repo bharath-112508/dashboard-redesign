@@ -52,7 +52,17 @@ export interface AuditContext {
 
 export interface RecordAuditInput {
     action: AuditAction | string;
-    target: { kind: AuditTargetKind | string; id: Types.ObjectId | null };
+    target: {
+        kind: AuditTargetKind | string;
+        id: Types.ObjectId | null;
+        /**
+         * Optional explicit human name for the target. When omitted,
+         * `recordAudit` derives one from the before/after snapshot or
+         * metadata (see `deriveTargetLabel`). Pass this when the best label
+         * is known at the call site and isn't in the snapshot.
+         */
+        label?: string | null;
+    };
     before?: Record<string, unknown> | null;
     after?: Record<string, unknown> | null;
     metadata?: Record<string, unknown>;
@@ -85,6 +95,47 @@ const toPlainJson = (value: unknown): Record<string, unknown> | null => {
     } catch {
         return null;
     }
+};
+
+/**
+ * Snapshot fields (in priority order) that make a good human label for the
+ * affected record. First non-empty string wins.
+ */
+const LABEL_SNAPSHOT_FIELDS = ['full_name', 'display_name', 'name', 'title', 'code', 'key', 'email'] as const;
+
+/** Metadata fields to fall back to when the snapshot has no usable name. */
+const LABEL_METADATA_FIELDS = ['key', 'job_name', 'name', 'title', 'code'] as const;
+
+const TARGET_LABEL_MAX = 200;
+
+const firstString = (source: Record<string, unknown> | null | undefined, fields: readonly string[]): string | null => {
+    if (!source) return null;
+    for (const f of fields) {
+        const v = source[f];
+        if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return null;
+};
+
+/**
+ * Derive a short, human-readable name for the audited record so the read UI
+ * can show "User — Jane Doe" instead of an opaque ObjectId. An explicit
+ * `target.label` wins; otherwise we read the `after` snapshot (the record's
+ * new state), then `before` (for deletes), then metadata. Returns null when
+ * nothing usable is present (the UI falls back to the id). Derived from the
+ * raw input BEFORE any size-based snapshot drop, so the label survives even
+ * when the snapshot itself is elided.
+ */
+export const deriveTargetLabel = (input: RecordAuditInput): string | null => {
+    const explicit = input.target.label;
+    if (typeof explicit === 'string' && explicit.trim()) {
+        return explicit.trim().slice(0, TARGET_LABEL_MAX);
+    }
+    const label =
+        firstString(input.after ?? null, LABEL_SNAPSHOT_FIELDS) ??
+        firstString(input.before ?? null, LABEL_SNAPSHOT_FIELDS) ??
+        firstString(input.metadata ?? null, LABEL_METADATA_FIELDS);
+    return label ? label.slice(0, TARGET_LABEL_MAX) : null;
 };
 
 /**
@@ -155,12 +206,16 @@ export const recordAudit = async (ctx: AuditContext, input: RecordAuditInput): P
         Object.assign(metadata, stripped);
     }
 
+    // Derive the human label from the RAW input (before any snapshot drop)
+    // so it survives even when the snapshot is elided for size.
+    const targetLabel = deriveTargetLabel(input);
+
     try {
         await AuditLog.create({
             actor_id: ctx.actor_id,
             actor_role: ctx.actor_role,
             action: input.action,
-            target_entity: { kind: input.target.kind, id: input.target.id },
+            target_entity: { kind: input.target.kind, id: input.target.id, label: targetLabel },
             before: beforeOverflow ? null : beforeJson,
             after: afterOverflow ? null : afterJson,
             metadata,

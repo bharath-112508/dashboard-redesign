@@ -41,7 +41,7 @@ export interface AuditLogListRow {
     action: string;
     actor: ActorDisplay | null;
     actor_role: string;
-    target_entity: { kind: string; id: string | null };
+    target_entity: { kind: string; id: string | null; label: string | null };
     metadata: Record<string, unknown>;
     created_at: string;
 }
@@ -122,6 +122,7 @@ const toListRow = (doc: AuditLogDocument, actorMap: Map<string, ActorDisplay>): 
     target_entity: {
         kind: doc.target_entity.kind,
         id: doc.target_entity.id?.toString() ?? null,
+        label: doc.target_entity.label ?? null,
     },
     metadata: doc.metadata ?? {},
     created_at: doc.created_at.toISOString(),

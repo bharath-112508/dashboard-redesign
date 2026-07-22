@@ -35,6 +35,15 @@ import { AUDIT_ACTION_MAX, AUDIT_TARGET_KIND_MAX, type AuditAction, type AuditAc
 export interface AuditTargetEntity {
     kind: string;
     id: Types.ObjectId | null;
+    /**
+     * Human-readable name of the affected record (e.g. the user's full
+     * name, the role's display name), derived at write time by
+     * `recordAudit` from the before/after snapshot or metadata. Lets the
+     * read UI show "User — Jane Doe" instead of an opaque ObjectId, and
+     * survives even when the snapshot is dropped for size. Null when no
+     * usable name could be derived (the UI falls back to the id).
+     */
+    label?: string | null;
 }
 
 export interface AuditLogDocument extends Document {
@@ -53,6 +62,7 @@ const targetEntitySchema = new Schema<AuditTargetEntity>(
     {
         kind: { type: String, required: true, trim: true, maxlength: AUDIT_TARGET_KIND_MAX },
         id: { type: Schema.Types.ObjectId, required: false, default: null },
+        label: { type: String, required: false, default: null, trim: true, maxlength: 200 },
     },
     { _id: false }
 );
