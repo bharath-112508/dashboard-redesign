@@ -1,7 +1,7 @@
 // src/utils/dashboard-range.test.ts
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { resolveDashboardRange, enumerateDates } from './dashboard-range.js';
+import { resolveDashboardRange, enumerateDates, resolveCustomRange } from './dashboard-range.js';
 
 describe('resolveDashboardRange', () => {
     beforeEach(() => {
@@ -68,5 +68,22 @@ describe('enumerateDates', () => {
 
     it('returns [] when from > to', () => {
         expect(enumerateDates('2026-06-11', '2026-06-09')).toEqual([]);
+    });
+});
+
+describe('resolveCustomRange', () => {
+    it('returns the window and the equally-long previous window', () => {
+        const r = resolveCustomRange('2026-07-10', '2026-07-19'); // 10 days
+        expect(r.from).toBe('2026-07-10');
+        expect(r.to).toBe('2026-07-19');
+        expect(r.prev_to).toBe('2026-07-09');
+        expect(r.prev_from).toBe('2026-06-30'); // 10 days before prev_to inclusive
+        expect(r.key).toBe('custom');
+    });
+    it('treats a single day as from==to', () => {
+        const r = resolveCustomRange('2026-07-10', '2026-07-10');
+        expect(r.from).toBe(r.to);
+        expect(r.prev_from).toBe('2026-07-09');
+        expect(r.prev_to).toBe('2026-07-09');
     });
 });

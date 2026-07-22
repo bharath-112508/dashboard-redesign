@@ -12,7 +12,7 @@ export const DASHBOARD_RANGE_KEYS = ['today', 'week', 'month', '30d', 'quarter']
 export type DashboardRangeKey = (typeof DASHBOARD_RANGE_KEYS)[number];
 
 export interface ResolvedRange {
-    key: DashboardRangeKey;
+    key: DashboardRangeKey | 'custom';
     label: string;
     /** Inclusive IST local dates. */
     from: string;
@@ -90,6 +90,30 @@ export const resolveDashboardRange = (key: DashboardRangeKey): ResolvedRange => 
             };
         }
     }
+};
+
+/**
+ * Resolves an arbitrary caller-supplied `[from, to]` window (inclusive IST
+ * local dates) plus the equally-long previous window immediately before it.
+ * Caller guarantees `from <= to` (validated by `dashboardOverviewQuerySchema`).
+ */
+export const resolveCustomRange = (from: string, to: string): ResolvedRange => {
+    const f = (d: ReturnType<typeof dayjs>) => d.format(DATE_FORMAT);
+    const fromDate = dayjs.tz(from, DEFAULT_TIMEZONE);
+    const toDate = dayjs.tz(to, DEFAULT_TIMEZONE);
+    const span = toDate.diff(fromDate, 'day') + 1;
+    const prevTo = fromDate.subtract(1, 'day');
+    const prevFrom = prevTo.subtract(span - 1, 'day');
+
+    return {
+        key: 'custom',
+        label: `${from} – ${to}`,
+        prev_label: `${f(prevFrom)} – ${f(prevTo)}`,
+        from,
+        to,
+        prev_from: f(prevFrom),
+        prev_to: f(prevTo),
+    };
 };
 
 /** Inclusive YYYY-MM-DD list for [from, to]. Caller guarantees from <= to. */
