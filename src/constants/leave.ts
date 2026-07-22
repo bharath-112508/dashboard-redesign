@@ -28,6 +28,17 @@ export const LEAVE_CODES = {
 export type LeaveCode = (typeof LEAVE_CODES)[keyof typeof LEAVE_CODES];
 export const LEAVE_CODE_VALUES = Object.values(LEAVE_CODES) as readonly string[];
 
+/**
+ * Codes for leave types that have been **permanently retired**. The boot
+ * seeder deletes any `leave_type` carrying one of these (plus its zero-usage
+ * balances) on every startup — so a stale process or an old branch that
+ * re-seeds them self-heals on the next boot. A retired type that has real
+ * leave requests is left in place (logged), never silently deleted.
+ *
+ * To bring a code back, remove it here AND re-add it to `LEAVE_TYPE_SEEDS`.
+ */
+export const RETIRED_LEAVE_TYPE_CODES = ['MATERNITY', 'PATERNITY', 'UNPAID'] as const;
+
 export const PRO_RATA_STRATEGIES = {
     NONE: 'none',
     BY_MONTHS_REMAINING: 'by_months_remaining',

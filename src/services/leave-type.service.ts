@@ -1,10 +1,12 @@
 import { Types } from 'mongoose';
 
 import { LeaveType, type LeaveTypeDocument } from '../models/leave-type.model.js';
+import { LeaveRequest } from '../models/leave-request.model.js';
+import { LeaveBalance } from '../models/leave-balance.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
-import { LEAVE_TYPE_SEEDS, type LeaveCode } from '../constants/leave.js';
+import { LEAVE_TYPE_SEEDS, RETIRED_LEAVE_TYPE_CODES, type LeaveCode } from '../constants/leave.js';
 import logger from '../utils/logger.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import type { CreateLeaveTypeBody, PatchLeaveTypeBody } from '../validators/leave-type.validator.js';
@@ -61,7 +63,41 @@ export const seedDefaultLeaveTypes = async (): Promise<{ inserted: LeaveCode[]; 
     } else {
         logger.debug({ skipped }, 'Default leave types already seeded');
     }
+    // Self-healing: drop any retired types a stale process / old branch may
+    // have re-seeded, so removal actually sticks across boots.
+    await pruneRetiredLeaveTypes();
     return { inserted, skipped };
+};
+
+/**
+ * Delete any leave type whose code is in `RETIRED_LEAVE_TYPE_CODES`, along
+ * with its zero-usage balance rows. A retired type that has real leave
+ * requests is kept (and logged) rather than silently deleted — historical
+ * requests must still resolve their type. Runs on every boot via
+ * `seedDefaultLeaveTypes`, and is idempotent (a no-op once nothing matches).
+ */
+export const pruneRetiredLeaveTypes = async (): Promise<{ removed: string[]; kept: string[] }> => {
+    const removed: string[] = [];
+    const kept: string[] = [];
+    const retired = await LeaveType.find({
+        code: { $in: RETIRED_LEAVE_TYPE_CODES as unknown as string[] },
+    }).select('_id code');
+    for (const t of retired) {
+        const inUse = await LeaveRequest.exists({ leave_type_id: t._id });
+        if (inUse) {
+            kept.push(t.code);
+            continue;
+        }
+        await LeaveBalance.deleteMany({ leave_type_id: t._id });
+        await LeaveType.deleteOne({ _id: t._id });
+        removed.push(t.code);
+    }
+    if (removed.length > 0) {
+        logger.info({ removed, kept }, 'Pruned retired leave types');
+    } else if (kept.length > 0) {
+        logger.warn({ kept }, 'Retired leave types kept — they have leave requests');
+    }
+    return { removed, kept };
 };
 
 // ─── GET /leave-types ─────────────────────────────────────────────────────
