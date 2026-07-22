@@ -62,6 +62,14 @@ vi.mock('../models/office-location.model.js', () => ({
     OfficeLocation: { findOne: vi.fn() },
 }));
 
+const { timesheetAggregateMock } = vi.hoisted(() => ({
+    timesheetAggregateMock: vi.fn(),
+}));
+
+vi.mock('../models/timesheet-entry.model.js', () => ({
+    TimesheetEntry: { aggregate: timesheetAggregateMock },
+}));
+
 vi.mock('./settings.service.js', () => ({
     getOrInitSettings: settingsLoadMock,
 }));
@@ -677,5 +685,47 @@ describe('listCorrections — reviewer queue excludes self', () => {
             user_id: Types.ObjectId;
         };
         expect(filter.user_id.equals(reviewer)).toBe(true);
+    });
+});
+
+describe('listMyAttendance — timesheet_totals join', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('merges summed timesheet totals per day and null when none', async () => {
+        const svc = await import('./attendance.service.js');
+        const userId = new Types.ObjectId();
+
+        attendanceRecordFindMock.mockReturnValue({
+            sort: vi.fn().mockReturnValue({
+                skip: vi.fn().mockReturnValue({
+                    limit: vi
+                        .fn()
+                        .mockResolvedValue([
+                            { toJSON: () => ({ id: '1', local_date: '2026-07-21', total_worked_minutes: 490 }) },
+                            { toJSON: () => ({ id: '2', local_date: '2026-07-20', total_worked_minutes: 120 }) },
+                        ]),
+                }),
+            }),
+        });
+        const { AttendanceRecord } = await import('../models/attendance-record.model.js');
+        vi.mocked(AttendanceRecord.countDocuments).mockResolvedValue(2 as never);
+
+        // Two entries on the 21st must be summed; the 20th has none.
+        timesheetAggregateMock.mockResolvedValue([{ _id: '2026-07-21', billable: 360, non_billable: 90, idle: 40 }]);
+
+        const res = await svc.listMyAttendance(userId, { page: 1, limit: 20 } as never);
+
+        expect(res.data[0]).toMatchObject({
+            local_date: '2026-07-21',
+            timesheet_totals: { billable_minutes: 360, non_billable_minutes: 90, idle_minutes: 40 },
+        });
+        expect(res.data[1]).toMatchObject({ local_date: '2026-07-20', timesheet_totals: null });
+
+        // Aggregate matched exactly the returned dates for this user.
+        const matchStage = timesheetAggregateMock.mock.calls[0][0][0].$match;
+        expect(matchStage.user_id).toEqual(userId);
+        expect(matchStage.local_date.$in.sort()).toEqual(['2026-07-20', '2026-07-21']);
     });
 });

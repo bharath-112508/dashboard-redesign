@@ -12,6 +12,7 @@ import {
     type AttendanceCorrectionRequestDocument,
 } from '../models/attendance-correction-request.model.js';
 import { OfficeLocation } from '../models/office-location.model.js';
+import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { User } from '../models/user.model.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
@@ -530,12 +531,58 @@ export const setMyTimes = async (
     return record.toJSON() as unknown as Record<string, unknown>;
 };
 
+// ─── Timesheet split join (billable / non-billable / idle per day) ────────
+
+/**
+ * Attaches a `timesheet_totals` aggregate to each attendance row's JSON,
+ * summed from that user's `timesheet_entries` for the same `local_date`.
+ * Attendance carries no billable data of its own — the split lives only on
+ * timesheets, keyed independently by (user_id, local_date). `null` = the day
+ * had no timesheet entries. Mutates `rows` in place.
+ */
+const attachTimesheetTotals = async (user_id: Types.ObjectId, rows: Record<string, unknown>[]): Promise<void> => {
+    const dates = rows.map((r) => r.local_date).filter((d): d is string => typeof d === 'string');
+    if (dates.length === 0) return;
+
+    const agg = await TimesheetEntry.aggregate<{
+        _id: string;
+        billable: number;
+        non_billable: number;
+        idle: number;
+    }>([
+        { $match: { user_id, local_date: { $in: dates } } },
+        {
+            $group: {
+                _id: '$local_date',
+                billable: { $sum: '$billable_total_minutes' },
+                non_billable: { $sum: '$non_billable_total_minutes' },
+                idle: { $sum: '$idle_total_minutes' },
+            },
+        },
+    ]);
+
+    const byDate = new Map(agg.map((a) => [a._id, a]));
+    for (const row of rows) {
+        const t = typeof row.local_date === 'string' ? byDate.get(row.local_date) : undefined;
+        row.timesheet_totals = t
+            ? {
+                  billable_minutes: t.billable,
+                  non_billable_minutes: t.non_billable,
+                  idle_minutes: t.idle,
+              }
+            : null;
+    }
+};
+
 // ─── GET /attendance/me/today ────────────────────────────────────────────
 
 export const getMyToday = async (user_id: Types.ObjectId): Promise<Record<string, unknown> | null> => {
     const local_date = todayLocalDate();
     const rec = await AttendanceRecord.findOne({ user_id, local_date });
-    return rec ? (rec.toJSON() as unknown as Record<string, unknown>) : null;
+    if (!rec) return null;
+    const json = rec.toJSON() as unknown as Record<string, unknown>;
+    await attachTimesheetTotals(user_id, [json]);
+    return json;
 };
 
 // ─── GET /attendance/me ──────────────────────────────────────────────────
@@ -558,8 +605,11 @@ export const listMyAttendance = async (
         AttendanceRecord.countDocuments(filter),
     ]);
 
+    const data = rows.map((r) => r.toJSON() as unknown as Record<string, unknown>);
+    await attachTimesheetTotals(user_id, data);
+
     return {
-        data: rows.map((r) => r.toJSON() as unknown as Record<string, unknown>),
+        data,
         meta: {
             page: query.page,
             limit: query.limit,
