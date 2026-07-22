@@ -101,7 +101,16 @@ const toPlainJson = (value: unknown): Record<string, unknown> | null => {
  * Snapshot fields (in priority order) that make a good human label for the
  * affected record. First non-empty string wins.
  */
-const LABEL_SNAPSHOT_FIELDS = ['full_name', 'display_name', 'name', 'title', 'code', 'key', 'email'] as const;
+const LABEL_SNAPSHOT_FIELDS = [
+    'full_name',
+    'display_name',
+    'name',
+    'title',
+    'file_name',
+    'code',
+    'key',
+    'email',
+] as const;
 
 /** Metadata fields to fall back to when the snapshot has no usable name. */
 const LABEL_METADATA_FIELDS = ['key', 'job_name', 'name', 'title', 'code'] as const;

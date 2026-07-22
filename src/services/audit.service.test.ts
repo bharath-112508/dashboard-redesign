@@ -147,6 +147,10 @@ describe('deriveTargetLabel', () => {
         ).toBe('regional_manager');
     });
 
+    it('uses file_name for attachments', () => {
+        expect(audit.deriveTargetLabel({ ...base, before: { file_name: 'contract.pdf' } })).toBe('contract.pdf');
+    });
+
     it('returns null when nothing usable is present', () => {
         expect(audit.deriveTargetLabel({ ...base, after: { status: 'active' } })).toBeNull();
     });

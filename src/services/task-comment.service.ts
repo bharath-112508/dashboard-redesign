@@ -409,7 +409,12 @@ export const deleteComment = async (commentId: Types.ObjectId, caller: ProjectCa
     if (caller.audit) {
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.COMMENT_DELETE,
-            target: { kind: AUDIT_TARGET_KINDS.COMMENT, id: comment._id },
+            // A comment has no name — label it with a short snippet of its text.
+            target: {
+                kind: AUDIT_TARGET_KINDS.COMMENT,
+                id: comment._id,
+                label: comment.body.trim().slice(0, 60) || 'Comment',
+            },
             before,
             metadata: {
                 task_id: comment.task_id.toString(),
