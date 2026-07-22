@@ -511,8 +511,11 @@ interface ClientDashboardPayload {
 
 /** Resolve the set of project IDs visible to this client-side caller. Every
  *  card below scopes its query through this list. The role → filter rule
- *  itself lives in `project.service` — never re-implement it here. */
-const resolveClientProjectIds = async (caller: ProjectCaller): Promise<Types.ObjectId[]> => {
+ *  itself lives in `project.service` — never re-implement it here.
+ *
+ *  Exported for reuse by `dashboard-overview.service.ts` (Task 3's client
+ *  overview builder) — same rule, don't duplicate the query. */
+export const resolveClientProjectIds = async (caller: ProjectCaller): Promise<Types.ObjectId[]> => {
     const rows = await Project.find(buildProjectVisibilityFilter(caller))
         .select({ _id: 1 })
         .lean<{ _id: Types.ObjectId }[]>();

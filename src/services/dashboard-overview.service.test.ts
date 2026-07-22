@@ -4,6 +4,8 @@ import { Types } from 'mongoose';
 import { ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { PROJECT_STATUSES } from '../constants/project.js';
+import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
+import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 
 /**
  * Unit tests for the range-aware dashboard overview aggregation helpers
@@ -24,6 +26,11 @@ const {
     attendanceDistinctMock,
     correctionCountMock,
     projectAggregateMock,
+    leaveRequestCountMock,
+    taskCountMock,
+    buildProjectVisibilityFilterMock,
+    resolveTeamLeadScopeMock,
+    resolveClientProjectIdsMock,
     loggerWarnMock,
 } = vi.hoisted(() => ({
     userAggregateMock: vi.fn(),
@@ -32,6 +39,11 @@ const {
     attendanceDistinctMock: vi.fn(),
     correctionCountMock: vi.fn(),
     projectAggregateMock: vi.fn(),
+    leaveRequestCountMock: vi.fn(),
+    taskCountMock: vi.fn(),
+    buildProjectVisibilityFilterMock: vi.fn(),
+    resolveTeamLeadScopeMock: vi.fn(),
+    resolveClientProjectIdsMock: vi.fn(),
     loggerWarnMock: vi.fn(),
 }));
 
@@ -61,6 +73,30 @@ vi.mock('../models/project.model.js', () => ({
     },
 }));
 
+vi.mock('../models/leave-request.model.js', () => ({
+    LeaveRequest: {
+        countDocuments: leaveRequestCountMock,
+    },
+}));
+
+vi.mock('../models/task.model.js', () => ({
+    Task: {
+        countDocuments: taskCountMock,
+    },
+}));
+
+vi.mock('./project.service.js', () => ({
+    buildProjectVisibilityFilter: buildProjectVisibilityFilterMock,
+}));
+
+vi.mock('./dashboard-analytics.service.js', () => ({
+    resolveTeamLeadScope: resolveTeamLeadScopeMock,
+}));
+
+vi.mock('./dashboard.service.js', () => ({
+    resolveClientProjectIds: resolveClientProjectIdsMock,
+}));
+
 vi.mock('../utils/logger.js', () => ({
     default: { warn: loggerWarnMock, info: vi.fn() },
 }));
@@ -74,6 +110,11 @@ beforeEach(() => {
     attendanceDistinctMock.mockReset();
     correctionCountMock.mockReset();
     projectAggregateMock.mockReset();
+    leaveRequestCountMock.mockReset();
+    taskCountMock.mockReset();
+    buildProjectVisibilityFilterMock.mockReset();
+    resolveTeamLeadScopeMock.mockReset();
+    resolveClientProjectIdsMock.mockReset();
     loggerWarnMock.mockReset();
 });
 
@@ -294,5 +335,160 @@ describe('representativesStatusFor', () => {
             expect.objectContaining({ card: 'overview.representatives_status' }),
             'Dashboard card aggregation failed'
         );
+    });
+});
+
+// ─── Per-scope overview builders (Task 3) ───────────────────────────────
+
+describe('buildAdminOverview', () => {
+    it('returns 3 summary cards, org-wide attendance, no representatives', async () => {
+        userCountMock.mockImplementation((filter: Record<string, unknown>) => {
+            const roleFilter = filter?.role as { $in?: string[] } | undefined;
+            if (roleFilter?.$in) {
+                if (roleFilter.$in.length === 1 && roleFilter.$in[0] === ROLES.CLIENT) return Promise.resolve(4);
+                return Promise.resolve(50);
+            }
+            return Promise.resolve(20); // total_internal_active (role: {$ne: CLIENT})
+        });
+        projectAggregateMock.mockResolvedValueOnce([
+            { _id: PROJECT_STATUSES.ACTIVE, count: 5 },
+            { _id: PROJECT_STATUSES.COMPLETED, count: 2 },
+        ]);
+        attendanceAggregateMock.mockResolvedValueOnce([{ _id: 'present', count: 9 }]);
+        correctionCountMock.mockResolvedValueOnce(0);
+
+        const out = await overview.buildAdminOverview('2026-07-22', '2026-07-22');
+
+        expect(out.scope).toBe('admin');
+        expect(out.range).toEqual({ from: '2026-07-22', to: '2026-07-22', is_single_day: true });
+        expect(out.summary).toEqual([
+            { label: 'Total Employees', value: 50 },
+            { label: 'Total Clients', value: 4 },
+            { label: 'Total Projects', value: 7 },
+        ]);
+        expect(out.attendance).not.toBeNull();
+        expect(out.attendance?.present).toBe(9);
+        expect(out.representatives).toBeNull();
+        expect(out.projects).toEqual({ active: 5, completed: 2, on_hold: 0, total: 7 });
+
+        // headcount roles: employees call spans admin/manager/team_lead/employee.
+        const employeeRolesCall = userCountMock.mock.calls.find(
+            (c) => (c[0].role as { $in?: string[] }).$in && (c[0].role as { $in: string[] }).$in.length > 1
+        );
+        expect(employeeRolesCall?.[0].role.$in).toEqual(
+            expect.arrayContaining([ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE])
+        );
+    });
+});
+
+describe('buildManagerOverview', () => {
+    const caller = { id: new Types.ObjectId(), role: ROLES.TEAM_LEAD } as const;
+
+    it('scopes team members/projects/pending-approvals via buildProjectVisibilityFilter + resolveTeamLeadScope', async () => {
+        const memberIds = [new Types.ObjectId(), new Types.ObjectId(), new Types.ObjectId()];
+        const filter = { member_ids: caller.id };
+        buildProjectVisibilityFilterMock.mockReturnValueOnce(filter);
+        resolveTeamLeadScopeMock.mockResolvedValueOnce({ projectIds: [], memberIds });
+        leaveRequestCountMock.mockResolvedValueOnce(2);
+        projectAggregateMock.mockResolvedValueOnce([{ _id: PROJECT_STATUSES.ACTIVE, count: 4 }]);
+        attendanceAggregateMock.mockResolvedValueOnce([{ _id: 'present', count: 3 }]);
+        correctionCountMock.mockResolvedValueOnce(0);
+        userCountMock.mockResolvedValueOnce(3); // total_internal_active
+
+        const out = await overview.buildManagerOverview(caller, '2026-07-22', '2026-07-22');
+
+        expect(buildProjectVisibilityFilterMock).toHaveBeenCalledWith(caller);
+        expect(resolveTeamLeadScopeMock).toHaveBeenCalledWith(caller.id);
+        expect(out.scope).toBe('manager');
+        expect(out.summary).toEqual([
+            { label: 'Team members', value: 3 },
+            { label: 'My Projects', value: 4 },
+            { label: 'Pending approvals', value: 2 },
+        ]);
+        expect(out.attendance).not.toBeNull();
+        expect(out.representatives).toBeNull();
+        expect(out.projects.total).toBe(4);
+
+        const pendingFilter = leaveRequestCountMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(pendingFilter.status).toBe(LEAVE_REQUEST_STATUSES.PENDING);
+        expect(pendingFilter.user_id).toEqual({ $in: memberIds });
+
+        const attendancePipeline = attendanceAggregateMock.mock.calls[0][0] as Array<Record<string, unknown>>;
+        const attendanceMatch = attendancePipeline[0].$match as Record<string, unknown>;
+        expect(attendanceMatch.user_id).toEqual({ $in: memberIds });
+    });
+});
+
+describe('buildEmployeeOverview', () => {
+    const caller = { id: new Types.ObjectId(), role: ROLES.EMPLOYEE } as const;
+
+    it('reports present-days/projects/open-tasks scoped to the caller only', async () => {
+        const filter = { member_ids: caller.id };
+        buildProjectVisibilityFilterMock.mockReturnValueOnce(filter);
+        projectAggregateMock.mockResolvedValueOnce([{ _id: PROJECT_STATUSES.ACTIVE, count: 2 }]);
+        attendanceAggregateMock.mockResolvedValueOnce([{ _id: 'present', count: 1 }]);
+        correctionCountMock.mockResolvedValueOnce(0);
+        userCountMock.mockResolvedValueOnce(1); // total_internal_active
+        taskCountMock.mockResolvedValueOnce(5);
+
+        const out = await overview.buildEmployeeOverview(caller, '2026-07-22', '2026-07-22');
+
+        expect(buildProjectVisibilityFilterMock).toHaveBeenCalledWith(caller);
+        expect(out.scope).toBe('employee');
+        expect(out.summary).toEqual([
+            { label: 'My present days', value: 1 },
+            { label: 'My Projects', value: 2 },
+            { label: 'My open tasks', value: 5 },
+        ]);
+        expect(out.attendance).not.toBeNull();
+        expect(out.representatives).toBeNull();
+        expect(out.projects.total).toBe(2);
+
+        const attendancePipeline = attendanceAggregateMock.mock.calls[0][0] as Array<Record<string, unknown>>;
+        const attendanceMatch = attendancePipeline[0].$match as Record<string, unknown>;
+        expect(attendanceMatch.user_id).toEqual({ $in: [caller.id] });
+
+        const taskFilter = taskCountMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(taskFilter.$or).toEqual([{ created_by: caller.id }, { primary_assignee_id: caller.id }]);
+        expect(taskFilter.status).toEqual({ $ne: DEFAULT_DONE_TASK_STATUS_KEY });
+    });
+});
+
+describe('buildClientOverview', () => {
+    const companyId = new Types.ObjectId();
+    const caller = { id: new Types.ObjectId(), role: ROLES.CLIENT, company_id: companyId } as const;
+
+    it('reports company projects/representatives/active-vs-completed, attendance null', async () => {
+        const projectIds = [new Types.ObjectId(), new Types.ObjectId()];
+        resolveClientProjectIdsMock.mockResolvedValueOnce(projectIds);
+        projectAggregateMock.mockResolvedValueOnce([
+            { _id: PROJECT_STATUSES.ACTIVE, count: 2 },
+            { _id: PROJECT_STATUSES.COMPLETED, count: 1 },
+        ]);
+        userAggregateMock.mockResolvedValueOnce([
+            { _id: USER_STATUSES.ACTIVE, count: 3 },
+            { _id: USER_STATUSES.DEACTIVATED, count: 1 },
+        ]);
+
+        const out = await overview.buildClientOverview(caller, '2026-07-22', '2026-07-22');
+
+        expect(resolveClientProjectIdsMock).toHaveBeenCalledWith(caller);
+        expect(out.scope).toBe('client');
+        expect(out.summary).toEqual([
+            { label: 'Company Projects', value: 3 },
+            { label: 'Representatives', value: 4 },
+            { label: 'Active vs Completed', value: 2, hint: '1 completed' },
+        ]);
+        expect(out.attendance).toBeNull();
+        expect(out.representatives).toEqual({ active: 3, inactive: 1, total: 4 });
+        expect(out.projects).toEqual({ active: 2, completed: 1, on_hold: 0, total: 3 });
+
+        const projectPipeline = projectAggregateMock.mock.calls[0][0] as Array<Record<string, unknown>>;
+        const projectMatch = projectPipeline[0].$match as Record<string, unknown>;
+        expect(projectMatch._id).toEqual({ $in: projectIds });
+
+        const repPipeline = userAggregateMock.mock.calls[0][0] as Array<Record<string, unknown>>;
+        const repMatch = repPipeline[0].$match as Record<string, unknown>;
+        expect(repMatch['client_profile.company_id']).toEqual(companyId);
     });
 });
