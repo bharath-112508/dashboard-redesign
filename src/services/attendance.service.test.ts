@@ -591,6 +591,34 @@ describe('listAttendance — single-day roster', () => {
         expect(presentRow?.status).toBe('present');
     });
 
+    it('roster excludes ALL client-side roles (representative too, not just client)', async () => {
+        setupRoster();
+        await svc.listAttendance({
+            from_date: date,
+            to_date: date,
+            include_absent: true,
+            page: 1,
+            limit: 20,
+        } as never);
+
+        // The first User.find call builds the staff roster; it must exclude both
+        // client-side roles so representatives never appear as "Absent" rows.
+        const rosterFilter = userFindMock.mock.calls[0][0] as {
+            role?: { $nin?: string[] };
+        };
+        expect(rosterFilter.role?.$nin).toEqual(
+            expect.arrayContaining([ROLES.CLIENT, ROLES.REPRESENTATIVE]),
+        );
+
+        // The "active workforce" headcount denominator excludes them too.
+        const countFilter = userCountMock.mock.calls[0][0] as {
+            role?: { $nin?: string[] };
+        };
+        expect(countFilter.role?.$nin).toEqual(
+            expect.arrayContaining([ROLES.CLIENT, ROLES.REPRESENTATIVE]),
+        );
+    });
+
     it('status=present filters OUT the synthetic absent rows', async () => {
         setupRoster();
         const res = await svc.listAttendance({

@@ -17,7 +17,7 @@ import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { callerCan } from '../utils/caller-permissions.js';
 import { PERMISSIONS } from '../constants/permissions.js';
-import { ROLES, type RoleType } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES, ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
 import { DASHBOARD_PENDING_LEAVES_PREVIEW, DASHBOARD_RECENT_LEAVES_LIMIT } from '../constants/dashboard.js';
@@ -138,7 +138,7 @@ const computeAttendanceToday = async (): Promise<AttendanceTodayCard> => {
         AttendanceRecord.countDocuments({ local_date: date, flagged_for_correction: true }),
         User.countDocuments({
             status: USER_STATUSES.ACTIVE,
-            role: { $ne: ROLES.CLIENT },
+            role: { $nin: CLIENT_SIDE_ROLES },
         }),
     ]);
 
@@ -291,7 +291,7 @@ export const buildManagerDashboard = async (
     if (orgWide) {
         const team_size = await safeCard(
             'manager.team_size',
-            () => User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } }),
+            () => User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES } }),
             0
         );
         const payload: ManagerDashboardPayload = {
