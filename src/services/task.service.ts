@@ -119,28 +119,32 @@ const isCallerAssignee = (task: TaskDocument, caller: ProjectCaller): boolean =>
 
 
 /**
- * Validate that an `assignee_ids` patch only ADDS or REMOVES the caller
- * themselves — every other person's membership is left unchanged. Used for any
- * NON-creator employee: they may grab a task (add self) or leave it (remove
- * self) but never assign or unassign anyone else. Managing the roster is the
+ * Validate that an `assignee_ids` patch only ADDS the caller themselves — a
+ * non-creator employee may grab an available task by putting their own name on
+ * it, but may never REMOVE anyone (including themselves) or add someone else.
+ * Managing the roster — every removal, and assigning other people — is the
  * creator's (and managers') job.
  */
-const assertOnlySelfAssigneeChange = (
-    patch: PatchTaskBody,
-    task: TaskDocument,
-    caller: ProjectCaller
-): void => {
+const assertSelfAddOnly = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
     if (patch.assignee_ids === undefined) return;
     const callerStr = String(caller.id);
     const requested = new Set(patch.assignee_ids.map(String));
     const current = new Set(task.assignee_ids.map((id) => String(id)));
     if (task.primary_assignee_id) current.add(String(task.primary_assignee_id));
-    for (const id of new Set([...requested, ...current])) {
-        if (id === callerStr) continue;
-        // Anyone other than the caller must have identical before/after membership.
-        if (requested.has(id) !== current.has(id)) {
+    // Nobody may be removed (this also blocks a non-creator leaving on their own).
+    for (const id of current) {
+        if (!requested.has(id)) {
             throw AppError.forbidden(
-                'You can add or remove only yourself — not other assignees.',
+                'Only the task creator or a manager can remove assignees.',
+                ERROR_CODES.TASK_WRITE_FORBIDDEN
+            );
+        }
+    }
+    // The only person the caller may add is themselves.
+    for (const id of requested) {
+        if (!current.has(id) && id !== callerStr) {
+            throw AppError.forbidden(
+                'You can add only yourself — you cannot assign other people.',
                 ERROR_CODES.TASK_WRITE_FORBIDDEN
             );
         }
@@ -176,7 +180,7 @@ const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, call
             ERROR_CODES.TASK_WRITE_FORBIDDEN
         );
     }
-    assertOnlySelfAssigneeChange(patch, task, caller);
+    assertSelfAddOnly(patch, task, caller);
 };
 
 // ─── Status / assignee / collaborator validation ─────────────────────────

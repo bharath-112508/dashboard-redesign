@@ -744,7 +744,7 @@ describe('updateTask', () => {
         expect(task.save).not.toHaveBeenCalled();
     });
 
-    it('lets a non-creator ASSIGNEE remove themselves (leave), keeping others', async () => {
+    it('rejects a non-creator ASSIGNEE removing themselves (only creator/managers remove)', async () => {
         const project = makeProject();
         const employeeId = new Types.ObjectId();
         const other = new Types.ObjectId();
@@ -756,10 +756,34 @@ describe('updateTask', () => {
         });
         taskFindByIdMock.mockResolvedValueOnce(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);
-        stubActiveUsers([other]);
 
-        await svc.updateTask(task._id, { assignee_ids: [other.toString()] }, employeeCaller(employeeId));
-        expect(task.assignee_ids.map(String)).toEqual([other.toString()]);
+        // Tries to drop themselves — not allowed for a non-creator.
+        await expect(
+            svc.updateTask(task._id, { assignee_ids: [other.toString()] }, employeeCaller(employeeId))
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
+        expect(task.save).not.toHaveBeenCalled();
+    });
+
+    it('lets a non-creator employee ADD themselves (grab), keeping existing assignees', async () => {
+        const project = makeProject();
+        const employeeId = new Types.ObjectId();
+        const other = new Types.ObjectId();
+        const task = makeTask({
+            project_id: project._id,
+            created_by: new Types.ObjectId(),
+            assignee_ids: [other],
+            primary_assignee_id: other,
+        });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubActiveUsers([other, employeeId]);
+
+        await svc.updateTask(
+            task._id,
+            { assignee_ids: [other.toString(), employeeId.toString()] },
+            employeeCaller(employeeId)
+        );
+        expect(task.assignee_ids.map(String)).toEqual([other.toString(), employeeId.toString()]);
         expect(task.save).toHaveBeenCalled();
     });
 
