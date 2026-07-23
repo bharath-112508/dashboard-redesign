@@ -896,10 +896,7 @@ export const addCustomStatus = async (
     // auto key never collides; an explicitly-supplied key still can.
     const key =
         body.key ??
-        pickCustomStatusKey(
-            slugifyCustomStatusKey(body.label),
-            new Set(doc.custom_task_statuses.map((s) => s.key))
-        );
+        pickCustomStatusKey(slugifyCustomStatusKey(body.label), new Set(doc.custom_task_statuses.map((s) => s.key)));
 
     if (doc.custom_task_statuses.some((s) => s.key === key)) {
         throw AppError.conflict('A custom status with this key already exists', ERROR_CODES.CUSTOM_STATUS_KEY_TAKEN, {

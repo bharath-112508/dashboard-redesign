@@ -8,17 +8,14 @@ import { Types } from 'mongoose';
  * kept (history must resolve), one without is deleted along with its balances.
  */
 
-const {
-    leaveTypeFindMock,
-    leaveTypeDeleteOneMock,
-    leaveRequestExistsMock,
-    leaveBalanceDeleteManyMock,
-} = vi.hoisted(() => ({
-    leaveTypeFindMock: vi.fn(),
-    leaveTypeDeleteOneMock: vi.fn(),
-    leaveRequestExistsMock: vi.fn(),
-    leaveBalanceDeleteManyMock: vi.fn(),
-}));
+const { leaveTypeFindMock, leaveTypeDeleteOneMock, leaveRequestExistsMock, leaveBalanceDeleteManyMock } = vi.hoisted(
+    () => ({
+        leaveTypeFindMock: vi.fn(),
+        leaveTypeDeleteOneMock: vi.fn(),
+        leaveRequestExistsMock: vi.fn(),
+        leaveBalanceDeleteManyMock: vi.fn(),
+    })
+);
 
 vi.mock('../models/leave-type.model.js', () => ({
     LeaveType: {
