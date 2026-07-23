@@ -67,6 +67,16 @@ export interface TaskDocument extends Document {
     /** Local-calendar `YYYY-MM-DD` per Data_Model §5.4. */
     due_date: string;
     estimated_hours: number;
+    /**
+     * Everyone the task is assigned to — the source of truth for assignment
+     * (a task can be assigned to several people). `primary_assignee_id` is a
+     * denormalized convenience kept in sync as `assignee_ids[0] ?? null` so the
+     * many existing single-assignee reads (my-tasks inbox, board card, Slack
+     * home, dashboards, reports) keep working while the multi-assignee UI drives
+     * this array. All assignees are equal; index 0 carries no special meaning
+     * beyond "the one shown when a single avatar is rendered".
+     */
+    assignee_ids: Types.ObjectId[];
     primary_assignee_id: Types.ObjectId | null;
     collaborator_ids: Types.ObjectId[];
     depends_on_task_ids: Types.ObjectId[];
@@ -147,6 +157,9 @@ const taskSchema = new Schema<TaskDocument>(
         },
         due_date: { type: String, required: true },
         estimated_hours: { type: Number, required: true, default: 0, min: 0, max: TASK_ESTIMATED_HOURS_MAX },
+        // Multi-assignee source of truth. `primary_assignee_id` is kept in sync
+        // by the service as `assignee_ids[0] ?? null` (see task.service).
+        assignee_ids: { type: [Schema.Types.ObjectId], ref: COLLECTIONS.USERS, default: [] },
         primary_assignee_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
         collaborator_ids: { type: [Schema.Types.ObjectId], ref: COLLECTIONS.USERS, default: [] },
         depends_on_task_ids: { type: [Schema.Types.ObjectId], ref: COLLECTIONS.TASKS, default: [] },
@@ -174,7 +187,8 @@ const taskSchema = new Schema<TaskDocument>(
 //  - {project_id, status, position}     → Kanban column ordering (the hot path)
 //  - {project_id, story_id}             → story board reads + derived rollup
 //  - {story_id}                         → reverse lookup (story page → tasks)
-//  - {primary_assignee_id, status}      → "my tasks" inbox
+//  - {primary_assignee_id, status}      → "my tasks" inbox (single-assignee reads)
+//  - {assignee_ids, status}             → "my tasks" inbox (multi-assignee)
 //  - {collaborator_ids}                 → "tasks I collaborate on"
 //  - {parent_task_id}                   → subtask listing
 //  - {due_date}                         → cross-project due-date dashboards
@@ -197,6 +211,10 @@ taskSchema.index({ project_id: 1, labels: 1 });
 taskSchema.index({ project_id: 1, story_id: 1 });
 taskSchema.index({ story_id: 1 });
 taskSchema.index({ primary_assignee_id: 1, status: 1 });
+// Multi-assignee "my tasks" inbox — matches any task where the caller is one
+// of several assignees. Multikey over assignee_ids, scoped with status like the
+// single-assignee index above.
+taskSchema.index({ assignee_ids: 1, status: 1 });
 taskSchema.index({ collaborator_ids: 1 });
 taskSchema.index({ parent_task_id: 1 });
 taskSchema.index({ due_date: 1 });

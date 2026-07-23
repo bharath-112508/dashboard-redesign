@@ -97,24 +97,85 @@ const requireWriter = (caller: ProjectCaller): void => {
     }
 };
 
+/** Order-preserving ObjectId de-dupe (first occurrence wins). */
+const dedupeObjectIds = (ids: Types.ObjectId[]): Types.ObjectId[] => {
+    const seen = new Set<string>();
+    const out: Types.ObjectId[] = [];
+    for (const id of ids) {
+        const key = String(id);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(id);
+    }
+    return out;
+};
+
+/** Is the caller one of the task's assignees? Checks the multi-assignee array
+ *  and the (kept-in-sync) primary field so pre-migration rows still resolve. */
+const isCallerAssignee = (task: TaskDocument, caller: ProjectCaller): boolean => {
+    if (task.assignee_ids.some((id) => id.equals(caller.id))) return true;
+    return !!task.primary_assignee_id && task.primary_assignee_id.equals(caller.id);
+};
+
 const isOwnerEmployee = (task: TaskDocument, caller: ProjectCaller): boolean => {
     if (caller.role !== ROLES.EMPLOYEE) return false;
     if (task.created_by.equals(caller.id)) return true;
-    if (task.primary_assignee_id && task.primary_assignee_id.equals(caller.id)) return true;
-    return false;
+    return isCallerAssignee(task, caller);
 };
 
-const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
-    if (isManagerOrAdmin(caller)) return;
-    if (caller.role === ROLES.CLIENT) {
-        // Clients have read-only project access; PATCH is never theirs.
-        throw AppError.forbidden('Clients cannot update tasks', ERROR_CODES.TASK_WRITE_FORBIDDEN);
-    }
-    if (!isOwnerEmployee(task, caller)) {
+/**
+ * A NON-owner employee is allowed exactly one thing on a task: add THEMSELVES
+ * to the assignee list ("grab" work). This validates that an `assignee_ids`
+ * patch is a pure self-add — the caller appears in the new set, every other id
+ * was already assigned (no adding teammates), and nobody was removed. Any other
+ * shape is rejected so a non-owner can't quietly reassign or wipe the roster.
+ */
+const assertPureSelfAssign = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
+    const keys = Object.keys(patch);
+    const isOnlyAssigneeChange = keys.length === 1 && keys[0] === 'assignee_ids';
+    if (!isOnlyAssigneeChange || patch.assignee_ids === undefined) {
         throw AppError.forbidden(
             'Employees can only update tasks they created or are assigned to',
             ERROR_CODES.TASK_WRITE_FORBIDDEN
         );
+    }
+    const callerStr = String(caller.id);
+    const requested = new Set(patch.assignee_ids.map(String));
+    const current = new Set(task.assignee_ids.map((id) => String(id)));
+    if (task.primary_assignee_id) current.add(String(task.primary_assignee_id));
+    if (!requested.has(callerStr)) {
+        throw AppError.forbidden('You can only add yourself as an assignee.', ERROR_CODES.TASK_WRITE_FORBIDDEN);
+    }
+    for (const id of requested) {
+        if (id !== callerStr && !current.has(id)) {
+            throw AppError.forbidden(
+                'You can add only yourself — you cannot assign other people.',
+                ERROR_CODES.TASK_WRITE_FORBIDDEN
+            );
+        }
+    }
+    for (const id of current) {
+        if (!requested.has(id)) {
+            throw AppError.forbidden(
+                'You cannot remove other assignees from this task.',
+                ERROR_CODES.TASK_WRITE_FORBIDDEN
+            );
+        }
+    }
+};
+
+const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
+    if (isManagerOrAdmin(caller)) return;
+    if (!INTERNAL_ROLES.includes(caller.role)) {
+        // Clients / representatives have read-only project access; PATCH is never theirs.
+        throw AppError.forbidden('Clients cannot update tasks', ERROR_CODES.TASK_WRITE_FORBIDDEN);
+    }
+    // An owner-employee (creator OR an assignee) may edit the whitelisted
+    // fields — including `assignee_ids`, so they can (re)assign to any project
+    // member. A non-owner employee may only add themselves (grab the task).
+    if (!isOwnerEmployee(task, caller)) {
+        assertPureSelfAssign(patch, task, caller);
+        return;
     }
     const offending = Object.keys(patch).filter((k) => !TASK_EMPLOYEE_PATCH_FIELDS.includes(k));
     if (offending.length > 0) {
@@ -382,7 +443,17 @@ const loadTaskAndProject = async (
 // ─── POST /tasks ─────────────────────────────────────────────────────────
 
 export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): Promise<Record<string, unknown>> => {
-    requireWriter(caller);
+    // Any internal team member (admin/manager/team_lead/employee) may create a
+    // task; `loadProjectForCaller` below restricts them to projects they can
+    // see (for an employee that means projects they're a member of). Client-side
+    // roles are read-only — the route's `task.write` gate already blocks them,
+    // but we guard here too so the service is safe on its own.
+    if (!INTERNAL_ROLES.includes(caller.role)) {
+        throw AppError.forbidden(
+            'Only internal team members can create tasks',
+            ERROR_CODES.TASK_WRITE_FORBIDDEN
+        );
+    }
     const projectId = new Types.ObjectId(input.project_id);
     const project = await loadProjectForCaller(projectId, caller);
 
@@ -398,8 +469,15 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
     const parentId = input.parent_task_id ? new Types.ObjectId(input.parent_task_id) : null;
     if (parentId) await assertParentTaskUsable(parentId, projectId);
 
-    const assigneeId = input.primary_assignee_id ? new Types.ObjectId(input.primary_assignee_id) : null;
-    if (assigneeId) await assertActiveInternalUsers([assigneeId], ERROR_CODES.TASK_INVALID_ASSIGNEE);
+    // Multi-assignee resolution. Accept `assignee_ids` (new clients) and/or a
+    // lone `primary_assignee_id` (older clients); merge, de-dupe, and let the
+    // first entry become the denormalized `primary_assignee_id`.
+    const rawAssignees: Types.ObjectId[] = [];
+    if (input.primary_assignee_id) rawAssignees.push(new Types.ObjectId(input.primary_assignee_id));
+    for (const id of input.assignee_ids ?? []) rawAssignees.push(new Types.ObjectId(id));
+    const assigneeIds = dedupeObjectIds(rawAssignees);
+    if (assigneeIds.length > 0) await assertActiveInternalUsers(assigneeIds, ERROR_CODES.TASK_INVALID_ASSIGNEE);
+    const primaryAssignee = assigneeIds[0] ?? null;
 
     const collabIds = (input.collaborator_ids ?? []).map((id) => new Types.ObjectId(id));
     if (collabIds.length > 0) await assertActiveInternalUsers(collabIds, ERROR_CODES.TASK_INVALID_COLLABORATOR);
@@ -465,7 +543,8 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
         labels: input.labels ?? [],
         due_date: input.due_date,
         estimated_hours: input.estimated_hours ?? 0,
-        primary_assignee_id: assigneeId,
+        assignee_ids: assigneeIds,
+        primary_assignee_id: primaryAssignee,
         collaborator_ids: collabIds,
         depends_on_task_ids: depIds,
         position,
@@ -553,7 +632,9 @@ export const listTasks = async (
     }
 
     if (query.sprint_id) filter.sprint_id = new Types.ObjectId(query.sprint_id);
-    if (query.assignee_id) filter.primary_assignee_id = new Types.ObjectId(query.assignee_id);
+    // "My tasks" — match any task where the caller is ONE OF the assignees
+    // (multi-assignee). `assignee_ids` carries the primary too (kept in sync).
+    if (query.assignee_id) filter.assignee_ids = new Types.ObjectId(query.assignee_id);
     if (query.status) filter.status = query.status;
     if (query.priority) filter.priority = query.priority;
     if (query.due_before) filter.due_date = { $lte: query.due_before };
@@ -688,10 +769,19 @@ export const updateTask = async (
         task.story_id = sid;
     }
 
-    if (patch.primary_assignee_id !== undefined) {
+    // Assignment. `assignee_ids` is authoritative (new clients); a lone
+    // `primary_assignee_id` is honoured for back-compat. Either way we keep
+    // `primary_assignee_id = assignee_ids[0]` so single-assignee reads still work.
+    if (patch.assignee_ids !== undefined) {
+        const ids = dedupeObjectIds(patch.assignee_ids.map((id) => new Types.ObjectId(id)));
+        if (ids.length > 0) await assertActiveInternalUsers(ids, ERROR_CODES.TASK_INVALID_ASSIGNEE);
+        task.assignee_ids = ids;
+        task.primary_assignee_id = ids[0] ?? null;
+    } else if (patch.primary_assignee_id !== undefined) {
         const aid = patch.primary_assignee_id ? new Types.ObjectId(patch.primary_assignee_id) : null;
         if (aid) await assertActiveInternalUsers([aid], ERROR_CODES.TASK_INVALID_ASSIGNEE);
         task.primary_assignee_id = aid;
+        task.assignee_ids = aid ? [aid] : [];
     }
 
     if (patch.collaborator_ids !== undefined) {
@@ -965,7 +1055,7 @@ export const reorderTask = async (
     // need a manager round-trip. Other employees / clients are denied.
     const { task, project } = await loadTaskAndProject(taskId, caller);
 
-    const isAssignee = !!task.primary_assignee_id && task.primary_assignee_id.equals(caller.id);
+    const isAssignee = isCallerAssignee(task, caller);
     if (!isManagerOrAdmin(caller) && !isAssignee) {
         throw AppError.forbidden(
             'Only admins, managers, or the task assignee can reorder this task',
@@ -1041,7 +1131,7 @@ export const rankTask = async (
 ): Promise<Record<string, unknown>> => {
     const { task, project } = await loadTaskAndProject(taskId, caller);
 
-    const isAssignee = !!task.primary_assignee_id && task.primary_assignee_id.equals(caller.id);
+    const isAssignee = isCallerAssignee(task, caller);
     if (!isManagerOrAdmin(caller) && !isAssignee) {
         throw AppError.forbidden(
             'Only admins, managers, or the task assignee can rank this task',

@@ -11,6 +11,7 @@ import {
     TASK_LABEL_MAX_LEN,
     TASK_LIST_DEFAULT_LIMIT,
     TASK_LIST_MAX_LIMIT,
+    TASK_MAX_ASSIGNEES,
     TASK_PRIORITY_VALUES,
     TASK_STATUS_KEY_MAX,
     TASK_STORY_POINT_VALUES,
@@ -125,6 +126,10 @@ export const createTaskBodySchema = z
         labels: labelsSchema.optional(),
         due_date: isoDateSchema,
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX).optional(),
+        // Multi-assignee. `primary_assignee_id` is still accepted for backward
+        // compatibility (older clients); the service merges it into the assignee
+        // set and keeps `primary_assignee_id = assignee_ids[0]` in sync.
+        assignee_ids: z.array(objectIdSchema).max(TASK_MAX_ASSIGNEES).optional(),
         primary_assignee_id: optionalNullableObjectId,
         collaborator_ids: z.array(objectIdSchema).max(TASK_COLLABORATORS_MAX).optional(),
         depends_on_task_ids: z.array(objectIdSchema).max(TASK_DEPENDENCIES_MAX).optional(),
@@ -152,6 +157,7 @@ export const patchTaskBodySchema = z
         labels: labelsSchema,
         due_date: isoDateSchema,
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX),
+        assignee_ids: z.array(objectIdSchema).max(TASK_MAX_ASSIGNEES),
         primary_assignee_id: optionalNullableObjectId,
         collaborator_ids: z.array(objectIdSchema).max(TASK_COLLABORATORS_MAX),
         position: z.number().int().min(0),

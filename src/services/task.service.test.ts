@@ -143,6 +143,7 @@ const makeTask = (overrides: Record<string, unknown> = {}) => {
         labels: [] as string[],
         due_date: '2026-05-10',
         estimated_hours: 0,
+        assignee_ids: [] as Types.ObjectId[],
         primary_assignee_id: null as Types.ObjectId | null,
         collaborator_ids: [] as Types.ObjectId[],
         depends_on_task_ids: [] as Types.ObjectId[],
@@ -196,6 +197,16 @@ const stubFindOneForNeighbour = (returns: { backlog_rank: number } | null): void
     });
 };
 
+/** Stub `User.find(...).select().lean()` used by `assertActiveInternalUsers`
+ *  to return the given ids as ACTIVE employees (so assignee validation passes). */
+const stubActiveUsers = (ids: Types.ObjectId[]): void => {
+    userFindMock.mockReturnValueOnce({
+        select: () => ({
+            lean: () => Promise.resolve(ids.map((id) => ({ _id: id, role: ROLES.EMPLOYEE }))),
+        }),
+    });
+};
+
 /** Stub `Story.findById(...).select().lean()`. */
 const stubStoryLookup = (project_id: Types.ObjectId | null): void => {
     storyFindByIdMock.mockReturnValueOnce({
@@ -239,17 +250,70 @@ describe('createTask', () => {
         due_date: '2026-05-10',
     });
 
-    it('rejects employees with TASK_WRITE_FORBIDDEN before any DB call', async () => {
-        await expect(svc.createTask(baseInput(new Types.ObjectId()), employeeCaller())).rejects.toMatchObject({
+    it('lets an employee create a task in a project they can see (scoped by loadProjectForCaller)', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
+
+        await svc.createTask(baseInput(project._id), employeeCaller());
+
+        // The gate is gone; project visibility is what limits an employee to
+        // their assigned projects (loadProjectForCaller throws otherwise).
+        expect(loadProjectForCallerMock).toHaveBeenCalled();
+        expect(taskCreateMock).toHaveBeenCalled();
+    });
+
+    it('rejects clients with TASK_WRITE_FORBIDDEN before any DB call', async () => {
+        await expect(svc.createTask(baseInput(new Types.ObjectId()), clientCaller())).rejects.toMatchObject({
             code: ERROR_CODES.TASK_WRITE_FORBIDDEN,
         });
         expect(loadProjectForCallerMock).not.toHaveBeenCalled();
     });
 
-    it('rejects clients with TASK_WRITE_FORBIDDEN', async () => {
-        await expect(svc.createTask(baseInput(new Types.ObjectId()), clientCaller())).rejects.toMatchObject({
-            code: ERROR_CODES.TASK_WRITE_FORBIDDEN,
-        });
+    it('creates with multiple assignees and derives primary_assignee_id = assignee_ids[0]', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        const a = new Types.ObjectId();
+        const b = new Types.ObjectId();
+        stubActiveUsers([a, b]); // assignee validation
+        stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
+
+        await svc.createTask(
+            { ...baseInput(project._id), assignee_ids: [a.toString(), b.toString()] },
+            adminCaller()
+        );
+
+        const createArg = taskCreateMock.mock.calls[0][0];
+        expect(createArg.assignee_ids.map(String)).toEqual([a.toString(), b.toString()]);
+        expect(String(createArg.primary_assignee_id)).toBe(a.toString());
+    });
+
+    it('de-dupes assignees and merges a lone primary_assignee_id into the set', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        const a = new Types.ObjectId();
+        const b = new Types.ObjectId();
+        stubActiveUsers([a, b]);
+        stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
+
+        await svc.createTask(
+            {
+                ...baseInput(project._id),
+                primary_assignee_id: a.toString(),
+                assignee_ids: [a.toString(), b.toString()], // a is duplicated
+            },
+            adminCaller()
+        );
+
+        const createArg = taskCreateMock.mock.calls[0][0];
+        expect(createArg.assignee_ids.map(String)).toEqual([a.toString(), b.toString()]);
+        expect(String(createArg.primary_assignee_id)).toBe(a.toString());
     });
 
     it('rejects status not in defaults+customs with TASK_INVALID_STATUS', async () => {
@@ -534,6 +598,106 @@ describe('updateTask', () => {
         await expect(svc.updateTask(task._id, { status: 'done' }, clientCaller())).rejects.toMatchObject({
             code: ERROR_CODES.TASK_WRITE_FORBIDDEN,
         });
+    });
+
+    it('lets a NON-owner employee add themselves to assignee_ids (grab an unassigned task)', async () => {
+        const project = makeProject();
+        const employeeId = new Types.ObjectId();
+        const task = makeTask({
+            project_id: project._id,
+            created_by: new Types.ObjectId(), // someone else
+            assignee_ids: [],
+            primary_assignee_id: null,
+        });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubActiveUsers([employeeId]);
+
+        await svc.updateTask(task._id, { assignee_ids: [employeeId.toString()] }, employeeCaller(employeeId));
+
+        expect(task.assignee_ids.map(String)).toEqual([employeeId.toString()]);
+        expect(String(task.primary_assignee_id)).toBe(employeeId.toString());
+        expect(task.save).toHaveBeenCalled();
+    });
+
+    it('rejects a NON-owner employee assigning someone ELSE', async () => {
+        const project = makeProject();
+        const employeeId = new Types.ObjectId();
+        const someoneElse = new Types.ObjectId();
+        const task = makeTask({
+            project_id: project._id,
+            created_by: new Types.ObjectId(),
+            assignee_ids: [],
+        });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await expect(
+            svc.updateTask(task._id, { assignee_ids: [someoneElse.toString()] }, employeeCaller(employeeId))
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
+        expect(task.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a NON-owner employee who edits another field alongside a self-assign', async () => {
+        const project = makeProject();
+        const employeeId = new Types.ObjectId();
+        const task = makeTask({ project_id: project._id, created_by: new Types.ObjectId(), assignee_ids: [] });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await expect(
+            svc.updateTask(
+                task._id,
+                { assignee_ids: [employeeId.toString()], status: 'done' },
+                employeeCaller(employeeId)
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
+        expect(task.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a NON-owner employee who removes existing assignees while adding self', async () => {
+        const project = makeProject();
+        const employeeId = new Types.ObjectId();
+        const existing = new Types.ObjectId();
+        const task = makeTask({
+            project_id: project._id,
+            created_by: new Types.ObjectId(),
+            assignee_ids: [existing],
+            primary_assignee_id: existing,
+        });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        // Sends only [self], dropping `existing` — not a pure self-add.
+        await expect(
+            svc.updateTask(task._id, { assignee_ids: [employeeId.toString()] }, employeeCaller(employeeId))
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
+        expect(task.save).not.toHaveBeenCalled();
+    });
+
+    it('lets an OWNER employee reassign to multiple project members', async () => {
+        const project = makeProject();
+        const employeeId = new Types.ObjectId();
+        const teammate = new Types.ObjectId();
+        const task = makeTask({
+            project_id: project._id,
+            created_by: employeeId, // owner via creation
+            assignee_ids: [employeeId],
+            primary_assignee_id: employeeId,
+        });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubActiveUsers([employeeId, teammate]);
+
+        await svc.updateTask(
+            task._id,
+            { assignee_ids: [employeeId.toString(), teammate.toString()] },
+            employeeCaller(employeeId)
+        );
+
+        expect(task.assignee_ids.map(String)).toEqual([employeeId.toString(), teammate.toString()]);
+        expect(String(task.primary_assignee_id)).toBe(employeeId.toString());
+        expect(task.save).toHaveBeenCalled();
     });
 
     it('moves task to END of new column on status change (admin)', async () => {
