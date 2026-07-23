@@ -174,18 +174,55 @@ beforeEach(() => {
 // ─── GET /dashboard/admin/analytics ───────────────────────────────────────
 
 describe('GET /api/v1/dashboard/admin/analytics', () => {
-    it('200 — passes held permissions + range key to buildAdminAnalytics', async () => {
+    it('200 — passes held permissions + resolved range to buildAdminAnalytics', async () => {
         const res = await request(app).get('/api/v1/dashboard/admin/analytics?range=week').set(authHeader(adminToken));
 
         expect(res.status).toBe(200);
-        expect(buildAdminAnalyticsMock).toHaveBeenCalledWith(['system.admin'], 'week');
+        expect(buildAdminAnalyticsMock).toHaveBeenCalledWith(
+            ['system.admin'],
+            expect.objectContaining({ key: 'week' })
+        );
         expect(res.body.data.range.key).toBe('month'); // stub has month
     });
 
     it('range defaults to month when query param is absent', async () => {
         await request(app).get('/api/v1/dashboard/admin/analytics').set(authHeader(adminToken));
 
-        expect(buildAdminAnalyticsMock).toHaveBeenCalledWith(['system.admin'], 'month');
+        expect(buildAdminAnalyticsMock).toHaveBeenCalledWith(
+            ['system.admin'],
+            expect.objectContaining({ key: 'month' })
+        );
+    });
+
+    it('200 — a custom from/to window resolves to a custom range', async () => {
+        const res = await request(app)
+            .get('/api/v1/dashboard/admin/analytics?from=2026-06-01&to=2026-07-23')
+            .set(authHeader(adminToken));
+
+        expect(res.status).toBe(200);
+        expect(buildAdminAnalyticsMock).toHaveBeenCalledWith(
+            ['system.admin'],
+            expect.objectContaining({ key: 'custom', from: '2026-06-01', to: '2026-07-23' })
+        );
+    });
+
+    it('400 VALIDATION_ERROR when only one of from/to is supplied', async () => {
+        const res = await request(app)
+            .get('/api/v1/dashboard/admin/analytics?from=2026-06-01')
+            .set(authHeader(adminToken));
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        expect(buildAdminAnalyticsMock).not.toHaveBeenCalled();
+    });
+
+    it('400 VALIDATION_ERROR when from is after to', async () => {
+        const res = await request(app)
+            .get('/api/v1/dashboard/admin/analytics?from=2026-07-23&to=2026-06-01')
+            .set(authHeader(adminToken));
+
+        expect(res.status).toBe(400);
+        expect(buildAdminAnalyticsMock).not.toHaveBeenCalled();
     });
 
     it('400 VALIDATION_ERROR for an unrecognised range value', async () => {
@@ -223,11 +260,11 @@ describe('GET /api/v1/dashboard/manager/analytics', () => {
         const [callerArg, heldArg, rangeArg] = buildManagerAnalyticsMock.mock.calls[0] as [
             { id: Types.ObjectId; role: string; role_keys: string[] },
             string[],
-            string,
+            { key: string },
         ];
         expect(callerArg.role).toBe('manager');
         expect(heldArg).toContain('dashboard.manager');
-        expect(rangeArg).toBe('today');
+        expect(rangeArg.key).toBe('today');
     });
 
     it('403 for a caller without dashboard.manager', async () => {
@@ -251,11 +288,11 @@ describe('GET /api/v1/dashboard/employee/analytics', () => {
         const [idArg, heldArg, rangeArg] = buildEmployeeAnalyticsMock.mock.calls[0] as [
             Types.ObjectId,
             string[],
-            string,
+            { key: string },
         ];
         expect(idArg.toString()).toBe(employeeUserId.toString());
         expect(heldArg).toContain('dashboard.employee');
-        expect(rangeArg).toBe('30d');
+        expect(rangeArg.key).toBe('30d');
     });
 
     it('400 for an unrecognised range', async () => {
@@ -296,11 +333,11 @@ describe('GET /api/v1/dashboard/client/analytics', () => {
         const [callerArg, , rangeArg] = buildClientAnalyticsMock.mock.calls[0] as [
             { id: Types.ObjectId; role: string },
             string[],
-            string,
+            { key: string },
         ];
         expect(callerArg.id.toString()).toBe(userId.toString());
         expect(callerArg.role).toBe('client');
-        expect(rangeArg).toBe('quarter');
+        expect(rangeArg.key).toBe('quarter');
     });
 
     it('403 for a caller without dashboard.client', async () => {

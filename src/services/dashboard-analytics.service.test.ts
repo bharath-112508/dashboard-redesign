@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Types } from 'mongoose';
 
 import { ROLES } from '../constants/roles.js';
+import { resolveDashboardRange } from '../utils/dashboard-range.js';
 
 vi.mock('../models/attendance-record.model.js', () => ({ AttendanceRecord: { aggregate: vi.fn() } }));
 vi.mock('../models/leave-request.model.js', () => ({
@@ -46,6 +47,7 @@ import {
 const RANGE = {
     key: 'month' as const,
     label: 'This month',
+    insight_label: 'This month',
     prev_label: 'last month',
     from: '2026-06-01',
     to: '2026-06-03',
@@ -59,6 +61,7 @@ const RANGE = {
 const TODAY_RANGE = {
     key: 'today' as const,
     label: 'Today',
+    insight_label: 'Today',
     prev_label: 'yesterday',
     from: '2026-06-24',
     to: '2026-06-24',
@@ -295,7 +298,7 @@ describe('buildAdminAnalytics — permission filtering', () => {
     it('system.admin gets every section', async () => {
         stubEmptyModels();
 
-        const out = await buildAdminAnalytics(['system.admin'], 'month');
+        const out = await buildAdminAnalytics(['system.admin'], resolveDashboardRange('month'));
         expect(Object.keys(out.sections)).toEqual(
             expect.arrayContaining([
                 'kpi',
@@ -314,7 +317,7 @@ describe('buildAdminAnalytics — permission filtering', () => {
     it('a caller without timesheet.read gets no hours/utilization sections', async () => {
         stubEmptyModels();
 
-        const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
+        const out = await buildAdminAnalytics(['attendance.read_team'], resolveDashboardRange('month'));
         expect(out.sections.hours_by_project).toBeUndefined();
         expect(out.sections.utilization).toBeUndefined();
         expect(out.sections.attendance_trend).toBeDefined();
@@ -325,7 +328,7 @@ describe('buildAdminAnalytics — permission filtering', () => {
         // Override attendance to throw
         vi.mocked(AttendanceRecord.aggregate).mockRejectedValue(new Error('boom') as never);
 
-        const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
+        const out = await buildAdminAnalytics(['attendance.read_team'], resolveDashboardRange('month'));
         expect(out.sections.attendance_trend).toEqual({ error: true });
     });
 });
@@ -336,7 +339,7 @@ describe('buildAdminAnalytics — empty kpi is omitted', () => {
     it('omits sections.kpi entirely when caller holds no kpi-level permissions', async () => {
         stubEmptyModels();
         // Only attendance.read_team — no user.read / project.read / timesheet.read / billing_rate.read.
-        const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
+        const out = await buildAdminAnalytics(['attendance.read_team'], resolveDashboardRange('month'));
         expect(out.sections.kpi).toBeUndefined();
         expect(out.sections.attendance_trend).toBeDefined();
     });
@@ -357,7 +360,7 @@ describe('buildClientAnalytics — zero-project scope', () => {
         const out = await buildClientAnalytics(
             { id: userId, role: ROLES.CLIENT, company_id: companyId, audit: undefined },
             ['project.read', 'task.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         // Project.find must be called with the tenant-isolation filter.
@@ -387,7 +390,7 @@ describe('buildEmployeeAnalytics — self-scope in aggregation pipelines', () =>
         await buildEmployeeAnalytics(
             userId,
             ['timesheet.write', 'attendance.check_in_out', 'leave_request.write', 'task.read', 'holiday.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         // Every TimesheetEntry.aggregate call whose first $match stage carries user_id
@@ -427,7 +430,7 @@ describe('buildManagerAnalytics — scope by role', () => {
         await buildManagerAnalytics(
             { id: managerId, role: 'manager', role_keys: ['manager'] },
             ['dashboard.manager', 'attendance.read_team', 'task.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         for (const call of vi.mocked(AttendanceRecord.aggregate).mock.calls) {
@@ -450,7 +453,7 @@ describe('buildManagerAnalytics — scope by role', () => {
         await buildManagerAnalytics(
             { id: leadId, role: 'team_lead', role_keys: ['team_lead'] },
             ['dashboard.manager', 'attendance.read_team', 'task.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         const scoped = vi
@@ -481,7 +484,7 @@ describe('buildManagerAnalytics — kpi.hours_logged safeSection isolation', () 
         const out = await buildManagerAnalytics(
             { id: managerId, role: 'manager', role_keys: ['manager'] },
             ['dashboard.manager', 'timesheet.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         // kpi section should still exist (team_size is always present).

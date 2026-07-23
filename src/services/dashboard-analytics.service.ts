@@ -17,12 +17,7 @@ import { USER_STATUSES } from '../constants/user-statuses.js';
 import { ROLES } from '../constants/roles.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { callerCan } from '../utils/caller-permissions.js';
-import {
-    resolveDashboardRange,
-    enumerateDates,
-    type DashboardRangeKey,
-    type ResolvedRange,
-} from '../utils/dashboard-range.js';
+import { enumerateDates, type ResolvedRange } from '../utils/dashboard-range.js';
 import { isAdminLike } from '../utils/role-check.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
@@ -121,8 +116,8 @@ export const computeAttendanceTrend = async (
     const avgPresent = daysWithData === 0 ? 0 : data.reduce((a, d) => a + d.present, 0) / daysWithData;
     const insight =
         userIds !== null && userIds.length === 1
-            ? employeeAttendanceInsight(daysWithData, await countWorkingDays(range.from, range.to), range.label)
-            : attendanceTrendInsight(avgPresent, totalHeads, range.label);
+            ? employeeAttendanceInsight(daysWithData, await countWorkingDays(range.from, range.to), range.insight_label)
+            : attendanceTrendInsight(avgPresent, totalHeads, range.insight_label);
 
     return { insight, delta: null, data };
 };
@@ -167,7 +162,7 @@ export const computeLeaveMix = async (userIds: UserScope, range: ResolvedRange):
 
     const total = data.reduce((a, r) => a + r.days, 0);
     return {
-        insight: leaveMixInsight(data, range.label),
+        insight: leaveMixInsight(data, range.insight_label),
         delta: buildDelta(total, prevRows[0]?.days ?? 0, range.prev_label, 'neutral'),
         data,
     };
@@ -284,8 +279,8 @@ export const computeHoursByProject = async (
 
     return {
         insight: top
-            ? hoursByProjectInsight(top.project_name, top.minutes, total_minutes, range.label)
-            : hoursLoggedInsight(0, range.label),
+            ? hoursByProjectInsight(top.project_name, top.minutes, total_minutes, range.insight_label)
+            : hoursLoggedInsight(0, range.insight_label),
         delta: buildDelta(total_minutes, prev[0]?.minutes ?? 0, range.prev_label, 'neutral'),
         data,
         total_minutes,
@@ -323,7 +318,7 @@ export const computeUtilization = async (
     const expected_minutes = workingDays * WORK_MINUTES_PER_DAY * Math.max(headcount, 0);
     const pct = expected_minutes === 0 ? 0 : Math.round((actual_minutes / expected_minutes) * 100);
     return {
-        insight: utilizationInsight(pct, range.label),
+        insight: utilizationInsight(pct, range.insight_label),
         delta: buildDelta(actual_minutes, prevActual, range.prev_label, 'up'),
         pct,
         actual_minutes,
@@ -358,7 +353,7 @@ export const computeHoursTrend = async (userIds: UserScope, range: ResolvedRange
     const data = enumerateDates(range.from, range.to).map((date) => ({ date, minutes: byDate.get(date) ?? 0 }));
     const total = data.reduce((a, d) => a + d.minutes, 0);
     return {
-        insight: hoursLoggedInsight(total, range.label),
+        insight: hoursLoggedInsight(total, range.insight_label),
         delta: buildDelta(total, prev[0]?.minutes ?? 0, range.prev_label, 'neutral'),
         data,
     };
@@ -472,7 +467,7 @@ export const computeTasksByStatus = async (
         );
     const total = data.reduce((a, r) => a + r.count, 0);
     const done = data.find((r) => r.status === DEFAULT_DONE_TASK_STATUS_KEY)?.count ?? 0;
-    return { insight: tasksByStatusInsight(done, total, range.label), delta: null, total, data };
+    return { insight: tasksByStatusInsight(done, total, range.insight_label), delta: null, total, data };
 };
 
 // ─── throughput (done tasks per day, approximated by updated_at) ─────────
@@ -521,7 +516,7 @@ export const computeThroughput = async (
     const data = enumerateDates(winFrom, range.to).map((date) => ({ date, count: byDate.get(date) ?? 0 }));
     const completed = data.reduce((a, d) => a + d.count, 0);
     return {
-        insight: throughputInsight(completed, range.label),
+        insight: throughputInsight(completed, range.insight_label),
         delta: buildDelta(completed, prev[0]?.count ?? 0, range.prev_label, 'up'),
         data,
     };
@@ -616,8 +611,7 @@ const computeUpcomingHolidays = async (): Promise<{ data: { id: string; date: st
     return { data: rows.map((h) => ({ id: h._id.toString(), date: h.date, name: h.name })) };
 };
 
-export const buildAdminAnalytics = async (held: Held, rangeKey: DashboardRangeKey): Promise<AnalyticsPayload> => {
-    const range = resolveDashboardRange(rangeKey);
+export const buildAdminAnalytics = async (held: Held, range: ResolvedRange): Promise<AnalyticsPayload> => {
     const heads = await safeSection('admin.headcount_total', activeInternalCount);
     const totalHeads = typeof heads === 'number' ? heads : 0;
 
@@ -714,10 +708,8 @@ const NO_TASKS_FILTER = { _id: new Types.ObjectId('000000000000000000000000') };
 export const buildManagerAnalytics = async (
     caller: { id: Types.ObjectId; role: string; role_keys?: readonly string[] },
     held: Held,
-    rangeKey: DashboardRangeKey
+    range: ResolvedRange
 ): Promise<AnalyticsPayload> => {
-    const range = resolveDashboardRange(rangeKey);
-
     // Admins + Managers are org-wide. A Team Lead's dashboard is scoped to the
     // projects they belong to and the people in those projects, so they don't
     // see org-wide tasks/hours/attendance for projects they aren't on.
@@ -768,9 +760,8 @@ export const buildManagerAnalytics = async (
 export const buildEmployeeAnalytics = async (
     userId: Types.ObjectId,
     held: Held,
-    rangeKey: DashboardRangeKey
+    range: ResolvedRange
 ): Promise<AnalyticsPayload> => {
-    const range = resolveDashboardRange(rangeKey);
     const self = [userId];
     const { add, settle } = sectionCollector(held);
 
@@ -792,9 +783,8 @@ export const buildEmployeeAnalytics = async (
 export const buildClientAnalytics = async (
     caller: ProjectCaller,
     held: Held,
-    rangeKey: DashboardRangeKey
+    range: ResolvedRange
 ): Promise<AnalyticsPayload> => {
-    const range = resolveDashboardRange(rangeKey);
     // Composed, not hard-coded: `client` is company-scoped and
     // `representative` is roster-scoped, and that rule lives in
     // project.service. A hard-coded filter here would silently return
@@ -818,7 +808,7 @@ export const buildClientAnalytics = async (
     );
     add('throughput', PERMISSIONS.TASK_READ, () =>
         projectIds.length === 0
-            ? Promise.resolve({ insight: throughputInsight(0, range.label), delta: null, data: [] })
+            ? Promise.resolve({ insight: throughputInsight(0, range.insight_label), delta: null, data: [] })
             : computeThroughput(taskScope, range)
     );
 

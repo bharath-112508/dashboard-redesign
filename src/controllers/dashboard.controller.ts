@@ -7,6 +7,7 @@ import * as overview from '../services/dashboard-overview.service.js';
 import { ok } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import { projectCallerFrom } from '../utils/caller.js';
+import { resolveAnalyticsRange } from '../utils/dashboard-range.js';
 import type { DashboardAnalyticsQuery, DashboardOverviewQuery } from '../validators/dashboard.validator.js';
 
 const callerId = (req: Request): Types.ObjectId => {
@@ -59,12 +60,15 @@ export const getClient = async (req: Request, res: Response): Promise<Response> 
 // ─── Analytics helpers ────────────────────────────────────────────────────
 
 const heldPerms = (req: Request): readonly string[] | undefined => req.user?.permissions;
-const rangeKey = (req: Request) => (req.query as unknown as DashboardAnalyticsQuery).range;
+// One control drives the page: the query carries either a preset `range` key
+// or an explicit custom `[from, to]` window. Resolve both to a ResolvedRange
+// here so the builders stay range-shape agnostic.
+const analyticsRange = (req: Request) => resolveAnalyticsRange(req.query as unknown as DashboardAnalyticsQuery);
 
 // ─── GET /dashboard/admin/analytics ──────────────────────────────────────
 
 export const getAdminAnalytics = async (req: Request, res: Response): Promise<Response> =>
-    ok(res, await analytics.buildAdminAnalytics(heldPerms(req), rangeKey(req)));
+    ok(res, await analytics.buildAdminAnalytics(heldPerms(req), analyticsRange(req)));
 
 // ─── GET /dashboard/manager/analytics ────────────────────────────────────
 
@@ -74,19 +78,19 @@ export const getManagerAnalytics = async (req: Request, res: Response): Promise<
         await analytics.buildManagerAnalytics(
             { id: callerId(req), role: callerRole(req), role_keys: req.user!.role_keys },
             heldPerms(req),
-            rangeKey(req)
+            analyticsRange(req)
         )
     );
 
 // ─── GET /dashboard/employee/analytics ───────────────────────────────────
 
 export const getEmployeeAnalytics = async (req: Request, res: Response): Promise<Response> =>
-    ok(res, await analytics.buildEmployeeAnalytics(callerId(req), heldPerms(req), rangeKey(req)));
+    ok(res, await analytics.buildEmployeeAnalytics(callerId(req), heldPerms(req), analyticsRange(req)));
 
 // ─── GET /dashboard/client/analytics ─────────────────────────────────────
 
 export const getClientAnalytics = async (req: Request, res: Response): Promise<Response> =>
-    ok(res, await analytics.buildClientAnalytics(projectCallerFrom(req), heldPerms(req), rangeKey(req)));
+    ok(res, await analytics.buildClientAnalytics(projectCallerFrom(req), heldPerms(req), analyticsRange(req)));
 
 // ─── Overview helpers (range-aware, Task 4) ──────────────────────────────
 
