@@ -117,47 +117,30 @@ const isCallerAssignee = (task: TaskDocument, caller: ProjectCaller): boolean =>
     return !!task.primary_assignee_id && task.primary_assignee_id.equals(caller.id);
 };
 
-const isOwnerEmployee = (task: TaskDocument, caller: ProjectCaller): boolean => {
-    if (caller.role !== ROLES.EMPLOYEE) return false;
-    if (task.created_by.equals(caller.id)) return true;
-    return isCallerAssignee(task, caller);
-};
 
 /**
- * A NON-owner employee is allowed exactly one thing on a task: add THEMSELVES
- * to the assignee list ("grab" work). This validates that an `assignee_ids`
- * patch is a pure self-add — the caller appears in the new set, every other id
- * was already assigned (no adding teammates), and nobody was removed. Any other
- * shape is rejected so a non-owner can't quietly reassign or wipe the roster.
+ * Validate that an `assignee_ids` patch only ADDS or REMOVES the caller
+ * themselves — every other person's membership is left unchanged. Used for any
+ * NON-creator employee: they may grab a task (add self) or leave it (remove
+ * self) but never assign or unassign anyone else. Managing the roster is the
+ * creator's (and managers') job.
  */
-const assertPureSelfAssign = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
-    const keys = Object.keys(patch);
-    const isOnlyAssigneeChange = keys.length === 1 && keys[0] === 'assignee_ids';
-    if (!isOnlyAssigneeChange || patch.assignee_ids === undefined) {
-        throw AppError.forbidden(
-            'Employees can only update tasks they created or are assigned to',
-            ERROR_CODES.TASK_WRITE_FORBIDDEN
-        );
-    }
+const assertOnlySelfAssigneeChange = (
+    patch: PatchTaskBody,
+    task: TaskDocument,
+    caller: ProjectCaller
+): void => {
+    if (patch.assignee_ids === undefined) return;
     const callerStr = String(caller.id);
     const requested = new Set(patch.assignee_ids.map(String));
     const current = new Set(task.assignee_ids.map((id) => String(id)));
     if (task.primary_assignee_id) current.add(String(task.primary_assignee_id));
-    if (!requested.has(callerStr)) {
-        throw AppError.forbidden('You can only add yourself as an assignee.', ERROR_CODES.TASK_WRITE_FORBIDDEN);
-    }
-    for (const id of requested) {
-        if (id !== callerStr && !current.has(id)) {
+    for (const id of new Set([...requested, ...current])) {
+        if (id === callerStr) continue;
+        // Anyone other than the caller must have identical before/after membership.
+        if (requested.has(id) !== current.has(id)) {
             throw AppError.forbidden(
-                'You can add only yourself — you cannot assign other people.',
-                ERROR_CODES.TASK_WRITE_FORBIDDEN
-            );
-        }
-    }
-    for (const id of current) {
-        if (!requested.has(id)) {
-            throw AppError.forbidden(
-                'You cannot remove other assignees from this task.',
+                'You can add or remove only yourself — not other assignees.',
                 ERROR_CODES.TASK_WRITE_FORBIDDEN
             );
         }
@@ -170,13 +153,7 @@ const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, call
         // Clients / representatives have read-only project access; PATCH is never theirs.
         throw AppError.forbidden('Clients cannot update tasks', ERROR_CODES.TASK_WRITE_FORBIDDEN);
     }
-    // An owner-employee (creator OR an assignee) may edit the whitelisted
-    // fields — including `assignee_ids`, so they can (re)assign to any project
-    // member. A non-owner employee may only add themselves (grab the task).
-    if (!isOwnerEmployee(task, caller)) {
-        assertPureSelfAssign(patch, task, caller);
-        return;
-    }
+    // Fields outside the employee whitelist are never allowed for any employee.
     const offending = Object.keys(patch).filter((k) => !TASK_EMPLOYEE_PATCH_FIELDS.includes(k));
     if (offending.length > 0) {
         throw AppError.forbidden(
@@ -184,6 +161,22 @@ const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, call
             ERROR_CODES.TASK_WRITE_FORBIDDEN
         );
     }
+
+    // The CREATOR fully owns the task they made — they can (re)assign anyone.
+    if (task.created_by.equals(caller.id)) return;
+
+    // Non-creator employee:
+    //  - work-field edits (status/description/estimate) require being an assignee;
+    //  - any assignee-list change may add/remove ONLY the caller themselves.
+    const isAssignee = isCallerAssignee(task, caller);
+    const editsWorkFields = Object.keys(patch).some((k) => k !== 'assignee_ids');
+    if (editsWorkFields && !isAssignee) {
+        throw AppError.forbidden(
+            'Employees can only update tasks they created or are assigned to',
+            ERROR_CODES.TASK_WRITE_FORBIDDEN
+        );
+    }
+    assertOnlySelfAssigneeChange(patch, task, caller);
 };
 
 // ─── Status / assignee / collaborator validation ─────────────────────────

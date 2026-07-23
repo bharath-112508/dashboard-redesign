@@ -111,11 +111,12 @@ export const TASK_LIST_MAX_LIMIT = 200;
 // + `TASK_EMPLOYEE_PATCH_FIELDS` below).
 
 /**
- * Fields an employee may update on a task they own (assignee or creator).
- * Anything outside this set requires manager-or-above. `assignee_ids` is
- * included so an owner-employee can (re)assign the task to any project member;
- * a NON-owner employee is separately allowed to add ONLY themselves to
- * `assignee_ids` (grabbing work) — see `assertEmployeePatchScope`.
+ * Fields an employee may update on a task. Anything outside this set requires
+ * manager-or-above. Who may set each, enforced in `assertEmployeePatchScope`:
+ *   - the CREATOR may edit all of these AND assign any project member;
+ *   - a non-creator ASSIGNEE may edit status/description/estimate and add or
+ *     remove ONLY themselves in `assignee_ids`;
+ *   - any other member may only add themselves (grab the task).
  */
 export const TASK_EMPLOYEE_PATCH_FIELDS: readonly string[] = [
     'status',

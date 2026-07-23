@@ -675,13 +675,13 @@ describe('updateTask', () => {
         expect(task.save).not.toHaveBeenCalled();
     });
 
-    it('lets an OWNER employee reassign to multiple project members', async () => {
+    it('lets the CREATOR employee assign multiple project members', async () => {
         const project = makeProject();
         const employeeId = new Types.ObjectId();
         const teammate = new Types.ObjectId();
         const task = makeTask({
             project_id: project._id,
-            created_by: employeeId, // owner via creation
+            created_by: employeeId, // creator
             assignee_ids: [employeeId],
             primary_assignee_id: employeeId,
         });
@@ -697,6 +697,69 @@ describe('updateTask', () => {
 
         expect(task.assignee_ids.map(String)).toEqual([employeeId.toString(), teammate.toString()]);
         expect(String(task.primary_assignee_id)).toBe(employeeId.toString());
+        expect(task.save).toHaveBeenCalled();
+    });
+
+    it('lets a non-creator ASSIGNEE edit their work fields (status)', async () => {
+        const project = makeProject();
+        const employeeId = new Types.ObjectId();
+        const task = makeTask({
+            project_id: project._id,
+            created_by: new Types.ObjectId(), // someone else made it
+            assignee_ids: [employeeId], // but they are assigned
+            primary_assignee_id: employeeId,
+            status: 'to_do',
+            position: 1,
+        });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition({ position: 4 });
+
+        await svc.updateTask(task._id, { status: 'in_progress' }, employeeCaller(employeeId));
+        expect(task.status).toBe('in_progress');
+        expect(task.save).toHaveBeenCalled();
+    });
+
+    it('rejects a non-creator ASSIGNEE from assigning SOMEONE ELSE', async () => {
+        const project = makeProject();
+        const employeeId = new Types.ObjectId();
+        const teammate = new Types.ObjectId();
+        const task = makeTask({
+            project_id: project._id,
+            created_by: new Types.ObjectId(),
+            assignee_ids: [employeeId],
+            primary_assignee_id: employeeId,
+        });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        // Assigned, but NOT the creator → may not add a teammate.
+        await expect(
+            svc.updateTask(
+                task._id,
+                { assignee_ids: [employeeId.toString(), teammate.toString()] },
+                employeeCaller(employeeId)
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
+        expect(task.save).not.toHaveBeenCalled();
+    });
+
+    it('lets a non-creator ASSIGNEE remove themselves (leave), keeping others', async () => {
+        const project = makeProject();
+        const employeeId = new Types.ObjectId();
+        const other = new Types.ObjectId();
+        const task = makeTask({
+            project_id: project._id,
+            created_by: new Types.ObjectId(),
+            assignee_ids: [other, employeeId],
+            primary_assignee_id: other,
+        });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubActiveUsers([other]);
+
+        await svc.updateTask(task._id, { assignee_ids: [other.toString()] }, employeeCaller(employeeId));
+        expect(task.assignee_ids.map(String)).toEqual([other.toString()]);
         expect(task.save).toHaveBeenCalled();
     });
 
