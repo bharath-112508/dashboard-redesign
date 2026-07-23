@@ -598,8 +598,15 @@ const sectionCollector = (held: Held) => {
     return { add, settle };
 };
 
+// Internal staff only — excludes BOTH client-side roles. A bare `$ne: CLIENT`
+// silently counted representatives as staff, inflating the "Team size" KPI and
+// the attendance-trend denominator (25) above the true internal headcount (11)
+// that the overview cards and admin totals use.
 const activeInternalCount = (): Promise<number> =>
-    User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } });
+    User.countDocuments({
+        status: USER_STATUSES.ACTIVE,
+        role: { $nin: [ROLES.CLIENT, ROLES.REPRESENTATIVE] },
+    });
 
 /** Shared: upcoming 5 holidays from today. Used by admin + employee assemblers. */
 const computeUpcomingHolidays = async (): Promise<{ data: { id: string; date: string; name: string }[] }> => {

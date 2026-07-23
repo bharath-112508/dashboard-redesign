@@ -397,7 +397,48 @@ describe('buildAdminOverview', () => {
 describe('buildManagerOverview', () => {
     const caller = { id: new Types.ObjectId(), role: ROLES.TEAM_LEAD } as const;
 
-    it('scopes team members/projects/pending-approvals via buildProjectVisibilityFilter + resolveTeamLeadScope', async () => {
+    it('org-wide for a MANAGER: internal headcount, all pending, org-wide attendance (no team scoping)', async () => {
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER } as const;
+        buildProjectVisibilityFilterMock.mockReturnValueOnce({});
+        // Two User.countDocuments hit userCountMock: internal headcount ($in
+        // roles) and attendance total_internal_active ($nin client-side roles).
+        userCountMock.mockImplementation((filter: Record<string, unknown>) => {
+            const roleFilter = filter?.role as { $in?: string[]; $nin?: string[] } | undefined;
+            return Promise.resolve(roleFilter?.$in ? 11 : 11);
+        });
+        leaveRequestCountMock.mockResolvedValueOnce(2);
+        projectAggregateMock.mockResolvedValueOnce([{ _id: PROJECT_STATUSES.ACTIVE, count: 11 }]);
+        attendanceAggregateMock.mockResolvedValueOnce([{ _id: 'present', count: 8 }]);
+        correctionCountMock.mockResolvedValueOnce(0);
+
+        const out = await overview.buildManagerOverview(manager, '2026-07-22', '2026-07-22');
+
+        // A manager is org-wide — the team-lead scope resolver must NOT run.
+        expect(resolveTeamLeadScopeMock).not.toHaveBeenCalled();
+        expect(out.summary).toEqual([
+            { label: 'Team members', value: 11 },
+            { label: 'My Projects', value: 11 },
+            { label: 'Pending approvals', value: 2 },
+        ]);
+
+        // Headcount spans the four internal roles (no client-side roles).
+        const headcountCall = userCountMock.mock.calls.find((c) => (c[0].role as { $in?: string[] }).$in);
+        expect(headcountCall?.[0].role.$in).toEqual(
+            expect.arrayContaining([ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE])
+        );
+
+        // Pending count is org-wide — no user_id scoping.
+        const pendingFilter = leaveRequestCountMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(pendingFilter.status).toBe(LEAVE_REQUEST_STATUSES.PENDING);
+        expect(pendingFilter.user_id).toBeUndefined();
+
+        // Attendance is org-wide — no user_id in the $match.
+        const attendanceMatch = (attendanceAggregateMock.mock.calls[0][0] as Array<Record<string, unknown>>)[0]
+            .$match as Record<string, unknown>;
+        expect(attendanceMatch.user_id).toBeUndefined();
+    });
+
+    it('scopes a TEAM LEAD to team members/projects/pending-approvals via buildProjectVisibilityFilter + resolveTeamLeadScope', async () => {
         const memberIds = [new Types.ObjectId(), new Types.ObjectId(), new Types.ObjectId()];
         const filter = { member_ids: caller.id };
         buildProjectVisibilityFilterMock.mockReturnValueOnce(filter);

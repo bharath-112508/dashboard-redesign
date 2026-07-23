@@ -10,6 +10,7 @@ import { buildProjectVisibilityFilter, type ProjectCaller } from './project.serv
 import { resolveTeamLeadScope } from './dashboard-analytics.service.js';
 import { resolveClientProjectIds } from './dashboard.service.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { isAdminLike } from '../utils/role-check.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { PROJECT_STATUSES } from '../constants/project.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
@@ -306,27 +307,70 @@ export const buildManagerOverview = async (
     to: string
 ): Promise<DashboardOverviewPayload> => {
     const filter = buildProjectVisibilityFilter(caller);
-    const { memberIds: teamIds } = await safeCard(
-        'overview.manager.team_scope',
-        () => resolveTeamLeadScope(caller.id),
-        { projectIds: [] as Types.ObjectId[], memberIds: [] as Types.ObjectId[] }
-    );
+
+    // Admins + Managers are org-wide (same rule as the snapshot + analytics
+    // builders); only a Team Lead is scoped to the members of the projects they
+    // belong to. Previously this always team-scoped the manager, so the summary
+    // tiles disagreed with the rest of their own dashboard — "Team members 1 /
+    // Pending approvals 0" beside a "Team size 25 / Approvals 2" KPI strip.
+    const orgWide = isAdminLike(caller) || caller.role === ROLES.MANAGER;
+
+    if (orgWide) {
+        const [teamMembers, projects, pendingApprovals, attendance] = await Promise.all([
+            currentHeadcount([ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE]),
+            projectStatusFor(filter),
+            safeCard(
+                'overview.manager.pending_approvals',
+                () => LeaveRequest.countDocuments({ status: LEAVE_REQUEST_STATUSES.PENDING }),
+                0
+            ),
+            attendanceOverviewFor(from, to, null),
+        ]);
+
+        return {
+            scope: 'manager',
+            range: buildRange(from, to),
+            summary: [
+                { label: 'Team members', value: teamMembers },
+                { label: 'My Projects', value: projects.total },
+                { label: 'Pending approvals', value: pendingApprovals },
+            ],
+            attendance,
+            representatives: null,
+            projects,
+        };
+    }
+
+    // Team lead — scope to the people who share a project with them. The pending
+    // queue excludes the lead's own requests (they can't approve their own),
+    // mirroring `buildManagerDashboard`'s team-lead branch.
+    const { memberIds } = await safeCard('overview.manager.team_scope', () => resolveTeamLeadScope(caller.id), {
+        projectIds: [] as Types.ObjectId[],
+        memberIds: [] as Types.ObjectId[],
+    });
+    const reviewIds = memberIds.filter((id) => !id.equals(caller.id));
 
     const [projects, pendingApprovals, attendance] = await Promise.all([
         projectStatusFor(filter),
         safeCard(
             'overview.manager.pending_approvals',
-            () => LeaveRequest.countDocuments({ status: LEAVE_REQUEST_STATUSES.PENDING, user_id: { $in: teamIds } }),
+            () =>
+                reviewIds.length === 0
+                    ? Promise.resolve(0)
+                    : LeaveRequest.countDocuments({
+                          status: LEAVE_REQUEST_STATUSES.PENDING,
+                          user_id: { $in: reviewIds },
+                      }),
             0
         ),
-        attendanceOverviewFor(from, to, teamIds),
+        attendanceOverviewFor(from, to, memberIds),
     ]);
 
     return {
         scope: 'manager',
         range: buildRange(from, to),
         summary: [
-            { label: 'Team members', value: teamIds.length },
+            { label: 'Team members', value: memberIds.length },
             { label: 'My Projects', value: projects.total },
             { label: 'Pending approvals', value: pendingApprovals },
         ],
