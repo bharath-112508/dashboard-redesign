@@ -27,6 +27,7 @@ import {
     attendanceTrendInsight,
     employeeAttendanceInsight,
     leaveMixInsight,
+    leaveStatusInsight,
     hoursByProjectInsight,
     hoursLoggedInsight,
     utilizationInsight,
@@ -165,6 +166,91 @@ export const computeLeaveMix = async (userIds: UserScope, range: ResolvedRange):
         insight: leaveMixInsight(data, range.insight_label),
         delta: buildDelta(total, prevRows[0]?.days ?? 0, range.prev_label, 'neutral'),
         data,
+    };
+};
+
+// ─── leave_status (requests + who's on leave, in range) ───────────────────
+
+export interface LeaveRequestRow {
+    id: string;
+    user_name: string | null;
+    /** IST `YYYY-MM-DD` the request was filed (`created_at`). */
+    applied_date: string;
+}
+
+export interface LeaveStatusSection {
+    insight: string;
+    delta: SectionDelta | null;
+    /** Total requests in the window (approved + rejected + pending). */
+    requests: number;
+    /** Of those, how many are approved — i.e. people on leave in the window. */
+    on_leave: number;
+    /** Newest-first request list (who + when filed) for the card body. */
+    recent: LeaveRequestRow[];
+}
+
+const LEAVE_STATUS_RECENT_LIMIT = 5;
+
+/**
+ * Leave activity over the range for the "Leaves" card: how many requests, how
+ * many are people on leave (approved), and a newest-first list of who filed
+ * and when. Requests are attributed to the range by leave `start_date` (same
+ * rule as `computeLeaveMix`); cancelled requests are withdrawn and excluded.
+ */
+export const computeLeaveRequests = async (userIds: UserScope, range: ResolvedRange): Promise<LeaveStatusSection> => {
+    // Cancelled requests are withdrawn — excluded from BOTH the counts and the
+    // list so "requests" and the rows below always agree.
+    const rangeMatch = (from: string, to: string) => ({
+        status: { $ne: LEAVE_REQUEST_STATUSES.CANCELLED },
+        start_date: { $gte: from, $lte: to },
+        ...userMatch(userIds),
+    });
+
+    const [cur, prev, recentDocs] = await Promise.all([
+        LeaveRequest.aggregate<{ _id: string; count: number }>([
+            { $match: rangeMatch(range.from, range.to) },
+            { $group: { _id: '$status', count: { $sum: 1 } } },
+        ]),
+        LeaveRequest.aggregate<{ _id: string; count: number }>([
+            { $match: rangeMatch(range.prev_from, range.prev_to) },
+            { $group: { _id: '$status', count: { $sum: 1 } } },
+        ]),
+        LeaveRequest.find(rangeMatch(range.from, range.to))
+            .sort({ created_at: -1, _id: -1 })
+            .limit(LEAVE_STATUS_RECENT_LIMIT)
+            .select({ user_id: 1, created_at: 1 })
+            .lean<{ _id: Types.ObjectId; user_id: Types.ObjectId; created_at: Date }[]>(),
+    ]);
+
+    const byStatus = (rows: { _id: string; count: number }[]) => new Map(rows.map((r) => [r._id, r.count]));
+    const activeTotal = (m: Map<string, number>): number =>
+        (m.get(LEAVE_REQUEST_STATUSES.APPROVED) ?? 0) +
+        (m.get(LEAVE_REQUEST_STATUSES.REJECTED) ?? 0) +
+        (m.get(LEAVE_REQUEST_STATUSES.PENDING) ?? 0);
+
+    const curMap = byStatus(cur);
+    const on_leave = curMap.get(LEAVE_REQUEST_STATUSES.APPROVED) ?? 0;
+    const requests = activeTotal(curMap);
+
+    // Hydrate requester names in one round-trip (ids may repeat → dedupe).
+    const uniqueUserIds = [...new Map(recentDocs.map((d) => [d.user_id.toString(), d.user_id])).values()];
+    const users = await User.find({ _id: { $in: uniqueUserIds } })
+        .select({ full_name: 1 })
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    const nameById = new Map(users.map((u) => [u._id.toString(), u.full_name]));
+
+    const recent: LeaveRequestRow[] = recentDocs.map((d) => ({
+        id: d._id.toString(),
+        user_name: nameById.get(d.user_id.toString()) ?? null,
+        applied_date: dayjs(d.created_at).tz(DEFAULT_TIMEZONE).format(DATE_FORMAT),
+    }));
+
+    return {
+        insight: leaveStatusInsight(requests, on_leave, range.insight_label),
+        delta: buildDelta(requests, activeTotal(byStatus(prev)), range.prev_label, 'neutral'),
+        requests,
+        on_leave,
+        recent,
     };
 };
 
@@ -672,6 +758,7 @@ export const buildAdminAnalytics = async (held: Held, range: ResolvedRange): Pro
 
     add('attendance_trend', PERMISSIONS.ATTENDANCE_READ_TEAM, () => computeAttendanceTrend(null, range, totalHeads));
     add('leave_mix', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveMix(null, range));
+    add('leave_status', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveRequests(null, range));
     add('upcoming_leaves', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeUpcomingLeaves(null));
     add('hours_by_project', PERMISSIONS.TIMESHEET_READ, () => computeHoursByProject(null, range));
     add('utilization', PERMISSIONS.TIMESHEET_READ, () => computeUtilization(null, range, totalHeads));
@@ -757,6 +844,7 @@ export const buildManagerAnalytics = async (
     });
     add('attendance_trend', PERMISSIONS.ATTENDANCE_READ_TEAM, () => computeAttendanceTrend(teamIds, range, headcount));
     add('leave_mix', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveMix(teamIds, range));
+    add('leave_status', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveRequests(teamIds, range));
     add('upcoming_leaves', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeUpcomingLeaves(teamIds));
     add('hours_by_project', PERMISSIONS.TIMESHEET_READ, () => computeHoursByProject(teamIds, range));
     add('utilization', PERMISSIONS.TIMESHEET_READ, () => computeUtilization(teamIds, range, headcount));

@@ -55,6 +55,11 @@ export const leaveMixInsight = (rows: { name: string | null; days: number }[], r
     return `${total} leave day${total === 1 ? '' : 's'} ${low(rangeLabel)} — mostly ${top.name ?? 'unnamed'} (${top.days}).`;
 };
 
+export const leaveStatusInsight = (requests: number, onLeave: number, rangeLabel: string): string =>
+    requests === 0
+        ? `No leave requests ${low(rangeLabel)}.`
+        : `${requests} leave request${requests === 1 ? '' : 's'} ${low(rangeLabel)} — ${onLeave} on leave.`;
+
 export const hoursByProjectInsight = (
     topName: string,
     topMinutes: number,

@@ -38,6 +38,7 @@ import {
     computeTasksByStatus,
     computeThroughput,
     computeProjectProgress,
+    computeLeaveRequests,
     buildAdminAnalytics,
     buildManagerAnalytics,
     buildEmployeeAnalytics,
@@ -293,6 +294,66 @@ describe('computeThroughput', () => {
         // Grouping buckets by the completed_at IST day too.
         const group = pipeline[1].$group as { _id: { $dateToString: { date: string } } };
         expect(group._id.$dateToString.date).toBe('$completed_at');
+    });
+});
+
+describe('computeLeaveRequests', () => {
+    it('counts requests + on-leave and lists who filed and when (cancelled excluded)', async () => {
+        const u1 = new Types.ObjectId();
+        const u2 = new Types.ObjectId();
+        const r1 = new Types.ObjectId();
+        const r2 = new Types.ObjectId();
+        vi.mocked(LeaveRequest.aggregate)
+            .mockResolvedValueOnce([
+                { _id: 'approved', count: 5 },
+                { _id: 'rejected', count: 1 },
+                { _id: 'pending', count: 2 },
+                { _id: 'cancelled', count: 3 }, // withdrawn — not a request
+            ] as never)
+            .mockResolvedValueOnce([{ _id: 'approved', count: 4 }] as never); // prev → 4
+        vi.mocked(LeaveRequest.find).mockReturnValue(
+            queryStub([
+                { _id: r1, user_id: u1, created_at: new Date('2026-06-02T10:00:00Z') },
+                { _id: r2, user_id: u2, created_at: new Date('2026-06-01T04:00:00Z') },
+            ]) as never
+        );
+        vi.mocked(User.find).mockReturnValue(
+            queryStub([
+                { _id: u1, full_name: 'Kavya Reddy' },
+                { _id: u2, full_name: 'Arjun Mehta' },
+            ]) as never
+        );
+
+        const out = await computeLeaveRequests(null, RANGE);
+
+        expect(out.requests).toBe(8); // 5 + 1 + 2 (cancelled excluded)
+        expect(out.on_leave).toBe(5); // approved
+        expect(out.insight).toBe('8 leave requests this month — 5 on leave.');
+        expect(out.delta?.pct).toBe(100); // 8 vs 4
+        expect(out.recent).toEqual([
+            { id: r1.toString(), user_name: 'Kavya Reddy', applied_date: '2026-06-02' },
+            { id: r2.toString(), user_name: 'Arjun Mehta', applied_date: '2026-06-01' },
+        ]);
+
+        // Attributed by leave start_date within the range.
+        const match = (vi.mocked(LeaveRequest.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[])[0]
+            .$match as Record<string, unknown>;
+        expect(match.start_date).toEqual({ $gte: '2026-06-01', $lte: '2026-06-03' });
+    });
+
+    it('scopes to the given user ids and reads zero cleanly', async () => {
+        vi.mocked(LeaveRequest.aggregate).mockResolvedValue([] as never);
+        vi.mocked(LeaveRequest.find).mockReturnValue(queryStub([]) as never);
+        vi.mocked(User.find).mockReturnValue(queryStub([]) as never);
+        const ids = [new Types.ObjectId()];
+
+        const out = await computeLeaveRequests(ids, RANGE);
+
+        expect(out).toMatchObject({ requests: 0, on_leave: 0, recent: [] });
+        expect(out.insight).toBe('No leave requests this month.');
+        const match = (vi.mocked(LeaveRequest.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[])[0]
+            .$match as Record<string, unknown>;
+        expect(match.user_id).toEqual({ $in: ids });
     });
 });
 
