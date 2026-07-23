@@ -71,6 +71,10 @@ export const utilizationReportQuerySchema = z
         // multi-select form. When both arrive the service unions them.
         user_id: objectIdSchema.optional(),
         user_ids: userIdsSchema,
+        // Optional project scope: narrows the report to time logged against
+        // this one project (per-user rows then cover only that project's work).
+        // Omitted → all projects.
+        project_id: objectIdSchema.optional(),
         // Which hours count toward the utilization %. `billable` = classic
         // billable utilization; `non_billable` = the inverse; `all` = both.
         // "Neither" is impossible — the FE disables unchecking the last box.

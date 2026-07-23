@@ -439,6 +439,18 @@ export const buildUtilizationReport = async (query: UtilizationReportQuery): Pro
     }
 
     const userIds = users.map((u) => u._id);
+
+    // Optional project scope: narrow the entries to this one project.
+    // "Unassigned" (project_id: null) general time falls out naturally — it
+    // isn't attributable to any project.
+    const entryMatch: Record<string, unknown> = {
+        user_id: { $in: userIds },
+        local_date: { $gte: query.from_date, $lte: query.to_date },
+    };
+    if (query.project_id) {
+        entryMatch.project_id = new Types.ObjectId(query.project_id);
+    }
+
     // Group by (user, project) so each user row can carry a per-project
     // breakdown. `project_id: null` (general/non-project time) groups
     // into its own bucket, rendered as "Unassigned".
@@ -448,10 +460,7 @@ export const buildUtilizationReport = async (query: UtilizationReportQuery): Pro
         non_billable_minutes: number;
     }>([
         {
-            $match: {
-                user_id: { $in: userIds },
-                local_date: { $gte: query.from_date, $lte: query.to_date },
-            },
+            $match: entryMatch,
         },
         {
             $group: {
