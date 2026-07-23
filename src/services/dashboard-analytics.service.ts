@@ -491,10 +491,10 @@ export const computeThroughput = async (
     taskMatch: Record<string, unknown>,
     range: ResolvedRange
 ): Promise<ThroughputSection> => {
-    const winFrom =
-        range.key === 'today'
-            ? dayjs.tz(range.to, DEFAULT_TIMEZONE).subtract(6, 'day').format(DATE_FORMAT)
-            : range.from;
+    // Count completions within the SELECTED range only (from..to). Previously
+    // 'today' used a rolling 7-day window but the headline was labelled "today",
+    // so it reported up to a week of completions as if they happened today.
+    const winFrom = range.from;
     const toDate = (d: string, endOfDay: boolean) =>
         endOfDay
             ? dayjs.tz(d, DEFAULT_TIMEZONE).endOf('day').toDate()
