@@ -418,7 +418,7 @@ describe('buildManagerOverview', () => {
         expect(out.summary).toEqual([
             { label: 'Team members', value: 11 },
             { label: 'My Projects', value: 11 },
-            { label: 'Pending approvals', value: 2 },
+            { label: 'Leaves to approve', value: 2 },
         ]);
 
         // Headcount spans the four internal roles (no client-side roles).
@@ -457,7 +457,7 @@ describe('buildManagerOverview', () => {
         expect(out.summary).toEqual([
             { label: 'Team members', value: 3 },
             { label: 'My Projects', value: 4 },
-            { label: 'Pending approvals', value: 2 },
+            { label: 'Leaves to approve', value: 2 },
         ]);
         expect(out.attendance).not.toBeNull();
         expect(out.representatives).toBeNull();

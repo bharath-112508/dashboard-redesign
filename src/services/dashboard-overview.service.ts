@@ -333,7 +333,7 @@ export const buildManagerOverview = async (
             summary: [
                 { label: 'Team members', value: teamMembers },
                 { label: 'My Projects', value: projects.total },
-                { label: 'Pending approvals', value: pendingApprovals },
+                { label: 'Leaves to approve', value: pendingApprovals },
             ],
             attendance,
             representatives: null,
@@ -372,7 +372,7 @@ export const buildManagerOverview = async (
         summary: [
             { label: 'Team members', value: memberIds.length },
             { label: 'My Projects', value: projects.total },
-            { label: 'Pending approvals', value: pendingApprovals },
+            { label: 'Leaves to approve', value: pendingApprovals },
         ],
         attendance,
         representatives: null,
