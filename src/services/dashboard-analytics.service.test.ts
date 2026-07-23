@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Types } from 'mongoose';
 
 import { ROLES } from '../constants/roles.js';
+import { resolveDashboardRange } from '../utils/dashboard-range.js';
 
 vi.mock('../models/attendance-record.model.js', () => ({ AttendanceRecord: { aggregate: vi.fn() } }));
 vi.mock('../models/leave-request.model.js', () => ({
@@ -37,6 +38,7 @@ import {
     computeTasksByStatus,
     computeThroughput,
     computeProjectProgress,
+    computeLeaveRequests,
     buildAdminAnalytics,
     buildManagerAnalytics,
     buildEmployeeAnalytics,
@@ -46,6 +48,7 @@ import {
 const RANGE = {
     key: 'month' as const,
     label: 'This month',
+    insight_label: 'This month',
     prev_label: 'last month',
     from: '2026-06-01',
     to: '2026-06-03',
@@ -59,6 +62,7 @@ const RANGE = {
 const TODAY_RANGE = {
     key: 'today' as const,
     label: 'Today',
+    insight_label: 'Today',
     prev_label: 'yesterday',
     from: '2026-06-24',
     to: '2026-06-24',
@@ -274,6 +278,83 @@ describe('computeThroughput', () => {
         ]);
         expect(out.delta?.pct).toBe(67); // 5 vs 3
     });
+
+    it('counts completions by completed_at (not updated_at) among done tasks', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        await computeThroughput({}, RANGE);
+
+        const pipeline = vi.mocked(Task.aggregate).mock.calls[0][0] as unknown as Array<Record<string, unknown>>;
+        const match = pipeline[0].$match as Record<string, unknown>;
+        expect(match.status).toBe('done');
+        // The window is anchored on the true completion time, so an edit to a
+        // long-since-done task can't re-date it into the range.
+        expect(match.completed_at).toMatchObject({ $gte: expect.any(Date), $lte: expect.any(Date) });
+        expect(match.updated_at).toBeUndefined();
+
+        // Grouping buckets by the completed_at IST day too.
+        const group = pipeline[1].$group as { _id: { $dateToString: { date: string } } };
+        expect(group._id.$dateToString.date).toBe('$completed_at');
+    });
+});
+
+describe('computeLeaveRequests', () => {
+    it('counts requests + on-leave and lists who filed and when (cancelled excluded)', async () => {
+        const u1 = new Types.ObjectId();
+        const u2 = new Types.ObjectId();
+        const r1 = new Types.ObjectId();
+        const r2 = new Types.ObjectId();
+        vi.mocked(LeaveRequest.aggregate)
+            .mockResolvedValueOnce([
+                { _id: 'approved', count: 5 },
+                { _id: 'rejected', count: 1 },
+                { _id: 'pending', count: 2 },
+                { _id: 'cancelled', count: 3 }, // withdrawn — not a request
+            ] as never)
+            .mockResolvedValueOnce([{ _id: 'approved', count: 4 }] as never); // prev → 4
+        vi.mocked(LeaveRequest.find).mockReturnValue(
+            queryStub([
+                { _id: r1, user_id: u1, created_at: new Date('2026-06-02T10:00:00Z') },
+                { _id: r2, user_id: u2, created_at: new Date('2026-06-01T04:00:00Z') },
+            ]) as never
+        );
+        vi.mocked(User.find).mockReturnValue(
+            queryStub([
+                { _id: u1, full_name: 'Kavya Reddy' },
+                { _id: u2, full_name: 'Arjun Mehta' },
+            ]) as never
+        );
+
+        const out = await computeLeaveRequests(null, RANGE);
+
+        expect(out.requests).toBe(8); // 5 + 1 + 2 (cancelled excluded)
+        expect(out.on_leave).toBe(5); // approved
+        expect(out.insight).toBe('8 leave requests this month — 5 on leave.');
+        expect(out.delta?.pct).toBe(100); // 8 vs 4
+        expect(out.recent).toEqual([
+            { id: r1.toString(), user_name: 'Kavya Reddy', applied_date: '2026-06-02' },
+            { id: r2.toString(), user_name: 'Arjun Mehta', applied_date: '2026-06-01' },
+        ]);
+
+        // Attributed by leave start_date within the range.
+        const match = (vi.mocked(LeaveRequest.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[])[0]
+            .$match as Record<string, unknown>;
+        expect(match.start_date).toEqual({ $gte: '2026-06-01', $lte: '2026-06-03' });
+    });
+
+    it('scopes to the given user ids and reads zero cleanly', async () => {
+        vi.mocked(LeaveRequest.aggregate).mockResolvedValue([] as never);
+        vi.mocked(LeaveRequest.find).mockReturnValue(queryStub([]) as never);
+        vi.mocked(User.find).mockReturnValue(queryStub([]) as never);
+        const ids = [new Types.ObjectId()];
+
+        const out = await computeLeaveRequests(ids, RANGE);
+
+        expect(out).toMatchObject({ requests: 0, on_leave: 0, recent: [] });
+        expect(out.insight).toBe('No leave requests this month.');
+        const match = (vi.mocked(LeaveRequest.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[])[0]
+            .$match as Record<string, unknown>;
+        expect(match.user_id).toEqual({ $in: ids });
+    });
 });
 
 describe('computeProjectProgress', () => {
@@ -295,7 +376,7 @@ describe('buildAdminAnalytics — permission filtering', () => {
     it('system.admin gets every section', async () => {
         stubEmptyModels();
 
-        const out = await buildAdminAnalytics(['system.admin'], 'month');
+        const out = await buildAdminAnalytics(['system.admin'], resolveDashboardRange('month'));
         expect(Object.keys(out.sections)).toEqual(
             expect.arrayContaining([
                 'kpi',
@@ -314,7 +395,7 @@ describe('buildAdminAnalytics — permission filtering', () => {
     it('a caller without timesheet.read gets no hours/utilization sections', async () => {
         stubEmptyModels();
 
-        const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
+        const out = await buildAdminAnalytics(['attendance.read_team'], resolveDashboardRange('month'));
         expect(out.sections.hours_by_project).toBeUndefined();
         expect(out.sections.utilization).toBeUndefined();
         expect(out.sections.attendance_trend).toBeDefined();
@@ -325,7 +406,7 @@ describe('buildAdminAnalytics — permission filtering', () => {
         // Override attendance to throw
         vi.mocked(AttendanceRecord.aggregate).mockRejectedValue(new Error('boom') as never);
 
-        const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
+        const out = await buildAdminAnalytics(['attendance.read_team'], resolveDashboardRange('month'));
         expect(out.sections.attendance_trend).toEqual({ error: true });
     });
 });
@@ -336,7 +417,7 @@ describe('buildAdminAnalytics — empty kpi is omitted', () => {
     it('omits sections.kpi entirely when caller holds no kpi-level permissions', async () => {
         stubEmptyModels();
         // Only attendance.read_team — no user.read / project.read / timesheet.read / billing_rate.read.
-        const out = await buildAdminAnalytics(['attendance.read_team'], 'month');
+        const out = await buildAdminAnalytics(['attendance.read_team'], resolveDashboardRange('month'));
         expect(out.sections.kpi).toBeUndefined();
         expect(out.sections.attendance_trend).toBeDefined();
     });
@@ -357,7 +438,7 @@ describe('buildClientAnalytics — zero-project scope', () => {
         const out = await buildClientAnalytics(
             { id: userId, role: ROLES.CLIENT, company_id: companyId, audit: undefined },
             ['project.read', 'task.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         // Project.find must be called with the tenant-isolation filter.
@@ -387,7 +468,7 @@ describe('buildEmployeeAnalytics — self-scope in aggregation pipelines', () =>
         await buildEmployeeAnalytics(
             userId,
             ['timesheet.write', 'attendance.check_in_out', 'leave_request.write', 'task.read', 'holiday.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         // Every TimesheetEntry.aggregate call whose first $match stage carries user_id
@@ -427,7 +508,7 @@ describe('buildManagerAnalytics — scope by role', () => {
         await buildManagerAnalytics(
             { id: managerId, role: 'manager', role_keys: ['manager'] },
             ['dashboard.manager', 'attendance.read_team', 'task.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         for (const call of vi.mocked(AttendanceRecord.aggregate).mock.calls) {
@@ -450,7 +531,7 @@ describe('buildManagerAnalytics — scope by role', () => {
         await buildManagerAnalytics(
             { id: leadId, role: 'team_lead', role_keys: ['team_lead'] },
             ['dashboard.manager', 'attendance.read_team', 'task.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         const scoped = vi
@@ -481,7 +562,7 @@ describe('buildManagerAnalytics — kpi.hours_logged safeSection isolation', () 
         const out = await buildManagerAnalytics(
             { id: managerId, role: 'manager', role_keys: ['manager'] },
             ['dashboard.manager', 'timesheet.read'],
-            'month'
+            resolveDashboardRange('month')
         );
 
         // kpi section should still exist (team_size is always present).

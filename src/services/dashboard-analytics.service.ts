@@ -17,12 +17,7 @@ import { USER_STATUSES } from '../constants/user-statuses.js';
 import { ROLES } from '../constants/roles.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { callerCan } from '../utils/caller-permissions.js';
-import {
-    resolveDashboardRange,
-    enumerateDates,
-    type DashboardRangeKey,
-    type ResolvedRange,
-} from '../utils/dashboard-range.js';
+import { enumerateDates, type ResolvedRange } from '../utils/dashboard-range.js';
 import { isAdminLike } from '../utils/role-check.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
@@ -32,6 +27,7 @@ import {
     attendanceTrendInsight,
     employeeAttendanceInsight,
     leaveMixInsight,
+    leaveStatusInsight,
     hoursByProjectInsight,
     hoursLoggedInsight,
     utilizationInsight,
@@ -121,8 +117,8 @@ export const computeAttendanceTrend = async (
     const avgPresent = daysWithData === 0 ? 0 : data.reduce((a, d) => a + d.present, 0) / daysWithData;
     const insight =
         userIds !== null && userIds.length === 1
-            ? employeeAttendanceInsight(daysWithData, await countWorkingDays(range.from, range.to), range.label)
-            : attendanceTrendInsight(avgPresent, totalHeads, range.label);
+            ? employeeAttendanceInsight(daysWithData, await countWorkingDays(range.from, range.to), range.insight_label)
+            : attendanceTrendInsight(avgPresent, totalHeads, range.insight_label);
 
     return { insight, delta: null, data };
 };
@@ -167,9 +163,94 @@ export const computeLeaveMix = async (userIds: UserScope, range: ResolvedRange):
 
     const total = data.reduce((a, r) => a + r.days, 0);
     return {
-        insight: leaveMixInsight(data, range.label),
+        insight: leaveMixInsight(data, range.insight_label),
         delta: buildDelta(total, prevRows[0]?.days ?? 0, range.prev_label, 'neutral'),
         data,
+    };
+};
+
+// ─── leave_status (requests + who's on leave, in range) ───────────────────
+
+export interface LeaveRequestRow {
+    id: string;
+    user_name: string | null;
+    /** IST `YYYY-MM-DD` the request was filed (`created_at`). */
+    applied_date: string;
+}
+
+export interface LeaveStatusSection {
+    insight: string;
+    delta: SectionDelta | null;
+    /** Total requests in the window (approved + rejected + pending). */
+    requests: number;
+    /** Of those, how many are approved — i.e. people on leave in the window. */
+    on_leave: number;
+    /** Newest-first request list (who + when filed) for the card body. */
+    recent: LeaveRequestRow[];
+}
+
+const LEAVE_STATUS_RECENT_LIMIT = 5;
+
+/**
+ * Leave activity over the range for the "Leaves" card: how many requests, how
+ * many are people on leave (approved), and a newest-first list of who filed
+ * and when. Requests are attributed to the range by leave `start_date` (same
+ * rule as `computeLeaveMix`); cancelled requests are withdrawn and excluded.
+ */
+export const computeLeaveRequests = async (userIds: UserScope, range: ResolvedRange): Promise<LeaveStatusSection> => {
+    // Cancelled requests are withdrawn — excluded from BOTH the counts and the
+    // list so "requests" and the rows below always agree.
+    const rangeMatch = (from: string, to: string) => ({
+        status: { $ne: LEAVE_REQUEST_STATUSES.CANCELLED },
+        start_date: { $gte: from, $lte: to },
+        ...userMatch(userIds),
+    });
+
+    const [cur, prev, recentDocs] = await Promise.all([
+        LeaveRequest.aggregate<{ _id: string; count: number }>([
+            { $match: rangeMatch(range.from, range.to) },
+            { $group: { _id: '$status', count: { $sum: 1 } } },
+        ]),
+        LeaveRequest.aggregate<{ _id: string; count: number }>([
+            { $match: rangeMatch(range.prev_from, range.prev_to) },
+            { $group: { _id: '$status', count: { $sum: 1 } } },
+        ]),
+        LeaveRequest.find(rangeMatch(range.from, range.to))
+            .sort({ created_at: -1, _id: -1 })
+            .limit(LEAVE_STATUS_RECENT_LIMIT)
+            .select({ user_id: 1, created_at: 1 })
+            .lean<{ _id: Types.ObjectId; user_id: Types.ObjectId; created_at: Date }[]>(),
+    ]);
+
+    const byStatus = (rows: { _id: string; count: number }[]) => new Map(rows.map((r) => [r._id, r.count]));
+    const activeTotal = (m: Map<string, number>): number =>
+        (m.get(LEAVE_REQUEST_STATUSES.APPROVED) ?? 0) +
+        (m.get(LEAVE_REQUEST_STATUSES.REJECTED) ?? 0) +
+        (m.get(LEAVE_REQUEST_STATUSES.PENDING) ?? 0);
+
+    const curMap = byStatus(cur);
+    const on_leave = curMap.get(LEAVE_REQUEST_STATUSES.APPROVED) ?? 0;
+    const requests = activeTotal(curMap);
+
+    // Hydrate requester names in one round-trip (ids may repeat → dedupe).
+    const uniqueUserIds = [...new Map(recentDocs.map((d) => [d.user_id.toString(), d.user_id])).values()];
+    const users = await User.find({ _id: { $in: uniqueUserIds } })
+        .select({ full_name: 1 })
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    const nameById = new Map(users.map((u) => [u._id.toString(), u.full_name]));
+
+    const recent: LeaveRequestRow[] = recentDocs.map((d) => ({
+        id: d._id.toString(),
+        user_name: nameById.get(d.user_id.toString()) ?? null,
+        applied_date: dayjs(d.created_at).tz(DEFAULT_TIMEZONE).format(DATE_FORMAT),
+    }));
+
+    return {
+        insight: leaveStatusInsight(requests, on_leave, range.insight_label),
+        delta: buildDelta(requests, activeTotal(byStatus(prev)), range.prev_label, 'neutral'),
+        requests,
+        on_leave,
+        recent,
     };
 };
 
@@ -284,8 +365,8 @@ export const computeHoursByProject = async (
 
     return {
         insight: top
-            ? hoursByProjectInsight(top.project_name, top.minutes, total_minutes, range.label)
-            : hoursLoggedInsight(0, range.label),
+            ? hoursByProjectInsight(top.project_name, top.minutes, total_minutes, range.insight_label)
+            : hoursLoggedInsight(0, range.insight_label),
         delta: buildDelta(total_minutes, prev[0]?.minutes ?? 0, range.prev_label, 'neutral'),
         data,
         total_minutes,
@@ -323,7 +404,7 @@ export const computeUtilization = async (
     const expected_minutes = workingDays * WORK_MINUTES_PER_DAY * Math.max(headcount, 0);
     const pct = expected_minutes === 0 ? 0 : Math.round((actual_minutes / expected_minutes) * 100);
     return {
-        insight: utilizationInsight(pct, range.label),
+        insight: utilizationInsight(pct, range.insight_label),
         delta: buildDelta(actual_minutes, prevActual, range.prev_label, 'up'),
         pct,
         actual_minutes,
@@ -358,7 +439,7 @@ export const computeHoursTrend = async (userIds: UserScope, range: ResolvedRange
     const data = enumerateDates(range.from, range.to).map((date) => ({ date, minutes: byDate.get(date) ?? 0 }));
     const total = data.reduce((a, d) => a + d.minutes, 0);
     return {
-        insight: hoursLoggedInsight(total, range.label),
+        insight: hoursLoggedInsight(total, range.insight_label),
         delta: buildDelta(total, prev[0]?.minutes ?? 0, range.prev_label, 'neutral'),
         data,
     };
@@ -472,7 +553,7 @@ export const computeTasksByStatus = async (
         );
     const total = data.reduce((a, r) => a + r.count, 0);
     const done = data.find((r) => r.status === DEFAULT_DONE_TASK_STATUS_KEY)?.count ?? 0;
-    return { insight: tasksByStatusInsight(done, total, range.label), delta: null, total, data };
+    return { insight: tasksByStatusInsight(done, total, range.insight_label), delta: null, total, data };
 };
 
 // ─── throughput (done tasks per day, approximated by updated_at) ─────────
@@ -483,18 +564,20 @@ export interface ThroughputSection {
     data: { date: string; count: number }[];
 }
 
+// Throughput buckets a completion into the IST day it actually happened —
+// `completed_at`, not `updated_at` (which any later edit would re-date).
 const istDayExpr = {
-    $dateToString: { format: '%Y-%m-%d', date: '$updated_at', timezone: DEFAULT_TIMEZONE },
+    $dateToString: { format: '%Y-%m-%d', date: '$completed_at', timezone: DEFAULT_TIMEZONE },
 };
 
 export const computeThroughput = async (
     taskMatch: Record<string, unknown>,
     range: ResolvedRange
 ): Promise<ThroughputSection> => {
-    const winFrom =
-        range.key === 'today'
-            ? dayjs.tz(range.to, DEFAULT_TIMEZONE).subtract(6, 'day').format(DATE_FORMAT)
-            : range.from;
+    // Count completions within the SELECTED range only (from..to). Previously
+    // 'today' used a rolling 7-day window but the headline was labelled "today",
+    // so it reported up to a week of completions as if they happened today.
+    const winFrom = range.from;
     const toDate = (d: string, endOfDay: boolean) =>
         endOfDay
             ? dayjs.tz(d, DEFAULT_TIMEZONE).endOf('day').toDate()
@@ -503,7 +586,7 @@ export const computeThroughput = async (
     const doneMatch = (from: string, to: string) => ({
         ...taskMatch,
         status: DEFAULT_DONE_TASK_STATUS_KEY,
-        updated_at: { $gte: toDate(from, false), $lte: toDate(to, true) },
+        completed_at: { $gte: toDate(from, false), $lte: toDate(to, true) },
     });
 
     const [rows, prev] = await Promise.all([
@@ -521,7 +604,7 @@ export const computeThroughput = async (
     const data = enumerateDates(winFrom, range.to).map((date) => ({ date, count: byDate.get(date) ?? 0 }));
     const completed = data.reduce((a, d) => a + d.count, 0);
     return {
-        insight: throughputInsight(completed, range.label),
+        insight: throughputInsight(completed, range.insight_label),
         delta: buildDelta(completed, prev[0]?.count ?? 0, range.prev_label, 'up'),
         data,
     };
@@ -603,8 +686,15 @@ const sectionCollector = (held: Held) => {
     return { add, settle };
 };
 
+// Internal staff only — excludes BOTH client-side roles. A bare `$ne: CLIENT`
+// silently counted representatives as staff, inflating the "Team size" KPI and
+// the attendance-trend denominator (25) above the true internal headcount (11)
+// that the overview cards and admin totals use.
 const activeInternalCount = (): Promise<number> =>
-    User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } });
+    User.countDocuments({
+        status: USER_STATUSES.ACTIVE,
+        role: { $nin: [ROLES.CLIENT, ROLES.REPRESENTATIVE] },
+    });
 
 /** Shared: upcoming 5 holidays from today. Used by admin + employee assemblers. */
 const computeUpcomingHolidays = async (): Promise<{ data: { id: string; date: string; name: string }[] }> => {
@@ -616,8 +706,7 @@ const computeUpcomingHolidays = async (): Promise<{ data: { id: string; date: st
     return { data: rows.map((h) => ({ id: h._id.toString(), date: h.date, name: h.name })) };
 };
 
-export const buildAdminAnalytics = async (held: Held, rangeKey: DashboardRangeKey): Promise<AnalyticsPayload> => {
-    const range = resolveDashboardRange(rangeKey);
+export const buildAdminAnalytics = async (held: Held, range: ResolvedRange): Promise<AnalyticsPayload> => {
     const heads = await safeSection('admin.headcount_total', activeInternalCount);
     const totalHeads = typeof heads === 'number' ? heads : 0;
 
@@ -669,6 +758,7 @@ export const buildAdminAnalytics = async (held: Held, rangeKey: DashboardRangeKe
 
     add('attendance_trend', PERMISSIONS.ATTENDANCE_READ_TEAM, () => computeAttendanceTrend(null, range, totalHeads));
     add('leave_mix', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveMix(null, range));
+    add('leave_status', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveRequests(null, range));
     add('upcoming_leaves', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeUpcomingLeaves(null));
     add('hours_by_project', PERMISSIONS.TIMESHEET_READ, () => computeHoursByProject(null, range));
     add('utilization', PERMISSIONS.TIMESHEET_READ, () => computeUtilization(null, range, totalHeads));
@@ -714,10 +804,8 @@ const NO_TASKS_FILTER = { _id: new Types.ObjectId('000000000000000000000000') };
 export const buildManagerAnalytics = async (
     caller: { id: Types.ObjectId; role: string; role_keys?: readonly string[] },
     held: Held,
-    rangeKey: DashboardRangeKey
+    range: ResolvedRange
 ): Promise<AnalyticsPayload> => {
-    const range = resolveDashboardRange(rangeKey);
-
     // Admins + Managers are org-wide. A Team Lead's dashboard is scoped to the
     // projects they belong to and the people in those projects, so they don't
     // see org-wide tasks/hours/attendance for projects they aren't on.
@@ -756,6 +844,7 @@ export const buildManagerAnalytics = async (
     });
     add('attendance_trend', PERMISSIONS.ATTENDANCE_READ_TEAM, () => computeAttendanceTrend(teamIds, range, headcount));
     add('leave_mix', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveMix(teamIds, range));
+    add('leave_status', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeLeaveRequests(teamIds, range));
     add('upcoming_leaves', PERMISSIONS.LEAVE_REQUEST_READ_TEAM, () => computeUpcomingLeaves(teamIds));
     add('hours_by_project', PERMISSIONS.TIMESHEET_READ, () => computeHoursByProject(teamIds, range));
     add('utilization', PERMISSIONS.TIMESHEET_READ, () => computeUtilization(teamIds, range, headcount));
@@ -768,9 +857,8 @@ export const buildManagerAnalytics = async (
 export const buildEmployeeAnalytics = async (
     userId: Types.ObjectId,
     held: Held,
-    rangeKey: DashboardRangeKey
+    range: ResolvedRange
 ): Promise<AnalyticsPayload> => {
-    const range = resolveDashboardRange(rangeKey);
     const self = [userId];
     const { add, settle } = sectionCollector(held);
 
@@ -792,9 +880,8 @@ export const buildEmployeeAnalytics = async (
 export const buildClientAnalytics = async (
     caller: ProjectCaller,
     held: Held,
-    rangeKey: DashboardRangeKey
+    range: ResolvedRange
 ): Promise<AnalyticsPayload> => {
-    const range = resolveDashboardRange(rangeKey);
     // Composed, not hard-coded: `client` is company-scoped and
     // `representative` is roster-scoped, and that rule lives in
     // project.service. A hard-coded filter here would silently return
@@ -818,7 +905,7 @@ export const buildClientAnalytics = async (
     );
     add('throughput', PERMISSIONS.TASK_READ, () =>
         projectIds.length === 0
-            ? Promise.resolve({ insight: throughputInsight(0, range.label), delta: null, data: [] })
+            ? Promise.resolve({ insight: throughputInsight(0, range.insight_label), delta: null, data: [] })
             : computeThroughput(taskScope, range)
     );
 

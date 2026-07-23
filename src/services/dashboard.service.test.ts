@@ -173,6 +173,11 @@ beforeEach(() => {
     loggerWarnMock.mockReset();
 
     initializeBalancesMock.mockResolvedValue(0);
+    // Default User.find → empty chainable stub. `computePendingLeaves` now
+    // hydrates requester names via User.find().select().lean(); with no
+    // recent rows this resolves to []. Tests needing specific users override
+    // with `mockReturnValueOnce`.
+    userFindMock.mockReturnValue(queryStub([]));
 });
 
 // ─── Admin dashboard ──────────────────────────────────────────────────────
@@ -305,9 +310,9 @@ describe('buildManagerDashboard', () => {
         expect(result.team_size).toBe(9);
         expect(result.pending_leave_approvals!.count).toBe(3);
 
-        // No reporting_manager_id resolution and no `user_id` team filter on the
-        // pending-count call — the scope is org-wide.
-        expect(userFindMock).not.toHaveBeenCalled();
+        // The pending count is org-wide — no `user_id` team filter on the
+        // pending-count query. (User.find IS now called, but only to hydrate
+        // the requester names on the recent rows — not to scope the count.)
         const filter = leaveCountMock.mock.calls[0][0] as { user_id?: unknown; status?: string };
         expect(filter.status).toBe(LEAVE_REQUEST_STATUSES.PENDING);
         expect(filter.user_id).toBeUndefined();

@@ -5,7 +5,7 @@ import { asyncHandler } from '../utils/async-handler.js';
 import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { PERMISSIONS } from '../constants/permissions.js';
-import { dashboardAnalyticsQuerySchema } from '../validators/dashboard.validator.js';
+import { dashboardAnalyticsQuerySchema, dashboardOverviewQuerySchema } from '../validators/dashboard.validator.js';
 
 /**
  * Dashboard routes (API_Contract.md §14, Step 13).
@@ -21,12 +21,20 @@ import { dashboardAnalyticsQuerySchema } from '../validators/dashboard.validator
  * return time-windowed section data. The `validate` middleware applies
  * the range schema and writes the coerced default ('month') back onto
  * `req.query` before the controller reads it.
+ *
+ * Overview routes (range-aware dashboard rework, Task 4): four
+ * `/overview` sub-routes accept `?from=&to=` (both `YYYY-MM-DD`,
+ * defaulted to the current month, validated `from <= to` and span
+ * <= 366 days by `dashboardOverviewQuerySchema`) and return the
+ * 3-summary-card + attendance/representatives/projects payload built
+ * by `services/dashboard-overview.service.ts`.
  */
 
 const router = Router();
 router.use(authenticate);
 
 const analyticsQuery = validate({ query: dashboardAnalyticsQuerySchema });
+const overviewQuery = validate({ query: dashboardOverviewQuerySchema });
 
 // Snapshot routes
 router.get('/admin', requirePermission(PERMISSIONS.DASHBOARD_ADMIN), asyncHandler(ctrl.getAdmin));
@@ -60,6 +68,32 @@ router.get(
     requirePermission(PERMISSIONS.DASHBOARD_CLIENT),
     analyticsQuery,
     asyncHandler(ctrl.getClientAnalytics)
+);
+
+// Overview routes (Task 4) — range-aware, `?from=&to=`.
+router.get(
+    '/admin/overview',
+    requirePermission(PERMISSIONS.DASHBOARD_ADMIN),
+    overviewQuery,
+    asyncHandler(ctrl.getAdminOverview)
+);
+router.get(
+    '/manager/overview',
+    requirePermission(PERMISSIONS.DASHBOARD_MANAGER),
+    overviewQuery,
+    asyncHandler(ctrl.getManagerOverview)
+);
+router.get(
+    '/employee/overview',
+    requirePermission(PERMISSIONS.DASHBOARD_EMPLOYEE),
+    overviewQuery,
+    asyncHandler(ctrl.getEmployeeOverview)
+);
+router.get(
+    '/client/overview',
+    requirePermission(PERMISSIONS.DASHBOARD_CLIENT),
+    overviewQuery,
+    asyncHandler(ctrl.getClientOverview)
 );
 
 export default router;

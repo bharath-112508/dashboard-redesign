@@ -20,6 +20,7 @@ import {
     TASK_PRIORITIES,
 } from '../constants/task.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
+import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import { TASK_ACTIVITY_TYPES } from '../constants/task-activity.js';
 import { recordAudit } from './audit.service.js';
 import { recordActivity } from './task-activity.service.js';
@@ -140,6 +141,19 @@ const assertValidStatus = (status: string, project: ProjectDocument): void => {
             { allowed: [...allowedStatusKeys(project)] }
         );
     }
+};
+
+/**
+ * Completion-timestamp transition for `completed_at`. Returns the value to
+ * write, or `undefined` when the done-state didn't change (leave it untouched).
+ * Stamped on not-done → done, cleared on done → not-done. `completed_at` is thus
+ * a true completion time, unlike `updated_at` which any edit re-dates.
+ */
+const completedAtOnTransition = (oldStatus: string | null, newStatus: string): Date | null | undefined => {
+    const wasDone = oldStatus === DEFAULT_DONE_TASK_STATUS_KEY;
+    const isDone = newStatus === DEFAULT_DONE_TASK_STATUS_KEY;
+    if (wasDone === isDone) return undefined;
+    return isDone ? new Date() : null;
 };
 
 const INTERNAL_ROLES: readonly string[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE];
@@ -458,6 +472,8 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
         backlog_rank: backlogRank,
         created_by: caller.id,
         updated_by: caller.id,
+        // A task created directly in the done column is "completed" now.
+        completed_at: status === DEFAULT_DONE_TASK_STATUS_KEY ? new Date() : null,
     });
 
     if (caller.audit) {
@@ -691,8 +707,10 @@ export const updateTask = async (
     let statusChanged = false;
     if (patch.status !== undefined && patch.status !== task.status) {
         assertValidStatus(patch.status, project);
+        const completedAt = completedAtOnTransition(prev.status, patch.status);
         task.status = patch.status;
         task.position = await nextPositionInColumn(task.project_id, patch.status);
+        if (completedAt !== undefined) task.completed_at = completedAt;
         statusChanged = true;
     }
 
@@ -964,8 +982,10 @@ export const reorderTask = async (
         // First close gap in source column so positions stay dense.
         const oldStatus = task.status;
         const oldPosition = task.position;
+        const completedAt = completedAtOnTransition(oldStatus, body.status);
         task.status = body.status;
         task.position = await nextPositionInColumn(task.project_id, body.status);
+        if (completedAt !== undefined) task.completed_at = completedAt;
         await task.save();
         await Task.updateMany(
             { project_id: task.project_id, status: oldStatus, position: { $gt: oldPosition } },

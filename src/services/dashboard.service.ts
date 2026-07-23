@@ -168,12 +168,20 @@ const computePendingLeaves = async (filter: Record<string, unknown>): Promise<Pe
         LeaveRequest.find(baseFilter).sort({ created_at: -1, _id: -1 }).limit(DASHBOARD_PENDING_LEAVES_PREVIEW),
     ]);
 
+    // Hydrate the requester's name so the card shows a person, not an id
+    // (matches `computeUpcomingLeaves`).
+    const users = await User.find({ _id: { $in: recentRows.map((r) => r.user_id) } })
+        .select({ full_name: 1 })
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    const nameById = new Map(users.map((u) => [u._id.toString(), u.full_name]));
+
     return {
         count,
         requires_additional_approval: additional,
         recent: recentRows.map((r) => ({
             id: r._id.toString(),
             user_id: r.user_id.toString(),
+            user_name: nameById.get(r.user_id.toString()) ?? null,
             requested_leave_type_id: r.requested_leave_type_id.toString(),
             start_date: r.start_date,
             end_date: r.end_date,
@@ -511,8 +519,11 @@ interface ClientDashboardPayload {
 
 /** Resolve the set of project IDs visible to this client-side caller. Every
  *  card below scopes its query through this list. The role → filter rule
- *  itself lives in `project.service` — never re-implement it here. */
-const resolveClientProjectIds = async (caller: ProjectCaller): Promise<Types.ObjectId[]> => {
+ *  itself lives in `project.service` — never re-implement it here.
+ *
+ *  Exported for reuse by `dashboard-overview.service.ts` (Task 3's client
+ *  overview builder) — same rule, don't duplicate the query. */
+export const resolveClientProjectIds = async (caller: ProjectCaller): Promise<Types.ObjectId[]> => {
     const rows = await Project.find(buildProjectVisibilityFilter(caller))
         .select({ _id: 1 })
         .lean<{ _id: Types.ObjectId }[]>();

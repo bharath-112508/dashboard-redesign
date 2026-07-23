@@ -150,6 +150,7 @@ const makeTask = (overrides: Record<string, unknown> = {}) => {
         backlog_rank: 0,
         created_by: new Types.ObjectId(),
         updated_by: null as Types.ObjectId | null,
+        completed_at: null as Date | null,
         created_at: new Date(),
         updated_at: new Date(),
         save: vi.fn(),
@@ -272,6 +273,32 @@ describe('createTask', () => {
 
         await svc.createTask({ ...baseInput(project._id), status: 'qa_passed' }, adminCaller());
         expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ status: 'qa_passed' }));
+    });
+
+    it('sets completed_at when created directly in the done column', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id, status: 'done' }));
+
+        await svc.createTask({ ...baseInput(project._id), status: 'done' }, adminCaller());
+
+        expect(taskCreateMock).toHaveBeenCalledWith(
+            expect.objectContaining({ status: 'done', completed_at: expect.any(Date) })
+        );
+    });
+
+    it('leaves completed_at null when created in a non-done column', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition(null);
+        stubFindOneForLastRank(null);
+        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
+
+        await svc.createTask(baseInput(project._id), adminCaller());
+
+        expect(taskCreateMock).toHaveBeenCalledWith(expect.objectContaining({ completed_at: null }));
     });
 
     it('assigns task_number from the atomically reserved counter', async () => {
@@ -533,6 +560,47 @@ describe('updateTask', () => {
         await expect(svc.updateTask(task._id, { status: 'nope' }, adminCaller())).rejects.toMatchObject({
             code: ERROR_CODES.TASK_INVALID_STATUS,
         });
+    });
+
+    it('stamps completed_at when a task enters the done column', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, status: 'in_progress', completed_at: null });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition({ position: 2 });
+
+        await svc.updateTask(task._id, { status: 'done' }, adminCaller());
+
+        expect(task.status).toBe('done');
+        expect(task.completed_at).toBeInstanceOf(Date);
+    });
+
+    it('clears completed_at when a done task is reopened', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, status: 'done', completed_at: new Date('2026-06-01') });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition({ position: 2 });
+
+        await svc.updateTask(task._id, { status: 'in_progress' }, adminCaller());
+
+        expect(task.status).toBe('in_progress');
+        expect(task.completed_at).toBeNull();
+    });
+
+    it('leaves completed_at untouched on a non-done status change', async () => {
+        const project = makeProject();
+        const stamp = new Date('2026-06-01');
+        // Edge case: a task somehow done with a stamp moving between two
+        // non-done columns must not touch the stamp (no done transition).
+        const task = makeTask({ project_id: project._id, status: 'to_do', completed_at: stamp });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForLastPosition({ position: 2 });
+
+        await svc.updateTask(task._id, { status: 'in_progress' }, adminCaller());
+
+        expect(task.completed_at).toBe(stamp);
     });
 });
 
