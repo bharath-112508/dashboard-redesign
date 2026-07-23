@@ -1,6 +1,7 @@
 import { Schema, model, Types, type Document, type Model } from 'mongoose';
 
 import { BASE_SCHEMA_OPTIONS, sensitiveToJSON } from './_base.js';
+import type { CompOffContribution } from './comp-off-ledger.model.js';
 import { COLLECTIONS } from '../constants/collections.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES, type UserStatus } from '../constants/user-statuses.js';
@@ -110,9 +111,14 @@ export interface UserDocument extends Document {
     push_notifications_enabled: boolean;
     comp_off_balance: number;
     /** Un-converted overtime remainder (minutes) for automatic comp-off
-     *  accrual. Every `overtime_hours_per_comp_off` accumulated earns 1
-     *  comp-off; the leftover carries here. See comp-off accrual job. */
+     *  accrual. Overtime accumulates across days; every half-step of the
+     *  threshold earns 0.5 comp-off, the leftover carries here. */
     comp_off_overtime_bank_minutes: number;
+    /** Provenance for the un-converted bank above: the (day, project, minutes)
+     *  overtime slices that haven't yet been minted into a comp-off lot. When
+     *  the bank crosses a step, these are attached to the granted lot's
+     *  `contributions` and cleared. */
+    comp_off_pending_contributions: CompOffContribution[];
 
     // Role-specific
     internal_profile?: InternalProfile;
@@ -233,6 +239,20 @@ const userSchema = new Schema<UserDocument>(
         push_notifications_enabled: { type: Boolean, required: true, default: true },
         comp_off_balance: { type: Number, default: 0, min: 0 },
         comp_off_overtime_bank_minutes: { type: Number, default: 0, min: 0 },
+        comp_off_pending_contributions: {
+            type: [
+                new Schema<CompOffContribution>(
+                    {
+                        date: { type: String, required: true },
+                        project_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.PROJECTS, default: null },
+                        project_name: { type: String, default: null },
+                        minutes: { type: Number, required: true, min: 0 },
+                    },
+                    { _id: false }
+                ),
+            ],
+            default: [],
+        },
 
         internal_profile: { type: internalProfileSchema, required: false },
         client_profile: { type: clientProfileSchema, required: false },

@@ -40,6 +40,29 @@ export interface CompOffAllocation {
     days: number;
 }
 
+/**
+ * One slice of billable-overtime work that fed an accrued comp-off lot: a
+ * (day, project, minutes) tuple. A lot minted from banked overtime across
+ * several days/projects carries several of these — the "accordion" the
+ * comp-off page expands to show *how* the day was earned.
+ */
+export interface CompOffContribution {
+    date: string; // YYYY-MM-DD worked
+    project_id: Types.ObjectId | null;
+    project_name: string | null;
+    minutes: number; // billable overtime minutes contributed
+}
+
+const compOffContributionSchema = new Schema<CompOffContribution>(
+    {
+        date: { type: String, required: true },
+        project_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.PROJECTS, default: null },
+        project_name: { type: String, default: null },
+        minutes: { type: Number, required: true, min: 0 },
+    },
+    { _id: false }
+);
+
 export interface CompOffLedgerDocument extends Document {
     _id: Types.ObjectId;
     user_id: Types.ObjectId;
@@ -57,10 +80,13 @@ export interface CompOffLedgerDocument extends Document {
     project_id: Types.ObjectId | null;
     /** Snapshot of the project name at grant time (for display without a join). */
     project_name: string | null;
-    /** Billable minutes that generated an accrued lot. */
+    /** Billable minutes that generated an accrued lot (sum of contributions). */
     source_minutes: number;
-    /** `YYYY-MM-DD` worked (accrual) — also the per-day idempotency key. */
+    /** `YYYY-MM-DD` of the day that TIPPED this lot over the step (accrual). */
     source_date: string | null;
+    /** The (day, project, minutes) overtime slices that built this lot. One
+     *  entry for a single-day grant; several for a banked-across-days grant. */
+    contributions: CompOffContribution[];
     /** `consumed` rows: the lots this consumption drew down, for refunds. */
     allocations: CompOffAllocation[];
     /** `consumed` rows: set when a cancel/reject reversed the consumption. */
@@ -89,6 +115,7 @@ const compOffLedgerSchema = new Schema<CompOffLedgerDocument>(
         project_name: { type: String, default: null },
         source_minutes: { type: Number, default: 0, min: 0 },
         source_date: { type: String, default: null },
+        contributions: { type: [compOffContributionSchema], default: [] },
         allocations: {
             type: [
                 new Schema<CompOffAllocation>(

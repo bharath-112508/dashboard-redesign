@@ -22,6 +22,7 @@ export const COLLECTIONS = {
     LEAVE_BALANCES: 'leave_balances',
     LEAVE_REQUESTS: 'leave_requests',
     COMP_OFF_LEDGER: 'comp_off_ledger',
+    COMP_OFF_ACCRUAL_DAYS: 'comp_off_accrual_days',
     SL_MONTHLY_FORFEITURES: 'sl_monthly_forfeitures',
 
     // Attendance

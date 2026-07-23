@@ -2,7 +2,12 @@ import { Types, type ClientSession } from 'mongoose';
 
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import { withTransaction } from '../utils/with-transaction.js';
-import { CompOffLedger, type CompOffAllocation, type CompOffLedgerDocument } from '../models/comp-off-ledger.model.js';
+import {
+    CompOffLedger,
+    type CompOffAllocation,
+    type CompOffContribution,
+    type CompOffLedgerDocument,
+} from '../models/comp-off-ledger.model.js';
 import { LeaveBalance, recomputeAvailable } from '../models/leave-balance.model.js';
 import { LeaveType } from '../models/leave-type.model.js';
 import { User } from '../models/user.model.js';
@@ -141,6 +146,7 @@ export interface CreateEarnedLotParams {
     project_name?: string | null;
     source_minutes?: number;
     source_date?: string | null;
+    contributions?: CompOffContribution[];
     remarks?: string;
     created_by?: Types.ObjectId | null;
     expires_at?: Date;
@@ -164,6 +170,7 @@ export const createEarnedLot = async (
         project_name: params.project_name ?? null,
         source_minutes: params.source_minutes ?? 0,
         source_date: params.source_date ?? null,
+        contributions: params.contributions ?? [],
         allocations: [],
         reversed_at: null,
         remarks: params.remarks ?? '',
