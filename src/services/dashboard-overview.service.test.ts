@@ -4,7 +4,6 @@ import { Types } from 'mongoose';
 import { ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { PROJECT_STATUSES } from '../constants/project.js';
-import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 
 /**
@@ -397,16 +396,19 @@ describe('buildAdminOverview', () => {
 describe('buildManagerOverview', () => {
     const caller = { id: new Types.ObjectId(), role: ROLES.TEAM_LEAD } as const;
 
-    it('org-wide for a MANAGER: internal headcount, all pending, org-wide attendance (no team scoping)', async () => {
+    // Distinguishes the two User.countDocuments call shapes: internal headcount
+    // ($in the four staff roles) → 11; clients ($in [CLIENT]) → 2; attendance
+    // total_internal_active ($nin the client-side roles) → 11.
+    const headcountByShape = (filter: Record<string, unknown>) => {
+        const role = filter?.role as { $in?: string[]; $nin?: string[] } | undefined;
+        if (role?.$in?.length === 1 && role.$in[0] === ROLES.CLIENT) return Promise.resolve(2);
+        return Promise.resolve(11);
+    };
+
+    it('org-wide for a MANAGER: internal + client headcount, org-wide attendance (no team scoping, no approvals tile)', async () => {
         const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER } as const;
         buildProjectVisibilityFilterMock.mockReturnValueOnce({});
-        // Two User.countDocuments hit userCountMock: internal headcount ($in
-        // roles) and attendance total_internal_active ($nin client-side roles).
-        userCountMock.mockImplementation((filter: Record<string, unknown>) => {
-            const roleFilter = filter?.role as { $in?: string[]; $nin?: string[] } | undefined;
-            return Promise.resolve(roleFilter?.$in ? 11 : 11);
-        });
-        leaveRequestCountMock.mockResolvedValueOnce(2);
+        userCountMock.mockImplementation(headcountByShape);
         projectAggregateMock.mockResolvedValueOnce([{ _id: PROJECT_STATUSES.ACTIVE, count: 11 }]);
         attendanceAggregateMock.mockResolvedValueOnce([{ _id: 'present', count: 8 }]);
         correctionCountMock.mockResolvedValueOnce(0);
@@ -415,22 +417,22 @@ describe('buildManagerOverview', () => {
 
         // A manager is org-wide — the team-lead scope resolver must NOT run.
         expect(resolveTeamLeadScopeMock).not.toHaveBeenCalled();
+        // Approvals are NOT a summary tile (they have their own "Leave approvals"
+        // card) — the third tile is Total Clients, and no leave query runs here.
         expect(out.summary).toEqual([
             { label: 'Team members', value: 11 },
             { label: 'My Projects', value: 11 },
-            { label: 'Leaves to approve', value: 2 },
+            { label: 'Total Clients', value: 2 },
         ]);
+        expect(leaveRequestCountMock).not.toHaveBeenCalled();
 
         // Headcount spans the four internal roles (no client-side roles).
-        const headcountCall = userCountMock.mock.calls.find((c) => (c[0].role as { $in?: string[] }).$in);
+        const headcountCall = userCountMock.mock.calls.find(
+            (c) => (c[0].role as { $in?: string[] }).$in && (c[0].role as { $in: string[] }).$in.length > 1
+        );
         expect(headcountCall?.[0].role.$in).toEqual(
             expect.arrayContaining([ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE])
         );
-
-        // Pending count is org-wide — no user_id scoping.
-        const pendingFilter = leaveRequestCountMock.mock.calls[0][0] as Record<string, unknown>;
-        expect(pendingFilter.status).toBe(LEAVE_REQUEST_STATUSES.PENDING);
-        expect(pendingFilter.user_id).toBeUndefined();
 
         // Attendance is org-wide — no user_id in the $match.
         const attendanceMatch = (attendanceAggregateMock.mock.calls[0][0] as Array<Record<string, unknown>>)[0]
@@ -438,16 +440,15 @@ describe('buildManagerOverview', () => {
         expect(attendanceMatch.user_id).toBeUndefined();
     });
 
-    it('scopes a TEAM LEAD to team members/projects/pending-approvals via buildProjectVisibilityFilter + resolveTeamLeadScope', async () => {
+    it('scopes a TEAM LEAD to team members/projects/attendance; Total Clients is org-wide', async () => {
         const memberIds = [new Types.ObjectId(), new Types.ObjectId(), new Types.ObjectId()];
         const filter = { member_ids: caller.id };
         buildProjectVisibilityFilterMock.mockReturnValueOnce(filter);
         resolveTeamLeadScopeMock.mockResolvedValueOnce({ projectIds: [], memberIds });
-        leaveRequestCountMock.mockResolvedValueOnce(2);
+        userCountMock.mockImplementation(headcountByShape);
         projectAggregateMock.mockResolvedValueOnce([{ _id: PROJECT_STATUSES.ACTIVE, count: 4 }]);
         attendanceAggregateMock.mockResolvedValueOnce([{ _id: 'present', count: 3 }]);
         correctionCountMock.mockResolvedValueOnce(0);
-        userCountMock.mockResolvedValueOnce(3); // total_internal_active
 
         const out = await overview.buildManagerOverview(caller, '2026-07-22', '2026-07-22');
 
@@ -457,16 +458,14 @@ describe('buildManagerOverview', () => {
         expect(out.summary).toEqual([
             { label: 'Team members', value: 3 },
             { label: 'My Projects', value: 4 },
-            { label: 'Leaves to approve', value: 2 },
+            { label: 'Total Clients', value: 2 },
         ]);
+        expect(leaveRequestCountMock).not.toHaveBeenCalled();
         expect(out.attendance).not.toBeNull();
         expect(out.representatives).toBeNull();
         expect(out.projects.total).toBe(4);
 
-        const pendingFilter = leaveRequestCountMock.mock.calls[0][0] as Record<string, unknown>;
-        expect(pendingFilter.status).toBe(LEAVE_REQUEST_STATUSES.PENDING);
-        expect(pendingFilter.user_id).toEqual({ $in: memberIds });
-
+        // Attendance stays team-scoped for a team lead.
         const attendancePipeline = attendanceAggregateMock.mock.calls[0][0] as Array<Record<string, unknown>>;
         const attendanceMatch = attendancePipeline[0].$match as Record<string, unknown>;
         expect(attendanceMatch.user_id).toEqual({ $in: memberIds });

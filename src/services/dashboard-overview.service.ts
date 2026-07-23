@@ -4,7 +4,6 @@ import { User } from '../models/user.model.js';
 import { AttendanceRecord } from '../models/attendance-record.model.js';
 import { AttendanceCorrectionRequest } from '../models/attendance-correction-request.model.js';
 import { Project } from '../models/project.model.js';
-import { LeaveRequest } from '../models/leave-request.model.js';
 import { Task } from '../models/task.model.js';
 import { buildProjectVisibilityFilter, type ProjectCaller } from './project.service.js';
 import { resolveTeamLeadScope } from './dashboard-analytics.service.js';
@@ -13,7 +12,6 @@ import { ROLES, type RoleType } from '../constants/roles.js';
 import { isAdminLike } from '../utils/role-check.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { PROJECT_STATUSES } from '../constants/project.js';
-import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
@@ -311,19 +309,20 @@ export const buildManagerOverview = async (
     // Admins + Managers are org-wide (same rule as the snapshot + analytics
     // builders); only a Team Lead is scoped to the members of the projects they
     // belong to. Previously this always team-scoped the manager, so the summary
-    // tiles disagreed with the rest of their own dashboard — "Team members 1 /
-    // Pending approvals 0" beside a "Team size 25 / Approvals 2" KPI strip.
+    // tiles disagreed with the rest of their own dashboard.
+    //
+    // Pending-leave approvals are intentionally NOT a summary tile: they already
+    // have a dedicated, richer "Leave approvals" card (names + dates + queue
+    // link). A second "Leaves to approve" tile showed the same number under a
+    // near-identical name — pure duplication. The third tile is Total Clients,
+    // a distinct point-in-time count shown nowhere else here.
     const orgWide = isAdminLike(caller) || caller.role === ROLES.MANAGER;
 
     if (orgWide) {
-        const [teamMembers, projects, pendingApprovals, attendance] = await Promise.all([
+        const [teamMembers, totalClients, projects, attendance] = await Promise.all([
             currentHeadcount([ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE]),
+            currentHeadcount([ROLES.CLIENT]),
             projectStatusFor(filter),
-            safeCard(
-                'overview.manager.pending_approvals',
-                () => LeaveRequest.countDocuments({ status: LEAVE_REQUEST_STATUSES.PENDING }),
-                0
-            ),
             attendanceOverviewFor(from, to, null),
         ]);
 
@@ -333,7 +332,7 @@ export const buildManagerOverview = async (
             summary: [
                 { label: 'Team members', value: teamMembers },
                 { label: 'My Projects', value: projects.total },
-                { label: 'Leaves to approve', value: pendingApprovals },
+                { label: 'Total Clients', value: totalClients },
             ],
             attendance,
             representatives: null,
@@ -341,28 +340,15 @@ export const buildManagerOverview = async (
         };
     }
 
-    // Team lead — scope to the people who share a project with them. The pending
-    // queue excludes the lead's own requests (they can't approve their own),
-    // mirroring `buildManagerDashboard`'s team-lead branch.
+    // Team lead — scope to the people who share a project with them.
     const { memberIds } = await safeCard('overview.manager.team_scope', () => resolveTeamLeadScope(caller.id), {
         projectIds: [] as Types.ObjectId[],
         memberIds: [] as Types.ObjectId[],
     });
-    const reviewIds = memberIds.filter((id) => !id.equals(caller.id));
 
-    const [projects, pendingApprovals, attendance] = await Promise.all([
+    const [totalClients, projects, attendance] = await Promise.all([
+        currentHeadcount([ROLES.CLIENT]),
         projectStatusFor(filter),
-        safeCard(
-            'overview.manager.pending_approvals',
-            () =>
-                reviewIds.length === 0
-                    ? Promise.resolve(0)
-                    : LeaveRequest.countDocuments({
-                          status: LEAVE_REQUEST_STATUSES.PENDING,
-                          user_id: { $in: reviewIds },
-                      }),
-            0
-        ),
         attendanceOverviewFor(from, to, memberIds),
     ]);
 
@@ -372,7 +358,7 @@ export const buildManagerOverview = async (
         summary: [
             { label: 'Team members', value: memberIds.length },
             { label: 'My Projects', value: projects.total },
-            { label: 'Leaves to approve', value: pendingApprovals },
+            { label: 'Total Clients', value: totalClients },
         ],
         attendance,
         representatives: null,
