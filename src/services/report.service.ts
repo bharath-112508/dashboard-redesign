@@ -352,25 +352,54 @@ export const buildBillingReport = async (query: BillingReportQuery): Promise<Bil
 
 // ─── /reports/utilization ────────────────────────────────────────────────
 
+/** Per-project slice of a user's logged time. `project: null` = the "Unassigned" bucket. */
+interface UtilizationProjectRow {
+    project: { id: string; name: string } | null;
+    billable_minutes: number;
+    non_billable_minutes: number;
+    /** billable + non-billable, filtered by the `billable` query param. */
+    total_minutes: number;
+    /** total_minutes ÷ the user's filtered total, two decimals. 0 when the user has no logged time. */
+    share_pct: number;
+}
+
 interface UtilizationRow {
     user: { id: string; full_name: string; role: string };
     logged_billable_minutes: number;
     logged_non_billable_minutes: number;
+    /** billable + non-billable, filtered by the `billable` query param. */
+    logged_total_minutes: number;
     expected_minutes: number;
     /** logged_total / expected — clamped to two decimal places. Null when expected is 0. */
     utilization_pct: number | null;
+    /** Per-project breakdown, sorted by total_minutes desc. */
+    projects: UtilizationProjectRow[];
 }
 
 export interface UtilizationReportResult {
     from_date: string;
     to_date: string;
     expected_per_user_minutes: number;
+    /** Echoes the applied filter so the FE can label the utilization column. */
+    billable: 'all' | 'billable' | 'non_billable';
     rows: UtilizationRow[];
 }
+
+/**
+ * Picks the minute count that counts toward utilization given the
+ * `billable` filter. Single source of truth so the per-user total, the
+ * per-project total, and the utilization % never drift apart.
+ */
+const filteredMinutes = (billable: number, nonBillable: number, mode: 'all' | 'billable' | 'non_billable'): number => {
+    if (mode === 'billable') return billable;
+    if (mode === 'non_billable') return nonBillable;
+    return billable + nonBillable;
+};
 
 export const buildUtilizationReport = async (query: UtilizationReportQuery): Promise<UtilizationReportResult> => {
     // `team_id` accepted by the validator but ignored by the service —
     // no `team` collection exists in v1. Documented at the validator.
+    const billableMode = query.billable ?? 'all';
     const settings = await getOrInitSettings();
     const dailyHours = Number.isFinite(settings.timesheet.daily_warn_threshold_hours)
         ? settings.timesheet.daily_warn_threshold_hours
@@ -387,7 +416,12 @@ export const buildUtilizationReport = async (query: UtilizationReportQuery): Pro
         status: USER_STATUSES.ACTIVE,
         role: { $in: [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE] },
     };
-    if (query.user_id) userFilter._id = new Types.ObjectId(query.user_id);
+    // Union `user_id` (single, back-compat) with `user_ids` (multi). Empty
+    // → no `_id` narrowing → all internal users (the default).
+    const selectedIds = new Set<string>([...(query.user_ids ?? []), ...(query.user_id ? [query.user_id] : [])]);
+    if (selectedIds.size > 0) {
+        userFilter._id = { $in: Array.from(selectedIds).map((id) => new Types.ObjectId(id)) };
+    }
 
     const users = await User.find(userFilter)
         .select('_id full_name role')
@@ -399,13 +433,17 @@ export const buildUtilizationReport = async (query: UtilizationReportQuery): Pro
             from_date: query.from_date,
             to_date: query.to_date,
             expected_per_user_minutes: expectedPerUserMinutes,
+            billable: billableMode,
             rows: [],
         };
     }
 
     const userIds = users.map((u) => u._id);
-    const totals = await TimesheetEntry.aggregate<{
-        _id: Types.ObjectId;
+    // Group by (user, project) so each user row can carry a per-project
+    // breakdown. `project_id: null` (general/non-project time) groups
+    // into its own bucket, rendered as "Unassigned".
+    const groups = await TimesheetEntry.aggregate<{
+        _id: { user_id: Types.ObjectId; project_id: Types.ObjectId | null };
         billable_minutes: number;
         non_billable_minutes: number;
     }>([
@@ -417,27 +455,73 @@ export const buildUtilizationReport = async (query: UtilizationReportQuery): Pro
         },
         {
             $group: {
-                _id: '$user_id',
+                _id: { user_id: '$user_id', project_id: '$project_id' },
                 billable_minutes: { $sum: '$billable_total_minutes' },
                 non_billable_minutes: { $sum: '$non_billable_total_minutes' },
             },
         },
     ]);
-    const totalsByUser = new Map(totals.map((t) => [t._id.toString(), t]));
+
+    // Hydrate project names in one batched lookup over the distinct ids.
+    const projectIds = Array.from(
+        new Set(
+            groups
+                .map((g) => g._id.project_id)
+                .filter((p): p is Types.ObjectId => Boolean(p))
+                .map((p) => p.toString())
+        )
+    ).map((id) => new Types.ObjectId(id));
+    const projectRows = projectIds.length
+        ? await Project.find({ _id: { $in: projectIds } })
+              .select('_id name')
+              .lean<{ _id: Types.ObjectId; name: string }[]>()
+        : [];
+    const projectNameById = new Map(projectRows.map((p) => [p._id.toString(), p.name]));
+
+    // Bucket the (user, project) groups under each user.
+    const groupsByUser = new Map<string, typeof groups>();
+    for (const g of groups) {
+        const key = g._id.user_id.toString();
+        const list = groupsByUser.get(key) ?? [];
+        list.push(g);
+        groupsByUser.set(key, list);
+    }
 
     const rows: UtilizationRow[] = users.map((u) => {
-        const t = totalsByUser.get(u._id.toString());
-        const billable = t?.billable_minutes ?? 0;
-        const nonBillable = t?.non_billable_minutes ?? 0;
-        const totalLogged = billable + nonBillable;
+        const userGroups = groupsByUser.get(u._id.toString()) ?? [];
+        const billable = userGroups.reduce((sum, g) => sum + g.billable_minutes, 0);
+        const nonBillable = userGroups.reduce((sum, g) => sum + g.non_billable_minutes, 0);
+        const totalLogged = filteredMinutes(billable, nonBillable, billableMode);
         const utilization =
             expectedPerUserMinutes > 0 ? Math.round((totalLogged / expectedPerUserMinutes) * 10000) / 100 : null;
+
+        const projects: UtilizationProjectRow[] = userGroups
+            .map((g) => {
+                const projTotal = filteredMinutes(g.billable_minutes, g.non_billable_minutes, billableMode);
+                const projectId = g._id.project_id ? g._id.project_id.toString() : null;
+                return {
+                    project: projectId
+                        ? { id: projectId, name: projectNameById.get(projectId) ?? 'Unknown project' }
+                        : null,
+                    billable_minutes: g.billable_minutes,
+                    non_billable_minutes: g.non_billable_minutes,
+                    total_minutes: projTotal,
+                    share_pct: totalLogged > 0 ? Math.round((projTotal / totalLogged) * 10000) / 100 : 0,
+                };
+            })
+            // Drop projects that contribute nothing under the current filter
+            // (e.g. billable-only view hides a purely non-billable project).
+            .filter((p) => p.total_minutes > 0)
+            .sort((a, b) => b.total_minutes - a.total_minutes);
+
         return {
             user: { id: u._id.toString(), full_name: u.full_name, role: u.role },
             logged_billable_minutes: billable,
             logged_non_billable_minutes: nonBillable,
+            logged_total_minutes: totalLogged,
             expected_minutes: expectedPerUserMinutes,
             utilization_pct: utilization,
+            projects,
         };
     });
 
@@ -445,6 +529,7 @@ export const buildUtilizationReport = async (query: UtilizationReportQuery): Pro
         from_date: query.from_date,
         to_date: query.to_date,
         expected_per_user_minutes: expectedPerUserMinutes,
+        billable: billableMode,
         rows,
     };
 };

@@ -42,6 +42,23 @@ export type BillingReportQuery = z.infer<typeof billingReportQuerySchema>;
 
 // ─── GET /reports/utilization ───────────────────────────────────────────
 
+/**
+ * Multi-user filter. Accepts BOTH shapes so one schema serves the sync
+ * GET and the async export POST:
+ *   - query string  → `?user_ids=a,b,c` (comma-joined; query strings have
+ *     no native array type, and the FE's `buildSearch` flattens arrays to
+ *     `key=value`).
+ *   - JSON body      → `"user_ids": ["a","b"]` (the export POST sends
+ *     `filters` as JSON, where an array survives the round-trip).
+ * Empty/omitted → `undefined` (all internal users). Malformed ids 400.
+ */
+const userIdsSchema = z.preprocess((val) => {
+    if (val === undefined || val === null) return undefined;
+    const raw = Array.isArray(val) ? val : String(val).split(',');
+    const cleaned = raw.map((s) => String(s).trim()).filter(Boolean);
+    return cleaned.length ? cleaned : undefined;
+}, z.array(objectIdSchema).optional());
+
 export const utilizationReportQuerySchema = z
     .object({
         from_date: isoDateSchema,
@@ -50,7 +67,14 @@ export const utilizationReportQuerySchema = z
         // v1 — accept and ignore so the FE shape stays stable. The
         // service drops it; documented in `report.service`.
         team_id: objectIdSchema.optional(),
+        // Single-user filter kept for back-compat; `user_ids` is the
+        // multi-select form. When both arrive the service unions them.
         user_id: objectIdSchema.optional(),
+        user_ids: userIdsSchema,
+        // Which hours count toward the utilization %. `billable` = classic
+        // billable utilization; `non_billable` = the inverse; `all` = both.
+        // "Neither" is impossible — the FE disables unchecking the last box.
+        billable: z.enum(['all', 'billable', 'non_billable']).default('all'),
     })
     .refine(dateRangeRefine, { message: dateRangeMessage });
 export type UtilizationReportQuery = z.infer<typeof utilizationReportQuerySchema>;

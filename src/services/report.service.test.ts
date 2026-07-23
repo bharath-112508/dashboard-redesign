@@ -32,6 +32,7 @@ const {
     leaveTypeFindMock,
     userFindMock,
     projectFindByIdMock,
+    projectFindMock,
     holidayFindMock,
     taskFindMock,
     settingsLoadMock,
@@ -44,6 +45,7 @@ const {
     leaveTypeFindMock: vi.fn(),
     userFindMock: vi.fn(),
     projectFindByIdMock: vi.fn(),
+    projectFindMock: vi.fn(),
     holidayFindMock: vi.fn(),
     taskFindMock: vi.fn(),
     settingsLoadMock: vi.fn(),
@@ -89,7 +91,7 @@ vi.mock('../models/user.model.js', () => ({
 }));
 
 vi.mock('../models/project.model.js', () => ({
-    Project: { findById: projectFindByIdMock },
+    Project: { findById: projectFindByIdMock, find: projectFindMock },
 }));
 
 vi.mock('../models/holiday.model.js', () => ({
@@ -328,6 +330,17 @@ describe('buildBillingReport', () => {
 // ─── Utilization report ──────────────────────────────────────────────────
 
 describe('buildUtilizationReport', () => {
+    // Post-multi-user/per-project: the query carries `user_ids` + `billable`
+    // (the validator defaults billable → 'all'). This helper mirrors that so
+    // tests read like a real request.
+    const utilQuery = (overrides: Record<string, unknown> = {}) => ({
+        from_date: '2026-05-04',
+        to_date: '2026-05-08',
+        user_ids: undefined as string[] | undefined,
+        billable: 'all' as 'all' | 'billable' | 'non_billable',
+        ...overrides,
+    });
+
     it('expected = working_days × daily_threshold × 60 (Mon–Fri minus holidays)', async () => {
         const userId = new Types.ObjectId();
         // 2026-05-01 (Fri) → 2026-05-08 (Fri) inclusive = 8 days.
@@ -337,13 +350,10 @@ describe('buildUtilizationReport', () => {
 
         userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna', role: ROLES.EMPLOYEE }]));
         timesheetAggregateMock.mockResolvedValueOnce([
-            { _id: userId, billable_minutes: 1200, non_billable_minutes: 0 },
+            { _id: { user_id: userId, project_id: null }, billable_minutes: 1200, non_billable_minutes: 0 },
         ]);
 
-        const result = await svc.buildUtilizationReport({
-            from_date: '2026-05-01',
-            to_date: '2026-05-08',
-        });
+        const result = await svc.buildUtilizationReport(utilQuery({ from_date: '2026-05-01', to_date: '2026-05-08' }));
 
         // 5 working days × 8 hours × 60 min = 2400.
         expect(result.expected_per_user_minutes).toBe(2400);
@@ -351,6 +361,8 @@ describe('buildUtilizationReport', () => {
         // 1200 / 2400 = 50.00.
         expect(result.rows[0].utilization_pct).toBe(50);
         expect(result.rows[0].logged_billable_minutes).toBe(1200);
+        expect(result.rows[0].logged_total_minutes).toBe(1200);
+        expect(result.billable).toBe('all');
     });
 
     it('rounds utilization_pct to two decimals', async () => {
@@ -359,13 +371,10 @@ describe('buildUtilizationReport', () => {
         userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna', role: ROLES.EMPLOYEE }]));
         // Mon–Fri (5 working days) × 8h × 60 = 2400 expected. Logged 1234.
         timesheetAggregateMock.mockResolvedValueOnce([
-            { _id: userId, billable_minutes: 1000, non_billable_minutes: 234 },
+            { _id: { user_id: userId, project_id: null }, billable_minutes: 1000, non_billable_minutes: 234 },
         ]);
 
-        const result = await svc.buildUtilizationReport({
-            from_date: '2026-05-04', // Monday
-            to_date: '2026-05-08', // Friday
-        });
+        const result = await svc.buildUtilizationReport(utilQuery());
 
         // 1234 / 2400 = 0.51416..., × 100 = 51.4166..., rounded to 51.42.
         expect(result.rows[0].utilization_pct).toBeCloseTo(51.42, 2);
@@ -377,23 +386,97 @@ describe('buildUtilizationReport', () => {
         userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna', role: ROLES.EMPLOYEE }]));
         timesheetAggregateMock.mockResolvedValueOnce([]);
         // Sat–Sun = 0 working days.
-        const result = await svc.buildUtilizationReport({
-            from_date: '2026-05-09',
-            to_date: '2026-05-10',
-        });
+        const result = await svc.buildUtilizationReport(utilQuery({ from_date: '2026-05-09', to_date: '2026-05-10' }));
         expect(result.expected_per_user_minutes).toBe(0);
         expect(result.rows[0].utilization_pct).toBeNull();
     });
 
     it('returns an empty rows[] when no users match the role filter', async () => {
         userFindMock.mockReturnValueOnce(queryStub([]));
-        const result = await svc.buildUtilizationReport({
-            from_date: '2026-05-04',
-            to_date: '2026-05-08',
-        });
+        const result = await svc.buildUtilizationReport(utilQuery());
         expect(result.rows).toEqual([]);
         // No timesheet aggregation when there are no users to roll up.
         expect(timesheetAggregateMock).not.toHaveBeenCalled();
+    });
+
+    it('splits a user across projects with share_pct summing to ~100 and hydrates project names', async () => {
+        const userId = new Types.ObjectId();
+        const apollo = new Types.ObjectId();
+        const gemini = new Types.ObjectId();
+        holidayFindMock.mockReturnValueOnce(queryStub([]));
+        userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna', role: ROLES.EMPLOYEE }]));
+        // 900 on Apollo, 300 on Gemini, 300 unassigned → 1500 total.
+        timesheetAggregateMock.mockResolvedValueOnce([
+            { _id: { user_id: userId, project_id: apollo }, billable_minutes: 600, non_billable_minutes: 300 },
+            { _id: { user_id: userId, project_id: gemini }, billable_minutes: 300, non_billable_minutes: 0 },
+            { _id: { user_id: userId, project_id: null }, billable_minutes: 0, non_billable_minutes: 300 },
+        ]);
+        projectFindMock.mockReturnValueOnce(
+            queryStub([
+                { _id: apollo, name: 'Apollo' },
+                { _id: gemini, name: 'Gemini' },
+            ])
+        );
+
+        const result = await svc.buildUtilizationReport(utilQuery());
+
+        const row = result.rows[0];
+        expect(row.logged_total_minutes).toBe(1500);
+        // Sorted by total_minutes desc: Apollo (900), then Gemini/Unassigned (300 each).
+        expect(row.projects).toHaveLength(3);
+        expect(row.projects[0].project).toEqual({ id: apollo.toString(), name: 'Apollo' });
+        expect(row.projects[0].total_minutes).toBe(900);
+        expect(row.projects[0].share_pct).toBe(60); // 900/1500
+        // The null-project group renders as an "Unassigned" bucket (project: null).
+        expect(row.projects.some((p) => p.project === null)).toBe(true);
+        const shareSum = row.projects.reduce((s, p) => s + p.share_pct, 0);
+        expect(shareSum).toBeCloseTo(100, 1);
+    });
+
+    it('billable=billable excludes non-billable minutes from totals, utilization, and project rows', async () => {
+        const userId = new Types.ObjectId();
+        const apollo = new Types.ObjectId();
+        holidayFindMock.mockReturnValueOnce(queryStub([]));
+        userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna', role: ROLES.EMPLOYEE }]));
+        // Apollo: 600 billable + 300 non-billable. Chores: 0 billable + 240 non-billable.
+        const chores = new Types.ObjectId();
+        timesheetAggregateMock.mockResolvedValueOnce([
+            { _id: { user_id: userId, project_id: apollo }, billable_minutes: 600, non_billable_minutes: 300 },
+            { _id: { user_id: userId, project_id: chores }, billable_minutes: 0, non_billable_minutes: 240 },
+        ]);
+        projectFindMock.mockReturnValueOnce(
+            queryStub([
+                { _id: apollo, name: 'Apollo' },
+                { _id: chores, name: 'Chores' },
+            ])
+        );
+
+        const result = await svc.buildUtilizationReport(utilQuery({ billable: 'billable' }));
+
+        const row = result.rows[0];
+        expect(result.billable).toBe('billable');
+        // Only billable minutes count now: 600 total, not 900+240.
+        expect(row.logged_total_minutes).toBe(600);
+        expect(row.utilization_pct).toBe(25); // 600 / 2400
+        // Raw sub-values are still surfaced for display.
+        expect(row.logged_billable_minutes).toBe(600);
+        expect(row.logged_non_billable_minutes).toBe(540);
+        // The purely non-billable "Chores" project drops out of the breakdown.
+        expect(row.projects).toHaveLength(1);
+        expect(row.projects[0].project?.name).toBe('Apollo');
+        expect(row.projects[0].total_minutes).toBe(600);
+        expect(row.projects[0].share_pct).toBe(100);
+    });
+
+    it('narrows the user filter to the union of user_ids when provided', async () => {
+        const a = new Types.ObjectId();
+        const b = new Types.ObjectId();
+        holidayFindMock.mockReturnValueOnce(queryStub([]));
+        userFindMock.mockReturnValueOnce(queryStub([]));
+        await svc.buildUtilizationReport(utilQuery({ user_ids: [a.toString(), b.toString()] }));
+        const filterArg = userFindMock.mock.calls[0][0] as { _id?: { $in: Types.ObjectId[] } };
+        expect(filterArg._id?.$in).toHaveLength(2);
+        expect(filterArg._id?.$in.map((id) => id.toString())).toEqual([a.toString(), b.toString()]);
     });
 });
 
