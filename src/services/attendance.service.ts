@@ -14,7 +14,7 @@ import {
 import { OfficeLocation } from '../models/office-location.model.js';
 import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { User } from '../models/user.model.js';
-import { ROLES, type RoleType } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES, ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
@@ -720,12 +720,12 @@ const listAttendanceRoster = async (
         AttendanceRecord.find(recordFilter).sort({ _id: -1 }),
         User.find({
             status: USER_STATUSES.ACTIVE,
-            role: { $ne: ROLES.CLIENT },
+            role: { $nin: CLIENT_SIDE_ROLES },
             ...(userFilter ? { _id: userFilter } : {}),
         })
             .select('_id full_name')
             .lean<{ _id: Types.ObjectId; full_name: string }[]>(),
-        User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } }),
+        User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES } }),
     ]);
 
     // Real rows (with user display). Records for non-employees (e.g. a client
@@ -812,7 +812,7 @@ export const listAttendance = async (
         // Active non-client headcount — the canonical "workforce" denominator
         // shared with the dashboard's attendance card. Clients are excluded;
         // any client attendance still surfaces as its own row in `data`.
-        User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } }),
+        User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES } }),
     ]);
 
     const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
@@ -1427,7 +1427,7 @@ export const getTodayAttendanceSummary = async (rosterCap: number): Promise<Toda
     const local_date = todayLocalDate();
 
     const [users, rows] = await Promise.all([
-        User.find({ status: USER_STATUSES.ACTIVE, role: { $ne: ROLES.CLIENT } })
+        User.find({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES } })
             .select('_id full_name')
             .lean<{ _id: Types.ObjectId; full_name: string }[]>(),
         AttendanceRecord.find({ local_date })

@@ -20,3 +20,12 @@ export const ROLES = {
 } as const;
 
 export type RoleType = (typeof ROLES)[keyof typeof ROLES];
+
+/**
+ * The client-side roles — external people who belong to a client company, not
+ * the internal workforce. Exclude these anywhere you count/list "staff" (e.g.
+ * the team-attendance roster + workforce headcounts) so client-side people
+ * don't leak into staff-only surfaces. Adding a new client-side role here fixes
+ * every consumer at once.
+ */
+export const CLIENT_SIDE_ROLES: RoleType[] = [ROLES.CLIENT, ROLES.REPRESENTATIVE];

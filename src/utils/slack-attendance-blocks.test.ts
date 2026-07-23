@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
     SLACK_ACTION_ATTENDANCE_CHECK_IN,
     SLACK_ACTION_ATTENDANCE_CHECK_OUT,
+    SLACK_ACTION_BREAK_START_LUNCH,
+    SLACK_ACTION_BREAK_START_TEA,
     SLACK_ACTION_BREAK_START_OTHER,
     SLACK_ACTION_BREAK_END,
 } from '../constants/slack.js';
@@ -41,7 +43,7 @@ describe('buildAttendanceHomeView', () => {
         expect(actionIds(view)).toEqual([SLACK_ACTION_ATTENDANCE_CHECK_IN]);
     });
 
-    it('shows a single Start break + Check Out when a segment is open (no active break)', () => {
+    it('shows Lunch / Tea / Break + Check Out when a segment is open (no active break)', () => {
         const record = {
             segments: [{ check_in: { time: inAt }, check_out: null, breaks: [] }],
             total_worked_minutes: 0,
@@ -49,7 +51,11 @@ describe('buildAttendanceHomeView', () => {
         const view = buildAttendanceHomeView(record, 'Raj') as { blocks: Array<Record<string, unknown>> };
         const ids = actionIds(view);
         const breakStarts = ids.filter((id) => id.startsWith('break_start'));
-        expect(breakStarts).toEqual([SLACK_ACTION_BREAK_START_OTHER]);
+        expect(breakStarts).toEqual([
+            SLACK_ACTION_BREAK_START_LUNCH,
+            SLACK_ACTION_BREAK_START_TEA,
+            SLACK_ACTION_BREAK_START_OTHER,
+        ]);
         expect(ids).toContain(SLACK_ACTION_ATTENDANCE_CHECK_OUT);
         expect(ids).not.toContain(SLACK_ACTION_BREAK_END);
     });
@@ -95,17 +101,16 @@ describe('attendanceHeaderBlocks', () => {
 });
 
 describe('attendanceHeaderBlocks — break sub-UI', () => {
-    it('shows a single Start break button when checked in and not on a break', () => {
+    it('shows Lunch / Tea / Break buttons when checked in and not on a break', () => {
         const rec = {
             segments: [{ check_in: { time: new Date() }, check_out: null, breaks: [] }],
             total_break_minutes: 0,
         };
         const blocks = attendanceHeaderBlocks(rec as never, 'Vivek');
         const s = JSON.stringify(blocks);
-        expect(s).toContain('Start break');
+        expect(s).toContain('break_start_lunch');
+        expect(s).toContain('break_start_tea');
         expect(s).toContain('break_start_other');
-        expect(s).not.toContain('break_start_lunch');
-        expect(s).not.toContain('break_start_tea');
         expect(s).not.toContain('break_end');
     });
 
@@ -128,25 +133,33 @@ describe('attendanceHeaderBlocks — break sub-UI', () => {
         expect(s).not.toContain('(*tea*)');
     });
 
-    it('lists break sessions with times + duration', () => {
+    it('lists break sessions with type label, times + duration', () => {
         const bIn = new Date('2026-06-16T05:33:00.000Z'); // 11:03 IST
         const bStart = new Date('2026-06-16T08:30:00.000Z'); // 14:00 IST
         const bEnd = new Date('2026-06-16T08:55:00.000Z'); // 14:25 IST
+        const lunchStart = new Date('2026-06-16T07:00:00.000Z'); // 12:30 IST
+        const lunchEnd = new Date('2026-06-16T07:30:00.000Z'); // 13:00 IST
         const rec = {
             segments: [
                 {
                     check_in: { time: bIn },
                     check_out: null,
-                    breaks: [{ break_type: 'other', start: { time: bStart }, end: { time: bEnd } }],
+                    breaks: [
+                        { break_type: 'lunch', start: { time: lunchStart }, end: { time: lunchEnd } },
+                        { break_type: 'other', start: { time: bStart }, end: { time: bEnd } },
+                    ],
                 },
             ],
-            total_break_minutes: 25,
+            total_break_minutes: 55,
         };
         const blocks = attendanceHeaderBlocks(rec as never, 'Vivek');
         const s = JSON.stringify(blocks);
         expect(s).toContain('Break sessions');
         expect(s).toContain('14:00 → 14:25');
         expect(s).toContain('0h 25m');
+        // Each session is tagged with its type (other → "Break").
+        expect(s).toContain('*Lunch*');
+        expect(s).toContain('*Break*');
     });
 });
 

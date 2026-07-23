@@ -1,6 +1,8 @@
 import {
     SLACK_ACTION_ATTENDANCE_CHECK_IN,
     SLACK_ACTION_ATTENDANCE_CHECK_OUT,
+    SLACK_ACTION_BREAK_START_LUNCH,
+    SLACK_ACTION_BREAK_START_TEA,
     SLACK_ACTION_BREAK_START_OTHER,
     SLACK_ACTION_BREAK_END,
 } from '../constants/slack.js';
@@ -76,15 +78,29 @@ const checkOutButton = () => ({
     ],
 });
 
-const startBreakButton = () => ({
+/** Display metadata per break type — emoji + label for buttons and session lines. */
+const BREAK_META: Record<string, { emoji: string; label: string; action: string }> = {
+    lunch: { emoji: ':fork_and_knife:', label: 'Lunch', action: SLACK_ACTION_BREAK_START_LUNCH },
+    tea: { emoji: ':tea:', label: 'Tea', action: SLACK_ACTION_BREAK_START_TEA },
+    other: { emoji: ':coffee:', label: 'Break', action: SLACK_ACTION_BREAK_START_OTHER },
+};
+const breakMeta = (type?: string | null) => BREAK_META[type ?? 'other'] ?? BREAK_META.other;
+
+/**
+ * Break-start controls — one button per type (Lunch / Tea / Break) so the user
+ * picks the kind of break, mirroring the web Today page. Each `action_id` is
+ * already handled by the Slack interactive controller.
+ */
+const startBreakButtons = () => ({
     type: 'actions',
-    elements: [
-        {
+    elements: (['lunch', 'tea', 'other'] as const).map((type) => {
+        const { label, action } = BREAK_META[type];
+        return {
             type: 'button',
-            text: { type: 'plain_text', text: 'Start break', emoji: true },
-            action_id: SLACK_ACTION_BREAK_START_OTHER,
-        },
-    ],
+            text: { type: 'plain_text', text: label, emoji: true },
+            action_id: action,
+        };
+    }),
 });
 
 const endBreakButton = () => ({
@@ -110,9 +126,9 @@ const segmentLines = (segments: Segment[]): string =>
         .join('\n');
 
 /**
- * Render today's break sessions across all segments as `:coffee:` lines:
- * `:coffee: 14:00 → 14:25 · 0h 25m` for a closed break, `:coffee: 14:00 → now`
- * for an ongoing one. Returns null when there are no breaks.
+ * Render today's break sessions across all segments, each tagged with its
+ * type: `:fork_and_knife: *Lunch* 14:00 → 14:25 · 0h 25m` for a closed break,
+ * `:tea: *Tea* 14:00 → now` for an ongoing one. Returns null when no breaks.
  */
 const breakSessionLines = (segments: Segment[]): string | null => {
     const lines = segments
@@ -120,10 +136,11 @@ const breakSessionLines = (segments: Segment[]): string | null => {
         .map((b) => {
             const st = toDate(b.start?.time);
             if (!st) return null;
+            const { emoji, label } = breakMeta(b.break_type);
             const en = toDate(b.end?.time);
             return en
-                ? `:coffee: ${formatTimeIST(st)} → ${formatTimeIST(en)} · ${formatDuration((en.getTime() - st.getTime()) / 60000)}`
-                : `:coffee: ${formatTimeIST(st)} → now`;
+                ? `${emoji} *${label}* ${formatTimeIST(st)} → ${formatTimeIST(en)} · ${formatDuration((en.getTime() - st.getTime()) / 60000)}`
+                : `${emoji} *${label}* ${formatTimeIST(st)} → now`;
         })
         .filter((l): l is string => l !== null);
     return lines.length > 0 ? lines.join('\n') : null;
@@ -160,7 +177,7 @@ export const attendanceHeaderBlocks = (
             blocks.push(endBreakButton());
         } else {
             blocks.push(section(`:coffee: Break today: *${formatDuration(totalBreak)}*`));
-            blocks.push(startBreakButton());
+            blocks.push(startBreakButtons());
         }
         if (breakSessions) blocks.push(section(`*Break sessions*\n${breakSessions}`));
         blocks.push(checkOutButton());
