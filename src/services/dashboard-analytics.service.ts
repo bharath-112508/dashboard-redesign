@@ -478,8 +478,10 @@ export interface ThroughputSection {
     data: { date: string; count: number }[];
 }
 
+// Throughput buckets a completion into the IST day it actually happened —
+// `completed_at`, not `updated_at` (which any later edit would re-date).
 const istDayExpr = {
-    $dateToString: { format: '%Y-%m-%d', date: '$updated_at', timezone: DEFAULT_TIMEZONE },
+    $dateToString: { format: '%Y-%m-%d', date: '$completed_at', timezone: DEFAULT_TIMEZONE },
 };
 
 export const computeThroughput = async (
@@ -498,7 +500,7 @@ export const computeThroughput = async (
     const doneMatch = (from: string, to: string) => ({
         ...taskMatch,
         status: DEFAULT_DONE_TASK_STATUS_KEY,
-        updated_at: { $gte: toDate(from, false), $lte: toDate(to, true) },
+        completed_at: { $gte: toDate(from, false), $lte: toDate(to, true) },
     });
 
     const [rows, prev] = await Promise.all([

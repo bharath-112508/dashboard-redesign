@@ -82,6 +82,14 @@ export interface TaskDocument extends Document {
     backlog_rank: number;
     created_by: Types.ObjectId;
     updated_by: Types.ObjectId | null;
+    /**
+     * When the task most recently entered the `done` status (`null` while it is
+     * not done). Stamped by the service on the not-done → done transition and
+     * cleared on the reverse, so it is a true completion time rather than
+     * `updated_at` (which any edit re-dates). Powers the dashboard throughput
+     * ("tasks completed in range") accurately.
+     */
+    completed_at: Date | null;
     created_at: Date;
     updated_at: Date;
 }
@@ -149,6 +157,9 @@ const taskSchema = new Schema<TaskDocument>(
         backlog_rank: { type: Number, min: 0 },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
         updated_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
+        // Completion timestamp — set/cleared by the service on done transitions
+        // (see createTask/updateTask). `null` = not currently done.
+        completed_at: { type: Date, default: null },
     },
     {
         ...BASE_SCHEMA_OPTIONS,
@@ -189,6 +200,9 @@ taskSchema.index({ primary_assignee_id: 1, status: 1 });
 taskSchema.index({ collaborator_ids: 1 });
 taskSchema.index({ parent_task_id: 1 });
 taskSchema.index({ due_date: 1 });
+// Dashboard throughput ("tasks completed in range") — matches done tasks by
+// completion day. Partial index keeps it to the (small) set of completed rows.
+taskSchema.index({ status: 1, completed_at: 1 }, { partialFilterExpression: { completed_at: { $type: 'date' } } });
 
 // Text search joins the global-search set (titles + descriptions).
 taskSchema.index({ title: 'text', description: 'text' });

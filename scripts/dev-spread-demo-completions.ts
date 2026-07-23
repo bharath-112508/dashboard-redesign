@@ -4,9 +4,10 @@
  * completed" / throughput numbers. The demo seed clustered every completion
  * on ~2 days, which made every range read the same total.
  *
- * Sets `updated_at` (the field throughput filters on) via the native driver
- * so Mongoose's timestamp plugin doesn't overwrite it. Idempotent-ish: run
- * again and it re-spreads the current done tasks. NOT for production.
+ * Sets `completed_at` (the field throughput now buckets by) — and `updated_at`
+ * to match, so an edit-time never predates the completion — via the native
+ * driver so Mongoose's timestamp plugin doesn't overwrite them. Idempotent-ish:
+ * run again and it re-spreads the current done tasks. NOT for production.
  *
  *   npx tsx scripts/dev-spread-demo-completions.ts
  */
@@ -46,10 +47,7 @@ const main = async () => {
     const db = mongoose.connection.db!;
     const tasks = db.collection(COLLECTIONS.TASKS);
 
-    const done = await tasks
-        .find({ status: DEFAULT_DONE_TASK_STATUS_KEY })
-        .project({ _id: 1, title: 1 })
-        .toArray();
+    const done = await tasks.find({ status: DEFAULT_DONE_TASK_STATUS_KEY }).project({ _id: 1, title: 1 }).toArray();
 
     if (done.length === 0) {
         console.log('No done tasks found — nothing to spread.');
@@ -61,7 +59,7 @@ const main = async () => {
     const perDate: Record<string, number> = {};
     for (let i = 0; i < done.length; i++) {
         const iso = COMPLETION_DATES[i % COMPLETION_DATES.length]!;
-        await tasks.updateOne({ _id: done[i]!._id }, { $set: { updated_at: at(iso) } });
+        await tasks.updateOne({ _id: done[i]!._id }, { $set: { completed_at: at(iso), updated_at: at(iso) } });
         perDate[iso] = (perDate[iso] ?? 0) + 1;
     }
 

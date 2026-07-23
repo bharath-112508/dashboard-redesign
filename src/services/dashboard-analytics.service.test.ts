@@ -277,6 +277,23 @@ describe('computeThroughput', () => {
         ]);
         expect(out.delta?.pct).toBe(67); // 5 vs 3
     });
+
+    it('counts completions by completed_at (not updated_at) among done tasks', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        await computeThroughput({}, RANGE);
+
+        const pipeline = vi.mocked(Task.aggregate).mock.calls[0][0] as unknown as Array<Record<string, unknown>>;
+        const match = pipeline[0].$match as Record<string, unknown>;
+        expect(match.status).toBe('done');
+        // The window is anchored on the true completion time, so an edit to a
+        // long-since-done task can't re-date it into the range.
+        expect(match.completed_at).toMatchObject({ $gte: expect.any(Date), $lte: expect.any(Date) });
+        expect(match.updated_at).toBeUndefined();
+
+        // Grouping buckets by the completed_at IST day too.
+        const group = pipeline[1].$group as { _id: { $dateToString: { date: string } } };
+        expect(group._id.$dateToString.date).toBe('$completed_at');
+    });
 });
 
 describe('computeProjectProgress', () => {
