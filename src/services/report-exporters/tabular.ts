@@ -69,30 +69,66 @@ export const toTabularBilling = (data: BillingReportResult): TabularReport => ({
     })),
 });
 
-export const toTabularUtilization = (data: UtilizationReportResult): TabularReport => ({
-    title: 'Utilization report',
-    summary: [
-        { label: 'From', value: data.from_date },
-        { label: 'To', value: data.to_date },
-        { label: 'Expected hours per user', value: String(formatMinutes(data.expected_per_user_minutes)) },
-    ],
-    columns: [
-        { key: 'user', label: 'User' },
-        { key: 'role', label: 'Role' },
-        { key: 'billable_hours', label: 'Billable hours' },
-        { key: 'non_billable_hours', label: 'Non-billable hours' },
-        { key: 'expected_hours', label: 'Expected hours' },
-        { key: 'utilization_pct', label: 'Utilization %' },
-    ],
-    rows: data.rows.map((r) => ({
-        user: r.user.full_name,
-        role: r.user.role,
-        billable_hours: formatMinutes(r.logged_billable_minutes),
-        non_billable_hours: formatMinutes(r.logged_non_billable_minutes),
-        expected_hours: formatMinutes(r.expected_minutes),
-        utilization_pct: r.utilization_pct,
-    })),
-});
+export const toTabularUtilization = (data: UtilizationReportResult): TabularReport => {
+    // One row per (user, project) so the export carries the same per-project
+    // breakdown the UI shows in the expandable accordion. User-level fields
+    // (expected hours, utilization %) repeat on each of that user's rows so
+    // every row is self-contained and pivots cleanly by user OR by project.
+    // `% of time` is the project's share of that user's logged time. A user
+    // with no logged time still gets one row (project "—") so headcount is
+    // complete.
+    const rows: Array<Record<string, CellValue>> = [];
+    for (const r of data.rows) {
+        const base = {
+            user: r.user.full_name,
+            role: r.user.role,
+            expected_hours: formatMinutes(r.expected_minutes),
+            utilization_pct: r.utilization_pct,
+        };
+        if (r.projects.length === 0) {
+            rows.push({
+                ...base,
+                project: '—',
+                billable_hours: formatMinutes(r.logged_billable_minutes),
+                non_billable_hours: formatMinutes(r.logged_non_billable_minutes),
+                total_hours: formatMinutes(r.logged_total_minutes),
+                share_pct: 0,
+            });
+            continue;
+        }
+        for (const p of r.projects) {
+            rows.push({
+                ...base,
+                project: p.project ? p.project.name : 'Unassigned',
+                billable_hours: formatMinutes(p.billable_minutes),
+                non_billable_hours: formatMinutes(p.non_billable_minutes),
+                total_hours: formatMinutes(p.total_minutes),
+                share_pct: p.share_pct,
+            });
+        }
+    }
+
+    return {
+        title: 'Utilization report',
+        summary: [
+            { label: 'From', value: data.from_date },
+            { label: 'To', value: data.to_date },
+            { label: 'Expected hours per user', value: String(formatMinutes(data.expected_per_user_minutes)) },
+        ],
+        columns: [
+            { key: 'user', label: 'User' },
+            { key: 'role', label: 'Role' },
+            { key: 'project', label: 'Project' },
+            { key: 'billable_hours', label: 'Billable hours' },
+            { key: 'non_billable_hours', label: 'Non-billable hours' },
+            { key: 'total_hours', label: 'Total hours' },
+            { key: 'share_pct', label: '% of time' },
+            { key: 'expected_hours', label: 'Expected hours' },
+            { key: 'utilization_pct', label: 'User utilization %' },
+        ],
+        rows,
+    };
+};
 
 export const toTabularAttendance = (data: AttendanceReportResult): TabularReport => ({
     title: 'Attendance report',
