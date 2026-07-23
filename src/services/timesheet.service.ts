@@ -209,6 +209,49 @@ const sumDailyTotalMinutes = async (userId: Types.ObjectId, localDate: string): 
     return rows[0]?.total ?? 0;
 };
 
+export interface TaskLoggedTime {
+    /** Total minutes logged against the task across ALL users' timesheets. */
+    logged_minutes: number;
+    /** Of which, minutes marked billable. */
+    billable_minutes: number;
+    /** Number of timesheet rows referencing the task. */
+    entry_count: number;
+    /** Distinct people who logged time on the task. */
+    contributor_count: number;
+}
+
+/**
+ * Roll up every timesheet entry that references `taskId` (across all users) into
+ * the task's actual time spent — powers the task-detail Estimate popover. Uses
+ * the `{ task_id: 1 }` drilldown index. Read-only; no auth here (callers gate).
+ */
+export const sumLoggedTimeForTask = async (taskId: Types.ObjectId): Promise<TaskLoggedTime> => {
+    const rows = await TimesheetEntry.aggregate<{
+        logged: number;
+        billable: number;
+        entries: number;
+        contributors: Types.ObjectId[];
+    }>([
+        { $match: { task_id: taskId } },
+        {
+            $group: {
+                _id: null,
+                logged: { $sum: '$total_minutes' },
+                billable: { $sum: '$billable_total_minutes' },
+                entries: { $sum: 1 },
+                contributors: { $addToSet: '$user_id' },
+            },
+        },
+    ]);
+    const r = rows[0];
+    return {
+        logged_minutes: r?.logged ?? 0,
+        billable_minutes: r?.billable ?? 0,
+        entry_count: r?.entries ?? 0,
+        contributor_count: r?.contributors?.length ?? 0,
+    };
+};
+
 /**
  * v1 semantics: "any approved leave covering this date" → warning.
  * `is_half_day` / `half_day_slot` are NOT consulted — a `first_half`

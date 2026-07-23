@@ -34,6 +34,7 @@ const {
     recordAuditMock,
     recordActivityMock,
     projectFindOneAndUpdateMock,
+    sumLoggedTimeForTaskMock,
 } = vi.hoisted(() => ({
     taskCreateMock: vi.fn(),
     taskFindByIdMock: vi.fn(),
@@ -50,6 +51,7 @@ const {
     recordAuditMock: vi.fn(),
     recordActivityMock: vi.fn(),
     projectFindOneAndUpdateMock: vi.fn(),
+    sumLoggedTimeForTaskMock: vi.fn(),
 }));
 
 vi.mock('../models/task.model.js', () => ({
@@ -97,6 +99,10 @@ vi.mock('./project.service.js', async (importOriginal) => {
 vi.mock('./audit.service.js', () => ({
     recordAudit: recordAuditMock,
     recordSystemAudit: vi.fn(),
+}));
+
+vi.mock('./timesheet.service.js', () => ({
+    sumLoggedTimeForTask: sumLoggedTimeForTaskMock,
 }));
 
 // Activity hooks are best-effort fire-and-forget; stub them out so tests
@@ -237,6 +243,13 @@ beforeEach(() => {
     // Default: every create reserves key #1 unless a test overrides it.
     projectFindOneAndUpdateMock.mockReturnValue({
         lean: () => Promise.resolve({ task_seq: 1 }),
+    });
+    // Default: no logged time unless a getTask test overrides it.
+    sumLoggedTimeForTaskMock.mockResolvedValue({
+        logged_minutes: 0,
+        billable_minutes: 0,
+        entry_count: 0,
+        contributor_count: 0,
     });
 });
 
@@ -1355,6 +1368,25 @@ describe('project visibility', () => {
             code: ERROR_CODES.TASK_NOT_FOUND,
         });
         expect(loadProjectForCallerMock).not.toHaveBeenCalled();
+    });
+
+    it('getTask embeds time_tracking rolled up from timesheets', async () => {
+        const task = makeTask();
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(makeProject());
+        sumLoggedTimeForTaskMock.mockResolvedValueOnce({
+            logged_minutes: 330,
+            billable_minutes: 300,
+            entry_count: 4,
+            contributor_count: 2,
+        });
+
+        const out = (await svc.getTask(task._id, adminCaller())) as {
+            time_tracking: { logged_minutes: number; billable_minutes: number };
+        };
+        expect(sumLoggedTimeForTaskMock).toHaveBeenCalledWith(task._id);
+        expect(out.time_tracking.logged_minutes).toBe(330);
+        expect(out.time_tracking.billable_minutes).toBe(300);
     });
 });
 

@@ -26,6 +26,7 @@ import { recordAudit } from './audit.service.js';
 import { recordActivity } from './task-activity.service.js';
 import { buildProjectVisibilityFilter, loadProjectForCaller } from './project.service.js';
 import type { ProjectCaller } from './project.service.js';
+import { sumLoggedTimeForTask } from './timesheet.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
     AddDependencyBody,
@@ -699,8 +700,12 @@ export const listTasks = async (
  */
 export const getTask = async (taskId: Types.ObjectId, caller: ProjectCaller): Promise<Record<string, unknown>> => {
     const { task, project } = await loadTaskAndProject(taskId, caller);
+    // Actual time spent, rolled up from every timesheet entry on this task
+    // (all users) — powers the Estimate popover on the detail page.
+    const time_tracking = await sumLoggedTimeForTask(task._id);
     return {
         ...toPublic(task),
+        time_tracking,
         project: {
             id: project._id.toString(),
             name: project.name,
