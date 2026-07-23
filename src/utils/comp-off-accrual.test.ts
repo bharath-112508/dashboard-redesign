@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-    overtimeBank,
-    weekdayOvertimeGrantDays,
-    weekendGrantDays,
-} from './comp-off-accrual.js';
+import { overtimeBank, weekdayOvertimeGrantDays, weekendGrantDays } from './comp-off-accrual.js';
 
 const FULL = 480; // 8h shift
 

@@ -159,12 +159,22 @@ export const updateSprint = async (
     const { sprint, project } = await loadSprintAndProject(sprintId, caller);
 
     const before = toPublic(sprint);
+    const prevStatus = sprint.status;
 
     if (patch.name !== undefined) sprint.name = patch.name;
     if (patch.goal !== undefined) sprint.goal = patch.goal;
     if (patch.start_date !== undefined) sprint.start_date = patch.start_date;
     if (patch.end_date !== undefined) sprint.end_date = patch.end_date;
-    if (patch.status !== undefined) sprint.status = patch.status as SprintStatus;
+    if (patch.status !== undefined) {
+        sprint.status = patch.status as SprintStatus;
+        // Keep `completed_at` in lock-step with the status: stamp it when the
+        // sprint first enters `completed`, clear it if it's moved back out.
+        if (sprint.status === SPRINT_STATUSES.COMPLETED && prevStatus !== SPRINT_STATUSES.COMPLETED) {
+            sprint.completed_at = new Date();
+        } else if (sprint.status !== SPRINT_STATUSES.COMPLETED && prevStatus === SPRINT_STATUSES.COMPLETED) {
+            sprint.completed_at = null;
+        }
+    }
 
     if (sprint.end_date < sprint.start_date) {
         throw AppError.unprocessable("The end date can't be before the start date.", ERROR_CODES.SPRINT_DATE_INVALID);
@@ -436,6 +446,9 @@ export const completeSprint = async (
             await Task.updateMany(unfinishedFilter, { $set: { sprint_id: targetSprintId } }, { session });
         }
         sprint.status = SPRINT_STATUSES.COMPLETED;
+        // Stamp the actual completion moment so the UI can show the exact
+        // date and tell whether it landed on time vs after `end_date`.
+        sprint.completed_at = new Date();
         await sprint.save({ session });
         return count;
     });

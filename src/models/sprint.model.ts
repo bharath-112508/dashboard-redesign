@@ -42,6 +42,14 @@ export interface SprintDocument extends Document {
      * dependant tasks (R3 escape hatch).
      */
     is_archived: boolean;
+    /**
+     * Timestamp the sprint was marked `completed` (set by the service when
+     * status transitions into `completed`; cleared back to `null` if it's
+     * ever moved out of `completed`). Distinct from the planned `end_date`
+     * — comparing the two tells us whether the sprint finished on time or
+     * late. `null` until the sprint is completed.
+     */
+    completed_at: Date | null;
     created_by: Types.ObjectId;
     created_at: Date;
     updated_at: Date;
@@ -69,6 +77,7 @@ const sprintSchema = new Schema<SprintDocument>(
             default: SPRINT_STATUSES.PLANNED,
         },
         is_archived: { type: Boolean, required: true, default: false },
+        completed_at: { type: Date, required: false, default: null },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
     },
     {

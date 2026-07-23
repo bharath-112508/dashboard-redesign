@@ -606,17 +606,13 @@ describe('listAttendance — single-day roster', () => {
         const rosterFilter = userFindMock.mock.calls[0][0] as {
             role?: { $nin?: string[] };
         };
-        expect(rosterFilter.role?.$nin).toEqual(
-            expect.arrayContaining([ROLES.CLIENT, ROLES.REPRESENTATIVE]),
-        );
+        expect(rosterFilter.role?.$nin).toEqual(expect.arrayContaining([ROLES.CLIENT, ROLES.REPRESENTATIVE]));
 
         // The "active workforce" headcount denominator excludes them too.
         const countFilter = userCountMock.mock.calls[0][0] as {
             role?: { $nin?: string[] };
         };
-        expect(countFilter.role?.$nin).toEqual(
-            expect.arrayContaining([ROLES.CLIENT, ROLES.REPRESENTATIVE]),
-        );
+        expect(countFilter.role?.$nin).toEqual(expect.arrayContaining([ROLES.CLIENT, ROLES.REPRESENTATIVE]));
     });
 
     it('status=present filters OUT the synthetic absent rows', async () => {
