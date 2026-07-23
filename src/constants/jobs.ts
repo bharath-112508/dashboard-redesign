@@ -109,6 +109,14 @@ export const JOB_NAMES = {
     // Runs just after the finalizer; gated on
     // `settings.leave_policy.comp_off_auto_accrual_enabled`.
     COMP_OFF_ACCRUAL: 'comp_off_accrual',
+    // Daily comp-off lot expiry. Walks earned lots whose `expires_at`
+    // has lapsed (3-month window), writes an `expired` history row for
+    // each, resyncs the owner's balance, and DMs an in-app notification
+    // per affected user. `expireDueLots` is idempotent (each lot is its
+    // own transaction, re-checked inside) so a manual re-run never
+    // double-expires. Runs AFTER the reconciliation cron so the day's
+    // repaired balances are the ones the expiry sweep reads.
+    COMP_OFF_EXPIRY: 'comp_off_expiry',
     // Slack attendance nudges — DM eligible employees a check-in button in
     // the morning and a "forgot to check out" reminder in the evening.
     // Fire times come from `settings.slack.attendance_nudges` (read at
@@ -178,6 +186,11 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // sum, and compares to `User.comp_off_balance`. Off-peak so a
     // longer-than-expected scan doesn't compete with morning traffic.
     [JOB_NAMES.COMP_OFF_RECONCILIATION]: '30 2 * * *',
+
+    // Daily 03:20 IST — comp-off lot expiry. Deliberately AFTER the
+    // 02:30 reconciliation so the balances the expiry sweep resyncs
+    // are the just-repaired ones, and off-peak like its sibling.
+    [JOB_NAMES.COMP_OFF_EXPIRY]: '20 3 * * *',
 
     // Every 15 minutes — stuck-job sweeper (BACKEND_AUDIT.md P1-6).
     // Walks `job_runs` for rows still flagged `running` but past the
@@ -295,6 +308,13 @@ export const compOffReconciliationRunKey = (now: Date = new Date()): string => {
  *  "yesterday" (IST) — and the run-key doubles as that target date. */
 export const compOffAccrualRunKey = (now: Date = new Date()): string =>
     dayjs(now).tz(JOB_TIMEZONE).subtract(1, 'day').format('YYYY-MM-DD');
+
+/**
+ * Comp-off expiry keys off **today** (IST) — one sweep per calendar day.
+ * `expireDueLots` is idempotent (per-lot transaction, re-checked inside)
+ * so a same-day ops re-run is harmless. Format: `YYYY-MM-DD`.
+ */
+export const compOffExpiryRunKey = (now: Date = new Date()): string => dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
 
 /** Both attendance nudge jobs key off **today** (IST) — one fire per day. */
 export const attendanceCheckinNudgeRunKey = (now: Date = new Date()): string =>

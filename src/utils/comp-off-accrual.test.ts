@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { overtimeBank, weekendGrantDays } from './comp-off-accrual.js';
+import {
+    overtimeBank,
+    weekdayOvertimeGrantDays,
+    weekendGrantDays,
+} from './comp-off-accrual.js';
 
 const FULL = 480; // 8h shift
 
@@ -23,6 +27,53 @@ describe('weekendGrantDays', () => {
     it('is safe for degenerate inputs', () => {
         expect(weekendGrantDays(600, 0)).toBe(0);
         expect(weekendGrantDays(-30, FULL)).toBe(0);
+    });
+});
+
+describe('weekdayOvertimeGrantDays', () => {
+    const SCHEDULED = 480; // 8h scheduled
+    const THRESHOLD = 480; // 8h threshold → half-step 240 (4h)
+
+    it('grants nothing for exactly zero overtime', () => {
+        expect(weekdayOvertimeGrantDays(SCHEDULED, SCHEDULED, THRESHOLD)).toBe(0);
+    });
+
+    it('grants nothing just under the half-threshold', () => {
+        // 3h OT (180) < 4h half-step
+        expect(weekdayOvertimeGrantDays(660, SCHEDULED, THRESHOLD)).toBe(0);
+        // one minute under the half-step
+        expect(weekdayOvertimeGrantDays(SCHEDULED + 239, SCHEDULED, THRESHOLD)).toBe(0);
+    });
+
+    it('grants half a day at exactly the half-threshold', () => {
+        // 4h OT (240) → 0.5
+        expect(weekdayOvertimeGrantDays(720, SCHEDULED, THRESHOLD)).toBe(0.5);
+    });
+
+    it('grants a full day at exactly the full threshold of overtime', () => {
+        // 8h OT (480) → 1.0
+        expect(weekdayOvertimeGrantDays(960, SCHEDULED, THRESHOLD)).toBe(1.0);
+    });
+
+    it('grants one and a half days at 1.5 thresholds of overtime', () => {
+        // 12h OT (720) → 1.5
+        expect(weekdayOvertimeGrantDays(1200, SCHEDULED, THRESHOLD)).toBe(1.5);
+    });
+
+    it('rounds down to the nearest 0.5 step (no carry)', () => {
+        // 10h OT (600) → 2 half-steps → 1.0 (the extra 2h is discarded)
+        expect(weekdayOvertimeGrantDays(1080, SCHEDULED, THRESHOLD)).toBe(1.0);
+        // 7h OT (420) → 1 half-step → 0.5
+        expect(weekdayOvertimeGrantDays(900, SCHEDULED, THRESHOLD)).toBe(0.5);
+    });
+
+    it('grants nothing when billable is below scheduled', () => {
+        expect(weekdayOvertimeGrantDays(300, SCHEDULED, THRESHOLD)).toBe(0);
+    });
+
+    it('is safe for zero / negative thresholds', () => {
+        expect(weekdayOvertimeGrantDays(1200, SCHEDULED, 0)).toBe(0);
+        expect(weekdayOvertimeGrantDays(1200, SCHEDULED, -480)).toBe(0);
     });
 });
 

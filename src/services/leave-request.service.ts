@@ -13,6 +13,7 @@ import { SlMonthlyForfeiture } from '../models/sl-monthly-forfeiture.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import {
+    COMP_OFF_SOURCES,
     LEAVE_CODES,
     LEAVE_REQUEST_STATUSES,
     LEAVE_TIMEZONE,
@@ -20,6 +21,7 @@ import {
     type LeaveRequestStatus,
 } from '../constants/leave.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { consumeCompOffLots, refundConsumedLots, resyncCompOff } from './comp-off.service.js';
 import { getOrInitSettings } from './settings.service.js';
 import { findOrInitBalance, initializeBalancesForUserYear } from './leave-balance.service.js';
 import {
@@ -916,6 +918,27 @@ export const approveLeave = async (
                 await LeaveBalance.updateOne(filter, update);
             }
         }
+
+        // Comp-off unification: a comp-off leave draws down the comp-off LEDGER
+        // lots FIFO (oldest-expiring first) so the ledger + expiry reflect the
+        // spend — the mirror above stays the apply-gate. The apply-time reserve
+        // guarantees the lots cover `total_days`, so this can't run short.
+        const requestedTypeQuery = LeaveType.findById(u.requested_leave_type_id).select('code');
+        const requestedType = session ? await requestedTypeQuery.session(session) : await requestedTypeQuery;
+        if (requestedType?.code === LEAVE_CODES.COMP_OFF) {
+            await consumeCompOffLots(
+                {
+                    user_id: u.user_id,
+                    days: u.total_days,
+                    source_type: COMP_OFF_SOURCES.LEAVE_REQUEST,
+                    source_ref_id: u._id,
+                    remarks: `Comp-off leave ${u.start_date}${u.end_date !== u.start_date ? ` – ${u.end_date}` : ''}`,
+                    created_by: caller.id,
+                },
+                session
+            );
+            await resyncCompOff(u.user_id, session);
+        }
         return u;
     });
 
@@ -1103,6 +1126,17 @@ export const cancelLeave = async (
                 } else {
                     await LeaveBalance.updateOne(filter, update);
                 }
+            }
+            // Comp-off unification: restore the exact lots this leave drew down
+            // (preserving their original expiry), reversing the `consumed` row.
+            const requestedTypeQuery = LeaveType.findById(u.requested_leave_type_id).select('code');
+            const requestedType = session ? await requestedTypeQuery.session(session) : await requestedTypeQuery;
+            if (requestedType?.code === LEAVE_CODES.COMP_OFF) {
+                await refundConsumedLots(
+                    { source_type: COMP_OFF_SOURCES.LEAVE_REQUEST, source_ref_id: u._id },
+                    session
+                );
+                await resyncCompOff(u.user_id, session);
             }
         } else {
             // Pending → just release the reservation.

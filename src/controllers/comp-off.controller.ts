@@ -16,13 +16,20 @@ const caller = (req: Request): { id: Types.ObjectId; role: RoleType } => {
 };
 
 export const getMine = async (req: Request, res: Response): Promise<Response> => {
-    const { data, meta, balance, earned_total, consumed_total } = await service.listOwnCompOff(
-        req.query as unknown as MyCompOffQuery,
-        caller(req)
-    );
+    const { data, meta, balance, earned_total, consumed_total, expired_total, expiring_soon_days, next_expiry_at } =
+        await service.listOwnCompOff(req.query as unknown as MyCompOffQuery, caller(req));
     // Custom envelope: ledger items + cached comp-off balance + all-time
-    // earned/consumed totals + pagination.
-    return res.status(StatusCodes.OK).json({ data, meta, balance, earned_total, consumed_total });
+    // earned/consumed/expired totals + expiring-soon warning + pagination.
+    return res.status(StatusCodes.OK).json({
+        data,
+        meta,
+        balance,
+        earned_total,
+        consumed_total,
+        expired_total,
+        expiring_soon_days,
+        next_expiry_at,
+    });
 };
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {

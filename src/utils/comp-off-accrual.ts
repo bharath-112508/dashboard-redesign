@@ -22,6 +22,27 @@ export const weekendGrantDays = (workedMinutes: number, fullShiftMinutes: number
 };
 
 /**
+ * Comp-off earned for overtime on a normal working day, by billable minutes
+ * against the scheduled shift. Overtime is `max(0, billable - scheduled)`; every
+ * HALF of the threshold of overtime earns 0.5 day, with NO carry — the remainder
+ * below the next half-step is discarded.
+ *
+ * e.g. threshold 480 (8h), scheduled 480: billable 720 (4h OT) → 0.5;
+ * 960 (8h OT) → 1.0; 1200 (12h OT) → 1.5; 660 (3h OT) → 0.
+ */
+export const weekdayOvertimeGrantDays = (
+    billableMinutes: number,
+    scheduledMinutes: number,
+    thresholdMinutes: number
+): number => {
+    if (thresholdMinutes <= 0) return 0;
+    const overtime = Math.max(0, billableMinutes - scheduledMinutes);
+    const halfStep = thresholdMinutes / 2;
+    const steps = Math.floor(overtime / halfStep);
+    return steps * 0.5;
+};
+
+/**
  * Add a working day's overtime to the running bank and convert whole
  * thresholds into comp-off days, carrying the remainder forward.
  *

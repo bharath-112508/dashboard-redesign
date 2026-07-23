@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 
 import { CompOffLedger } from '../models/comp-off-ledger.model.js';
 import { User } from '../models/user.model.js';
-import { COMP_OFF_TYPES, type CompOffType } from '../constants/leave.js';
+import { recomputeBalance } from '../services/comp-off.service.js';
 import { JOB_NAMES, JOB_USER_BATCH_SIZE, compOffReconciliationRunKey } from '../constants/jobs.js';
 import { runJob, type JobContext, type RunJobOptions, type RunJobResult } from './runner.js';
 
@@ -60,37 +60,23 @@ export const reconcileCompOffBalances = async (log: JobContext['log']): Promise<
         total_drift_days: 0,
     };
 
-    // Aggregate the ledger sum per user. The pipeline materialises one
-    // row per user with at least one ledger entry — users with zero
-    // ledger activity have `comp_off_balance: 0` by construction and
+    // Enumerate every user with at least one ledger entry — users with
+    // zero ledger activity have `comp_off_balance: 0` by construction and
     // don't need scanning.
-    const cursor = CompOffLedger.aggregate<{
-        _id: Types.ObjectId;
-        byType: { type: CompOffType; total: number }[];
-    }>([
+    const cursor = CompOffLedger.aggregate<{ _id: Types.ObjectId }>([
         { $match: { user_id: { $exists: true } } },
-        { $group: { _id: { user_id: '$user_id', type: '$type' }, total: { $sum: '$days' } } },
-        {
-            $group: {
-                _id: '$_id.user_id',
-                byType: { $push: { type: '$_id.type', total: '$total' } },
-            },
-        },
+        { $group: { _id: '$user_id' } },
     ]).cursor({ batchSize: JOB_USER_BATCH_SIZE });
 
     for await (const row of cursor) {
         summary.users_scanned += 1;
-        let earned = 0;
-        let consumed = 0;
-        for (const t of row.byType) {
-            if (t.type === COMP_OFF_TYPES.EARNED) earned = t.total;
-            if (t.type === COMP_OFF_TYPES.CONSUMED) consumed = t.total;
-        }
-        const ledgerBalance = earned - consumed;
 
-        // CAS the row only when the stored balance disagrees with the
-        // ledger sum. Two reads + one write per drifted user; zero
-        // writes per in-sync user.
+        // Lot-authoritative balance = Σ `remaining_days` over non-expired
+        // earned lots. Pre-read the stored value BEFORE recomputing,
+        // because `recomputeBalance` writes the authoritative sum back to
+        // `User.comp_off_balance` as a side effect — that write IS the
+        // drift repair. Comparing the pre-read value to the returned
+        // balance is how we detect (and thus log) drift.
         const user = await User.findById(row._id).select('comp_off_balance').lean<{
             _id: Types.ObjectId;
             comp_off_balance: number | null | undefined;
@@ -100,7 +86,7 @@ export const reconcileCompOffBalances = async (log: JobContext['log']): Promise<
             // hard-delete users) — log and skip.
             try {
                 log.warn(
-                    { user_id: row._id.toString(), ledger_balance: ledgerBalance },
+                    { user_id: row._id.toString() },
                     'Comp-off ledger row references a user that no longer exists; skipping reconciliation'
                 );
             } catch {
@@ -109,11 +95,14 @@ export const reconcileCompOffBalances = async (log: JobContext['log']): Promise<
             continue;
         }
         const storedBalance = user.comp_off_balance ?? 0;
+        const { balance: ledgerBalance } = await recomputeBalance(row._id);
         if (storedBalance === ledgerBalance) {
             summary.users_in_sync += 1;
             continue;
         }
 
+        // `recomputeBalance` has already applied the $set repair to the
+        // ledger sum; we only surface the drift signal here.
         const drift = Math.abs(storedBalance - ledgerBalance);
         summary.users_repaired += 1;
         summary.total_drift_days += drift;
@@ -131,7 +120,6 @@ export const reconcileCompOffBalances = async (log: JobContext['log']): Promise<
         } catch {
             // never throw from a log line
         }
-        await User.updateOne({ _id: row._id }, { $set: { comp_off_balance: ledgerBalance } });
     }
 
     log.info(summary, 'Comp-off reconciliation finished');

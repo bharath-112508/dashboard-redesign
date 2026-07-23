@@ -21,7 +21,23 @@ import {
 } from '../constants/timesheet.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
 import { recordAudit } from './audit.service.js';
+import { settleCompOffForDay } from './comp-off-accrual.service.js';
 import { loadProjectForCaller } from './project.service.js';
+import logger from '../utils/logger.js';
+
+/**
+ * Fire-and-forget: re-settle the user's comp-off for a day after a timesheet
+ * write. `settleCompOffForDay` is idempotent and self-guards (disabled / today /
+ * client), so this is safe to call unconditionally and never blocks the write.
+ */
+const scheduleCompOffSettle = (userId: Types.ObjectId, localDate: string): void => {
+    void settleCompOffForDay(userId, localDate).catch((err: unknown) => {
+        logger.warn(
+            { err, user_id: userId.toString(), local_date: localDate },
+            'comp-off settle after timesheet write failed'
+        );
+    });
+};
 import type { ProjectCaller } from './project.service.js';
 import { getOrInitSettings } from './settings.service.js';
 import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
@@ -332,6 +348,7 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
         });
     }
 
+    scheduleCompOffSettle(caller.id, created.local_date);
     return { data: toPublic(created), warnings };
 };
 
@@ -459,6 +476,7 @@ export const patchEntry = async (
         }
     }
 
+    scheduleCompOffSettle(entry.user_id, entry.local_date);
     return { data: toPublic(entry), warnings };
 };
 
@@ -506,6 +524,7 @@ export const deleteEntry = async (id: Types.ObjectId, caller: Caller): Promise<{
         });
     }
 
+    scheduleCompOffSettle(entry.user_id, entry.local_date);
     return { deleted: true };
 };
 

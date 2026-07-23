@@ -39,6 +39,7 @@ const {
     runAuditLogMirrorMock,
     runCompOffReconciliationMock,
     runCompOffAccrualMock,
+    runCompOffExpiryMock,
     runCheckinNudgeMock,
     runCheckoutReminderMock,
     getOrInitSettingsMock,
@@ -60,6 +61,7 @@ const {
     runAuditLogMirrorMock: vi.fn(),
     runCompOffReconciliationMock: vi.fn(),
     runCompOffAccrualMock: vi.fn(),
+    runCompOffExpiryMock: vi.fn(),
     runCheckinNudgeMock: vi.fn(),
     runCheckoutReminderMock: vi.fn(),
     getOrInitSettingsMock: vi.fn(),
@@ -131,6 +133,12 @@ vi.mock('./comp-off-reconciliation.job.js', () => ({
 vi.mock('./comp-off-accrual.job.js', () => ({
     runCompOffAccrual: runCompOffAccrualMock,
 }));
+// Same reason as the reconciliation mock above — the real expiry job
+// imports the `notifications` (+ comp-off) Mongoose models, and the
+// per-test `vi.resetModules()` would re-register them → OverwriteModelError.
+vi.mock('./comp-off-expiry.job.js', () => ({
+    runCompOffExpiry: runCompOffExpiryMock,
+}));
 vi.mock('./attendance-slack-nudge.job.js', () => ({
     runAttendanceCheckinNudge: runCheckinNudgeMock,
     runAttendanceCheckoutReminder: runCheckoutReminderMock,
@@ -181,6 +189,7 @@ beforeEach(() => {
     runAuditLogMirrorMock.mockResolvedValue(undefined);
     runCompOffReconciliationMock.mockResolvedValue(undefined);
     runCompOffAccrualMock.mockResolvedValue(undefined);
+    runCompOffExpiryMock.mockResolvedValue(undefined);
     runCheckinNudgeMock.mockResolvedValue(undefined);
     runCheckoutReminderMock.mockResolvedValue(undefined);
     // No nudge override → scheduler uses the static JOB_SCHEDULES defaults.

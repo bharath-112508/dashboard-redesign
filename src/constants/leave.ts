@@ -63,15 +63,25 @@ export type HalfDaySlot = (typeof HALF_DAY_SLOTS)[keyof typeof HALF_DAY_SLOTS];
 export const COMP_OFF_TYPES = {
     EARNED: 'earned',
     CONSUMED: 'consumed',
+    // Debit written when an earned lot's unconsumed days lapse (3-month expiry).
+    // History/audit only — the authoritative balance is Σ lot.remaining_days.
+    EXPIRED: 'expired',
 } as const;
 export type CompOffType = (typeof COMP_OFF_TYPES)[keyof typeof COMP_OFF_TYPES];
 
 export const COMP_OFF_SOURCES = {
     ATTENDANCE_OVERTIME: 'attendance_overtime',
+    // Auto-accrued from a day's billable timesheet hours (carries the project).
+    TIMESHEET_BILLABLE: 'timesheet_billable',
     LEAVE_REQUEST: 'leave_request',
     ADMIN_ADJUSTMENT: 'admin_adjustment',
 } as const;
 export type CompOffSource = (typeof COMP_OFF_SOURCES)[keyof typeof COMP_OFF_SOURCES];
+
+/** Comp-off earned lots expire this many months after their earn/source date. */
+export const COMP_OFF_EXPIRY_MONTHS = 3;
+/** Show an "expiring soon" warning when a lot expires within this many days. */
+export const COMP_OFF_EXPIRING_SOON_DAYS = 14;
 
 export const SL_FORFEITURE_REASONS = {
     UNUSED_MONTHLY_ALLOCATION: 'unused_monthly_allocation',
