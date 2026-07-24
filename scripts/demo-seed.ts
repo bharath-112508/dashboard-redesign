@@ -1224,7 +1224,118 @@ async function seedTimesheets(): Promise<void> {
     }
 }
 
-// ─── Step 5: attendance today (API) ────────────────────────────────────────
+// ─── Step 5: engagements + invoices ────────────────────────────────────────
+//
+// Phase 1 "Client Engagements & Invoicing" (docs/superpowers/specs/2026-07-24-
+// billing-invoicing-design.md). Runs after billing rates + timesheets so the
+// generated invoices' `hours` lines resolve real rates against real seeded
+// timesheet minutes, exactly like a live demo would. Idempotent by `name`
+// (engagements) / `engagement_id` (invoices) so re-running the seed against a
+// non-wiped DB just skips what already exists.
+
+async function seedEngagements(): Promise<void> {
+    console.log('\n── Engagements + invoices ──');
+
+    const periodDays = [...workingDaysBefore(TODAY, 5), TODAY];
+    const periodStart = periodDays[0]!;
+    const periodEnd = TODAY;
+
+    const engagementSpecs: Array<{ key: string; body: Record<string, unknown>; sendInvoice: boolean }> = [
+        {
+            key: 'aurora-retainer',
+            body: {
+                company_id: companyId.aurora,
+                project_ids: [projectId.afs],
+                name: 'Aurora Foods — 2026 Retainer',
+                currency: 'EUR',
+                billing_type: 'retainer',
+                setup_fee: 1500,
+                retainer_amount: 8000,
+                retainer_period: 'month',
+                included_hours: 40,
+                start_date: '2026-03-02',
+                notes: 'Monthly retainer covering the Aurora Foods Supply Portal build.',
+            },
+            sendInvoice: true,
+        },
+        {
+            key: 'nordmark-hourly',
+            body: {
+                company_id: companyId.nordmark,
+                project_ids: [projectId.nfd],
+                name: 'Nordmark Fleet Dashboard — Hourly',
+                currency: 'NOK',
+                billing_type: 'hourly',
+                start_date: '2026-02-02',
+                notes: 'Hourly billing against the Fleet Dashboard build (billing-rate driven).',
+            },
+            sendInvoice: false,
+        },
+    ];
+
+    for (const spec of engagementSpecs) {
+        const existing = must(
+            await api('GET', `/engagements?company_id=${spec.body.company_id}&limit=50`, undefined, adminToken),
+            `list engagements for ${spec.key}`
+        ) as any[];
+        const already = existing.find((e) => e.name === spec.body.name);
+
+        let engagementId: string;
+        if (already) {
+            console.log(`  engagement "${spec.body.name as string}" already exists — skipping create`);
+            engagementId = idOf(already);
+        } else {
+            const r = await api('POST', '/engagements', spec.body, adminToken);
+            if (r.status !== 201) {
+                quirks.push(`engagement ${spec.key} → ${r.status}: ${JSON.stringify(r.body)?.slice(0, 200)}`);
+                continue;
+            }
+            engagementId = idOf(r.body?.data);
+            bump('engagements');
+            console.log(`  created engagement "${spec.body.name as string}"`);
+        }
+
+        // Idempotency for the invoice half: skip generate if this engagement
+        // already has an invoice (from a prior run against a non-wiped DB).
+        const existingInvoices = must(
+            await api('GET', `/invoices?engagement_id=${engagementId}&limit=50`, undefined, adminToken),
+            `list invoices for ${spec.key}`
+        ) as any[];
+        if (existingInvoices.length > 0) {
+            console.log(`  invoice(s) already exist for "${spec.body.name as string}" — skipping generate`);
+            continue;
+        }
+
+        const genRes = await api(
+            'POST',
+            '/invoices/generate',
+            { engagement_id: engagementId, period_start: periodStart, period_end: periodEnd },
+            adminToken
+        );
+        if (genRes.status !== 201) {
+            quirks.push(
+                `invoice generate ${spec.key} → ${genRes.status}: ${JSON.stringify(genRes.body)?.slice(0, 200)}`
+            );
+            continue;
+        }
+        const invoice = genRes.body?.data;
+        bump('invoices');
+        console.log(`  generated invoice ${invoice.number} for "${spec.body.name as string}" (${invoice.status})`);
+
+        if (spec.sendInvoice) {
+            const sendRes = await api('POST', `/invoices/${idOf(invoice)}/status`, { to: 'sent' }, adminToken);
+            if (sendRes.status === 200) {
+                console.log(`  marked ${invoice.number} as sent`);
+            } else {
+                quirks.push(
+                    `invoice send ${spec.key} → ${sendRes.status}: ${JSON.stringify(sendRes.body)?.slice(0, 200)}`
+                );
+            }
+        }
+    }
+}
+
+// ─── Step 6: attendance today (API) ────────────────────────────────────────
 
 async function seedAttendanceToday(): Promise<void> {
     console.log('\n── Attendance (today, via API) ──');
@@ -1242,7 +1353,7 @@ async function seedAttendanceToday(): Promise<void> {
     console.log('  (sneha, aditya left not-checked-in on purpose — aditya is on same-day SL)');
 }
 
-// ─── Step 6: leaves ────────────────────────────────────────────────────────
+// ─── Step 7: leaves ────────────────────────────────────────────────────────
 
 async function seedLeaves(): Promise<void> {
     console.log('\n── Leaves ──');
@@ -1373,7 +1484,7 @@ async function seedLeaves(): Promise<void> {
     }
 }
 
-// ─── Step 7: comp-off ──────────────────────────────────────────────────────
+// ─── Step 8: comp-off ──────────────────────────────────────────────────────
 
 async function seedCompOff(): Promise<void> {
     console.log('\n── Comp-off ──');
@@ -1408,7 +1519,7 @@ async function seedCompOff(): Promise<void> {
     }
 }
 
-// ─── Step 8: holidays ──────────────────────────────────────────────────────
+// ─── Step 9: holidays ──────────────────────────────────────────────────────
 
 async function seedHolidays(): Promise<void> {
     console.log('\n── Holidays ──');
@@ -1422,7 +1533,7 @@ async function seedHolidays(): Promise<void> {
     }
 }
 
-// ─── Step 9: attendance history + today's time variation (direct Mongo) ───
+// ─── Step 10: attendance history + today's time variation (direct Mongo) ──
 
 async function seedAttendanceHistory(): Promise<void> {
     console.log('\n── Attendance history (direct Mongo) ──');
@@ -1488,7 +1599,7 @@ async function seedAttendanceHistory(): Promise<void> {
     await disconnectDB();
 }
 
-// ─── Step 10: verification ─────────────────────────────────────────────────
+// ─── Step 11: verification ─────────────────────────────────────────────────
 
 async function verify(): Promise<void> {
     console.log('\n── Verification ──');
@@ -1585,6 +1696,7 @@ async function main(): Promise<void> {
     await seedProjects();
     await seedBillingRates();
     await seedTimesheets();
+    await seedEngagements();
     await seedAttendanceToday();
     await seedLeaves();
     await seedCompOff();
