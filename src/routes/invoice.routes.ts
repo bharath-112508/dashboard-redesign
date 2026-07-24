@@ -52,6 +52,13 @@ router.get(
     asyncHandler(ctrl.getOne)
 );
 
+router.get(
+    '/:id/pdf',
+    requirePermission(PERMISSIONS.INVOICE_READ),
+    validate({ params: invoiceIdPathSchema }),
+    asyncHandler(ctrl.getPdf)
+);
+
 router.patch(
     '/:id',
     requirePermission(PERMISSIONS.INVOICE_WRITE),

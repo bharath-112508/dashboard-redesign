@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as service from '../services/invoice.service.js';
+import { renderInvoicePdf } from '../services/invoice-pdf.service.js';
 import { created, noContent, ok, paginated } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import { buildAuditContext } from '../utils/audit-context.js';
@@ -47,6 +48,25 @@ export const postGenerate = async (req: Request, res: Response): Promise<Respons
 export const getOne = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.getInvoice(idOf(req, 'id'));
     return ok(res, data);
+};
+
+// ─── GET /invoices/:id/pdf ─────────────────────────────────────────────────
+//
+// Binary response — same header pattern as the report-export inline
+// fallback (`report-export.controller.ts`): explicit Content-Type +
+// RFC 5987/6266 Content-Disposition + Content-Length, body is the raw
+// Buffer via `res.end`. No `ok()` envelope; this isn't JSON.
+
+export const getPdf = async (req: Request, res: Response): Promise<Response> => {
+    const { buffer, filename } = await renderInvoicePdf(idOf(req, 'id'));
+    const safeFileName = filename.replace(/[\r\n"]/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(safeFileName)}`
+    );
+    res.setHeader('Content-Length', String(buffer.length));
+    return res.status(200).end(buffer);
 };
 
 // ─── PATCH /invoices/:id ──────────────────────────────────────────────────
