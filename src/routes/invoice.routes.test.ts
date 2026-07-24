@@ -114,7 +114,10 @@ beforeEach(() => {
 
     generateInvoiceMock.mockResolvedValue(STUB_INVOICE);
     getInvoiceMock.mockResolvedValue(STUB_INVOICE);
-    listInvoicesMock.mockResolvedValue({ data: [STUB_INVOICE], meta: { page: 1, limit: 20, total: 1, total_pages: 1 } });
+    listInvoicesMock.mockResolvedValue({
+        data: [STUB_INVOICE],
+        meta: { page: 1, limit: 20, total: 1, total_pages: 1 },
+    });
     updateInvoiceMock.mockResolvedValue({ ...STUB_INVOICE, notes: 'updated' });
     setInvoiceStatusMock.mockResolvedValue({ ...STUB_INVOICE, status: 'sent' });
     deleteInvoiceMock.mockResolvedValue(undefined);
@@ -126,7 +129,10 @@ describe('POST /api/v1/invoices/generate', () => {
     it('403s a token that lacks invoice.write', async () => {
         const token = issueToken({ role: 'employee', permissions: ['invoice.read'] });
 
-        const res = await request(app).post('/api/v1/invoices/generate').set(authHeader(token)).send(VALID_GENERATE_BODY);
+        const res = await request(app)
+            .post('/api/v1/invoices/generate')
+            .set(authHeader(token))
+            .send(VALID_GENERATE_BODY);
 
         expect(res.status).toBe(403);
         expect(generateInvoiceMock).not.toHaveBeenCalled();
@@ -135,7 +141,10 @@ describe('POST /api/v1/invoices/generate', () => {
     it('201s + returns data.number for a token that holds invoice.write', async () => {
         const token = issueToken({ role: 'manager', permissions: ['invoice.write'] });
 
-        const res = await request(app).post('/api/v1/invoices/generate').set(authHeader(token)).send(VALID_GENERATE_BODY);
+        const res = await request(app)
+            .post('/api/v1/invoices/generate')
+            .set(authHeader(token))
+            .send(VALID_GENERATE_BODY);
 
         expect(res.status).toBe(201);
         expect(res.body.data.number).toBe(STUB_INVOICE.number);

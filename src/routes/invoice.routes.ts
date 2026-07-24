@@ -31,7 +31,12 @@ const router = Router();
 
 router.use(authenticate);
 
-router.get('/', requirePermission(PERMISSIONS.INVOICE_READ), validate({ query: listInvoicesQuerySchema }), asyncHandler(ctrl.getList));
+router.get(
+    '/',
+    requirePermission(PERMISSIONS.INVOICE_READ),
+    validate({ query: listInvoicesQuerySchema }),
+    asyncHandler(ctrl.getList)
+);
 
 router.post(
     '/generate',
