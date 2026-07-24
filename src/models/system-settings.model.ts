@@ -381,7 +381,11 @@ const payrollSchema = new Schema<PayrollSettings>(
 const fxRateSettingSchema = new Schema<FxRateSetting>(
     {
         currency: { type: String, required: true, trim: true, uppercase: true, match: /^[A-Z]{3}$/ },
-        rate_to_base: { type: Number, required: true, min: 0 },
+        rate_to_base: {
+            type: Number,
+            required: true,
+            validate: { validator: (v: number) => v > 0, message: 'rate_to_base must be greater than 0' },
+        },
     },
     { _id: false }
 );
@@ -395,7 +399,7 @@ const billingSchema = new Schema<BillingSettings>(
             default: 'INR',
             trim: true,
             uppercase: true,
-            match: /^[A-Z]+$/,
+            match: /^[A-Z]{3}$/,
         },
         fx_rates: { type: [fxRateSettingSchema], default: [] },
     },

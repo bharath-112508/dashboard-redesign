@@ -215,7 +215,7 @@ const billingSchema = z
         reporting_currency: z
             .string()
             .trim()
-            .regex(/^[A-Za-z]+$/, 'reporting_currency must be letters only'),
+            .regex(/^[A-Za-z]{3}$/, 'reporting_currency must be a 3-letter ISO code'),
         fx_rates: z.array(fxRateSchema),
     })
     .partial();
