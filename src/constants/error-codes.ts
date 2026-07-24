@@ -46,6 +46,7 @@ export const ERROR_CODES = {
     TIMESHEET_NOT_FOUND: 'TIMESHEET_NOT_FOUND',
     BILLING_RATE_NOT_FOUND: 'BILLING_RATE_NOT_FOUND',
     ENGAGEMENT_NOT_FOUND: 'ENGAGEMENT_NOT_FOUND',
+    INVOICE_NOT_FOUND: 'INVOICE_NOT_FOUND',
     EXPORT_NOT_FOUND: 'EXPORT_NOT_FOUND',
     AUDIT_ARCHIVE_NOT_FOUND: 'AUDIT_ARCHIVE_NOT_FOUND',
     AUDIT_ARCHIVE_INTEGRITY_FAILED: 'AUDIT_ARCHIVE_INTEGRITY_FAILED',
@@ -89,6 +90,15 @@ export const ERROR_CODES = {
     SPRINT_ALREADY_ACTIVE: 'SPRINT_ALREADY_ACTIVE',
     /** Refused to delete because dependant rows would be orphaned. (BACKEND_AUDIT.md R3) */
     RESOURCE_HAS_DEPENDENTS: 'RESOURCE_HAS_DEPENDENTS',
+    /** Phase 1 Invoicing (Task 7) — a non-void invoice already covers this
+     *  engagement + overlapping period; caller must re-send with `confirm: true`. */
+    INVOICE_PERIOD_OVERLAP: 'INVOICE_PERIOD_OVERLAP',
+    /** Edit/delete attempted on an invoice that has left `draft` (sent/paid/void
+     *  are immutable snapshots — void, don't edit). */
+    INVOICE_NOT_DRAFT: 'INVOICE_NOT_DRAFT',
+    /** The requested invoice status move is illegal (legal: draft→sent→paid,
+     *  any-non-void→void). */
+    INVOICE_INVALID_TRANSITION: 'INVOICE_INVALID_TRANSITION',
 
     // 410 — Gone
     SHARE_LINK_REVOKED: 'SHARE_LINK_REVOKED',
