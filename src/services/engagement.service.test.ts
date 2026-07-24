@@ -256,6 +256,37 @@ describe('updateEngagement', () => {
         });
     });
 
+    it('rejects end_date earlier than start_date with ENGAGEMENT_INVALID_RANGE', async () => {
+        const engagement = makeEngagement({ start_date: '2026-03-01' });
+        engagementFindByIdMock.mockResolvedValueOnce(engagement);
+
+        await expect(
+            svc.updateEngagement(engagement._id, { end_date: '2020-01-01' }, makeCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.ENGAGEMENT_INVALID_RANGE });
+        expect(engagement.save).not.toHaveBeenCalled();
+        expect(engagement.end_date).toBeNull();
+    });
+
+    it('accepts an end_date on or after start_date', async () => {
+        const engagement = makeEngagement({ start_date: '2026-03-01' });
+        engagementFindByIdMock.mockResolvedValueOnce(engagement);
+
+        await svc.updateEngagement(engagement._id, { end_date: '2026-06-01' }, makeCaller());
+
+        expect(engagement.end_date).toBe('2026-06-01');
+        expect(engagement.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows clearing end_date to null regardless of start_date', async () => {
+        const engagement = makeEngagement({ start_date: '2026-03-01', end_date: '2026-06-01' });
+        engagementFindByIdMock.mockResolvedValueOnce(engagement);
+
+        await svc.updateEngagement(engagement._id, { end_date: null }, makeCaller());
+
+        expect(engagement.end_date).toBeNull();
+        expect(engagement.save).toHaveBeenCalledTimes(1);
+    });
+
     it('audits update with before/after snapshots', async () => {
         const engagement = makeEngagement();
         engagementFindByIdMock.mockResolvedValueOnce(engagement);

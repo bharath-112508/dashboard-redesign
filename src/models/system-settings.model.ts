@@ -148,6 +148,12 @@ export interface CompanySettings {
     login_page_tagline: string;
 }
 
+export interface BillingSettings {
+    /** Prefix used by `nextInvoiceNumber` when minting `{prefix}-{year}-{seq}`
+     *  invoice numbers (Phase 1.1 follow-up — was hard-coded to `'INV'`). */
+    invoice_prefix: string;
+}
+
 export interface PayrollSettings {
     company_legal_name: string;
     company_address_lines: string[];
@@ -175,6 +181,7 @@ export interface SystemSettingsDocument extends Document {
     reminders: ReminderSettings;
     company: CompanySettings;
     payroll: PayrollSettings;
+    billing: BillingSettings;
 
     default_timezone: string;
 
@@ -352,6 +359,16 @@ const payrollSchema = new Schema<PayrollSettings>(
     { _id: false }
 );
 
+// Billing & invoicing (Phase 1.1 follow-up) — single configurable field so
+// far: the `nextInvoiceNumber` prefix. Trimmed + upper-cased at write time so
+// `INV`/`inv `/` Inv` all normalise to the same stored value.
+const billingSchema = new Schema<BillingSettings>(
+    {
+        invoice_prefix: { type: String, required: true, default: 'INV', trim: true, uppercase: true },
+    },
+    { _id: false }
+);
+
 // ─── Top-level schema ──────────────────────────────────────────────────────
 
 const systemSettingsSchema = new Schema<SystemSettingsDocument>(
@@ -375,6 +392,7 @@ const systemSettingsSchema = new Schema<SystemSettingsDocument>(
         reminders: { type: remindersSchema, required: true },
         company: { type: companySchema, required: true },
         payroll: { type: payrollSchema, default: () => ({}) },
+        billing: { type: billingSchema, default: () => ({}) },
 
         default_timezone: { type: String, required: true },
 

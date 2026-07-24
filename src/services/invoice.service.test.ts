@@ -42,6 +42,7 @@ const {
     companyFindByIdMock,
     nextInvoiceNumberMock,
     recordAuditMock,
+    getOrInitSettingsMock,
 } = vi.hoisted(() => ({
     engagementFindByIdMock: vi.fn(),
     engagementFindMock: vi.fn(),
@@ -59,6 +60,7 @@ const {
     engagementFindByIdLeanMock: vi.fn(),
     nextInvoiceNumberMock: vi.fn(),
     recordAuditMock: vi.fn(),
+    getOrInitSettingsMock: vi.fn(),
 }));
 
 vi.mock('../models/engagement.model.js', () => ({
@@ -110,6 +112,10 @@ vi.mock('../models/company.model.js', () => ({
 
 vi.mock('./invoice-number.service.js', () => ({
     nextInvoiceNumber: nextInvoiceNumberMock,
+}));
+
+vi.mock('./settings.service.js', () => ({
+    getOrInitSettings: getOrInitSettingsMock,
 }));
 
 vi.mock('./audit.service.js', () => ({
@@ -200,6 +206,7 @@ beforeEach(() => {
     timesheetAggregateMock.mockResolvedValue([]);
     billingRateFindMock.mockReturnValue([]);
     projectFindMock.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
+    getOrInitSettingsMock.mockResolvedValue({ billing: { invoice_prefix: 'INV' } });
     wireInvoiceCreate();
 });
 
@@ -232,8 +239,8 @@ describe('generateInvoice — hourly', () => {
         expect(payload.total).toBe(1120);
         expect(payload.number).toBe('INV-2026-0001');
         expect(payload.status).toBe('draft');
-        // year(period_end), default prefix (undefined), no session in tests
-        expect(nextInvoiceNumberMock).toHaveBeenCalledWith(2026, undefined, undefined);
+        // year(period_end), prefix resolved from settings ('INV' default), no session in tests
+        expect(nextInvoiceNumberMock).toHaveBeenCalledWith(2026, 'INV', undefined);
     });
 
     it('a user with no matching rate contributes a line with rate null and amount 0', async () => {
@@ -507,6 +514,32 @@ describe('generateInvoice — misc', () => {
         const [, payload] = recordAuditMock.mock.calls[0] as [unknown, { action: string }];
         expect(payload.action).toBe(AUDIT_ACTIONS.INVOICE_GENERATE);
         expect(payload.action).toBe('invoice.generate');
+    });
+});
+
+// ─── generateInvoice — configurable invoice-number prefix ───────────────
+
+describe('generateInvoice — invoice number prefix', () => {
+    it('resolves the prefix from SystemSettings.billing.invoice_prefix', async () => {
+        const engagement = makeEngagement({ billing_type: 'fixed', fixed_amount: 100 });
+        engagementFindByIdMock.mockResolvedValueOnce(engagement);
+        getOrInitSettingsMock.mockResolvedValueOnce({ billing: { invoice_prefix: 'VJ' } });
+        nextInvoiceNumberMock.mockResolvedValueOnce('VJ-2026-0001');
+
+        await svc.generateInvoice(baseGenBody(), makeCaller());
+
+        expect(nextInvoiceNumberMock).toHaveBeenCalledWith(2026, 'VJ', undefined);
+        expect(lastCreatePayload().number).toBe('VJ-2026-0001');
+    });
+
+    it('falls back to INV when settings.billing is absent', async () => {
+        const engagement = makeEngagement({ billing_type: 'fixed', fixed_amount: 100 });
+        engagementFindByIdMock.mockResolvedValueOnce(engagement);
+        getOrInitSettingsMock.mockResolvedValueOnce({});
+
+        await svc.generateInvoice(baseGenBody(), makeCaller());
+
+        expect(nextInvoiceNumberMock).toHaveBeenCalledWith(2026, 'INV', undefined);
     });
 });
 

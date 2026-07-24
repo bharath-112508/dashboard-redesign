@@ -139,6 +139,14 @@ export const DEFAULT_SETTINGS = {
         hr_reply_to_name: '',
     },
 
+    // Billing & invoicing (Phase 1.1 follow-up) — `invoice_prefix` feeds
+    // `nextInvoiceNumber` in `invoice.service.ts#generateInvoice`. Kept in
+    // sync with the Mongoose schema default in `models/system-settings.model.ts`
+    // (`billingSchema`), same rationale as `payroll` above.
+    billing: {
+        invoice_prefix: 'INV',
+    },
+
     default_timezone: 'Asia/Kolkata',
 } as const;
 

@@ -159,6 +159,17 @@ export const updateEngagement = async (
     if (patch.retainer_period !== undefined) engagement.retainer_period = patch.retainer_period;
     if (patch.included_hours !== undefined) engagement.included_hours = patch.included_hours;
     if (patch.fixed_amount !== undefined) engagement.fixed_amount = patch.fixed_amount;
+
+    // A PATCH body never carries `start_date`, so the validator's cross-field
+    // refine (create-time only) can't catch `end_date < start_date` here — the
+    // service is the only place that still has both values. `null` (clearing
+    // end_date) is always allowed.
+    if (patch.end_date !== undefined && patch.end_date !== null && patch.end_date < engagement.start_date) {
+        throw AppError.unprocessable('end_date must be on or after start_date', ERROR_CODES.ENGAGEMENT_INVALID_RANGE, {
+            start_date: engagement.start_date,
+            end_date: patch.end_date,
+        });
+    }
     if (patch.end_date !== undefined) engagement.end_date = patch.end_date;
     if (patch.notes !== undefined) engagement.notes = patch.notes;
 

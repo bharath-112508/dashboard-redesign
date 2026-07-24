@@ -7,6 +7,7 @@ import { Project } from '../models/project.model.js';
 import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { BillingRate } from '../models/billing-rate.model.js';
 import { nextInvoiceNumber } from './invoice-number.service.js';
+import { getOrInitSettings } from './settings.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -282,8 +283,30 @@ export const generateInvoice = async (
         }
 
         // setup — one-time, bill-once via `setup_fee_invoiced` flipped in-txn.
+        //
+        // The read-flag → decide → flip must be atomic under two CONCURRENT
+        // `generateInvoice` calls for the same engagement: read outside the
+        // transaction's session, both callers could observe
+        // `setup_fee_invoiced: false` and both bill the fee. Re-reading the
+        // engagement WITH the session (when one is live — see `withTransaction`)
+        // pulls this read into the same transaction as the flip+save below, so
+        // Mongo's transaction isolation makes the whole check-and-flip atomic.
+        // When there's no session (standalone/mocked Mongoose — the test/dev
+        // fallback `withTransaction` already logs/degrades for), we fall back
+        // to the doc already loaded above; that preserves the pre-existing
+        // non-atomic behaviour rather than doing a redundant read.
+        //
+        // NOTE: this only closes the setup-fee race. The overlap guard above
+        // (step 2) remains a best-effort, non-transactional check by design —
+        // see its comment — because a unique (engagement_id, period) index
+        // would break the legitimate "void an invoice, re-generate the same
+        // period" flow.
+        const setupEngagement = session
+            ? ((await Engagement.findById(engagementId).session(session)) ?? engagement)
+            : engagement;
+
         let flipSetup = false;
-        if (engagement.setup_fee != null && engagement.setup_fee > 0 && !engagement.setup_fee_invoiced) {
+        if (engagement.setup_fee != null && engagement.setup_fee > 0 && !setupEngagement.setup_fee_invoiced) {
             lineItems.push(line({ kind: 'setup', description: 'Setup fee', amount: round2(engagement.setup_fee) }));
             flipSetup = true;
         }
@@ -311,8 +334,11 @@ export const generateInvoice = async (
         const taxAmount = round2((subtotal * taxRate) / 100);
         const total = round2(subtotal + taxAmount);
 
-        // 5) Number + persist as draft (in-session).
-        const number = await nextInvoiceNumber(yearOf(period_end), undefined, session);
+        // 5) Number + persist as draft (in-session). Prefix is admin-configurable
+        //    via `SystemSettings.billing.invoice_prefix` (defaults to 'INV').
+        const settings = await getOrInitSettings();
+        const prefix = settings.billing?.invoice_prefix || 'INV';
+        const number = await nextInvoiceNumber(yearOf(period_end), prefix, session);
 
         const [created] = await Invoice.create(
             [
@@ -341,10 +367,11 @@ export const generateInvoice = async (
             session ? { session } : {}
         );
 
-        // Flip the bill-once setup flag inside the same transaction.
+        // Flip the bill-once setup flag inside the same transaction — on the
+        // SAME document instance that made the check-and-flip decision above.
         if (flipSetup) {
-            engagement.setup_fee_invoiced = true;
-            await engagement.save(session ? { session } : undefined);
+            setupEngagement.setup_fee_invoiced = true;
+            await setupEngagement.save(session ? { session } : undefined);
         }
 
         if (actor.audit) {

@@ -197,6 +197,14 @@ const payrollSchema = z
     })
     .partial();
 
+// Billing & invoicing (Phase 1.1 follow-up) — configurable invoice-number
+// prefix (default 'INV'), consumed by `invoice.service.ts#generateInvoice`.
+const billingSchema = z
+    .object({
+        invoice_prefix: z.string().trim().min(1).max(8),
+    })
+    .partial();
+
 // ─── PATCH body ────────────────────────────────────────────────────────────
 
 export const patchSettingsBodySchema = z
@@ -212,6 +220,7 @@ export const patchSettingsBodySchema = z
         reminders: remindersSchema,
         company: companySchema,
         payroll: payrollSchema,
+        billing: billingSchema,
         default_timezone: z.string().trim().min(1),
     })
     .partial()

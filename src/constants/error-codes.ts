@@ -152,6 +152,9 @@ export const ERROR_CODES = {
     /** Phase 1 Client Engagements — one or more `project_ids` on a create/patch
      *  don't belong to the engagement's `company_id` (Task 4). */
     ENGAGEMENT_INVALID_SCOPE: 'ENGAGEMENT_INVALID_SCOPE',
+    /** Phase 1.1 follow-up — a PATCH sets `end_date` earlier than the
+     *  engagement's (unchanged-by-PATCH) `start_date`. */
+    ENGAGEMENT_INVALID_RANGE: 'ENGAGEMENT_INVALID_RANGE',
     PAYROLL_NO_CURRENT_SALARY: 'PAYROLL_NO_CURRENT_SALARY',
 
     // 423 — Locked
