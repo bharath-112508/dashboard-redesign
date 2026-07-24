@@ -156,6 +156,9 @@ export const ERROR_CODES = {
      *  engagement's (unchanged-by-PATCH) `start_date`. */
     ENGAGEMENT_INVALID_RANGE: 'ENGAGEMENT_INVALID_RANGE',
     PAYROLL_NO_CURRENT_SALARY: 'PAYROLL_NO_CURRENT_SALARY',
+    /** Billing Phase 2 — `toReportingCurrency` had no matching `fx_rates` entry
+     *  for the source currency and it differs from `billing.reporting_currency`. */
+    FX_RATE_MISSING: 'FX_RATE_MISSING',
 
     // 423 — Locked
     ACCOUNT_LOCKED: 'ACCOUNT_LOCKED',

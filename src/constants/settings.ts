@@ -145,6 +145,12 @@ export const DEFAULT_SETTINGS = {
     // (`billingSchema`), same rationale as `payroll` above.
     billing: {
         invoice_prefix: 'INV',
+        // Billing Phase 2 — reporting currency + FX rate table for the Margin
+        // report (`utils/fx.ts#toReportingCurrency`). Kept in sync with the
+        // Mongoose schema defaults in `models/system-settings.model.ts`
+        // (`billingSchema`).
+        reporting_currency: 'INR',
+        fx_rates: [] as { currency: string; rate_to_base: number }[],
     },
 
     default_timezone: 'Asia/Kolkata',

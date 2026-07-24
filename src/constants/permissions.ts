@@ -103,6 +103,10 @@ export const PERMISSIONS = {
     INVOICE_READ: 'invoice.read',
     INVOICE_WRITE: 'invoice.write',
 
+    // ─── Cost rates & margin (Billing Phase 2) ─────────────────────────
+    COST_RATE_READ: 'cost_rate.read',
+    COST_RATE_WRITE: 'cost_rate.write',
+
     // ─── Attendance ────────────────────────────────────────────────────
     //
     // M3 — `attendance.read_own` was removed. `/attendance/me*` routes

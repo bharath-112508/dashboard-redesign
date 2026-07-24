@@ -55,6 +55,9 @@ export const COLLECTIONS = {
     INVOICES: 'invoices',
     INVOICE_COUNTERS: 'invoice_counters',
 
+    // Cost rates & margin (Billing Phase 2)
+    COST_RATES: 'cost_rates',
+
     // Cross-cutting
     NOTIFICATIONS: 'notifications',
     PUSH_SUBSCRIPTIONS: 'push_subscriptions',

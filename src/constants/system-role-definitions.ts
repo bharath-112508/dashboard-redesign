@@ -109,6 +109,10 @@ const MANAGER_ADDITIONS: readonly Permission[] = [
     PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE,
     PERMISSIONS.BILLING_RATE_READ,
     PERMISSIONS.INVOICE_READ,
+    // Cost rates & margin (Billing Phase 2) — manager can read per-person
+    // cost rates for the Margin report; cost_rate.write stays admin-only
+    // (via the system.admin wildcard), same split as billing_rate.*.
+    PERMISSIONS.COST_RATE_READ,
     PERMISSIONS.REPORT_READ,
     PERMISSIONS.REPORT_EXPORT_WRITE,
     PERMISSIONS.LEAVE_BALANCE_READ_TEAM,
