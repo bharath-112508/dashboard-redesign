@@ -23,6 +23,7 @@ import { attachmentsRouter, taskAttachmentsNestedRouter } from './task-attachmen
 import timesheetRoutes from './timesheet.routes.js';
 import billingRateRoutes from './billing-rate.routes.js';
 import engagementRoutes from './engagement.routes.js';
+import invoiceRoutes from './invoice.routes.js';
 import payrollProfileRoutes from './payroll-profile.routes.js';
 import salaryStructureRoutes from './salary-structure.routes.js';
 import payslipRoutes from './payslip.routes.js';
@@ -85,6 +86,9 @@ appRoutes.use('/billing-rates', billingRateRoutes);
 // Client engagements (Phase 1 "Client Engagements & Invoicing"). No prefix
 // overlap with anything else, so mount order doesn't matter here.
 appRoutes.use('/engagements', engagementRoutes);
+// Invoices (Phase 1 "Client Engagements & Invoicing", Task 8). No prefix
+// overlap with anything else, so mount order doesn't matter here.
+appRoutes.use('/invoices', invoiceRoutes);
 appRoutes.use('/payroll-profiles', payrollProfileRoutes);
 appRoutes.use('/salary-structures', salaryStructureRoutes);
 appRoutes.use('/payslips', payslipRoutes);
