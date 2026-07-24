@@ -249,6 +249,15 @@ export const AUDIT_ACTIONS = {
     BILLING_RATE_END: 'billing_rate.end',
     BILLING_RATE_DELETE: 'billing_rate.delete',
 
+    // Cost-rate lifecycle (Billing Phase 2 — Cost Rates & Margin, Task 3).
+    // Cost-side twin of the `billing_rate.*` verbs above; `cost_rate.create`
+    // likewise records the auto-closed predecessor (when one existed) in
+    // `metadata.previous_rate_id`.
+    COST_RATE_CREATE: 'cost_rate.create',
+    COST_RATE_UPDATE: 'cost_rate.update',
+    COST_RATE_END: 'cost_rate.end',
+    COST_RATE_DELETE: 'cost_rate.delete',
+
     // Client engagements (Phase 1 — Client Engagements & Invoicing, Task 4).
     // `engagement.end` is its own verb (not folded into `engagement.update`)
     // so the Step-31 audit UI can flag lifecycle closes distinctly from
@@ -388,6 +397,7 @@ export const AUDIT_TARGET_KINDS = {
     ATTACHMENT: 'task_attachment',
     TIMESHEET_ENTRY: 'timesheet_entry',
     BILLING_RATE: 'billing_rate',
+    COST_RATE: 'cost_rate',
     ENGAGEMENT: 'engagement',
     INVOICE: 'invoice',
     SHARE_LINK: 'project_share_link',
