@@ -1335,6 +1335,109 @@ async function seedEngagements(): Promise<void> {
     }
 }
 
+// ─── Step 5.5: cost rates + FX (Billing Phase 2 — Cost Rates & Margin) ─────
+//
+// Cost-side twin of `seedBillingRates` — same INR-flat-rate simplification,
+// same "prefetch existing + skip" idempotency (a cost rate is unique per
+// `(user_id, effective_from)`, so re-POSTing the same pair on a re-run
+// would either 409 or, worse, silently auto-close/extend). Mirrors exactly
+// the staff `seedBillingRates`/`seedTimesheets` already covers (`HOURLY_RATES`
+// keys) so the Margin report has both a bill rate AND a cost rate — and
+// therefore real, non-zero numbers — for every billable user out of the box.
+//
+// Also seeds `SystemSettings.billing.reporting_currency = 'INR'` (already
+// the schema default, set explicitly here for clarity) + `fx_rates` for
+// EUR and NOK — the two non-INR currencies `seedEngagements` uses (Aurora
+// retainer = EUR, Nordmark hourly = NOK) — so the demo Margin report shows
+// zero "No FX rate" warnings out of the box. Runs AFTER `seedBillingRates`
+// (references the same users) and AFTER `seedEngagements` (so the FX rates
+// it needs are known) though neither is a hard dependency.
+
+const COST_RATES_INR: Record<string, number> = {
+    kavya: 650,
+    rohan: 650,
+    ananya: 450,
+    vikram: 500,
+    sneha: 400,
+    aditya: 480,
+    ishita: 450,
+    karthik: 500,
+    priya: 700,
+    arjun: 700,
+};
+
+const COST_RATE_EFFECTIVE_FROM = '2026-01-01'; // matches seedBillingRates
+
+async function seedCostRatesAndFx(): Promise<void> {
+    console.log('\n── Cost rates + FX ──');
+
+    // Prefetch existing cost rates so a re-run against a non-wiped DB skips
+    // users who already have one, rather than 409-ing or (for a later
+    // effective_from) silently auto-closing/extending a real admin-entered
+    // rate.
+    const existingUserIds = new Set<string>();
+    for (let page = 1; ; page += 1) {
+        const res = await api('GET', `/cost-rates?limit=100&page=${page}`, undefined, adminToken);
+        const rows = must(res, `list cost rates page ${page}`) as any[];
+        for (const row of rows) existingUserIds.add(String(row.user_id));
+        if (rows.length < 100) break;
+    }
+
+    for (const [key, cost_per_hour] of Object.entries(COST_RATES_INR)) {
+        const uid = userId[key];
+        if (!uid) continue; // defensive — USERS list changed underneath us
+        if (existingUserIds.has(uid)) {
+            console.log(`  cost rate exists for ${key} (skipping)`);
+            continue;
+        }
+        const r = await api(
+            'POST',
+            '/cost-rates',
+            {
+                user_id: uid,
+                cost_per_hour,
+                currency: 'INR',
+                effective_from: COST_RATE_EFFECTIVE_FROM,
+            },
+            adminToken
+        );
+        if (r.status === 201) bump('cost_rates');
+        else if (r.status === 409) console.log(`  cost rate exists for ${key}`);
+        else throw new Error(`cost rate ${key} failed (${r.status}): ${JSON.stringify(r.body)}`);
+    }
+    console.log(`  created ${counts.cost_rates ?? 0} cost rates`);
+
+    // Reporting currency + FX — deep-merge PATCH, so this only ever adds to
+    // (never removes) whatever an admin already configured. Skips the PATCH
+    // entirely once INR/EUR/NOK are all present, so a re-run is a no-op.
+    const settingsRes = must(await api('GET', '/settings', undefined, adminToken), 'get settings');
+    const currentFxRates: Array<{ currency: string; rate_to_base: number }> = settingsRes?.billing?.fx_rates ?? [];
+    const currentReportingCurrency: string = settingsRes?.billing?.reporting_currency ?? 'INR';
+
+    const wantFx: Record<string, number> = { EUR: 90, NOK: 8 };
+    const haveCurrencies = new Set(currentFxRates.map((r) => r.currency.toUpperCase()));
+    const missing = Object.entries(wantFx).filter(([ccy]) => !haveCurrencies.has(ccy));
+
+    if (currentReportingCurrency === 'INR' && missing.length === 0) {
+        console.log('  reporting_currency + fx_rates already cover EUR/NOK — skipping settings patch');
+    } else {
+        const mergedFxRates = [
+            ...currentFxRates,
+            ...missing.map(([currency, rate_to_base]) => ({ currency, rate_to_base })),
+        ];
+        const patchRes = await api(
+            'PATCH',
+            '/settings',
+            { billing: { reporting_currency: 'INR', fx_rates: mergedFxRates } },
+            adminToken
+        );
+        if (patchRes.status !== 200) {
+            throw new Error(`settings billing FX patch failed (${patchRes.status}): ${JSON.stringify(patchRes.body)}`);
+        }
+        console.log(`  reporting_currency=INR, fx_rates=[${mergedFxRates.map((r) => r.currency).join(', ')}]`);
+    }
+}
+
 // ─── Step 6: attendance today (API) ────────────────────────────────────────
 
 async function seedAttendanceToday(): Promise<void> {
@@ -1697,6 +1800,7 @@ async function main(): Promise<void> {
     await seedBillingRates();
     await seedTimesheets();
     await seedEngagements();
+    await seedCostRatesAndFx();
     await seedAttendanceToday();
     await seedLeaves();
     await seedCompOff();
