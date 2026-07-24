@@ -74,8 +74,12 @@ const formatMoney = (amount: number, currency: string): string => {
     } catch {
         // Unrecognised ISO code (shouldn't happen — `currency` is validated
         // at the model layer — but this is a rendering path, not a place to
-        // throw over a formatting nicety).
-        return `${currency} ${(amount || 0).toFixed(2)}`;
+        // throw over a formatting nicety). Escape it: it's user-influenced
+        // data reaching this fallback only if it bypassed validation
+        // upstream (e.g. a direct DB write), and every other user string in
+        // this template is escaped — this fallback shouldn't be the one
+        // exception that lets HTML metacharacters through.
+        return `${escapeHtml(currency)} ${(amount || 0).toFixed(2)}`;
     }
 };
 

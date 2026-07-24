@@ -155,6 +155,18 @@ describe('buildInvoiceHtml', () => {
         expect(html).toContain('&lt;b&gt;bold&lt;/b&gt; &amp; &quot;quoted&quot;');
     });
 
+    it('escapes an HTML-injection string in the currency fallback', () => {
+        // `Intl.NumberFormat` throws for any currency that isn't 3
+        // alphabetic chars, so a malformed `Invoice.currency` (only
+        // reachable via a direct DB write / pre-validation legacy row —
+        // `Engagement.currency` validation is letter-only as of this fix)
+        // falls back to the raw-string formatter. That fallback must escape
+        // `currency` like every other user string in this template.
+        const html = buildInvoiceHtml({ ...baseInvoice, currency: 'X"<' }, company, settings);
+        expect(html).not.toContain('X"<');
+        expect(html).toContain('X&quot;&lt;');
+    });
+
     it('shows the invoice status', () => {
         const html = buildInvoiceHtml({ ...baseInvoice, status: 'paid' }, company, settings);
         expect(html).toContain('Paid');

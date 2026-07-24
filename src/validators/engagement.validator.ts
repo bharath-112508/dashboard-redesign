@@ -19,7 +19,7 @@ const baseShape = {
     company_id: objectId,
     project_ids: z.array(objectId).optional(),
     name: z.string().trim().min(1),
-    currency: z.string().trim().length(3),
+    currency: z.string().trim().regex(/^[A-Za-z]{3}$/, 'Must be a 3-letter ISO currency code'),
     billing_type: z.enum(BILLING_TYPES),
     setup_fee: z.number().min(0).nullable().optional(),
     retainer_amount: z.number().min(0).nullable().optional(),
