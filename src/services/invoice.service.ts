@@ -118,8 +118,13 @@ export const sumBillableByUser = async ({
  * `buildBillingReport`'s batched rate lookup: one `find` over all
  * `(user, project)` rate rows effective at the window end, first-wins in
  * `effective_from desc` order. Returns `user → rate` (missing = no rate).
+ *
+ * Exported for reuse by `margin.service.ts` (Billing Phase 2, Task 4) — the
+ * margin report's revenue side needs the exact same bill-rate resolution as
+ * invoices/the billing report, so it imports this instead of duplicating
+ * the `BillingRate` query.
  */
-const resolveUserRates = async ({
+export const resolveUserRates = async ({
     userIds,
     projectIds,
     to,
