@@ -11,6 +11,7 @@ import {
     attendanceReportQuerySchema,
     billingReportQuerySchema,
     leaveReportQuerySchema,
+    marginReportQuerySchema,
     utilizationReportQuerySchema,
 } from '../validators/report.validator.js';
 import { exportIdPathSchema, exportRequestPathSchema } from '../validators/report-export.validator.js';
@@ -36,6 +37,28 @@ import { exportIdPathSchema, exportRequestPathSchema } from '../validators/repor
 const router = Router();
 
 router.use(authenticate);
+
+// ─── GET /reports/margin (Billing Phase 2, Task 5) ──────────────────────
+//
+// Gated on `COST_RATE_READ`, NOT the blanket `REPORT_READ` applied to
+// every other route below via `router.use(...)` — seeing margin means
+// seeing cost, which is more sensitive than the other reports. This
+// route is registered BEFORE that blanket `.use()` so Express never
+// stacks the `REPORT_READ` check on top of it: a custom role holding
+// ONLY `cost_rate.read` (no `report.read`) can still reach this
+// endpoint. Manager holds both by default (system-role-definitions.ts),
+// so this reordering is invisible to the out-of-the-box roles. Uses the
+// same per-user read limiter as the other sync reports below (applied
+// per-route here since it would otherwise only be `.use()`'d after the
+// blanket gate).
+router.get(
+    '/margin',
+    reportReadRateLimiter,
+    requirePermission(PERMISSIONS.COST_RATE_READ),
+    validate({ query: marginReportQuerySchema }),
+    asyncHandler(ctrl.getMargin)
+);
+
 router.use(requirePermission(PERMISSIONS.REPORT_READ));
 
 // ─── Synchronous JSON reads (Step 29) ───────────────────────────────────

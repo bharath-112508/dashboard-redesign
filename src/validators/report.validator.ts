@@ -104,3 +104,22 @@ export const leaveReportQuerySchema = z.object({
     user_id: objectIdSchema.optional(),
 });
 export type LeaveReportQuery = z.infer<typeof leaveReportQuerySchema>;
+
+// ─── GET /reports/margin ────────────────────────────────────────────────
+//
+// Billing Phase 2 (Task 5). Same date-pair shape as billing/utilization/
+// attendance (required `from_date`/`to_date`, `dateRangeRefine` enforces
+// `from_date <= to_date` within `REPORT_RANGE_MAX_DAYS`). `project_id` and
+// `company_id` are BOTH optional (unlike billing's required `project_id`)
+// — `buildMarginReport` (margin.service.ts) scopes to a single project, a
+// whole company, or, with neither, every project.
+
+export const marginReportQuerySchema = z
+    .object({
+        from_date: isoDateSchema,
+        to_date: isoDateSchema,
+        project_id: objectIdSchema.optional(),
+        company_id: objectIdSchema.optional(),
+    })
+    .refine(dateRangeRefine, { message: dateRangeMessage });
+export type MarginReportQuery = z.infer<typeof marginReportQuerySchema>;
