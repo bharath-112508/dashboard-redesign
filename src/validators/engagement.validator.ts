@@ -90,3 +90,8 @@ export const listEngagementsQuerySchema = z
 export type CreateEngagementInput = z.infer<typeof createEngagementSchema>;
 export type UpdateEngagementInput = z.infer<typeof updateEngagementSchema>;
 export type ListEngagementsQuery = z.infer<typeof listEngagementsQuerySchema>;
+
+// ─── Path params ─────────────────────────────────────────────────────────
+
+export const engagementIdPathSchema = z.object({ id: objectId });
+export type EngagementIdPath = z.infer<typeof engagementIdPathSchema>;

@@ -249,6 +249,14 @@ export const AUDIT_ACTIONS = {
     BILLING_RATE_END: 'billing_rate.end',
     BILLING_RATE_DELETE: 'billing_rate.delete',
 
+    // Client engagements (Phase 1 — Client Engagements & Invoicing, Task 4).
+    // `engagement.end` is its own verb (not folded into `engagement.update`)
+    // so the Step-31 audit UI can flag lifecycle closes distinctly from
+    // ordinary field edits, mirroring `billing_rate.end`.
+    ENGAGEMENT_CREATE: 'engagement.create',
+    ENGAGEMENT_UPDATE: 'engagement.update',
+    ENGAGEMENT_END: 'engagement.end',
+
     // Project share-link lifecycle (Phase 2 Step 24). `share_link.revoke`
     // captures `metadata.reason ∈ {manual, client_deactivated}` so the
     // Step-31 audit UI can distinguish admin-driven revokes from the
@@ -370,6 +378,7 @@ export const AUDIT_TARGET_KINDS = {
     ATTACHMENT: 'task_attachment',
     TIMESHEET_ENTRY: 'timesheet_entry',
     BILLING_RATE: 'billing_rate',
+    ENGAGEMENT: 'engagement',
     SHARE_LINK: 'project_share_link',
     SESSION: 'session',
     REPORT_EXPORT: 'report_export',
