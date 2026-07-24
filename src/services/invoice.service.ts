@@ -288,8 +288,12 @@ export const generateInvoice = async (
             flipSetup = true;
         }
 
-        // hourly — pure hourly + the hybrid hourly component.
-        if (billingType === 'hourly' || billingType === 'hybrid') {
+        // hourly — pure hourly + the hybrid hourly component. Hours are billed
+        // EITHER as full hourly lines OR as overage on top of a retainer, never
+        // both: when the engagement has a retainer component, hours are already
+        // covered above (retainer + any overage over included_hours), so this
+        // block must not also fire and double-bill the same hours.
+        if ((billingType === 'hourly' || billingType === 'hybrid') && engagement.retainer_amount == null) {
             const hours = await computeHours({ projectIds, from: period_start, to: period_end, kind: 'hours' });
             lineItems.push(...hours.lines);
         }

@@ -355,6 +355,64 @@ describe('generateInvoice — setup fee', () => {
     });
 });
 
+// ─── generateInvoice — hybrid (retainer/overage must not double-bill hours) ─
+
+describe('generateInvoice — hybrid', () => {
+    it('WITH retainer + overage: bills retainer + overage only, no hours lines', async () => {
+        const userA = new Types.ObjectId();
+        const engagement = makeEngagement({
+            billing_type: 'hybrid',
+            retainer_amount: 5000,
+            retainer_period: 'month',
+            included_hours: 40,
+        });
+        engagementFindByIdMock.mockResolvedValueOnce(engagement);
+        // Only ONE stubTimesheet call is expected: the hourly block must not
+        // fire a second aggregation now that retainer_amount is set.
+        stubTimesheet([{ _id: userA, billable_minutes: 52 * 60 }]); // 52h actual
+        stubRates([{ user_id: userA, hourly_rate: 100 }]);
+
+        await svc.generateInvoice(baseGenBody(), makeCaller());
+
+        const lines = lastCreatePayload().line_items as { kind: string; amount: number }[];
+        expect(lines.some((l) => l.kind === 'hours')).toBe(false);
+        const retainer = lines.find((l) => l.kind === 'retainer');
+        const overage = lines.find((l) => l.kind === 'overage');
+        expect(retainer?.amount).toBe(5000);
+        expect(overage?.amount).toBe(1200); // 12h excess * 100
+        expect(lines).toHaveLength(2);
+        expect(lastCreatePayload().subtotal).toBe(6200); // retainer + overage only
+        expect(lastCreatePayload().total).toBe(6200);
+        expect(timesheetAggregateMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('WITHOUT retainer: bills full hours lines + setup, no retainer/overage lines', async () => {
+        const userA = new Types.ObjectId();
+        const engagement = makeEngagement({
+            billing_type: 'hybrid',
+            retainer_amount: null,
+            included_hours: null,
+            setup_fee: 2000,
+            setup_fee_invoiced: false,
+        });
+        engagementFindByIdMock.mockResolvedValueOnce(engagement);
+        stubTimesheet([{ _id: userA, billable_minutes: 10 * 60 }]); // 10h
+        stubRates([{ user_id: userA, hourly_rate: 100 }]);
+
+        await svc.generateInvoice(baseGenBody(), makeCaller());
+
+        const lines = lastCreatePayload().line_items as { kind: string; amount: number }[];
+        expect(lines.some((l) => l.kind === 'retainer')).toBe(false);
+        expect(lines.some((l) => l.kind === 'overage')).toBe(false);
+        const hours = lines.find((l) => l.kind === 'hours');
+        const setup = lines.find((l) => l.kind === 'setup');
+        expect(hours?.amount).toBe(1000); // 10h * 100
+        expect(setup?.amount).toBe(2000);
+        expect(lines).toHaveLength(2);
+        expect(lastCreatePayload().subtotal).toBe(3000);
+    });
+});
+
 // ─── generateInvoice — fixed ─────────────────────────────────────────────
 
 describe('generateInvoice — fixed', () => {
