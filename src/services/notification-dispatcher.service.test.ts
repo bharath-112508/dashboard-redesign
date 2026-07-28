@@ -32,6 +32,7 @@ const {
     sendEmailMock,
     userFindByIdMock,
     userFindMock,
+    userFindOneMock,
     leaveRequestFindByIdMock,
     leaveRequestFindByIdAndUpdateMock,
     loggerWarnMock,
@@ -47,6 +48,7 @@ const {
         sendEmailMock: vi.fn(),
         userFindByIdMock: vi.fn(),
         userFindMock: vi.fn(),
+        userFindOneMock: vi.fn(),
         leaveRequestFindByIdMock: vi.fn(),
         leaveRequestFindByIdAndUpdateMock: vi.fn().mockResolvedValue(null),
         loggerWarnMock: vi.fn(),
@@ -106,6 +108,7 @@ vi.mock('../models/user.model.js', () => ({
     User: {
         findById: userFindByIdMock,
         find: userFindMock,
+        findOne: userFindOneMock,
     },
 }));
 
@@ -265,16 +268,31 @@ describe('notifyLeaveSubmitted', () => {
         total_days: 2,
     };
 
-    it('fans out one in-app row + one email per reviewer; excludes the requester from the pool', async () => {
+    it('routes to the employee reporting manager when one is set', async () => {
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
+            id.equals(requesterId)
+                ? queryReturning({ ...requester, internal_profile: { reporting_manager_id: managerId } })
+                : queryReturning(requester)
+        );
+        userFindOneMock.mockReturnValue(queryReturning(manager));
+
+        await dispatcher.notifyLeaveSubmitted(baseInput);
+
+        // Only the manager is notified — not the whole admin/manager pool.
+        expect(notificationCreateMock).toHaveBeenCalledTimes(1);
+        expect(userFindOneMock.mock.calls[0][0]._id).toEqual(managerId);
+    });
+
+    it('falls back to the admin pool (self-excluded) when no reporting manager is set', async () => {
         await dispatcher.notifyLeaveSubmitted(baseInput);
 
         expect(notificationCreateMock).toHaveBeenCalledTimes(2);
         expect(sendEmailMock).toHaveBeenCalledTimes(2);
 
-        // The reviewer-pool fetch must have excluded the requester id
+        // Fallback pool = active admins, excluding the requester.
         const findCall = userFindMock.mock.calls[0][0];
         expect(findCall._id).toEqual({ $ne: requesterId });
-        expect(findCall.role).toEqual({ $in: [ROLES.ADMIN, ROLES.MANAGER] });
+        expect(findCall.role).toEqual(ROLES.ADMIN);
 
         // Each in-app row points at the leave_request entity
         for (const call of notificationCreateMock.mock.calls) {

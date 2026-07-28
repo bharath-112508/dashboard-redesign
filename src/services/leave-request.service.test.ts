@@ -28,6 +28,8 @@ const {
     settingsLoadMock,
     notifyDecidedMock,
     recordAuditMock,
+    userFindMock,
+    userFindByIdMock,
 } = vi.hoisted(() => ({
     leaveRequestFindByIdMock: vi.fn(),
     leaveRequestFindOneAndUpdateMock: vi.fn(),
@@ -40,6 +42,8 @@ const {
     settingsLoadMock: vi.fn(),
     notifyDecidedMock: vi.fn(),
     recordAuditMock: vi.fn(),
+    userFindMock: vi.fn(),
+    userFindByIdMock: vi.fn(),
 }));
 
 vi.mock('../models/leave-request.model.js', () => ({
@@ -77,6 +81,21 @@ vi.mock('../models/leave-type.model.js', () => ({
 vi.mock('../models/holiday.model.js', () => ({
     Holiday: { find: holidayFindMock },
 }));
+
+vi.mock('../models/user.model.js', () => ({
+    User: { find: userFindMock, findById: userFindByIdMock },
+}));
+
+/** Stub `User.find(...).distinct('_id')` → the given report ids. */
+const stubDirectReports = (ids: Types.ObjectId[]) => {
+    userFindMock.mockReturnValue({ distinct: () => Promise.resolve(ids) });
+};
+/** Stub `User.findById(...).select(...).lean()` → a reporting_manager_id. */
+const stubReportingManager = (managerId: Types.ObjectId | null) => {
+    userFindByIdMock.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve({ internal_profile: { reporting_manager_id: managerId } }) }),
+    });
+};
 
 vi.mock('../models/sl-monthly-forfeiture.model.js', () => ({
     SlMonthlyForfeiture: { find: slForfeitureFindMock },
@@ -174,7 +193,9 @@ beforeEach(() => {
 // ─── Approve ──────────────────────────────────────────────────────────────
 
 describe('approveLeave', () => {
-    const reviewer = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+    // Admin reviewer — bypasses reporting-chain scoping, so these tests stay
+    // focused on approval mechanics. Manager/report scoping is tested separately.
+    const reviewer = { id: new Types.ObjectId(), role: ROLES.ADMIN };
 
     it('throws ADDITIONAL_APPROVAL_REASON_REQUIRED when the request requires it and reason is missing', async () => {
         const r = baseRequest({ requires_additional_approval: true });
@@ -186,6 +207,28 @@ describe('approveLeave', () => {
 
         expect(leaveRequestFindOneAndUpdateMock).not.toHaveBeenCalled();
         expect(leaveBalanceUpdateOneMock).not.toHaveBeenCalled();
+    });
+
+    it('MANAGER: cannot approve a request from a NON-report (forbidden)', async () => {
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        const r = baseRequest();
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        stubReportingManager(new Types.ObjectId()); // requester reports to someone else
+        await expect(svc.approveLeave(r._id, { approver_remarks: '' }, manager)).rejects.toMatchObject({
+            statusCode: 403,
+        });
+        expect(leaveRequestFindOneAndUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it('MANAGER: CAN review a direct report (passes the scope guard)', async () => {
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        const r = baseRequest();
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        stubReportingManager(manager.id); // requester reports to THIS manager
+        leaveRequestFindOneAndUpdateMock.mockResolvedValueOnce(null); // race → proves auth passed
+        await expect(svc.approveLeave(r._id, { approver_remarks: '' }, manager)).rejects.toMatchObject({
+            code: ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING,
+        });
     });
 
     it('throws conflict when the row is no longer pending (race loss)', async () => {
@@ -660,17 +703,17 @@ describe('listLeaves — reviewer approvals queue', () => {
         vi.mocked(LeaveRequest.countDocuments).mockResolvedValue(0 as never);
     };
 
-    it("excludes the reviewer's OWN requests from the queue (can't self-approve)", async () => {
+    it("ADMIN: excludes their OWN requests from the queue (can't self-approve)", async () => {
         const reviewerId = new Types.ObjectId();
         let filter: Record<string, unknown> = {};
         stubFindReturningEmpty((f) => (filter = f));
 
-        await svc.listLeaves({ page: 1, limit: 50 } as never, { id: reviewerId, role: ROLES.MANAGER });
+        await svc.listLeaves({ page: 1, limit: 50 } as never, { id: reviewerId, role: ROLES.ADMIN });
 
         expect(filter.user_id).toEqual({ $ne: reviewerId });
     });
 
-    it('honours a positive user_id filter instead of excluding self', async () => {
+    it('ADMIN: honours a positive user_id filter instead of excluding self', async () => {
         const reviewerId = new Types.ObjectId();
         const targetId = new Types.ObjectId();
         let filter: Record<string, unknown> = {};
@@ -678,10 +721,38 @@ describe('listLeaves — reviewer approvals queue', () => {
 
         await svc.listLeaves({ page: 1, limit: 50, user_id: targetId.toString() } as never, {
             id: reviewerId,
-            role: ROLES.MANAGER,
+            role: ROLES.ADMIN,
         });
 
         expect(filter.user_id).toEqual(targetId);
+    });
+
+    it('MANAGER: is scoped to ONLY their direct reports', async () => {
+        const managerId = new Types.ObjectId();
+        const reportA = new Types.ObjectId();
+        const reportB = new Types.ObjectId();
+        stubDirectReports([reportA, reportB]);
+        let filter: Record<string, unknown> = {};
+        stubFindReturningEmpty((f) => (filter = f));
+
+        await svc.listLeaves({ page: 1, limit: 50 } as never, { id: managerId, role: ROLES.MANAGER });
+
+        expect(filter.user_id).toEqual({ $in: [reportA, reportB] });
+    });
+
+    it('MANAGER: drilling into a NON-report returns nothing', async () => {
+        const managerId = new Types.ObjectId();
+        const someoneElse = new Types.ObjectId();
+        stubDirectReports([new Types.ObjectId()]); // reports, but not `someoneElse`
+        let filter: Record<string, unknown> = {};
+        stubFindReturningEmpty((f) => (filter = f));
+
+        await svc.listLeaves({ page: 1, limit: 50, user_id: someoneElse.toString() } as never, {
+            id: managerId,
+            role: ROLES.MANAGER,
+        });
+
+        expect(filter.user_id).toEqual({ $in: [] });
     });
 
     it('scopes an employee to ONLY their own requests', async () => {

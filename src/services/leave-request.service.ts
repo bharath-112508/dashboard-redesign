@@ -21,6 +21,7 @@ import {
     type LeaveRequestStatus,
 } from '../constants/leave.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { USER_STATUSES } from '../constants/user-statuses.js';
 import { consumeCompOffLots, refundConsumedLots, resyncCompOff } from './comp-off.service.js';
 import { getOrInitSettings } from './settings.service.js';
 import { findOrInitBalance, initializeBalancesForUserYear } from './leave-balance.service.js';
@@ -102,6 +103,43 @@ const ensureCanReviewRequest = (req: LeaveRequestDocument, caller: { id: Types.O
     }
     if (caller.id.equals(req.user_id)) {
         throw AppError.forbidden('You cannot review your own leave request');
+    }
+};
+
+/**
+ * Reporting-chain scoping (leave routes to the employee's manager).
+ * `directReportIdsOf` — the active internal users whose
+ * `internal_profile.reporting_manager_id` points at `managerId`. Used to
+ * narrow a non-admin reviewer's approval queue to their own reports.
+ */
+const directReportIdsOf = async (managerId: Types.ObjectId): Promise<Types.ObjectId[]> =>
+    (await User.find({
+        'internal_profile.reporting_manager_id': managerId,
+        status: USER_STATUSES.ACTIVE,
+    }).distinct('_id')) as Types.ObjectId[];
+
+/** True when `requesterId`'s reporting manager is `managerId`. */
+const isDirectReportOf = async (requesterId: Types.ObjectId, managerId: Types.ObjectId): Promise<boolean> => {
+    const u = await User.findById(requesterId)
+        .select('internal_profile.reporting_manager_id')
+        .lean<{ internal_profile?: { reporting_manager_id?: Types.ObjectId | null } }>();
+    const rm = u?.internal_profile?.reporting_manager_id ?? null;
+    return rm != null && managerId.equals(rm);
+};
+
+/**
+ * Approve/reject authorisation WITH reporting-chain scoping. Admins may
+ * review any request; a manager / team-lead may review ONLY their own
+ * direct reports' requests (plus the existing role + no-self-review guard).
+ */
+const assertCanReviewScoped = async (
+    req: LeaveRequestDocument,
+    caller: { id: Types.ObjectId; role: RoleType }
+): Promise<void> => {
+    ensureCanReviewRequest(req, caller);
+    if (caller.role === ROLES.ADMIN) return;
+    if (!(await isDirectReportOf(req.user_id, caller.id))) {
+        throw AppError.forbidden('You can only review leave requests from your direct reports');
     }
 };
 
@@ -782,13 +820,22 @@ export const listLeaves = async (
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const filter: Filter = {};
     if (isReviewer(caller.role)) {
-        if (query.user_id) {
-            filter.user_id = new Types.ObjectId(query.user_id);
+        if (caller.role === ROLES.ADMIN) {
+            // Admin sees the whole queue (minus their own — a reviewer can
+            // never approve their OWN request, so it never appears here).
+            filter.user_id = query.user_id ? new Types.ObjectId(query.user_id) : { $ne: caller.id };
         } else {
-            // A reviewer can never approve their OWN request, so it must not
-            // appear in their approvals queue — always exclude self. (Supersedes
-            // the old opt-in `exclude_user_id`, which only ever excluded self.)
-            filter.user_id = { $ne: caller.id };
+            // Manager / Team Lead — scoped to their OWN direct reports, so a
+            // request routes to the employee's reporting manager, not to every
+            // reviewer. An empty `$in` (no reports / drilling into someone else's
+            // report) simply returns nothing.
+            const reportIds = await directReportIdsOf(caller.id);
+            if (query.user_id) {
+                const wanted = new Types.ObjectId(query.user_id);
+                filter.user_id = reportIds.some((id) => id.equals(wanted)) ? wanted : { $in: [] };
+            } else {
+                filter.user_id = { $in: reportIds };
+            }
         }
     } else {
         // Employees only see their own.
@@ -858,7 +905,7 @@ export const approveLeave = async (
 ): Promise<Record<string, unknown>> => {
     const existing = await LeaveRequest.findById(id);
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
-    ensureCanReviewRequest(existing, caller);
+    await assertCanReviewScoped(existing, caller);
 
     if (
         existing.requires_additional_approval &&
@@ -1000,7 +1047,7 @@ export const rejectLeave = async (
 ): Promise<Record<string, unknown>> => {
     const existing = await LeaveRequest.findById(id);
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
-    ensureCanReviewRequest(existing, caller);
+    await assertCanReviewScoped(existing, caller);
 
     // C2 — status transition + `pending → 0` refunds are atomic. Pre-C2
     // the PENDING→REJECTED flip and the per-segment refund were
