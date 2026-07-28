@@ -1449,14 +1449,22 @@ export interface TodayAttendanceSummary {
  * placeholders), so during the day on_leave may read 0 — the dashboard's
  * separate "Who's out" section is the authoritative leave view.
  */
-export const getTodayAttendanceSummary = async (rosterCap: number): Promise<TodayAttendanceSummary> => {
+export const getTodayAttendanceSummary = async (
+    rosterCap: number,
+    // Reporting-chain scope: `null`/omitted → whole workforce (admin); an array
+    // → only those user_ids (a reviewer's direct reports). Optional so existing
+    // org-wide callers are unaffected.
+    scopeIds?: Types.ObjectId[] | null
+): Promise<TodayAttendanceSummary> => {
     const local_date = todayLocalDate();
+    const userScope = scopeIds ? { _id: { $in: scopeIds } } : {};
+    const recordScope = scopeIds ? { user_id: { $in: scopeIds } } : {};
 
     const [users, rows] = await Promise.all([
-        User.find({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES } })
+        User.find({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES }, ...userScope })
             .select('_id full_name')
             .lean<{ _id: Types.ObjectId; full_name: string }[]>(),
-        AttendanceRecord.find({ local_date })
+        AttendanceRecord.find({ local_date, ...recordScope })
             .select('user_id status check_in')
             .lean<{ user_id: Types.ObjectId; status: string; check_in: { time: Date } | null }[]>(),
     ]);

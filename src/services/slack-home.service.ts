@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { getMyToday, getTodayAttendanceSummary, type TodayAttendanceSummary } from './attendance.service.js';
 import { listOwnBalances } from './leave-balance.service.js';
 import { listLeaves, calendarLeaves } from './leave-request.service.js';
+import { visibleUserIdsForReviewer } from './reporting-scope.service.js';
 import { resolvePermissionsForUser } from './role.service.js';
 import { getSlackAvatarUrlsByIds } from './user.service.js';
 import { callerCan } from '../utils/caller-permissions.js';
@@ -87,6 +88,12 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
 
     const perms = (await safe('perms', () => resolvePermissionsForUser(user._id)))?.permissions ?? [];
     const canReadTeamAttendance = callerCan(perms, PERMISSIONS.ATTENDANCE_READ_TEAM);
+    // Reporting-chain scope for the team-attendance summary — Admin sees the
+    // whole workforce; a Manager/Team-Lead sees only their direct reports
+    // (matches the /admin/attendance and pending-approvals scoping).
+    const attendanceScope = canReadTeamAttendance
+        ? await safe('attendance_scope', () => visibleUserIdsForReviewer({ id: user._id, role: user.role }))
+        : null;
 
     const [my_today, my_balances, my_pending, whos_out, team_attendance, pending_result] = await Promise.all([
         safe('my_today', () => getMyToday(user._id)),
@@ -103,7 +110,7 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
             calendarLeaves({ from_date: today, to_date: weekEnd } as Parameters<typeof calendarLeaves>[0])
         ),
         canReadTeamAttendance
-            ? safe('team_attendance', () => getTodayAttendanceSummary(ATT_ROSTER_CAP))
+            ? safe('team_attendance', () => getTodayAttendanceSummary(ATT_ROSTER_CAP, attendanceScope))
             : Promise.resolve(null),
         reviewer
             ? safe('pending_leaves', () =>
