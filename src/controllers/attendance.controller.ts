@@ -86,7 +86,10 @@ export const getMy = async (req: Request, res: Response): Promise<Response> => {
 // ─── GET /attendance ─────────────────────────────────────────────────────
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {
-    const { data, meta } = await service.listAttendance(req.query as unknown as ListAttendanceQuery);
+    const { data, meta } = await service.listAttendance(req.query as unknown as ListAttendanceQuery, {
+        id: callerId(req),
+        role: callerRole(req),
+    });
     return paginated(res, data, meta);
 };
 

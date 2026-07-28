@@ -21,7 +21,7 @@ import {
     type LeaveRequestStatus,
 } from '../constants/leave.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
-import { USER_STATUSES } from '../constants/user-statuses.js';
+import { directReportIdsOf, isDirectReportOf } from './reporting-scope.service.js';
 import { consumeCompOffLots, refundConsumedLots, resyncCompOff } from './comp-off.service.js';
 import { getOrInitSettings } from './settings.service.js';
 import { findOrInitBalance, initializeBalancesForUserYear } from './leave-balance.service.js';
@@ -104,27 +104,6 @@ const ensureCanReviewRequest = (req: LeaveRequestDocument, caller: { id: Types.O
     if (caller.id.equals(req.user_id)) {
         throw AppError.forbidden('You cannot review your own leave request');
     }
-};
-
-/**
- * Reporting-chain scoping (leave routes to the employee's manager).
- * `directReportIdsOf` — the active internal users whose
- * `internal_profile.reporting_manager_id` points at `managerId`. Used to
- * narrow a non-admin reviewer's approval queue to their own reports.
- */
-const directReportIdsOf = async (managerId: Types.ObjectId): Promise<Types.ObjectId[]> =>
-    (await User.find({
-        'internal_profile.reporting_manager_id': managerId,
-        status: USER_STATUSES.ACTIVE,
-    }).distinct('_id')) as Types.ObjectId[];
-
-/** True when `requesterId`'s reporting manager is `managerId`. */
-const isDirectReportOf = async (requesterId: Types.ObjectId, managerId: Types.ObjectId): Promise<boolean> => {
-    const u = await User.findById(requesterId)
-        .select('internal_profile.reporting_manager_id')
-        .lean<{ internal_profile?: { reporting_manager_id?: Types.ObjectId | null } }>();
-    const rm = u?.internal_profile?.reporting_manager_id ?? null;
-    return rm != null && managerId.equals(rm);
 };
 
 /**

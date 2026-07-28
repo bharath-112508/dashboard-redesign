@@ -579,7 +579,7 @@ describe('listAttendance — single-day roster', () => {
             include_absent: true,
             page: 1,
             limit: 20,
-        } as never);
+        } as never, { id: new Types.ObjectId(), role: ROLES.ADMIN } as never);
 
         expect(res.meta.total).toBe(2);
         expect(res.meta.total_internal_active).toBe(2);
@@ -599,7 +599,7 @@ describe('listAttendance — single-day roster', () => {
             include_absent: true,
             page: 1,
             limit: 20,
-        } as never);
+        } as never, { id: new Types.ObjectId(), role: ROLES.ADMIN } as never);
 
         // The first User.find call builds the staff roster; it must exclude both
         // client-side roles so representatives never appear as "Absent" rows.
@@ -624,7 +624,7 @@ describe('listAttendance — single-day roster', () => {
             status: 'present',
             page: 1,
             limit: 20,
-        } as never);
+        } as never, { id: new Types.ObjectId(), role: ROLES.ADMIN } as never);
 
         expect(res.meta.total).toBe(1);
         expect(res.data.every((r) => r.status === 'present')).toBe(true);
@@ -643,7 +643,7 @@ describe('listAttendance — single-day roster', () => {
             include_absent: true,
             page: 1,
             limit: 20,
-        } as never);
+        } as never, { id: new Types.ObjectId(), role: ROLES.ADMIN } as never);
 
         const presentRow = res.data.find((r) => r.user_id === present.toString());
         expect(presentRow?.timesheet_totals).toEqual({

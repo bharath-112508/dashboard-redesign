@@ -16,6 +16,7 @@ import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { User } from '../models/user.model.js';
 import { CLIENT_SIDE_ROLES, ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
+import { visibleUserIdsForReviewer } from './reporting-scope.service.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
@@ -708,24 +709,37 @@ const loadUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, User
  * single day is at most ~headcount rows.
  */
 const listAttendanceRoster = async (
-    query: ListAttendanceQuery
+    query: ListAttendanceQuery,
+    caller: { id: Types.ObjectId; role: RoleType }
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     const date = query.from_date as string;
-    const userFilter = query.user_id ? new Types.ObjectId(query.user_id) : null;
-
-    const recordFilter: Record<string, unknown> = { local_date: date };
-    if (userFilter) recordFilter.user_id = userFilter;
+    // Reporting-chain scoping (Admin all; Manager/Team-Lead → own team).
+    const scopeIds = await visibleUserIdsForReviewer(caller);
+    const requested = query.user_id ? new Types.ObjectId(query.user_id) : null;
+    // Resolve which user_ids this roster covers. `undefined` = whole workforce
+    // (admin, no drill). A non-admin drilling into a non-report → `{ $in: [] }`.
+    let idScope: unknown | undefined;
+    if (requested) {
+        idScope = scopeIds && !scopeIds.some((id) => id.equals(requested)) ? { $in: [] } : requested;
+    } else if (scopeIds) {
+        idScope = { $in: scopeIds };
+    }
+    const teamScope = idScope !== undefined ? { _id: idScope } : {};
+    const recordFilter: Record<string, unknown> = {
+        local_date: date,
+        ...(idScope !== undefined ? { user_id: idScope } : {}),
+    };
 
     const [records, employees, totalInternalActive] = await Promise.all([
         AttendanceRecord.find(recordFilter).sort({ _id: -1 }),
         User.find({
             status: USER_STATUSES.ACTIVE,
             role: { $nin: CLIENT_SIDE_ROLES },
-            ...(userFilter ? { _id: userFilter } : {}),
+            ...teamScope,
         })
             .select('_id full_name')
             .lean<{ _id: Types.ObjectId; full_name: string }[]>(),
-        User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES } }),
+        User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES }, ...teamScope }),
     ]);
 
     // Real rows (with user display). Records for non-employees (e.g. a client
@@ -782,18 +796,27 @@ const listAttendanceRoster = async (
 };
 
 export const listAttendance = async (
-    query: ListAttendanceQuery
+    query: ListAttendanceQuery,
+    caller: { id: Types.ObjectId; role: RoleType }
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     // Single-day roster mode — surface the FULL active non-client workforce for
     // the day: real records for whoever has one, plus a synthetic `absent` row
     // for every active non-client employee who hasn't checked in. The FE only
     // requests this on working, non-holiday, non-future days.
     if (query.include_absent && query.from_date && query.from_date === query.to_date) {
-        return listAttendanceRoster(query);
+        return listAttendanceRoster(query, caller);
     }
 
+    // Reporting-chain scoping — Admin sees all; Manager/Team-Lead only their
+    // direct reports (their team). `null` = admin (no restriction).
+    const scopeIds = await visibleUserIdsForReviewer(caller);
     const filter: Record<string, unknown> = {};
-    if (query.user_id) filter.user_id = new Types.ObjectId(query.user_id);
+    if (query.user_id) {
+        const wanted = new Types.ObjectId(query.user_id);
+        filter.user_id = scopeIds && !scopeIds.some((id) => id.equals(wanted)) ? { $in: [] } : wanted;
+    } else if (scopeIds) {
+        filter.user_id = { $in: scopeIds };
+    }
     if (query.status) filter.status = query.status;
     if (query.flagged_for_correction !== undefined) {
         filter.flagged_for_correction = query.flagged_for_correction;
@@ -809,10 +832,13 @@ export const listAttendance = async (
     const [rows, total, totalInternalActive] = await Promise.all([
         AttendanceRecord.find(filter).sort({ local_date: -1, _id: -1 }).skip(skip).limit(query.limit),
         AttendanceRecord.countDocuments(filter),
-        // Active non-client headcount — the canonical "workforce" denominator
-        // shared with the dashboard's attendance card. Clients are excluded;
-        // any client attendance still surfaces as its own row in `data`.
-        User.countDocuments({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES } }),
+        // Active non-client headcount — the "workforce" denominator. Scoped to
+        // the reviewer's team for a non-admin so "X of Y present" reads per-team.
+        User.countDocuments({
+            status: USER_STATUSES.ACTIVE,
+            role: { $nin: CLIENT_SIDE_ROLES },
+            ...(scopeIds ? { _id: { $in: scopeIds } } : {}),
+        }),
     ]);
 
     const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
