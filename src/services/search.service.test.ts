@@ -11,9 +11,10 @@ import { USER_STATUSES } from '../constants/user-statuses.js';
  *   1. **Regex injection guard** — every metacharacter in the user
  *      query is escaped before being passed to Mongo. A literal
  *      `q = ".*"` must NOT match every row.
- *   2. **Role-visibility scoping** — admins/managers see all rows;
- *      employees scope to their projects; clients scope to their
- *      projects AND see no users.
+ *   2. **Role-visibility scoping** — admins/managers see all rows and
+ *      are the ONLY roles that get People results; employees + team
+ *      leads scope to their projects and see no users; clients scope to
+ *      their projects AND see no users.
  *   3. **Types filter** — when only one bucket is requested, the
  *      others run zero DB queries (no wasted roundtrips).
  *   4. **Empty visible-projects short-circuit** — clients/employees
@@ -68,7 +69,9 @@ const queryStub = (rows: unknown[]) => {
 };
 
 const adminCaller = () => ({ id: new Types.ObjectId(), role: ROLES.ADMIN });
+const managerCaller = () => ({ id: new Types.ObjectId(), role: ROLES.MANAGER });
 const employeeCaller = () => ({ id: new Types.ObjectId(), role: ROLES.EMPLOYEE });
+const teamLeadCaller = () => ({ id: new Types.ObjectId(), role: ROLES.TEAM_LEAD });
 const clientCaller = () => ({ id: new Types.ObjectId(), role: ROLES.CLIENT });
 
 const baseQuery = (overrides: Record<string, unknown> = {}) => ({
@@ -209,9 +212,25 @@ describe('search (employee)', () => {
         expect(taskFilter.project_id.$in.map((i) => i.toString())).toEqual([visibleId.toString()]);
     });
 
-    it('still surfaces the user directory (employees can find colleagues)', async () => {
-        await svc.search(baseQuery() as never, employeeCaller());
+    it('returns an empty users[] without hitting the User collection (directory is admin/manager-only)', async () => {
+        const result = await svc.search(baseQuery() as never, employeeCaller());
+        expect(result.users).toEqual([]);
+        expect(userFindMock).not.toHaveBeenCalled();
+    });
+
+    it('team leads also get an empty users[] (not admin/manager)', async () => {
+        const result = await svc.search(baseQuery() as never, teamLeadCaller());
+        expect(result.users).toEqual([]);
+        expect(userFindMock).not.toHaveBeenCalled();
+    });
+
+    it('managers DO get user results (they can open the directory)', async () => {
+        userFindMock.mockReturnValueOnce(
+            queryStub([{ _id: new Types.ObjectId(), full_name: 'Anna Login', role: 'employee' }])
+        );
+        const result = await svc.search(baseQuery({ types: ['users'] }) as never, managerCaller());
         expect(userFindMock).toHaveBeenCalledTimes(1);
+        expect(result.users).toHaveLength(1);
     });
 
     it('short-circuits sprint + task buckets when the caller has zero visible projects', async () => {

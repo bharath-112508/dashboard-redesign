@@ -32,12 +32,15 @@ import type { SearchQuery } from '../validators/search.validator.js';
  *
  * Visibility scoping:
  *   - **Admin / Manager** → no extra filter beyond the per-bucket
- *     "active / non-archived" gates.
- *   - **Employee** → projects (and their sprints + tasks) that have the
- *     caller in `member_ids`. Users bucket is open (internal directory).
- *   - **Client** → projects (and their sprints + tasks) that have the
- *     caller in `client_ids`. Users bucket is **always empty** for
- *     clients — the directory is internal-only.
+ *     "active / non-archived" gates. Only these two roles get People
+ *     results (the user directory is admin/manager-only).
+ *   - **Employee / Team Lead** → projects (and their sprints + tasks)
+ *     that have the caller in `member_ids`. Users bucket is **empty** —
+ *     they can't open the admin directory, so surfacing people here
+ *     would only dead-end at a 403 (and leak the roster).
+ *   - **Client / Representative** → projects (and their sprints + tasks)
+ *     they can see. Users bucket is **always empty** — the directory is
+ *     internal-only.
  *
  * Regex injection guard: `q` is escaped before being inlined into a
  * `RegExp`. A literal `q = ".*"` would otherwise match every row and
@@ -130,9 +133,15 @@ const resolveVisibleProjectIds = async (caller: SearchCaller): Promise<Types.Obj
 };
 
 const searchUsers = async (q: RegExp, limit: number, caller: SearchCaller): Promise<UserHit[]> => {
-    // Clients are explicitly excluded from the user-directory bucket.
-    // Returning early avoids a wasted DB roundtrip.
-    if (caller.role === ROLES.CLIENT) return [];
+    // The People bucket mirrors the admin user directory, which is
+    // admin/manager-only. Employees, team leads, clients, and
+    // representatives get NO people results here — otherwise global
+    // search / the ⌘K palette would surface every colleague's profile
+    // (and a link into `/admin/users/:id`) to roles that can't open the
+    // directory. Name resolution for tasks still works via the
+    // per-id `GET /users/:id` name lookup and the project-scoped
+    // `/users/assignable` picker — neither routes through this bucket.
+    if (caller.role !== ROLES.ADMIN && caller.role !== ROLES.MANAGER) return [];
 
     // Search by `full_name` only. Email is intentionally NOT searchable
     // here because it isn't surfaced in the response shape (see file
