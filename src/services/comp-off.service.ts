@@ -23,6 +23,7 @@ import {
     type CompOffSource,
 } from '../constants/leave.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { scopedUserIdFilter } from './reporting-scope.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { AdjustCompOffBody, ListCompOffQuery, MyCompOffQuery } from '../validators/comp-off.validator.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
@@ -523,7 +524,10 @@ export const listCompOff = async (
     // reviewers (admin/manager) get the org-wide view. Mirrors the
     // attendance / leave-balance team-read gating.
     if (isReviewer(caller.role)) {
-        if (query.user_id) filter.user_id = new Types.ObjectId(query.user_id);
+        // Reporting-chain scoping — Admin sees all; Manager only their direct
+        // reports. `undefined` → no user_id restriction (admin, no drill).
+        const scopedUid = await scopedUserIdFilter(caller, query.user_id);
+        if (scopedUid !== undefined) filter.user_id = scopedUid;
     } else {
         filter.user_id = caller.id;
     }

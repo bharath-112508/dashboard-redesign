@@ -8,7 +8,8 @@ import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { LEAVE_CODES, PRO_RATA_STRATEGIES, type ProRataStrategy } from '../constants/leave.js';
-import { ROLES } from '../constants/roles.js';
+import { ROLES, type RoleType } from '../constants/roles.js';
+import { scopedUserIdFilter } from './reporting-scope.service.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import logger from '../utils/logger.js';
@@ -314,18 +315,22 @@ const loadBalanceUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<strin
     return new Map(users.map((u) => [u._id.toString(), { id: u._id.toString(), full_name: u.full_name }]));
 };
 
-export const listBalances = async (query: ListLeaveBalancesQuery): Promise<Record<string, unknown>[]> => {
+export const listBalances = async (
+    query: ListLeaveBalancesQuery,
+    caller: { id: Types.ObjectId; role: RoleType }
+): Promise<Record<string, unknown>[]> => {
     const filter: Filter = {};
     const targetYear = query.year ?? currentYear();
     filter.year = targetYear;
-    if (query.user_id) filter.user_id = new Types.ObjectId(query.user_id);
 
-    if (query.user_id) {
-        // Self-heal for the requested user.
-        await initializeBalancesForUserYear({
-            user_id: new Types.ObjectId(query.user_id),
-            year: targetYear,
-        });
+    // Reporting-chain scoping — Admin sees all; Manager/Team-Lead only their
+    // direct reports. `undefined` → no user_id restriction (admin, no drill).
+    const scopedUid = await scopedUserIdFilter(caller, query.user_id);
+    if (scopedUid !== undefined) filter.user_id = scopedUid;
+
+    if (query.user_id && scopedUid instanceof Types.ObjectId) {
+        // Self-heal only when drilling into a specific, allowed user.
+        await initializeBalancesForUserYear({ user_id: scopedUid, year: targetYear });
     }
 
     const rows = await LeaveBalance.find(filter).sort({ user_id: 1, leave_type_id: 1 });

@@ -12,6 +12,7 @@ import { LeaveRequest } from '../models/leave-request.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
+import { scopedUserIdFilter } from './reporting-scope.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import {
     TIMESHEET_DEFAULT_DAILY_WARN_THRESHOLD_HOURS,
@@ -564,7 +565,7 @@ export const getEntry = async (id: Types.ObjectId, caller: Caller): Promise<Reco
 
 // ─── GET /timesheets/me  &  GET /timesheets ──────────────────────────────
 
-const buildListFilter = (query: ListTimesheetsQuery, scopeUserId: Types.ObjectId | null): Record<string, unknown> => {
+const buildListFilter = (query: ListTimesheetsQuery, scopeUserId: unknown): Record<string, unknown> => {
     const filter: Record<string, unknown> = {};
     if (scopeUserId) filter.user_id = scopeUserId;
     if (query.project_id) filter.project_id = new Types.ObjectId(query.project_id);
@@ -643,7 +644,9 @@ export const listAllEntries = async (
     caller: Caller
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     if (!canReadTeamTimesheets(caller.role)) throw AppError.forbidden();
-    const scopeUserId = query.user_id ? new Types.ObjectId(query.user_id) : null;
+    // Reporting-chain scoping — Admin sees all; Manager/Team-Lead only their
+    // direct reports. `undefined` → no user_id restriction (admin, no filter).
+    const scopeUserId = await scopedUserIdFilter(caller, query.user_id);
     const filter = buildListFilter(query, scopeUserId);
     const skip = (query.page - 1) * query.limit;
     const [rows, total] = await Promise.all([

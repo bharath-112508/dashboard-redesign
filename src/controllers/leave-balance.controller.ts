@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as service from '../services/leave-balance.service.js';
+import type { RoleType } from '../constants/roles.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import { created, ok } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
@@ -29,7 +30,11 @@ export const getMine = async (req: Request, res: Response): Promise<Response> =>
 // ─── GET /leave-balances ──────────────────────────────────────────────────
 
 export const getList = async (req: Request, res: Response): Promise<Response> => {
-    const data = await service.listBalances(req.query as unknown as ListLeaveBalancesQuery);
+    if (!req.user?.role) throw AppError.unauthenticated();
+    const data = await service.listBalances(req.query as unknown as ListLeaveBalancesQuery, {
+        id: callerId(req),
+        role: req.user.role as RoleType,
+    });
     return ok(res, data);
 };
 

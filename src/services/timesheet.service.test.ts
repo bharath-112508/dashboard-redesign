@@ -86,6 +86,14 @@ vi.mock('./settings.service.js', () => ({
     getOrInitSettings: getOrInitSettingsMock,
 }));
 
+// User model — only needed for reporting-chain scoping (directReportIdsOf).
+const userFindMock = vi.hoisted(() => vi.fn());
+vi.mock('../models/user.model.js', () => ({
+    User: { find: userFindMock, findById: vi.fn() },
+}));
+/** Stub `User.find(...).distinct('_id')` → the given direct-report ids. */
+const stubReports = (ids: unknown[]) => userFindMock.mockReturnValue({ distinct: () => Promise.resolve(ids) });
+
 const svc = await import('./timesheet.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
@@ -543,10 +551,37 @@ describe('list & summary RBAC', () => {
     });
 
     it('listAllEntries allows a team lead (holds timesheet.read — matches the route gate)', async () => {
+        stubReports([]);
         stubFind([]);
         await expect(svc.listAllEntries({ page: 1, limit: 20 }, teamLeadCaller())).resolves.toMatchObject({
             data: [],
         });
+    });
+
+    it('listAllEntries scopes a manager to ONLY their direct reports', async () => {
+        const reports = [new Types.ObjectId(), new Types.ObjectId()];
+        stubReports(reports);
+        let filter: Record<string, unknown> = {};
+        entryFindMock.mockImplementation((f: Record<string, unknown>) => {
+            filter = f;
+            return { sort: () => ({ skip: () => ({ limit: () => Promise.resolve([]) }) }) };
+        });
+        entryCountMock.mockResolvedValue(0);
+
+        await svc.listAllEntries({ page: 1, limit: 20 }, managerCaller());
+        expect(filter.user_id).toEqual({ $in: reports });
+    });
+
+    it('listAllEntries lets an ADMIN see everyone (no user_id restriction)', async () => {
+        let filter: Record<string, unknown> = {};
+        entryFindMock.mockImplementation((f: Record<string, unknown>) => {
+            filter = f;
+            return { sort: () => ({ skip: () => ({ limit: () => Promise.resolve([]) }) }) };
+        });
+        entryCountMock.mockResolvedValue(0);
+
+        await svc.listAllEntries({ page: 1, limit: 20 }, adminCaller());
+        expect(filter.user_id).toBeUndefined();
     });
 
     it('summary allows a team lead', async () => {

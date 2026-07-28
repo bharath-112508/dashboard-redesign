@@ -27,6 +27,7 @@ const {
     userExistsMock,
     userUpdateOneMock,
     userFindByIdMock,
+    userFindMock,
     recordAuditMock,
     leaveTypeFindOneMock,
     leaveBalanceFindOneMock,
@@ -39,6 +40,7 @@ const {
     userExistsMock: vi.fn(),
     userUpdateOneMock: vi.fn(),
     userFindByIdMock: vi.fn(),
+    userFindMock: vi.fn(),
     recordAuditMock: vi.fn(),
     leaveTypeFindOneMock: vi.fn(),
     leaveBalanceFindOneMock: vi.fn(),
@@ -58,6 +60,8 @@ vi.mock('../models/user.model.js', () => ({
     User: {
         exists: userExistsMock,
         updateOne: userUpdateOneMock,
+        // Reporting-chain scoping calls `User.find(...).distinct('_id')`.
+        find: userFindMock,
         // `.select('role')` is chained off `findById` — model the chain
         // with a thenable shape that resolves to whatever `userFindByIdMock`
         // returns. Tests override `userFindByIdMock` per-case.
@@ -593,8 +597,16 @@ describe('listCompOff — caller scoping (org-wide leak guard)', () => {
         expect(compOffLedgerFindMock).toHaveBeenCalledWith(expect.objectContaining({ user_id: me.id }));
     });
 
-    it('gives a reviewer (manager) the org-wide ledger (no user_id filter)', async () => {
+    it('scopes a MANAGER to ONLY their direct reports', async () => {
+        const reports = [new Types.ObjectId(), new Types.ObjectId()];
+        userFindMock.mockReturnValue({ distinct: () => Promise.resolve(reports) });
         await svc.listCompOff({ page: 1, limit: 20 } as never, caller(ROLES.MANAGER));
+        const filter = compOffLedgerFindMock.mock.calls[0]![0];
+        expect(filter.user_id).toEqual({ $in: reports });
+    });
+
+    it('gives an ADMIN the org-wide ledger (no user_id filter)', async () => {
+        await svc.listCompOff({ page: 1, limit: 20 } as never, caller(ROLES.ADMIN));
         const filter = compOffLedgerFindMock.mock.calls[0]![0];
         expect(filter.user_id).toBeUndefined();
     });
