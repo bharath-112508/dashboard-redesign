@@ -149,6 +149,69 @@ export const resolveCustomRange = (from: string, to: string): ResolvedRange => {
 export const resolveAnalyticsRange = (q: { range?: DashboardRangeKey; from?: string; to?: string }): ResolvedRange =>
     q.from && q.to ? resolveCustomRange(q.from, q.to) : resolveDashboardRange(q.range ?? 'month');
 
+/**
+ * Full calendar-period boundaries for the "Tasks Completed" throughput
+ * card — Sunday–Saturday for a week, 1st–last day of the calendar month,
+ * first–last day of the calendar quarter. Every other dashboard section
+ * shares `resolveDashboardRange`'s Monday-start week and "to = today"
+ * truncation, but a still-in-progress period there just means the
+ * not-yet-arrived days have zero completions — reporting the FULL period
+ * (rather than only "so far") never inflates the total, it just fixes the
+ * boundary so e.g. "This week" always means Sun–Sat, not a partial
+ * Monday-to-today window.
+ *
+ * `'today'` (a single day), `'30d'` (a rolling window with no calendar
+ * period of its own) and `'custom'` (an explicit caller-chosen span) have
+ * no distinct "full period" — they fall through to the range as already
+ * resolved.
+ */
+export const resolveThroughputPeriod = (
+    range: ResolvedRange
+): Pick<ResolvedRange, 'from' | 'to' | 'prev_from' | 'prev_to'> => {
+    const f = (d: ReturnType<typeof dayjs>) => d.format(DATE_FORMAT);
+    // `range.to` is "today" for every preset that reaches this point (week /
+    // month / quarter all end their shared range at today), so it doubles as
+    // the reference date for finding which week/month/quarter we're in.
+    const now = dayjs.tz(range.to, DEFAULT_TIMEZONE);
+
+    switch (range.key) {
+        case 'week': {
+            const dow = now.day(); // dayjs: 0 = Sunday .. 6 = Saturday
+            const start = now.subtract(dow, 'day');
+            const end = start.add(6, 'day');
+            return {
+                from: f(start),
+                to: f(end),
+                prev_from: f(start.subtract(7, 'day')),
+                prev_to: f(start.subtract(1, 'day')),
+            };
+        }
+        case 'month': {
+            const start = now.startOf('month');
+            const end = now.endOf('month');
+            return {
+                from: f(start),
+                to: f(end),
+                prev_from: f(start.subtract(1, 'month')),
+                prev_to: f(start.subtract(1, 'day')),
+            };
+        }
+        case 'quarter': {
+            const qStartMonth = Math.floor(now.month() / 3) * 3;
+            const start = now.month(qStartMonth).startOf('month');
+            const end = start.add(2, 'month').endOf('month');
+            return {
+                from: f(start),
+                to: f(end),
+                prev_from: f(start.subtract(3, 'month')),
+                prev_to: f(start.subtract(1, 'day')),
+            };
+        }
+        default:
+            return { from: range.from, to: range.to, prev_from: range.prev_from, prev_to: range.prev_to };
+    }
+};
+
 /** Inclusive YYYY-MM-DD list for [from, to]. Caller guarantees from <= to. */
 export const enumerateDates = (from: string, to: string): string[] => {
     const out: string[] = [];
