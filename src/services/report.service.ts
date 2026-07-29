@@ -71,6 +71,20 @@ const countWorkingDays = (from: string, to: string, holidayDates: ReadonlySet<st
     return count;
 };
 
+/**
+ * Inclusive calendar-day count between `from` and `to` (ISO date strings).
+ * Used as the attendance report's `total_days` — deliberately NOT a sum of
+ * the per-status buckets (present/absent/on_leave/holiday/weekend/
+ * incomplete). That sum only reflects whatever `attendance_records` rows
+ * happen to exist, so a day the nightly finalizer failed to process (e.g.
+ * the server was offline at 23:00 IST) silently disappears from the total
+ * instead of surfacing as a gap. Anchoring `total_days` to the actual
+ * calendar span makes that kind of gap visible: if the buckets don't sum
+ * to `total_days`, some day in the range has no attendance record at all.
+ */
+const countCalendarDays = (from: string, to: string): number =>
+    dayjs(to).diff(dayjs(from), 'day') + 1;
+
 const loadHolidayDateSet = async (from: string, to: string): Promise<Set<string>> => {
     const rows = await Holiday.find({ date: { $gte: from, $lte: to } })
         .select('date')
@@ -641,13 +655,16 @@ export const buildAttendanceReport = async (query: AttendanceReportQuery): Promi
         byUser.set(key, bucket);
     }
 
+    // Same value for every row — the calendar span of the report window,
+    // not a sum of the (possibly incomplete) per-status buckets. See
+    // `countCalendarDays` for why.
+    const totalDays = countCalendarDays(query.from_date, query.to_date);
     const rows: AttendanceRow[] = users.map((u) => {
         const b = byUser.get(u._id.toString()) ?? blank();
-        const total = b.present + b.absent + b.on_leave + b.holiday + b.weekend + b.incomplete;
         return {
             user: { id: u._id.toString(), full_name: u.full_name },
             ...b,
-            total_days: total,
+            total_days: totalDays,
             total_break_minutes: breakByUser.get(u._id.toString()) ?? 0,
         };
     });
