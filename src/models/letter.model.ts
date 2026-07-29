@@ -6,9 +6,9 @@ import { COLLECTIONS } from '../constants/collections.js';
 /**
  * `letters` — one immutable row per generated letter PDF (Task 8).
  *
- * Covers all 7 letter types: offer, joining, relieving, experience,
- * internship, hike, promotion. Like `payslips` (Task 7), a letter is never
- * edited in place — re-running generation creates a NEW row with a fresh
+ * Covers all 8 letter types: offer, joining, internship_offer, relieving,
+ * experience, internship, hike, promotion. Like `payslips` (Task 7), a letter
+ * is never edited in place — re-running generation creates a NEW row with a fresh
  * `blob_key` / `content_hash`. `render_snapshot` freezes the exact render-data
  * payload used to produce the PDF (the `LetterRenderData` shape for the 5
  * employee letter types, or the `OfferLetterRenderData` shape for `offer` and

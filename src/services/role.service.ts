@@ -21,14 +21,14 @@ import logger from '../utils/logger.js';
 /**
  * Role service (Phase 4 Step 47 — all phases).
  *
- *  1. **System-role seeder** — `seedSystemRoles()` upserts the five
+ *  1. **System-role seeder** — `seedSystemRoles()` upserts the six
  *     pre-defined system roles from `SYSTEM_ROLE_DEFINITIONS`.
  *     Idempotent: re-running on an already-seeded DB is a no-op.
  *     Called from the boot path AND lazily from the bootstrap-
  *     migration path so a fresh-DB integration test doesn't need
  *     a separate setup step.
  *  2. **System-role lookup** — `getSystemRoleByKey(key)` returns the
- *     role document for one of the five system roles, seeding on the
+ *     role document for one of the six system roles, seeding on the
  *     fly if missing (race-safe via the unique-key index). Used by
  *     `auth.service.login` to translate the legacy `users.role`
  *     string into a `role_ids` array, and by the bootstrap migration.
