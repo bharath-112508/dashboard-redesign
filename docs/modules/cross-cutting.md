@@ -11,7 +11,7 @@ The platform plumbing every other module sits on top of. Six themes:
 7. **Boot migrations + cron scheduler** — five boot migrations + the registry of 11 scheduled jobs with consecutive-failure tracking.
 8. **Graceful shutdown** — server.close → cron drain → Mongo disconnect, in that exact order.
 
-Cross-references: every module documented in this directory uses some of this layer. Auth specifically is documented in [`auth-identity.md`](./auth-identity.md); audit's `recordAudit` non-throwing contract in [`audit-compliance.md`](./audit-compliance.md); JWT details in the auth module.
+Cross-references: every module documented in this directory uses some of this layer. Auth specifically is documented in [`auth.md`](./auth.md); audit's `recordAudit` non-throwing contract in [`audit-compliance.md`](./audit-compliance.md); JWT details in the auth module.
 
 ---
 

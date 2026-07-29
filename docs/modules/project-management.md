@@ -14,7 +14,7 @@ This module owns:
 - **Project Share Links** — token-gated public read-only project view; C9 token-hashed at rest.
 - **Project Timeline** — Gantt-shape rollup of project + sprints + tasks with derived `start_date`.
 
-Cross-references: [`auth-identity.md`](./auth-identity.md) for `requirePermission` and JWT shape; [`audit-compliance.md`](./audit-compliance.md) for the audit substrate; [`user-management.md`](./user-management.md) for the share-link auto-revoke cascade on client deactivation.
+Cross-references: [`auth.md`](./auth.md) for `requirePermission` and JWT shape; [`audit-compliance.md`](./audit-compliance.md) for the audit substrate; [`user-management.md`](./user-management.md) for the share-link auto-revoke cascade on client deactivation.
 
 ---
 
@@ -839,7 +839,7 @@ Indexes: `{project_id, is_archived}` (project templates panel); `{recurrence.ena
 | `DELETE` | `/task-templates/:id` | `task_template.write` |
 | `POST` | `/task-templates/:id/instantiate` | `task_template.write` |
 
-`requireWriter` uses [`isProjectAuthor`](../../src/utils/role-check.js) — admin / manager / team_lead.
+`requireWriter` uses [`isProjectAuthor`](../../src/utils/role-check.ts) — admin / manager / team_lead.
 
 ## Reference resilience at instantiation
 

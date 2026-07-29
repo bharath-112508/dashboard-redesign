@@ -80,7 +80,7 @@ Both gated on **`authenticate` only** at the route layer. Per-bucket visibility 
 }
 ```
 
-**Admin-like callers get `scope: 'org'`** (`isAdminLike(caller)` per [auth-identity module](./auth-identity.md)): no team filter, sees the full pending queue.
+**Admin-like callers get `scope: 'org'`** (`isAdminLike(caller)` per [auth module](./auth.md)): no team filter, sees the full pending queue.
 
 **Manager / Team Lead callers get `scope: 'team'`**: pending leaves scoped to direct reports via `internal_profile.reporting_manager_id === caller.id`.
 
@@ -370,7 +370,7 @@ return {actions: actionsResult.data, items}
 | 1 | Every dashboard card wrapped in `safeCard` — one slow/failing aggregation can't black out the page | Cards default to contractually-shaped empty values; failures log warn |
 | 2 | H1 — `currentYear()` and `todayLocalDate()` IST-anchored | Year-end window between IST + UTC midnight doesn't read stale data |
 | 3 | Admin dashboard `headcount.by_role` counts ACTIVE only; deactivated surfaced separately | Total visible vs total ever |
-| 4 | Manager dashboard scope: admin-like = `'org'`, others = `'team'` (direct reports only) | `isAdminLike(caller)` mirrors auth-identity module |
+| 4 | Manager dashboard scope: admin-like = `'org'`, others = `'team'` (direct reports only) | `isAdminLike(caller)` mirrors auth module |
 | 5 | Manager `pending_leave_approvals` scoped via `reporting_manager_id` | Direct reports only |
 | 6 | Employee dashboard self-heals leave balances (initializes year if missing) | Fresh joiner before first balance read |
 | 7 | Client dashboard resolves `visibleProjectIds` ONCE per request | All cards scope through the list |

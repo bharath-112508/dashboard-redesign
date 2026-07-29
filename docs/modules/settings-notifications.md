@@ -8,7 +8,7 @@ Three sub-modules paired here because they share the dispatch substrate every bu
 4. **Push** — Web Push subscription registry + VAPID dispatch + endpoint allowlist (SSRF defense).
 
 Cross-references:
-- [`auth-identity.md`](./auth-identity.md) — `requirePermission` gates writes; `require_mfa_for_admins` setting (Step 28).
+- [`auth.md`](./auth.md) — `requirePermission` gates writes; `require_mfa_for_admins` setting (Step 28).
 - [`audit-compliance.md`](./audit-compliance.md) — every settings mutation + Slack `test-message` + push subscribe/unsubscribe audits.
 - Every prior module — they call `notifyXxx(...)` helpers; the dispatcher fan-out is one-stop.
 
