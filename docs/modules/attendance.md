@@ -33,7 +33,7 @@ Cross-module dependencies:
 
 ## Roles & permissions
 
-Route-level baseline ([`attendance.routes.ts:28`](../../src/routes/attendance.routes.ts#L28)): the **entire router** requires `ATTENDANCE_CHECK_IN_OUT`. Clients don't hold this and would only ever see 403s.
+Route-level baseline in [`attendance.routes.ts`](../../src/routes/attendance.routes.ts): the **entire router** requires `ATTENDANCE_CHECK_IN_OUT` (via `router.use(requirePermission(...))`). Clients don't hold this and would only ever see 403s.
 
 | Endpoint | Permission | Held by |
 |---|---|---|

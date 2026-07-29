@@ -39,7 +39,7 @@ ESM + NodeNext. Every relative import in `.ts` must end with `.js`. Routes mount
 
 ## Roles & permissions
 
-Role keys ([`constants/role-keys.ts:22-28`](src/constants/role-keys.ts#L22-L28)) and bundled permissions ([`constants/system-role-definitions.ts`](src/constants/system-role-definitions.ts)):
+Role keys ([`SYSTEM_ROLE_KEYS`](src/constants/role-keys.ts)) and bundled permissions ([`constants/system-role-definitions.ts`](src/constants/system-role-definitions.ts)):
 
 | Role | Slug | Audience | Permission baseline |
 |---|---|---|---|
@@ -57,7 +57,7 @@ Role keys ([`constants/role-keys.ts:22-28`](src/constants/role-keys.ts#L22-L28))
 
 Permission constants live in [`constants/permissions.ts`](src/constants/permissions.ts) (71 total, grouped by domain prefix: `user.*`, `role.*`, `company.*`, `representative.*`, `project.*`, `task.*`, `timesheet.*`, `billing_rate.*`, `cost_rate.*`, `invoice.*`, `attendance.*`, `leave_type.*`, `leave_balance.*`, `leave_request.*`, `comp_off.*`, `holiday.*`, `office_location.*`, `report.*`, `audit_log.*`, `audit_archive.*`, `settings.*`, `share_link.*`, `dashboard.*`, `system.admin`, and others — see the file for the full list). **BE is the source of truth.** The FE mirrors it in [`src/lib/permissions.ts`](../viljetech-platform-frontend/src/lib/permissions.ts) — zero drift today.
 
-[`requirePermissionOrSelf(perm, paramName?)`](src/middlewares/auth.middleware.ts#L235-L260) lets a caller through if **either** they hold `perm` (or wildcard) **or** the URL param matches their JWT `user_id`. Currently used only on `PATCH /users/:id` ([`user.routes.ts:77-82`](src/routes/user.routes.ts#L77-L82)).
+[`requirePermissionOrSelf`](src/middlewares/auth.middleware.ts) lets a caller through if **either** they hold `perm` (or wildcard) **or** the URL param matches their JWT `user_id`. Currently used only on `PATCH /users/:id` in [`user.routes.ts`](src/routes/user.routes.ts).
 
 ## Module catalog
 
@@ -66,7 +66,7 @@ Permission constants live in [`constants/permissions.ts`](src/constants/permissi
 - **Purpose** — Directory CRUD, profile, profile photo, MFA, sessions, deactivation, GDPR DSAR/erasure
 - **Roles & visibility** — Admin: full. Manager/TL/Employee: read directory ([`user.read`](src/constants/permissions.ts)); patch own via `requirePermissionOrSelf`. Client: no directory access; `/me` self-fetch only.
 - **Permissions** — `USER_READ`, `USER_WRITE`, `USER_DEACTIVATE`, `USER_ROLE_CHANGE`, `USER_DATA_EXPORT`, `USER_DATA_ERASURE`
-- **Routes** — [`routes/user.routes.ts`](src/routes/user.routes.ts). `GET /users`, `POST /users` ([`USER_WRITE`](src/routes/user.routes.ts#L40)), `GET /users/:id`, `PATCH /users/:id` ([self-or-perm](src/routes/user.routes.ts#L77-L82)), `POST /users/:id/deactivate|reactivate` ([`USER_DEACTIVATE`](src/routes/user.routes.ts#L86)), `POST /users/:id/change-role` ([`USER_ROLE_CHANGE`](src/routes/user.routes.ts#L100)), `POST /users/:id/reset-password`, profile-photo upload-url/finalize/delete pairs for self + admin, `GET /users/:id/data-export` ([`USER_DATA_EXPORT`](src/routes/user.routes.ts#L146)), `POST /users/:id/data-erasure` ([`USER_DATA_ERASURE`](src/routes/user.routes.ts#L153))
+- **Routes** — [`routes/user.routes.ts`](src/routes/user.routes.ts). `GET /users`, `POST /users` (gates on `USER_WRITE`), `GET /users/:id`, `PATCH /users/:id` (gates on `USER_WRITE` or `USER_EMPLOYMENT_WRITE` with self access), `POST /users/:id/deactivate|reactivate` (gates on `USER_DEACTIVATE`), `POST /users/:id/change-role` (gates on `USER_ROLE_CHANGE`), `POST /users/:id/reset-password`, profile-photo upload-url/finalize/delete pairs for self + admin, `GET /users/:id/data-export` (gates on `USER_DATA_EXPORT`), `POST /users/:id/data-erasure` (gates on `USER_DATA_ERASURE`)
 - **Service** — [`services/user.service.ts`](src/services/user.service.ts) · **Model** — [`models/user.model.ts`](src/models/user.model.ts) · **Validator** — [`validators/user.validator.ts`](src/validators/user.validator.ts)
 - **Flow** — create writes a `User` doc (bcrypt-hashed password) + welcome email + audit row. Deactivate revokes all active refresh tokens. Profile photo upload mints a write-SAS via Azure Blob, FE PUTs bytes, then BE finalizes the record. GDPR export streams NDJSON of user-owned rows (timesheet, leave, audit) — see [`user-gdpr.service.ts`](src/services/user-gdpr.service.ts). Erasure soft-deletes + PII scrub.
 - **Gotchas** — single-admin rule enforced via `one_active_admin` partial-unique index on role + status; deactivate fails if it would leave zero admins. Self-edit whitelist limits which fields a non-admin can PATCH on themselves.
@@ -76,7 +76,7 @@ Permission constants live in [`constants/permissions.ts`](src/constants/permissi
 - **Purpose** — Custom role CRUD + per-user role/permission assignment (Step 47 RBAC)
 - **Roles & visibility** — Admin: full. Team Lead+: `ROLE_READ` only (so the user-detail UI can render role-name badges).
 - **Permissions** — `ROLE_READ`, `ROLE_WRITE`, `ROLE_DELETE`, `USER_ROLE_CHANGE`
-- **Routes** — [`routes/role.routes.ts`](src/routes/role.routes.ts). CRUD: `GET /roles`, `POST /roles` ([`ROLE_WRITE`](src/routes/role.routes.ts#L45)), `PATCH /roles/:id`, `DELETE /roles/:id` ([`ROLE_DELETE`](src/routes/role.routes.ts#L68)). User-assignment sub-router: `PATCH /users/:user_id/roles`, `PATCH /users/:user_id/extra-permissions` (both [`USER_ROLE_CHANGE`](src/routes/role.routes.ts#L90)).
+- **Routes** — [`routes/role.routes.ts`](src/routes/role.routes.ts). CRUD: `GET /roles`, `POST /roles` (gates on `ROLE_WRITE`), `PATCH /roles/:id`, `DELETE /roles/:id` (gates on `ROLE_DELETE`). User-assignment sub-router: `PATCH /users/:user_id/roles`, `PATCH /users/:user_id/extra-permissions` (both gate on `USER_ROLE_CHANGE`).
 - **Service** — [`services/role.service.ts`](src/services/role.service.ts) · **Model** — [`models/role.model.ts`](src/models/role.model.ts)
 - **Flow** — admin defines a custom role with a bundled permission set; assigns to users via `role_ids[]` on `User`. Per-user ad-hoc grants land in `extra_permissions[]`. Both flow into the JWT at next refresh; the BE's `requirePermission` always reads from the JWT, so a role/perm change requires a token rotation to take effect ([drift detection in FE](../viljetech-platform-frontend/src/lib/queries.ts)).
 - **Gotchas** — system roles (admin/manager/team_lead/employee/client) are `is_system: true` and cannot be deleted or have their bundles edited. Delete refuses any role that's in-use.
@@ -96,12 +96,12 @@ Sub-modules with their own routers; grouped because they share `LeaveRequest`/`L
 [`routes/leave-balance.routes.ts`](src/routes/leave-balance.routes.ts) · [`services/leave-balance.service.ts`](src/services/leave-balance.service.ts). `GET /leave-balances/me` (auth-only — service pins to caller), `GET /leave-balances` (team scope), `POST /leave-balances/initialize-year`, `PATCH /leave-balances/:id`.
 
 #### Leave requests
-[`routes/leave-request.routes.ts`](src/routes/leave-request.routes.ts) · [`services/leave-request.service.ts`](src/services/leave-request.service.ts). `POST /leaves/preview-split` (dry-run segment generation), `GET /leaves/calendar` (org-wide approved; gated on [`LEAVE_REQUEST_READ_TEAM`](src/routes/leave-request.routes.ts#L39) per C5 to prevent rank-and-file enumeration), `POST /leaves` (apply), `POST /leaves/:id/approve|reject|cancel`.
+[`routes/leave-request.routes.ts`](src/routes/leave-request.routes.ts) · [`services/leave-request.service.ts`](src/services/leave-request.service.ts). `POST /leaves/preview-split` (dry-run segment generation), `GET /leaves/calendar` (org-wide approved; gated on `LEAVE_REQUEST_READ_TEAM` per C5 to prevent rank-and-file enumeration), `POST /leaves` (apply), `POST /leaves/:id/approve|reject|cancel`.
 - **Flow** — apply → preview-split computes segments excluding holidays + non-working days → `withTransaction(LeaveBalance.pending++ via $gte CAS predicate, LeaveRequest.create)` → notify (Slack DM + push + in-app). On approve: `findOneAndUpdate({status: 'pending'}, {$set: {status: 'approved'}})` (race-safe gate) + `withTransaction(LeaveBalance.used++, LeaveBalance.pending--)` + audit row + Slack `chat.update` against the persisted `slack_message.{channel, ts}` so the same DM mutates in-place through the lifecycle.
 - **Gotchas** — **C4 SL month attribution**: SL caps are per calendar month; on apply, the service replays historical requests in `created_at` order to reconstruct the cap state at the new request's apply time. **Self-approval refused** by service. **Cancel is author-only** even though the route has no perm gate.
 
 #### Comp-off
-[`routes/comp-off.routes.ts`](src/routes/comp-off.routes.ts) · [`services/comp-off.service.ts`](src/services/comp-off.service.ts) · [`models/comp-off-ledger.model.ts`](src/models/comp-off-ledger.model.ts). `GET /comp-off/me`, `GET /comp-off` ([`COMP_OFF_READ`](src/routes/comp-off.routes.ts#L21)), `POST /comp-off/adjust` ([`COMP_OFF_WRITE`](src/routes/comp-off.routes.ts#L28)). Balance is denormalized on `User.comp_off_balance` for hot-path reads; the [`comp_off_reconciliation` job](src/jobs/comp-off-reconciliation.job.ts) recomputes nightly from ledger truth. Earn rows come from attendance overtime; spend rows come from leave-type=comp-off requests.
+[`routes/comp-off.routes.ts`](src/routes/comp-off.routes.ts) · [`services/comp-off.service.ts`](src/services/comp-off.service.ts) · [`models/comp-off-ledger.model.ts`](src/models/comp-off-ledger.model.ts). `GET /comp-off/me`, `GET /comp-off` (gates on `COMP_OFF_READ`), `POST /comp-off/adjust` (gates on `COMP_OFF_WRITE`). Balance is denormalized on `User.comp_off_balance` for hot-path reads; the [`comp_off_reconciliation` job](src/jobs/comp-off-reconciliation.job.ts) recomputes nightly from ledger truth. Earn rows come from attendance overtime; spend rows come from leave-type=comp-off requests.
 
 ### Holidays
 
@@ -156,7 +156,7 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 - **Roles & visibility** — Admin/Manager: see all. Team Lead/Employee: see projects where `member_ids ∋ caller`. **Client: every project where `company_id` = their company** (NOT roster containment — they must be able to see a new project in order to staff it). **Representative: only projects where `representative_ids ∋ caller`.** Service-layer scoping in [`loadProjectForCaller`](src/services/project.service.ts) — every project read funnels through it. **All sub-resources reuse this engine** (sprint, story, task, comment, attachment, template, timeline services all import `loadProjectForCaller`/`buildProjectVisibilityFilter`).
 - **Permissions** — `PROJECT_READ`/`WRITE`/`ARCHIVE`/`MEMBERS_WRITE`/`REPRESENTATIVES_WRITE`, `SPRINT_WRITE`, `STORY_WRITE`, `TASK_READ`/`WRITE`, `TASK_COMMENT_WRITE`, `TASK_ATTACHMENT_WRITE`, `TASK_TEMPLATE_READ`/`WRITE`, `SHARE_LINK_WRITE`
 - **Routes** (top-level entry points, all under `/api/v1`):
-  - Projects + custom statuses + bulk member/client roster — [`routes/project.routes.ts`](src/routes/project.routes.ts). `PATCH|DELETE /project-custom-statuses/:id` are on the [`customStatusRouter`](src/routes/sprint.routes.ts#L71-L90) exported from `sprint.routes.ts`.
+  - Projects + custom statuses + bulk member/client roster — [`routes/project.routes.ts`](src/routes/project.routes.ts). `PATCH|DELETE /project-custom-statuses/:id` are on the [`customStatusRouter`](src/routes/sprint.routes.ts) exported from `sprint.routes.ts`.
   - Nested sprint/story/template/share-link list+create on the project router.
   - Sprints — [`routes/sprint.routes.ts`](src/routes/sprint.routes.ts) (item-level PATCH/DELETE/archive/unarchive at `/sprints/:id`).
   - Stories — [`routes/story.routes.ts`](src/routes/story.routes.ts).
@@ -267,7 +267,7 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 - **Roles & visibility** — Manager+: `REPORT_READ` (read + sync responses), `REPORT_EXPORT_WRITE` (async export). Per-user rate limits stacked on top of the global per-IP cap.
 - **Routes** — [`routes/report.routes.ts`](src/routes/report.routes.ts). Sync: `GET /reports/billing|utilization|attendance|leaves`. Async: `POST /reports/:name/export` (10/15min/user) + `GET /reports/exports/:id` (status poll).
 - **Services** — [`services/report.service.ts`](src/services/report.service.ts) (builders), [`services/report-export.service.ts`](src/services/report-export.service.ts) (pipeline)
-- **Flow** — sync builders aggregate live and return JSON. POST `/export` creates a `ReportExport` row, then either runs the worker inline (`EXPORT_WORKER_INLINE=true`, test seam) or async via `setImmediate`. Worker calls the same builder, renders via the format-specific exporter ([`services/report-exporters/`](src/services/report-exporters/)), uploads to Azure Blob, persists the blob key + size + hash, and mints a fresh download SAS on each poll. **Inline fallback** ([`report-export.controller.ts:74-118`](src/controllers/report-export.controller.ts#L74-L118)): if Azure isn't configured, the POST returns the file body directly with `X-Export-Inline: 1` so dev / on-prem deployments still work.
+- **Flow** — sync builders aggregate live and return JSON. POST `/export` creates a `ReportExport` row, then either runs the worker inline (`EXPORT_WORKER_INLINE=true`, test seam) or async via `setImmediate`. Worker calls the same builder, renders via the format-specific exporter ([`services/report-exporters/`](src/services/report-exporters/)), uploads to Azure Blob, persists the blob key + size + hash, and mints a fresh download SAS on each poll. **Inline fallback** in [`report-export.controller.ts`](src/controllers/report-export.controller.ts): if Azure isn't configured, the POST returns the file body directly with `X-Export-Inline: 1` so dev / on-prem deployments still work.
 - **Gotchas** — orphaned `running` rows (worker crash) get swept to `failed` by the [`stuck_job_sweeper`](src/jobs/index.ts). Two concurrent enqueues from one user produce two rows — no global queue lock.
 
 #### Report presets
@@ -334,7 +334,7 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 
 ### Health & metrics
 
-- **Routes** — [`/health`](src/index.ts#L203) (back-compat), [`/health/live`](src/index.ts#L207) (event-loop only), [`/health/ready`](src/index.ts#L260) (Mongo ping + scheduler check, cached 5 s). All under [`healthRateLimiter`](src/middlewares/rate-limit.middleware.ts) at 600/min/IP.
+- **Routes** — `GET /health` [`index.ts`](src/index.ts) (back-compat), `GET /health/live` [`index.ts`](src/index.ts) (event-loop only), `GET /health/ready` [`index.ts`](src/index.ts) (Mongo ping + scheduler check, cached 5 s). All under [`healthRateLimiter`](src/middlewares/rate-limit.middleware.ts) at 600/min/IP.
 - **Metrics** — `GET /metrics` returns OpenMetrics text. Counters/histograms in [`utils/metrics.ts`](src/utils/metrics.ts): `http_requests_total`, `http_request_duration_seconds`, `job_runs_total`, `job_run_duration_seconds`, `stuck_job_sweeps_total`, `audit_writes_total`, `audit_snapshot_dropped_total`, `unhandled_rejection_total`, `jwt_verify_failures_total`, `refresh_tokens_issued_total`, `email_rate_limited_total`, `audit_log_mirror_lag_rows` (gauge).
 
 ## Cross-cutting concerns
@@ -345,8 +345,8 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 - **`withTransaction`** — [`utils/with-transaction.ts`](src/utils/with-transaction.ts). Wraps multi-write ops. Auto-falls-back to non-transactional execution on standalone `mongod` and on test-time `vi.mock`'d Mongoose. **Every model call inside MUST pass `{ session }`** or it runs outside the transaction silently.
 - **Audit helper** — [`recordAudit`](src/services/audit.service.ts) (above).
 - **Rate limiters** — [`middlewares/rate-limit.middleware.ts`](src/middlewares/rate-limit.middleware.ts). Per-IP general (120/min, env `GENERAL_RATE_LIMIT_MAX`), per-IP auth (10/15min, env `AUTH_RATE_LIMIT_MAX`), per-IP health (600/min), per-IP Slack webhook (30/min, before signature verify), per-user report-read (60/min), per-user export (10/15min), per-user search (60/min), per-user palette (60/min, separate bucket). In-memory per instance — multi-instance fleets see `instances × limit` effective ceiling.
-- **Helmet / CSP** — [`index.ts:57-97`](src/index.ts#L57-L97). API-only `default-src 'none'`, `frame-ancestors 'none'`, `form-action 'none'`. Rationale: this is a JSON API, not a browser context.
-- **Body-parser ordering** — Slack router mounted in [`index.ts:143`](src/index.ts#L143) **before** `compression` (line 150) and `express.json()` (line 152). Auth-body limit is 4 KB; global is 1 MB. **Don't reorder.**
+- **Helmet / CSP** — [`index.ts`](src/index.ts). API-only `default-src 'none'`, `frame-ancestors 'none'`, `form-action 'none'`. Rationale: this is a JSON API, not a browser context.
+- **Body-parser ordering** — Slack router mounted in [`index.ts`](src/index.ts) **before** `compression` and `express.json()`. Auth-body limit is 4 KB; global is 1 MB. **Don't reorder.**
 - **Cron jobs** — [`jobs/index.ts`](src/jobs/index.ts) registers 13 jobs (IST):
 
   | Job | Schedule | Idempotency |
