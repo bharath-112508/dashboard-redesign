@@ -3,6 +3,7 @@
 Per-user payroll master data (statutory + bank fields, versioned salary structures) and on-demand generation of **payslip** and **employee-letter** PDFs. Four collections, one rendering pipeline: adapt platform models → render-data → HTML template → headless-Chromium PDF → private Azure Blob → immutable row → short-lived download SAS.
 
 Cross-references:
+- [`../../../viljetech-platform-frontend/docs/modules/payroll.md`](../../../viljetech-platform-frontend/docs/modules/payroll.md) — the frontend half: four pages, the sub-navigation that substitutes for the missing sidebar entry, the three preview modes, and the eight-type conditional form.
 - [`user-management.md`](./user-management.md) — `internal_profile` (department, designation, date-of-joining, employee number) is the fallback source the render adapter reads before applying payroll-profile overrides.
 - [`settings-notifications.md`](./settings-notifications.md) — `SystemSettings.payroll` holds the letterhead + signatory block shared by every template, edited through the normal `PATCH /settings`.
 - [`audit-compliance.md`](./audit-compliance.md) — generation and deletion both write audit rows; preview does not.
