@@ -415,6 +415,7 @@ The new row lands with `is_current: false` and does not disturb the existing lat
 | 9 | Azure is mandatory here — no inline fallback | Generation fails without it; preview still works |
 | 10 | `GET /payroll-profiles` returns unredacted PII for a page of employees | No projection, no field-level redaction anywhere in the module |
 | 11 | `internship_offer` ≠ `internship` | Start vs end of an internship; different templates |
-| 12 | All three letter entry points must keep sharing `resolveRender` | They each used to carry a copy of the per-type if/else, so a new type could render the wrong template in preview only |
-| 13 | `salary_structure.update` is a defined audit action with no writer | There is no update path; do not assume one exists |
-| 14 | No `/me` routes, no bulk generation | Both Phase-2 deferred — see the note at the top |
+| 12 | 🔴 **`offer` requires `candidate_name` as well as `user_id`** — enforced only by the validator's `superRefine` | Every type-specific field is optional at the flat-schema level, and `buildOfferRenderData` falls back to `''`/`[]` for each. Without the refine, `{type:'offer', user_id}` validates, renders, uploads, persists and returns a **blank "Dear Candidate" PDF with an empty CTC table** — and unlike the other failures here, the artefact is a document that gets sent to a candidate. Weaken the refine and you post an empty job offer |
+| 13 | All three letter entry points must keep sharing `resolveRender` | They each used to carry a copy of the per-type if/else, so a new type could render the wrong template in preview only |
+| 14 | `salary_structure.update` is a defined audit action with no writer | There is no update path; do not assume one exists. Its absence from `audit_logs` means "impossible", not "never happened". Fifth instance of the *controls that appear wired and are not* pattern — see [`PENDING_WORK.md`](../../../PENDING_WORK.md) |
+| 15 | No `/me` routes, no bulk generation | Both Phase-2 deferred — see the note at the top |
