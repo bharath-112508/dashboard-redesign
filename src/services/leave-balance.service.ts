@@ -233,7 +233,9 @@ const toBalancePublic = async (
     const out: Record<string, unknown> = {
         id: b._id.toString(),
         user_id: b.user_id.toString(),
-        leave_type: lt ? { id: lt._id.toString(), code: lt.code, name: lt.name } : { id: b.leave_type_id.toString() },
+        leave_type: lt
+            ? { id: lt._id.toString(), code: lt.code, name: lt.name, is_unlimited: lt.is_unlimited }
+            : { id: b.leave_type_id.toString() },
         year: b.year,
         allocated: b.allocated,
         carried_forward: b.carried_forward,

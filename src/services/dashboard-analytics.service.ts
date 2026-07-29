@@ -17,7 +17,7 @@ import { USER_STATUSES } from '../constants/user-statuses.js';
 import { ROLES } from '../constants/roles.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { callerCan } from '../utils/caller-permissions.js';
-import { enumerateDates, type ResolvedRange } from '../utils/dashboard-range.js';
+import { enumerateDates, resolveThroughputPeriod, type ResolvedRange } from '../utils/dashboard-range.js';
 import { isAdminLike } from '../utils/role-check.js';
 import logger from '../utils/logger.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
@@ -574,10 +574,17 @@ export const computeThroughput = async (
     taskMatch: Record<string, unknown>,
     range: ResolvedRange
 ): Promise<ThroughputSection> => {
-    // Count completions within the SELECTED range only (from..to). Previously
-    // 'today' used a rolling 7-day window but the headline was labelled "today",
-    // so it reported up to a week of completions as if they happened today.
-    const winFrom = range.from;
+    // Tasks Completed reports the FULL calendar period — Sun–Sat for a week,
+    // 1st–last day for a month, the full quarter — rather than the shared
+    // dashboard range's Monday-start week / to-today truncation used by
+    // every other section. A still-in-progress period just has zero
+    // completions on its not-yet-arrived days, so this never inflates the
+    // total. 'today' keeps its single-day window unchanged: it previously
+    // used a rolling 7-day window but the headline was labelled "today", so
+    // it reported up to a week of completions as if they happened today.
+    const period = resolveThroughputPeriod(range);
+    const winFrom = period.from;
+    const winTo = period.to;
     const toDate = (d: string, endOfDay: boolean) =>
         endOfDay
             ? dayjs.tz(d, DEFAULT_TIMEZONE).endOf('day').toDate()
@@ -591,17 +598,17 @@ export const computeThroughput = async (
 
     const [rows, prev] = await Promise.all([
         Task.aggregate<{ _id: string; count: number }>([
-            { $match: doneMatch(winFrom, range.to) },
+            { $match: doneMatch(winFrom, winTo) },
             { $group: { _id: istDayExpr, count: { $sum: 1 } } },
         ]),
         Task.aggregate<{ _id: null; count: number }>([
-            { $match: doneMatch(range.prev_from, range.prev_to) },
+            { $match: doneMatch(period.prev_from, period.prev_to) },
             { $group: { _id: null, count: { $sum: 1 } } },
         ]),
     ]);
 
     const byDate = new Map(rows.map((r) => [r._id, r.count]));
-    const data = enumerateDates(winFrom, range.to).map((date) => ({ date, count: byDate.get(date) ?? 0 }));
+    const data = enumerateDates(winFrom, winTo).map((date) => ({ date, count: byDate.get(date) ?? 0 }));
     const completed = data.reduce((a, d) => a + d.count, 0);
     return {
         insight: throughputInsight(completed, range.insight_label),

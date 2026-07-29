@@ -418,8 +418,18 @@ const loadAvailableMap = async (params: {
     }
     const out = new Map<string, number>();
     const idToCode = new Map(params.types.map((t) => [t._id.toString(), t.code]));
+    // Unlimited types (WFH) always carry a 0 allocation (nothing to track —
+    // see `deriveAllocation` in leave-balance.service.ts), so any non-zero
+    // request would otherwise read as negative-balance and wrongly flag
+    // `requires_additional_approval`. Omitting them from the map entirely
+    // means the engine's `available.get(k) !== undefined` guard skips the
+    // check for these codes — no cap, so no "insufficient balance" is ever
+    // possible.
+    const unlimitedIds = new Set(params.types.filter((t) => t.is_unlimited).map((t) => t._id.toString()));
     for (const r of rows) {
-        const code = idToCode.get(r.leave_type_id.toString());
+        const idStr = r.leave_type_id.toString();
+        if (unlimitedIds.has(idStr)) continue;
+        const code = idToCode.get(idStr);
         if (!code) continue;
         out.set(`${code}|${r.year}`, recomputeAvailable(r));
     }

@@ -521,15 +521,56 @@ describe('buildAttendanceReport', () => {
         expect(rowA.absent).toBe(0);
         expect(rowA.holiday).toBe(0);
         expect(rowA.incomplete).toBe(0);
-        expect(rowA.total_days).toBe(28);
+        // April has 30 calendar days — total_days is the range span, NOT
+        // the bucket sum (18 + 2 + 8 = 28 here), so a gap in the
+        // underlying attendance data doesn't silently shrink it.
+        expect(rowA.total_days).toBe(30);
 
         const rowB = result.rows.find((r) => r.user.id === userB.toString())!;
         expect(rowB.present).toBe(15);
         expect(rowB.incomplete).toBe(4);
-        expect(rowB.total_days).toBe(20);
+        // Same calendar span as rowA, even though rowB's buckets only sum
+        // to 19 (15 + 1 + 4).
+        expect(rowB.total_days).toBe(30);
     });
 
-    it('returns a zero-filled row for users with no attendance rows in range', async () => {
+    it('total_days is the calendar span of the range, not a sum of the status buckets', async () => {
+        // Guards the fix: total_days used to equal
+        // present+absent+on_leave+holiday+weekend+incomplete, so a day the
+        // nightly finalizer failed to process (server offline at its
+        // 23:00 IST run) silently vanished from the total instead of
+        // surfacing as a gap. Anchoring it to the calendar span means a
+        // shortfall in the buckets is now visible as "buckets don't sum to
+        // total_days" rather than an invisible undercount.
+        const userId = new Types.ObjectId();
+        userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna' }]));
+        // Only 6 of the 7 days in range have ANY attendance record — a
+        // data gap identical to the one found in production data.
+        attendanceAggregateMock
+            .mockResolvedValueOnce([
+                { _id: { user_id: userId, status: 'present' }, count: 5 },
+                { _id: { user_id: userId, status: 'weekend' }, count: 1 },
+            ])
+            .mockResolvedValueOnce([]);
+
+        const result = await svc.buildAttendanceReport({
+            from_date: '2026-07-13',
+            to_date: '2026-07-19',
+        });
+
+        expect(result.rows[0].total_days).toBe(7);
+        const bucketSum =
+            result.rows[0].present +
+            result.rows[0].absent +
+            result.rows[0].on_leave +
+            result.rows[0].holiday +
+            result.rows[0].weekend +
+            result.rows[0].incomplete;
+        expect(bucketSum).toBe(6);
+        expect(bucketSum).not.toBe(result.rows[0].total_days);
+    });
+
+    it('returns a zero-bucket row (but a real calendar-day total_days) for users with no attendance rows in range', async () => {
         const userId = new Types.ObjectId();
         userFindMock.mockReturnValueOnce(queryStub([{ _id: userId, full_name: 'Anna' }]));
         // Two aggregate calls: status-pivot then break-totals — both empty.
@@ -548,7 +589,9 @@ describe('buildAttendanceReport', () => {
             holiday: 0,
             weekend: 0,
             incomplete: 0,
-            total_days: 0,
+            // NOT 0 — total_days is the calendar span (April = 30 days)
+            // regardless of how many (if any) attendance rows exist.
+            total_days: 30,
             total_break_minutes: 0,
         });
     });

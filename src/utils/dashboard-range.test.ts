@@ -1,7 +1,13 @@
 // src/utils/dashboard-range.test.ts
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
-import { resolveDashboardRange, enumerateDates, resolveCustomRange, resolveAnalyticsRange } from './dashboard-range.js';
+import {
+    resolveDashboardRange,
+    resolveThroughputPeriod,
+    enumerateDates,
+    resolveCustomRange,
+    resolveAnalyticsRange,
+} from './dashboard-range.js';
 
 describe('resolveDashboardRange', () => {
     beforeEach(() => {
@@ -58,6 +64,52 @@ describe('resolveDashboardRange', () => {
     it('IST day boundary: 20:00 UTC = next day IST', () => {
         vi.setSystemTime(new Date('2026-06-11T20:00:00.000Z')); // 01:30 IST Jun 12
         expect(resolveDashboardRange('today').from).toBe('2026-06-12');
+    });
+});
+
+describe('resolveThroughputPeriod', () => {
+    // Same fixed "now" as the block above: 2026-06-11 is a Thursday, so the
+    // shared 'week' range (Monday-start, truncated to today) is Jun 8–11.
+    beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-06-11T12:00:00.000Z'));
+    });
+    afterEach(() => vi.useRealTimers());
+
+    it('week → Sunday–Saturday of the week containing "today", not the Monday-start/to-today range', () => {
+        const p = resolveThroughputPeriod(resolveDashboardRange('week'));
+        expect(p.from).toBe('2026-06-07'); // Sunday
+        expect(p.to).toBe('2026-06-13'); // Saturday
+        expect(p.prev_from).toBe('2026-05-31');
+        expect(p.prev_to).toBe('2026-06-06');
+    });
+
+    it('month → 1st to last day of the calendar month', () => {
+        const p = resolveThroughputPeriod(resolveDashboardRange('month'));
+        expect(p.from).toBe('2026-06-01');
+        expect(p.to).toBe('2026-06-30');
+        expect(p.prev_from).toBe('2026-05-01');
+        expect(p.prev_to).toBe('2026-05-31');
+    });
+
+    it('quarter → full quarter (first day of its first month to last day of its last month)', () => {
+        const p = resolveThroughputPeriod(resolveDashboardRange('quarter'));
+        expect(p.from).toBe('2026-04-01');
+        expect(p.to).toBe('2026-06-30');
+        expect(p.prev_from).toBe('2026-01-01');
+        expect(p.prev_to).toBe('2026-03-31');
+    });
+
+    it('today → unchanged single day (no "full period" to expand to)', () => {
+        const range = resolveDashboardRange('today');
+        const p = resolveThroughputPeriod(range);
+        expect(p).toEqual({ from: range.from, to: range.to, prev_from: range.prev_from, prev_to: range.prev_to });
+    });
+
+    it('custom → unchanged, passed through as-is', () => {
+        const range = resolveCustomRange('2026-06-10', '2026-06-12');
+        const p = resolveThroughputPeriod(range);
+        expect(p).toEqual({ from: '2026-06-10', to: '2026-06-12', prev_from: range.prev_from, prev_to: range.prev_to });
     });
 });
 

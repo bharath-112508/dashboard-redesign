@@ -266,17 +266,95 @@ describe('computeTasksByStatus', () => {
 });
 
 describe('computeThroughput', () => {
-    it('buckets done tasks per day for short ranges', async () => {
+    // RANGE is 'month' truncated to today (from=2026-06-01, to=2026-06-03 —
+    // 3 days into the month), matching the shared dashboard range every
+    // other section uses. Tasks Completed instead reports the FULL month
+    // (1st–last day), so the window widens to all 30 days of June even
+    // though `range.to` only reaches the 3rd.
+    it('reports the full calendar month, not the to-today truncation', async () => {
         vi.mocked(Task.aggregate)
             .mockResolvedValueOnce([{ _id: '2026-06-02', count: 5 }] as never)
             .mockResolvedValueOnce([{ _id: null, count: 3 }] as never);
         const out = await computeThroughput({}, RANGE);
-        expect(out.data).toEqual([
-            { date: '2026-06-01', count: 0 },
-            { date: '2026-06-02', count: 5 },
-            { date: '2026-06-03', count: 0 },
-        ]);
+
+        expect(out.data).toHaveLength(30); // June has 30 days
+        expect(out.data[0]).toEqual({ date: '2026-06-01', count: 0 });
+        expect(out.data[1]).toEqual({ date: '2026-06-02', count: 5 });
+        expect(out.data[29]).toEqual({ date: '2026-06-30', count: 0 });
+        expect(out.data.reduce((a, d) => a + d.count, 0)).toBe(5);
         expect(out.delta?.pct).toBe(67); // 5 vs 3
+
+        // The previous-period comparison stays the full previous calendar
+        // month (unaffected here since RANGE's prev_from/prev_to already
+        // happen to be the full May window).
+        const prevMatch = (vi.mocked(Task.aggregate).mock.calls[1][0] as unknown as Array<Record<string, unknown>>)[0]
+            .$match as { completed_at: { $gte: Date; $lte: Date } };
+        expect(prevMatch.completed_at.$gte.toISOString().slice(0, 10)).toBe('2026-04-30'); // IST midnight May 1 = Apr 30 18:30 UTC
+    });
+
+    it('reports Sunday–Saturday for the week filter, not a Monday-start/to-today window', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        const weekRange = {
+            key: 'week' as const,
+            label: 'This week',
+            insight_label: 'This week',
+            prev_label: 'last week',
+            from: '2026-06-22', // Monday-start week (what the shared range uses)
+            to: '2026-06-24', // Wednesday — truncated to "today"
+            prev_from: '2026-06-15',
+            prev_to: '2026-06-21',
+        };
+        const out = await computeThroughput({}, weekRange);
+
+        // June 24, 2026 is a Wednesday → that week's Sunday is the 21st,
+        // Saturday is the 27th.
+        expect(out.data[0].date).toBe('2026-06-21');
+        expect(out.data).toHaveLength(7);
+        expect(out.data[6].date).toBe('2026-06-27');
+    });
+
+    it('reports the full quarter for the quarter filter', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        const quarterRange = {
+            key: 'quarter' as const,
+            label: 'This quarter',
+            insight_label: 'This quarter',
+            prev_label: 'last quarter',
+            from: '2026-04-01',
+            to: '2026-06-03', // truncated to today, mid-quarter
+            prev_from: '2026-01-01',
+            prev_to: '2026-03-31',
+        };
+        const out = await computeThroughput({}, quarterRange);
+
+        expect(out.data[0].date).toBe('2026-04-01');
+        expect(out.data[out.data.length - 1].date).toBe('2026-06-30');
+    });
+
+    it('leaves "today" as a single day (no widening)', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        const out = await computeThroughput({}, TODAY_RANGE);
+        expect(out.data).toEqual([{ date: '2026-06-24', count: 0 }]);
+    });
+
+    it('leaves a custom range untouched — no full-period concept to expand to', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        const customRange = {
+            key: 'custom' as const,
+            label: '10 Jun – 12 Jun 2026',
+            insight_label: 'in the selected range',
+            prev_label: 'the previous period',
+            from: '2026-06-10',
+            to: '2026-06-12',
+            prev_from: '2026-06-07',
+            prev_to: '2026-06-09',
+        };
+        const out = await computeThroughput({}, customRange);
+        expect(out.data).toEqual([
+            { date: '2026-06-10', count: 0 },
+            { date: '2026-06-11', count: 0 },
+            { date: '2026-06-12', count: 0 },
+        ]);
     });
 
     it('counts completions by completed_at (not updated_at) among done tasks', async () => {
