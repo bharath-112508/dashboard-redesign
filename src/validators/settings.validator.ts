@@ -86,7 +86,7 @@ const attendanceSchema = z
 const securitySchema = z
     .object({
         password_min_length: z.number().int().min(6),
-        password_max_length: z.number().int().min(6),
+        password_max_length: z.number().int().min(6).max(12),
         password_require_upper: z.boolean(),
         password_require_lower: z.boolean(),
         password_require_number: z.boolean(),
@@ -157,7 +157,7 @@ const emailSchema = z
 const remindersSchema = z
     .object({
         timesheet_reminder_time: hhmm,
-        task_due_reminder_run_interval_hours: z.number().int().min(1),
+        task_due_reminder_run_interval_hours: z.number().int().min(1).max(24),
     })
     .partial();
 

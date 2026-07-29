@@ -246,7 +246,7 @@ const attendanceSchema = new Schema<AttendanceSettings>(
 const securitySchema = new Schema<SecuritySettings>(
     {
         password_min_length: { type: Number, required: true, min: 6 },
-        password_max_length: { type: Number, required: true, min: 6 },
+        password_max_length: { type: Number, required: true, min: 6, max: 12 },
         password_require_upper: { type: Boolean, required: true },
         password_require_lower: { type: Boolean, required: true },
         password_require_number: { type: Boolean, required: true },
@@ -319,7 +319,7 @@ const emailSchema = new Schema<EmailSettings>(
 const remindersSchema = new Schema<ReminderSettings>(
     {
         timesheet_reminder_time: { type: String, required: true },
-        task_due_reminder_run_interval_hours: { type: Number, required: true, min: 1 },
+        task_due_reminder_run_interval_hours: { type: Number, required: true, min: 1, max: 24 },
     },
     { _id: false }
 );
