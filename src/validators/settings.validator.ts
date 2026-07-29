@@ -197,6 +197,29 @@ const payrollSchema = z
     })
     .partial();
 
+// Billing & invoicing (Phase 1.1 follow-up) — configurable invoice-number
+// prefix (default 'INV'), consumed by `invoice.service.ts#generateInvoice`.
+// Billing Phase 2 — reporting currency + FX rate table consumed by
+// `utils/fx.ts#toReportingCurrency` (Margin report).
+const fxRateSchema = z.object({
+    currency: z
+        .string()
+        .trim()
+        .regex(/^[A-Za-z]{3}$/, 'currency must be a 3-letter ISO code'),
+    rate_to_base: z.number().positive(),
+});
+
+const billingSchema = z
+    .object({
+        invoice_prefix: z.string().trim().min(1).max(8),
+        reporting_currency: z
+            .string()
+            .trim()
+            .regex(/^[A-Za-z]{3}$/, 'reporting_currency must be a 3-letter ISO code'),
+        fx_rates: z.array(fxRateSchema),
+    })
+    .partial();
+
 // ─── PATCH body ────────────────────────────────────────────────────────────
 
 export const patchSettingsBodySchema = z
@@ -212,6 +235,7 @@ export const patchSettingsBodySchema = z
         reminders: remindersSchema,
         company: companySchema,
         payroll: payrollSchema,
+        billing: billingSchema,
         default_timezone: z.string().trim().min(1),
     })
     .partial()
