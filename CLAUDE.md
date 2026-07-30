@@ -18,6 +18,7 @@ This file is the **quick-reference**. For the per-module deep-dive — data mode
 | [`timesheets-billing.md`](docs/modules/timesheets-billing.md) | Daily entries + weekly view + manager approval + billing rates with forward-extension invariants + reminder cron |
 | [`reports-exports.md`](docs/modules/reports-exports.md) | Sync report reads + async export pipeline (Azure Blob + inline fallback) + presets + subscriptions + cleanup cron |
 | [`audit-compliance.md`](docs/modules/audit-compliance.md) | `audit_logs` + `audit_archives` (daily WORM + SHA-256 chain) + `audit_log_mirrors` (P1-7 hourly) |
+| [`invoicing.md`](docs/modules/invoicing.md) | Client engagements + numbered invoices (the generation algorithm, the status transition table and the draft edit-freeze) + per-user cost rates + the margin report and its hand-maintained FX table |
 | [`payroll.md`](docs/modules/payroll.md) | Payroll profiles (PII + the three `*_override` fields) + append-only salary structures (`getCurrentStructure`, not `is_current`) + payslip/letter generation, the eight letter types, the singleton Chromium PDF pipeline, and private-blob storage with per-download SAS |
 | [`settings-notifications.md`](docs/modules/settings-notifications.md) | System settings + Slack (signed inbound webhooks + slash commands + Events API / App Home dashboard + attendance nudges + outbound `chat.update`/`views.publish`) + notification dispatcher + in-app + push |
 | [`dashboard-search-palette.md`](docs/modules/dashboard-search-palette.md) | Per-role dashboards + global search + Cmd-K command palette |
