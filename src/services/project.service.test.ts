@@ -271,6 +271,28 @@ describe('createProject', () => {
         ).rejects.toMatchObject({ code: ERROR_CODES.PROJECT_CODE_TAKEN });
     });
 
+    it('refuses a completed project with no end date', async () => {
+        userFindMock.mockReturnValue(mkUserChain([]));
+
+        await expect(
+            svc.createProject(
+                {
+                    name: 'A',
+                    code: 'DONE-1',
+                    description: '',
+                    start_date: '2026-01-01',
+                    end_date: null,
+                    status: 'completed',
+                    member_ids: [],
+                    representative_ids: [],
+                    custom_task_statuses: [],
+                },
+                adminCaller()
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.PROJECT_DATE_INVALID });
+        expect(projectCreateMock).not.toHaveBeenCalled();
+    });
+
     it('rejects member_ids that are not active internal users with INVALID_PROJECT_MEMBER_ROLE', async () => {
         const goodId = new Types.ObjectId();
         const badId = new Types.ObjectId();
@@ -522,6 +544,45 @@ describe('updateProject', () => {
             code: ERROR_CODES.PROJECT_DATE_INVALID,
         });
         expect(proj.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a status flip to completed when the project has no end date', async () => {
+        const proj = makeProject({ start_date: '2026-06-01', end_date: null, status: 'active' });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await expect(svc.updateProject(proj._id, { status: 'completed' }, adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.PROJECT_DATE_INVALID,
+        });
+        expect(proj.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses clearing the end date on an already-completed project', async () => {
+        const proj = makeProject({ start_date: '2026-06-01', end_date: '2026-12-31', status: 'completed' });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await expect(svc.updateProject(proj._id, { end_date: null }, adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.PROJECT_DATE_INVALID,
+        });
+        expect(proj.save).not.toHaveBeenCalled();
+    });
+
+    it('lets a pre-existing completed/no-end-date project still be archived', async () => {
+        const proj = makeProject({ start_date: '2026-06-01', end_date: null, status: 'completed' });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { is_archived: true }, adminCaller());
+
+        expect(proj.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows completed when the patch supplies the end date', async () => {
+        const proj = makeProject({ start_date: '2026-06-01', end_date: null, status: 'active' });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        const out = await svc.updateProject(proj._id, { status: 'completed', end_date: '2026-12-31' }, adminCaller());
+
+        expect(proj.save).toHaveBeenCalledTimes(1);
+        expect(out).toMatchObject({ status: 'completed', end_date: '2026-12-31' });
     });
 
     it('happy path saves and reflects field changes', async () => {

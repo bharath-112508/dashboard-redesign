@@ -18,6 +18,7 @@ import {
     PROJECT_COMPANY_SCOPED_ROLES,
     PROJECT_MEMBER_SCOPED_ROLES,
     PROJECT_REPRESENTATIVE_SCOPED_ROLES,
+    PROJECT_STATUSES,
     type ProjectStatus,
 } from '../constants/project.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
@@ -324,6 +325,25 @@ const generateUniqueProjectCode = async (name: string): Promise<string> => {
     return pickProjectCode(base, new Set(rows.map((r) => r.code)));
 };
 
+/**
+ * A project can't be "completed" with no end date — that's the date it
+ * completed ON, and reports/timelines have nothing to anchor the bar's
+ * right edge to without it.
+ *
+ * Lives here rather than in the validator because a PATCH carries only
+ * the changed fields: `{status: 'completed'}` alone can't see the
+ * persisted `end_date`, and `{end_date: null}` alone can't see the
+ * persisted status. Only the merged document knows, so both write paths
+ * check the merged values.
+ */
+const assertCompletedHasEndDate = (status: string | undefined, endDate: string | null): void => {
+    if (status === PROJECT_STATUSES.COMPLETED && !endDate) {
+        throw AppError.unprocessable('A completed project needs an end date.', ERROR_CODES.PROJECT_DATE_INVALID, {
+            errors: [{ field: 'end_date', message: 'Required when the status is Completed' }],
+        });
+    }
+};
+
 // ─── POST /projects ──────────────────────────────────────────────────────
 
 export const createProject = async (
@@ -345,6 +365,8 @@ export const createProject = async (
     if (PROJECT_MEMBER_SCOPED_ROLES.includes(caller.role) && !memberIds.some((id) => id.equals(caller.id))) {
         memberIds.push(caller.id);
     }
+
+    assertCompletedHasEndDate(input.status, input.end_date);
 
     await validateMemberCandidates(memberIds);
     await validateRepresentativeCandidates(representativeIds, companyId);
@@ -580,6 +602,14 @@ export const updateProject = async (
     // Cross-field guard duplicates the validator's `.refine` for the case
     // where only one of the dates is present in the patch — the validator
     // can't know the persisted "other" date.
+    // Only when the patch actually touches one of the two fields. Rows that
+    // predate this rule (completed, no end date) would otherwise be frozen —
+    // even renaming or archiving one would 422 on a state the caller didn't
+    // create and isn't changing.
+    if (patch.status !== undefined || patch.end_date !== undefined) {
+        assertCompletedHasEndDate(doc.status, doc.end_date);
+    }
+
     if (doc.end_date !== null && doc.end_date < doc.start_date) {
         throw AppError.unprocessable("The end date can't be before the start date.", ERROR_CODES.PROJECT_DATE_INVALID);
     }
