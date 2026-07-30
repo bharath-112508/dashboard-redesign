@@ -75,9 +75,43 @@ const loadCompanyOrThrow = async (id: Types.ObjectId): Promise<CompanyDocument> 
  * A `client` may only act on their OWN company. RBAC grants the verb
  * ("may create representatives"); it cannot express the scope ("for their
  * own company only"), so that check has to live here.
+ *
+ * 🔴 **This is a SCOPING check, not an authorization check.** Authorization
+ * is the route-layer `requirePermission`. The only thing this adds is
+ * "…and only for your own company", which is a constraint that exists for
+ * client-side roles alone — `caller.company_id` is populated from
+ * `client_profile.company_id` and is **undefined for every staff role**.
+ *
+ * Applying it to staff therefore denies them unconditionally, which is why
+ * the read paths use `assertCanReadCompany` below. Keep this strict version
+ * on the **mutation** paths: a custom role granted `representative.write`
+ * must still not be able to reach into another company's roster.
  */
 const assertCallerOwnsCompany = (companyId: Types.ObjectId, caller: CompanyCaller): void => {
     if (isAdminLike(caller)) return;
+    if (caller.company_id && caller.company_id.equals(companyId)) return;
+    throw AppError.forbidden('You do not have access to this company', ERROR_CODES.FORBIDDEN);
+};
+
+/**
+ * Read-path scoping. Same rule as `listCompanies` uses for its filter, so a
+ * list and a detail read agree about what a caller may see.
+ *
+ * A client-side caller is narrowed to their own company. Everyone else has
+ * already passed the route gate (`company.read` OR `representative.write`),
+ * and staff carry no `company_id` to compare against, so there is nothing
+ * further to scope by.
+ *
+ * Before this existed, `assertCallerOwnsCompany` guarded the reads too, and a
+ * **Manager could list companies and open none of them** — `company.read` is
+ * in `MANAGER_ADDITIONS`, the frontend routes Managers to `/companies/:id`,
+ * and every one of those requests 403'd. The list worked because
+ * `listCompanies` already narrowed by role rather than by ownership; the
+ * detail routes did not, and the two disagreed.
+ */
+const assertCanReadCompany = (companyId: Types.ObjectId, caller: CompanyCaller): void => {
+    if (isAdminLike(caller)) return;
+    if (!PROJECT_CLIENT_SIDE_ROLES.includes(caller.role)) return;
     if (caller.company_id && caller.company_id.equals(companyId)) return;
     throw AppError.forbidden('You do not have access to this company', ERROR_CODES.FORBIDDEN);
 };
@@ -123,7 +157,7 @@ export const listCompanies = async (
     // A client-side caller only ever sees their own company. Without this
     // they'd get the full customer list — every other client's name.
     if (!isAdminLike(caller) && PROJECT_CLIENT_SIDE_ROLES.includes(caller.role)) {
-        if (!caller.company_id) return { data: [], meta: { page: 1, limit: query.limit, total: 0, total_pages: 0 } };
+        if (!caller.company_id) return { data: [], meta: { page: 1, limit: query.limit, total: 0, total_pages: 1 } };
         filter._id = caller.company_id;
     }
 
@@ -133,6 +167,12 @@ export const listCompanies = async (
             .sort({ name: 1 })
             .skip((query.page - 1) * query.limit)
             .limit(query.limit),
+        // NOTE: deliberately uncollated. The `find` above needs the collation
+        // for its `sort({name:1})`; the count does not sort, and `q` is an
+        // `$options:'i'` regex, so both match the SAME documents either way.
+        // Adding `.collation()` here would only change index selection — a
+        // non-issue at this collection's size, and it would force the test
+        // mock to become a chainable Query for no behavioural gain.
         Company.countDocuments(filter),
     ]);
 
@@ -142,7 +182,11 @@ export const listCompanies = async (
             page: query.page,
             limit: query.limit,
             total,
-            total_pages: Math.ceil(total / query.limit),
+            // `Math.max(1, …)` so an empty result reports one (empty) page
+            // rather than zero. Matches `listRepresentatives`; the two used to
+            // disagree, so a consumer looping `1..total_pages` got nothing
+            // from one endpoint and one empty page from the other.
+            total_pages: Math.max(1, Math.ceil(total / query.limit)),
         },
     };
 };
@@ -151,7 +195,7 @@ export const listCompanies = async (
 
 export const getCompany = async (id: Types.ObjectId, caller: CompanyCaller): Promise<Record<string, unknown>> => {
     const doc = await loadCompanyOrThrow(id);
-    assertCallerOwnsCompany(doc._id, caller);
+    assertCanReadCompany(doc._id, caller);
     return toPublic(doc);
 };
 
@@ -163,6 +207,11 @@ export const patchCompany = async (
     caller: CompanyCaller
 ): Promise<Record<string, unknown>> => {
     const doc = await loadCompanyOrThrow(id);
+    // Defence in depth. `company.write` is in NO role bundle today, so only
+    // the `system.admin` wildcard reaches here and this never fires. It exists
+    // for the day someone grants `company.write` to a custom role: without it,
+    // that role could rename or archive ANY company, not just its own.
+    assertCallerOwnsCompany(id, caller);
     const before = { name: doc.name, status: doc.status };
 
     if (body.name !== undefined) doc.name = body.name;
@@ -194,6 +243,10 @@ export const patchCompany = async (
 
 export const archiveCompany = async (id: Types.ObjectId, caller: CompanyCaller): Promise<Record<string, unknown>> => {
     const doc = await loadCompanyOrThrow(id);
+    // Defence in depth — see `patchCompany`. Placed BEFORE the idempotent
+    // early return so an unauthorised caller cannot use the 200-vs-403
+    // difference to probe whether a company is already archived.
+    assertCallerOwnsCompany(id, caller);
     if (doc.status === 'archived') return toPublic(doc);
 
     doc.status = 'archived';
@@ -275,7 +328,7 @@ export const listRepresentatives = async (
     caller: CompanyCaller
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
     await loadCompanyOrThrow(id);
-    assertCallerOwnsCompany(id, caller);
+    assertCanReadCompany(id, caller);
 
     // Search matches name OR email. Applied at the DB layer, not to the
     // fetched page — filtering in the browser would only ever search the 10
@@ -343,7 +396,7 @@ export const getRepresentative = async (
     caller: CompanyCaller
 ): Promise<Record<string, unknown>> => {
     await loadCompanyOrThrow(id);
-    assertCallerOwnsCompany(id, caller);
+    assertCanReadCompany(id, caller);
 
     const [person, projects] = await Promise.all([
         User.findOne({ _id: userId, ...peopleFilter(id) })

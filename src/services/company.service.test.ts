@@ -294,6 +294,59 @@ describe('getCompany — client scope', () => {
     });
 });
 
+/**
+ * Regression: a Manager holds `company.read`, could list companies, and was
+ * 403'd opening every one of them.
+ *
+ * `assertCallerOwnsCompany` returned early only for `isAdminLike` (admin-only)
+ * or a matching `caller.company_id` — which `authenticate` sets from
+ * `client_profile.company_id` and is undefined for EVERY staff role. So a
+ * Manager fell through to the throw on all three detail reads, while
+ * `listCompanies` (which narrows by role, not ownership) worked. The frontend
+ * routes Managers to `/companies/:id`, so clicking a directory row 403'd.
+ *
+ * The reads now use `assertCanReadCompany`, which scopes client-side callers
+ * only. Authorization stays where it belongs: the route-layer gate.
+ */
+describe('getCompany — staff scope (regression)', () => {
+    /** A staff role with no `company_id` — the shape every non-client caller has. */
+    const managerCaller = () => ({
+        id: new Types.ObjectId(),
+        role: ROLES.MANAGER,
+        role_keys: [ROLES.MANAGER],
+        audit: undefined,
+    });
+
+    it('a manager can read a company detail', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        const out = await svc.getCompany(companyId, managerCaller());
+
+        expect(out).toMatchObject({ id: companyId.toString() });
+    });
+
+    it('a manager can read any company, not just one', async () => {
+        // `makeCompany` is pinned to `companyId`; override `_id` so this is a
+        // genuinely different company and not the same row under another name.
+        const other = new Types.ObjectId();
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany({ _id: other }));
+
+        await expect(svc.getCompany(other, managerCaller())).resolves.toBeDefined();
+    });
+
+    it('the relaxation does NOT extend to mutations — a manager cannot add a representative', async () => {
+        // The strict guard is deliberately kept on the write paths: a custom
+        // role granted `representative.write` must not reach another company's
+        // roster. `representative.write` is client-bundle-only today, so this
+        // asserts the guard, not the route gate.
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(svc.createRepresentative(companyId, validBody, managerCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+});
+
 describe('removeRepresentative', () => {
     const userFindByIdChain = (row: unknown) => ({
         select: () => ({ lean: () => Promise.resolve(row) }),
