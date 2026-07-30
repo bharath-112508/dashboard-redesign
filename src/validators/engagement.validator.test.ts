@@ -30,18 +30,18 @@ describe('createEngagementSchema', () => {
         ).toBe(false);
     });
     it('rejects a non-letter currency code', () => {
-        expect(
-            createEngagementSchema.safeParse({ ...base, billing_type: 'hourly', currency: '12<' }).success
-        ).toBe(false);
+        expect(createEngagementSchema.safeParse({ ...base, billing_type: 'hourly', currency: '12<' }).success).toBe(
+            false
+        );
     });
     it('accepts a lowercase currency code', () => {
-        expect(
-            createEngagementSchema.safeParse({ ...base, billing_type: 'hourly', currency: 'eur' }).success
-        ).toBe(true);
+        expect(createEngagementSchema.safeParse({ ...base, billing_type: 'hourly', currency: 'eur' }).success).toBe(
+            true
+        );
     });
     it('accepts an uppercase currency code', () => {
-        expect(
-            createEngagementSchema.safeParse({ ...base, billing_type: 'hourly', currency: 'EUR' }).success
-        ).toBe(true);
+        expect(createEngagementSchema.safeParse({ ...base, billing_type: 'hourly', currency: 'EUR' }).success).toBe(
+            true
+        );
     });
 });
