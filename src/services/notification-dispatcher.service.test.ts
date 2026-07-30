@@ -98,6 +98,9 @@ const queryReturning = <T>(value: T) => {
     return chain;
 };
 
+const publishMock = vi.hoisted(() => vi.fn());
+vi.mock('./realtime.service.js', () => ({ publish: publishMock }));
+
 vi.mock('../models/notification.model.js', () => ({
     Notification: {
         create: notificationCreateMock,
@@ -840,5 +843,62 @@ describe('push channel', () => {
             expect.objectContaining({ channel: 'push' }),
             'Notification push fan-out failed'
         );
+    });
+});
+
+describe('realtime — notifications topic', () => {
+    // The realtime-emit middleware derives its topic from the request PATH,
+    // so a notification born as a side effect of another write (task
+    // assignment, leave approval, a comment) never published `notifications`
+    // and the bell sat stale until the 120s fallback poll. The dispatcher
+    // publishes it directly now; this pins that.
+    it('publishes `notifications` when an in-app row is written', async () => {
+        const { notifyTaskAssigned } = await import('./notification-dispatcher.service.js');
+        const actor = new Types.ObjectId();
+        const assignee = new Types.ObjectId();
+        userFindByIdMock.mockReturnValue(
+            queryReturning({ _id: actor, full_name: 'Ada Lovelace', email: 'ada@x.com', role: ROLES.ADMIN })
+        );
+        userFindMock.mockReturnValue(
+            queryReturning([
+                {
+                    _id: assignee,
+                    email: 'grace@x.com',
+                    full_name: 'Grace Hopper',
+                    role: ROLES.EMPLOYEE,
+                    slack_user_id: null,
+                    slack_notifications_enabled: true,
+                    push_notifications_enabled: true,
+                },
+            ])
+        );
+        publishMock.mockClear();
+
+        await notifyTaskAssigned({
+            task_id: new Types.ObjectId(),
+            task_title: 'Wire the OAuth callback',
+            actor_id: actor,
+            assignee_ids: [assignee],
+        });
+
+        expect(notificationCreateMock).toHaveBeenCalled();
+        expect(publishMock).toHaveBeenCalledWith(['notifications']);
+    });
+
+    it('does not notify the person doing the assigning', async () => {
+        const { notifyTaskAssigned } = await import('./notification-dispatcher.service.js');
+        const actor = new Types.ObjectId();
+        notificationCreateMock.mockClear();
+        publishMock.mockClear();
+
+        await notifyTaskAssigned({
+            task_id: new Types.ObjectId(),
+            task_title: 'Self-assigned work',
+            actor_id: actor,
+            assignee_ids: [actor],
+        });
+
+        expect(notificationCreateMock).not.toHaveBeenCalled();
+        expect(publishMock).not.toHaveBeenCalled();
     });
 });

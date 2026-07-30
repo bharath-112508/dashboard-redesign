@@ -13,6 +13,8 @@ import { NOTIFICATION_TYPES } from '../constants/notification.js';
 import { ROLES } from '../constants/roles.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import { overtimeBank, weekendGrantDays } from '../utils/comp-off-accrual.js';
+import { REALTIME_TOPICS } from '../constants/realtime.js';
+import { publish } from './realtime.service.js';
 import logger from '../utils/logger.js';
 import { withTransaction } from '../utils/with-transaction.js';
 import { recordSystemAudit } from './audit.service.js';
@@ -239,6 +241,10 @@ const notifyAccrual = async (userId: Types.ObjectId, days: number, rule: string,
             is_read: false,
             read_at: null,
         });
+        // Cron-driven, so there's no HTTP request for the realtime-emit
+        // middleware to derive a topic from — publish explicitly or the
+        // bell won't move until the fallback poll.
+        publish([REALTIME_TOPICS.NOTIFICATIONS, REALTIME_TOPICS.COMP_OFF]);
     } catch (err) {
         logger.warn({ err, user_id: userId.toString() }, 'comp-off accrual side-effect failed');
     }

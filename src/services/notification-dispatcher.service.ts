@@ -6,6 +6,8 @@ import { ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { NOTIFICATION_TYPES, RELATED_ENTITY_KINDS, type NotificationType } from '../constants/notification.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { REALTIME_TOPICS } from '../constants/realtime.js';
+import { publish } from './realtime.service.js';
 import logger from '../utils/logger.js';
 import { sendEmail } from '../utils/mailer.js';
 import { postOrUpdateSlackMessage, postSlackMessage, slackContextFrom, type SlackContext } from '../utils/slack.js';
@@ -123,6 +125,18 @@ const dispatchToRecipient = async (
             is_read: false,
             read_at: null,
         });
+        // Wake the recipient's notification bell NOW. The realtime-emit
+        // middleware derives its topic from the REQUEST PATH, so a
+        // notification born as a side effect of some other write (assigning
+        // a task, approving leave, a comment) only ever published that
+        // route's topic — never `notifications`. The bell then sat stale
+        // until the 120s fallback poll or a manual refresh, which is exactly
+        // the "notifications aren't real-time" report.
+        //
+        // Publishing here rather than at each call site means every current
+        // AND future dispatch path is covered, including the cron-driven
+        // ones that have no HTTP request for the middleware to inspect.
+        publish([REALTIME_TOPICS.NOTIFICATIONS]);
     } catch (err) {
         logger.warn(
             {
@@ -816,6 +830,67 @@ export interface TaskCommentMentionDispatchInput {
 // everyone else gets a quiet bell ping that the comments tab refreshes
 // to anyway. Caller is responsible for de-duping against the @mention
 // set so a recipient never gets two rows for the same comment.
+
+export interface TaskAssignedDispatchInput {
+    task_id: Types.ObjectId;
+    task_title: string;
+    /** Who did the assigning — excluded from the recipients. */
+    actor_id: Types.ObjectId;
+    /** Newly-added assignees only. Callers must diff against the previous set. */
+    assignee_ids: Types.ObjectId[];
+}
+
+/**
+ * "X assigned you TaskTitle". Fires on task create with assignees and on any
+ * PATCH that ADDS one — the diff is the caller's job so a re-save with an
+ * unchanged roster doesn't re-notify.
+ *
+ * In-app only, deliberately: assignment churn during planning would make an
+ * email/Slack channel unusable. `NOTIFICATION_TYPES.TASK_ASSIGNED` has been in
+ * the enum (and the Slack category map) since the beginning with nothing
+ * dispatching it — assigning work notified nobody.
+ */
+export const notifyTaskAssigned = async (input: TaskAssignedDispatchInput): Promise<void> => {
+    const context = 'notify.task_assigned';
+    try {
+        const recipientIds = input.assignee_ids.filter((id) => !id.equals(input.actor_id));
+        if (recipientIds.length === 0) return;
+
+        const [actor, recipients] = await Promise.all([
+            findUserById(input.actor_id),
+            User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
+                .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+                .lean<RecipientUser[]>(),
+        ]);
+
+        if (recipients.length === 0) {
+            logger.info({ context }, 'No active recipients to notify');
+            return;
+        }
+
+        const actorName = actor?.full_name ?? 'Someone';
+        await runWithConcurrency(recipients, NOTIFICATION_FAN_OUT_CONCURRENCY, (r) =>
+            dispatchToRecipient(
+                r,
+                {
+                    type: NOTIFICATION_TYPES.TASK_ASSIGNED,
+                    title: `${actorName} assigned you a task`,
+                    body: input.task_title,
+                    link_url: `/tasks/${input.task_id.toString()}`,
+                    related_entity: { kind: RELATED_ENTITY_KINDS.TASK, id: input.task_id },
+                },
+                null,
+                context,
+                null
+            )
+        );
+    } catch (err) {
+        logger.warn(
+            { err, code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED, dispatch_event: context },
+            'dispatch failed'
+        );
+    }
+};
 
 export interface TaskCommentWatcherDispatchInput {
     comment_id: Types.ObjectId;

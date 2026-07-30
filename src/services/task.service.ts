@@ -22,6 +22,7 @@ import {
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import { TASK_ACTIVITY_TYPES } from '../constants/task-activity.js';
+import { notifyTaskAssigned } from './notification-dispatcher.service.js';
 import { recordAudit } from './audit.service.js';
 import { recordActivity } from './task-activity.service.js';
 import { buildProjectVisibilityFilter, loadProjectForCaller } from './project.service.js';
@@ -117,7 +118,6 @@ const isCallerAssignee = (task: TaskDocument, caller: ProjectCaller): boolean =>
     if (task.assignee_ids.some((id) => id.equals(caller.id))) return true;
     return !!task.primary_assignee_id && task.primary_assignee_id.equals(caller.id);
 };
-
 
 /**
  * Validate that an `assignee_ids` patch only ADDS the caller themselves — a
@@ -447,10 +447,7 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
     // roles are read-only — the route's `task.write` gate already blocks them,
     // but we guard here too so the service is safe on its own.
     if (!INTERNAL_ROLES.includes(caller.role)) {
-        throw AppError.forbidden(
-            'Only internal team members can create tasks',
-            ERROR_CODES.TASK_WRITE_FORBIDDEN
-        );
+        throw AppError.forbidden('Only internal team members can create tasks', ERROR_CODES.TASK_WRITE_FORBIDDEN);
     }
     const projectId = new Types.ObjectId(input.project_id);
     const project = await loadProjectForCaller(projectId, caller);
@@ -561,6 +558,14 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
             metadata: { project_id: projectId.toString() },
         });
     }
+
+    // Fire-and-forget: assignment notifications must never fail the write.
+    void notifyTaskAssigned({
+        task_id: created._id,
+        task_title: created.title,
+        actor_id: caller.id,
+        assignee_ids: assigneeIds,
+    });
 
     // Activity feed: a `created` row on the new task itself, plus a
     // `subtask_added` row on the parent (if any) so the parent's feed
@@ -774,14 +779,21 @@ export const updateTask = async (
     // Assignment. `assignee_ids` is authoritative (new clients); a lone
     // `primary_assignee_id` is honoured for back-compat. Either way we keep
     // `primary_assignee_id = assignee_ids[0]` so single-assignee reads still work.
+    // Diff against the roster BEFORE the patch so only genuinely-new
+    // assignees are notified — re-saving a task with an unchanged roster
+    // must not re-ping everyone on it.
+    const assigneesBefore = new Set(task.assignee_ids.map((id) => String(id)));
+    let addedAssignees: Types.ObjectId[] = [];
     if (patch.assignee_ids !== undefined) {
         const ids = dedupeObjectIds(patch.assignee_ids.map((id) => new Types.ObjectId(id)));
         if (ids.length > 0) await assertActiveInternalUsers(ids, ERROR_CODES.TASK_INVALID_ASSIGNEE);
+        addedAssignees = ids.filter((id) => !assigneesBefore.has(String(id)));
         task.assignee_ids = ids;
         task.primary_assignee_id = ids[0] ?? null;
     } else if (patch.primary_assignee_id !== undefined) {
         const aid = patch.primary_assignee_id ? new Types.ObjectId(patch.primary_assignee_id) : null;
         if (aid) await assertActiveInternalUsers([aid], ERROR_CODES.TASK_INVALID_ASSIGNEE);
+        addedAssignees = aid && !assigneesBefore.has(String(aid)) ? [aid] : [];
         task.primary_assignee_id = aid;
         task.assignee_ids = aid ? [aid] : [];
     }
@@ -841,6 +853,17 @@ export const updateTask = async (
     // feed. Position-only changes are also intentionally silent (they
     // don't carry semantic meaning).
     await emitPatchActivities(task, prev, caller.id);
+
+    // Fire-and-forget, after the write has committed — only the assignees
+    // this patch actually added.
+    if (addedAssignees.length > 0) {
+        void notifyTaskAssigned({
+            task_id: task._id,
+            task_title: task.title,
+            actor_id: caller.id,
+            assignee_ids: addedAssignees,
+        });
+    }
 
     return toPublic(task);
 };
