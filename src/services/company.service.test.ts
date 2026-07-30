@@ -230,13 +230,13 @@ describe('createRepresentative — company scope', () => {
 // ─── Listing ─────────────────────────────────────────────────────────────
 
 describe('listCompanies', () => {
-    const stubList = (): void => {
+    const stubList = (total = 0): void => {
         companyFindMock.mockReturnValueOnce({
             collation: () => ({
                 sort: () => ({ skip: () => ({ limit: () => Promise.resolve([]) }) }),
             }),
         });
-        companyCountMock.mockResolvedValueOnce(0);
+        companyCountMock.mockResolvedValueOnce(total);
     };
 
     it('narrows a client-side caller to their own company', async () => {
@@ -270,6 +270,37 @@ describe('listCompanies', () => {
 
         expect(result.data).toEqual([]);
         expect(companyFindMock).not.toHaveBeenCalled();
+        // Never 0 — see the pagination test below.
+        expect(result.meta.total_pages).toBe(1);
+    });
+
+    /**
+     * `listCompanies` reported `total_pages: 0` for an empty result while
+     * `listRepresentatives` reported 1, in the same file. A consumer looping
+     * `1..total_pages` got nothing from one endpoint and one empty page from
+     * the other, so "no companies" and "no representatives" needed different
+     * client code for no reason.
+     *
+     * `listRepresentatives` has asserted the 1 convention since before this;
+     * these are the mirrors that were missing on the companies side. Both
+     * paths matter — the early return for a client-side caller with no
+     * company, and the normal count path.
+     */
+    it('reports total_pages 1 for an empty result (never 0)', async () => {
+        stubList(0);
+
+        const { meta } = await svc.listCompanies({ page: 1, limit: 20 }, adminCaller());
+
+        expect(meta).toMatchObject({ total: 0, total_pages: 1 });
+    });
+
+    it('still reports the real page count when there are rows', async () => {
+        // Pins that Math.max(1, …) did not flatten a genuine multi-page count.
+        stubList(24);
+
+        const { meta } = await svc.listCompanies({ page: 1, limit: 10 }, adminCaller());
+
+        expect(meta).toMatchObject({ total: 24, total_pages: 3 });
     });
 });
 
