@@ -47,3 +47,50 @@ describe('patchSettingsBodySchema — security.password_max_length', () => {
         expect(parseWith(13).success).toBe(false);
     });
 });
+
+describe('patchSettingsBodySchema — payroll.company_email', () => {
+    const parseWith = (company_email: string) => patchSettingsBodySchema.safeParse({ payroll: { company_email } });
+
+    // Renders as the company's contact address on every payslip and letter,
+    // so a malformed value is a wrong address printed on a document. The FE
+    // guards it as well; this is the enforcement point.
+    it('rejects a value that is not an email', () => {
+        expect(parseWith('not-an-email').success).toBe(false);
+    });
+
+    it('rejects a website — the field is an email, not free letterhead text', () => {
+        expect(parseWith('www.viljetech.com').success).toBe(false);
+    });
+
+    it('accepts blank — the field is optional until configured', () => {
+        expect(parseWith('').success).toBe(true);
+    });
+
+    it('accepts a real address', () => {
+        expect(parseWith('hr@viljetech.com').success).toBe(true);
+    });
+});
+
+describe('patchSettingsBodySchema — leave_policy.comp_off_hours_per_day', () => {
+    const parseWith = (comp_off_hours_per_day: number) =>
+        patchSettingsBodySchema.safeParse({ leave_policy: { comp_off_hours_per_day } });
+
+    // The accrual job derives `halfStep = max(1, threshold/2)` from this. At 0
+    // the step collapses to one minute, so a single minute of overtime mints
+    // half a comp-off day — an hour of overtime would grant 30 days.
+    it('rejects 0', () => {
+        expect(parseWith(0).success).toBe(false);
+    });
+
+    it('accepts the minimum, 0.25', () => {
+        expect(parseWith(0.25).success).toBe(true);
+    });
+
+    it('accepts the default, 8', () => {
+        expect(parseWith(8).success).toBe(true);
+    });
+
+    it('rejects above 24', () => {
+        expect(parseWith(25).success).toBe(false);
+    });
+});

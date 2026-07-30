@@ -43,7 +43,11 @@ const workScheduleSchema = z
 const leavePolicySchema = z
     .object({
         cl_carry_forward_cap: z.number().int().min(0),
-        comp_off_hours_per_day: z.number().min(0).max(24),
+        // NOT `min(0)`: the accrual job derives its half-step from this
+        // (`halfStep = max(1, threshold/2)` in comp-off-accrual.service), so a
+        // zero collapses the step to ONE MINUTE and every minute of overtime
+        // mints half a comp-off day. 0.25 matches the form's step.
+        comp_off_hours_per_day: z.number().min(0.25).max(24),
         comp_off_auto_accrual_enabled: z.boolean(),
         cl_advance_notice_days: z.number().int().min(0),
         pro_rata_for_joiners: z.boolean(),
@@ -184,10 +188,11 @@ const payrollSchema = z
     .object({
         company_legal_name: z.string().trim(),
         company_address_lines: z.array(z.string()),
-        // Free display string on the letterhead — the sample uses a website
-        // (www.viljetech.com), not an email address. (hr_reply_to_address below
-        // stays a real email since it's used as an outbound Reply-To.)
-        company_email: z.string().trim(),
+        // Blank (not configured yet) or a real address. It renders as the
+        // company's contact email on every payslip/letter, so a typo'd value
+        // is a wrong address printed on a document — the FE guards it too,
+        // but the FE is not the enforcement point.
+        company_email: optionalEmail,
         cin_no: z.string().trim(),
         iec_code: z.string().trim(),
         signatory_name: z.string().trim(),

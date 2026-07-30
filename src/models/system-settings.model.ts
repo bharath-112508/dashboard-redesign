@@ -198,7 +198,7 @@ const workScheduleSchema = new Schema<WorkScheduleSettings>(
 const leavePolicySchema = new Schema<LeavePolicySettings>(
     {
         cl_carry_forward_cap: { type: Number, required: true, min: 0 },
-        comp_off_hours_per_day: { type: Number, required: true, min: 0, max: 24 },
+        comp_off_hours_per_day: { type: Number, required: true, min: 0.25, max: 24 },
         comp_off_auto_accrual_enabled: { type: Boolean, required: true, default: false },
         cl_advance_notice_days: { type: Number, required: true, min: 0 },
         pro_rata_for_joiners: { type: Boolean, required: true },
