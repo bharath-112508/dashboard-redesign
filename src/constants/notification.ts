@@ -37,6 +37,12 @@ export const NOTIFICATION_TYPES = {
     ATTENDANCE_CORRECTION_REQUESTED: 'attendance_correction_requested',
     ATTENDANCE_CORRECTION_DECIDED: 'attendance_correction_decided',
     TIMESHEET_REMINDER: 'timesheet_reminder',
+    // Person-affecting admin actions. Each is something done TO a user by
+    // someone else, which they'd otherwise only discover by stumbling on it.
+    PROJECT_MEMBER_ADDED: 'project_member_added',
+    LEAVE_BALANCE_ADJUSTED: 'leave_balance_adjusted',
+    COMP_OFF_ADJUSTED: 'comp_off_adjusted',
+    ROLE_CHANGED: 'role_changed',
     SYSTEM: 'system',
 } as const;
 
@@ -54,6 +60,8 @@ export const RELATED_ENTITY_KINDS = {
     ATTENDANCE_CORRECTION_REQUEST: 'attendance_correction_request',
     USER: 'user',
     TASK: 'task',
+    PROJECT: 'project',
+    LEAVE_BALANCE: 'leave_balance',
 } as const;
 
 // Notifications are fully owner-scoped: every authenticated user can

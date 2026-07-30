@@ -23,6 +23,7 @@ import {
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { withTransaction } from '../utils/with-transaction.js';
+import { notifyProjectMembersAdded } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import logger from '../utils/logger.js';
 import type { PaginationMeta } from '../utils/api-response.js';
@@ -663,6 +664,18 @@ export const updateProjectMembers = async (
                 added: addIds.map((a) => a.toString()).filter((a) => !before.includes(a)),
                 removed: before.filter((b) => !after.includes(b)),
             },
+        });
+    }
+
+    // Being added to a project changes what you can see; nobody was told.
+    // Only the genuinely-new ids, so a no-op re-add doesn't re-notify.
+    const trulyAdded = addIds.filter((a) => !before.includes(a.toString()));
+    if (trulyAdded.length > 0) {
+        void notifyProjectMembersAdded({
+            project_id: updated._id,
+            project_name: updated.name,
+            actor_id: caller.id,
+            member_ids: trulyAdded,
         });
     }
 

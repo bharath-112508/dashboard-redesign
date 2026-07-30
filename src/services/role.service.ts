@@ -8,6 +8,7 @@ import { PERMISSIONS, type Permission } from '../constants/permissions.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { AppError } from '../utils/app-error.js';
+import { notifyRoleChanged } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import type {
     AssignRolesBody,
@@ -653,6 +654,15 @@ export const assignRolesToUser = async (
             },
         });
     }
+
+    // A role change silently alters what the person can see and do — and
+    // their JWT keeps the old permission set until it rotates, so telling
+    // them also explains why the UI may lag until they sign in again.
+    void notifyRoleChanged({
+        user_id,
+        actor_id,
+        role_labels: orderedKeys.filter(Boolean),
+    });
 
     return {
         user_id: user_id.toString(),

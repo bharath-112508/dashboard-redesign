@@ -897,6 +897,121 @@ export const notifyLeaveReviewReassigned = async (input: LeaveReviewReassignedDi
     }
 };
 
+/**
+ * Person-affecting admin actions.
+ *
+ * Each of these is something done TO a user by somebody else — added to a
+ * project, balance corrected, role changed. None of them notified anyone, so
+ * the only way to find out was to stumble across the change. All are in-app
+ * only: they're informational, not a call to action, and an email per balance
+ * tweak would be noise.
+ */
+const notifyOne = async (userId: Types.ObjectId, payload: NotificationPayload, context: string): Promise<void> => {
+    try {
+        const recipient = await User.findOne({ _id: userId, status: USER_STATUSES.ACTIVE })
+            .select(RECIPIENT_SELECT)
+            .lean<RecipientUser>();
+        if (!recipient) return;
+        await dispatchToRecipient(recipient, payload, null, context, null);
+    } catch (err) {
+        logger.warn(
+            { err, code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED, dispatch_event: context },
+            'dispatch failed'
+        );
+    }
+};
+
+export const notifyProjectMembersAdded = async (input: {
+    project_id: Types.ObjectId;
+    project_name: string;
+    actor_id: Types.ObjectId;
+    member_ids: Types.ObjectId[];
+}): Promise<void> => {
+    const actor = await findUserById(input.actor_id).catch(() => null);
+    const actorName = actor?.full_name ?? 'Someone';
+    // Never tell the actor they added themselves.
+    for (const id of input.member_ids.filter((m) => !m.equals(input.actor_id))) {
+        await notifyOne(
+            id,
+            {
+                type: NOTIFICATION_TYPES.PROJECT_MEMBER_ADDED,
+                title: `${actorName} added you to ${input.project_name}`,
+                body: 'You can now see this project and everything under it.',
+                link_url: `/projects/${input.project_id.toString()}`,
+                related_entity: { kind: RELATED_ENTITY_KINDS.PROJECT, id: input.project_id },
+            },
+            'notify.project_member_added'
+        );
+    }
+};
+
+export const notifyLeaveBalanceAdjusted = async (input: {
+    balance_id: Types.ObjectId;
+    user_id: Types.ObjectId;
+    actor_id: Types.ObjectId;
+    leave_type_label: string;
+    delta: number;
+    reason: string;
+}): Promise<void> => {
+    if (input.user_id.equals(input.actor_id)) return;
+    const actor = await findUserById(input.actor_id).catch(() => null);
+    const sign = input.delta > 0 ? '+' : '';
+    await notifyOne(
+        input.user_id,
+        {
+            type: NOTIFICATION_TYPES.LEAVE_BALANCE_ADJUSTED,
+            title: `Your ${input.leave_type_label} balance changed by ${sign}${input.delta}`,
+            body: `${actor?.full_name ?? 'An administrator'} adjusted it: ${input.reason}`,
+            link_url: '/leaves?tab=balances',
+            related_entity: { kind: RELATED_ENTITY_KINDS.LEAVE_BALANCE, id: input.balance_id },
+        },
+        'notify.leave_balance_adjusted'
+    );
+};
+
+export const notifyCompOffAdjusted = async (input: {
+    user_id: Types.ObjectId;
+    actor_id: Types.ObjectId;
+    days: number;
+    direction: 'earned' | 'consumed';
+    remarks: string;
+}): Promise<void> => {
+    if (input.user_id.equals(input.actor_id)) return;
+    const actor = await findUserById(input.actor_id).catch(() => null);
+    const verb = input.direction === 'earned' ? 'credited' : 'deducted';
+    await notifyOne(
+        input.user_id,
+        {
+            type: NOTIFICATION_TYPES.COMP_OFF_ADJUSTED,
+            title: `${input.days} comp-off day${input.days === 1 ? '' : 's'} ${verb}`,
+            body: `${actor?.full_name ?? 'An administrator'} adjusted your comp-off: ${input.remarks}`,
+            link_url: '/comp-off',
+            related_entity: null,
+        },
+        'notify.comp_off_adjusted'
+    );
+};
+
+export const notifyRoleChanged = async (input: {
+    user_id: Types.ObjectId;
+    actor_id: Types.ObjectId;
+    role_labels: string[];
+}): Promise<void> => {
+    if (input.user_id.equals(input.actor_id)) return;
+    const actor = await findUserById(input.actor_id).catch(() => null);
+    await notifyOne(
+        input.user_id,
+        {
+            type: NOTIFICATION_TYPES.ROLE_CHANGED,
+            title: 'Your access level changed',
+            body: `${actor?.full_name ?? 'An administrator'} set your role to ${input.role_labels.join(', ') || 'none'}. Sign out and back in if something looks missing.`,
+            link_url: '/me?tab=roles',
+            related_entity: { kind: RELATED_ENTITY_KINDS.USER, id: input.user_id },
+        },
+        'notify.role_changed'
+    );
+};
+
 export interface TaskAssignedDispatchInput {
     task_id: Types.ObjectId;
     task_title: string;
@@ -922,12 +1037,18 @@ export const notifyTaskAssigned = async (input: TaskAssignedDispatchInput): Prom
         const recipientIds = input.assignee_ids.filter((id) => !id.equals(input.actor_id));
         if (recipientIds.length === 0) return;
 
-        const [actor, recipients] = await Promise.all([
-            findUserById(input.actor_id),
-            User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
-                .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
-                .lean<RecipientUser[]>(),
-        ]);
+        // Sequential, not `Promise.all`: if the second expression throws
+        // *synchronously* the first promise is already in flight with no
+        // handler attached, and the try/catch below never sees it — it
+        // surfaces as an unhandled rejection instead. Two round-trips on a
+        // notification path is a fine price for that not happening.
+        const actor = await findUserById(input.actor_id);
+        const recipients = await User.find({
+            _id: { $in: recipientIds },
+            status: USER_STATUSES.ACTIVE,
+        })
+            .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+            .lean<RecipientUser[]>();
 
         if (recipients.length === 0) {
             logger.info({ context }, 'No active recipients to notify');

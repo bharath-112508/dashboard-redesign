@@ -9,6 +9,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { LEAVE_CODES, PRO_RATA_STRATEGIES, type ProRataStrategy } from '../constants/leave.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { notifyLeaveBalanceAdjusted } from './notification-dispatcher.service.js';
 import { scopedUserIdFilter } from './reporting-scope.service.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
@@ -407,6 +408,18 @@ export const adjustBalance = async (
     }
 
     const lt = await LeaveType.findById(row.leave_type_id);
+
+    // Somebody else moving your balance is worth knowing about — this was
+    // silent, so the first sign was a number that didn't match expectations.
+    void notifyLeaveBalanceAdjusted({
+        balance_id: row._id,
+        user_id: row.user_id,
+        actor_id: updated_by,
+        leave_type_label: lt ? `${lt.code} — ${lt.name}` : 'leave',
+        delta: body.delta,
+        reason: body.reason,
+    });
+
     return toBalancePublic(row, new Map(lt ? [[lt._id.toString(), lt]] : []));
 };
 

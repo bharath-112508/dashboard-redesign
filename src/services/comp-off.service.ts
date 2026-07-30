@@ -23,6 +23,7 @@ import {
     type CompOffSource,
 } from '../constants/leave.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
+import { notifyCompOffAdjusted } from './notification-dispatcher.service.js';
 import { scopedUserIdFilter } from './reporting-scope.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { AdjustCompOffBody, ListCompOffQuery, MyCompOffQuery } from '../validators/comp-off.validator.js';
@@ -645,6 +646,16 @@ export const adjustCompOff = async (
             },
         });
     }
+
+    // A manual comp-off credit/deduction is invisible to the person it
+    // happened to until they open the ledger. Tell them.
+    void notifyCompOffAdjusted({
+        user_id: targetUserId,
+        actor_id: actor.id,
+        days: body.days,
+        direction: body.type === COMP_OFF_TYPES.EARNED ? 'earned' : 'consumed',
+        remarks: body.remarks ?? 'no remarks given',
+    });
 
     return { ledger: toPublic(ledger), balance: balanceAfter };
 };

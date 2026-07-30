@@ -959,3 +959,106 @@ describe('realtime — notifications topic', () => {
         expect(publishMock).not.toHaveBeenCalled();
     });
 });
+
+// ─── Person-affecting admin actions ──────────────────────────────────────
+//
+// Four events that change something about a person without them doing
+// anything — being added to a project, a balance/comp-off adjustment, a
+// role change. All four were silent before; the assertions here pin both
+// that a row is written and that the actor never notifies themselves.
+
+describe('person-affecting admin dispatchers', () => {
+    const projectId = new Types.ObjectId();
+    const balanceId = new Types.ObjectId();
+
+    beforeEach(() => {
+        userFindOneMock.mockReset();
+        userFindOneMock.mockReturnValue(queryReturning(requester));
+    });
+
+    it('notifies each added project member but not the actor', async () => {
+        await dispatcher.notifyProjectMembersAdded({
+            project_id: projectId,
+            project_name: 'Apollo',
+            actor_id: adminId,
+            member_ids: [requesterId, adminId, managerId],
+        });
+
+        expect(notificationCreateMock).toHaveBeenCalledTimes(2);
+        const row = notificationCreateMock.mock.calls[0][0];
+        expect(row.type).toBe('project_member_added');
+        expect(row.title).toContain('Apollo');
+        expect(row.link_url).toBe(`/projects/${projectId.toString()}`);
+    });
+
+    it('notifies the user whose leave balance was adjusted', async () => {
+        await dispatcher.notifyLeaveBalanceAdjusted({
+            balance_id: balanceId,
+            user_id: requesterId,
+            actor_id: adminId,
+            leave_type_label: 'CL — Casual Leave',
+            delta: -2,
+            reason: 'correction',
+        });
+
+        expect(notificationCreateMock).toHaveBeenCalledTimes(1);
+        const row = notificationCreateMock.mock.calls[0][0];
+        expect(row.type).toBe('leave_balance_adjusted');
+        expect(row.title).toContain('-2');
+        expect(row.body).toContain('correction');
+    });
+
+    it('stays silent when an admin adjusts their own balance', async () => {
+        await dispatcher.notifyLeaveBalanceAdjusted({
+            balance_id: balanceId,
+            user_id: adminId,
+            actor_id: adminId,
+            leave_type_label: 'CL — Casual Leave',
+            delta: 1,
+            reason: 'self',
+        });
+
+        expect(notificationCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('notifies a comp-off credit with the right verb', async () => {
+        await dispatcher.notifyCompOffAdjusted({
+            user_id: requesterId,
+            actor_id: adminId,
+            days: 1,
+            direction: 'earned',
+            remarks: 'weekend release',
+        });
+
+        const row = notificationCreateMock.mock.calls[0][0];
+        expect(row.type).toBe('comp_off_adjusted');
+        expect(row.title).toBe('1 comp-off day credited');
+    });
+
+    it('notifies a role change with the new roles', async () => {
+        await dispatcher.notifyRoleChanged({
+            user_id: requesterId,
+            actor_id: adminId,
+            role_labels: ['team_lead'],
+        });
+
+        const row = notificationCreateMock.mock.calls[0][0];
+        expect(row.type).toBe('role_changed');
+        expect(row.body).toContain('team_lead');
+    });
+
+    it('never throws when the recipient lookup fails', async () => {
+        userFindOneMock.mockImplementation(() => {
+            throw new Error('mongo down');
+        });
+
+        await expect(
+            dispatcher.notifyRoleChanged({
+                user_id: requesterId,
+                actor_id: adminId,
+                role_labels: ['employee'],
+            })
+        ).resolves.toBeUndefined();
+        expect(loggerWarnMock).toHaveBeenCalled();
+    });
+});
