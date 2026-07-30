@@ -61,30 +61,38 @@ import { describe, expect, it } from 'vitest';
  * Almost always a rename the mirror did not follow. Delete or rename it; there
  * is no legitimate reason for an FE-only entry in any of these three.
  *
- * ── Known failures at the time this test was written ─────────────────────
+ * ── History: this test was committed red, and is now green ───────────────
  *
- * `permissions` passes. The other two do not, and are committed red because the
- * red is the finding:
+ * All four catalogs pass. They did not when this was written, and what it
+ * caught is worth keeping as a record of what drift looks like here:
  *
- *   error-codes    SESSION_NOT_FOUND is thrown to clients by auth.service.ts
- *                  via AppError.notFound and is absent from the FE mirror —
- *                  case 1, real drift. Seven others are referenced NOWHERE in
- *                  src/: INVALID_EXPORT_FORMAT, MAINTENANCE_MODE,
- *                  PUSH_NOT_CONFIGURED, TASK_TEMPLATE_RECURRENCE_INVALID,
- *                  TIMESHEET_GENERAL_CATEGORY_REQUIRED, UPLOAD_FAILED are
- *                  case 3, dead constants to delete.
+ *   audit-catalog  37 actions and 12 target kinds were missing from the FE,
+ *                  and whole domains were absent rather than stragglers —
+ *                  attendance had no group at all, nor did companies,
+ *                  engagements/invoices/cost-rates, payroll, report presets,
+ *                  or push subscriptions. Those rows were being written and
+ *                  stored the whole time and could not be filtered for on
+ *                  /admin/audit-logs. Plus one stale FE entry,
+ *                  project.clients_update, retired in the clients ->
+ *                  representatives rename — a filter that matched nothing.
  *
- *                  AUDIT_ARCHIVE_INTEGRITY_FAILED is the exception and is NOT
- *                  case 3 — do not delete it on the strength of this test.
- *                  It was reserved for an unbuilt "auto-quarantine on mismatch"
- *                  path (BUILD_PROGRESS.md:1302); verifyArchive returns a
- *                  structured result and deliberately never throws, which is
- *                  why nothing raises it. Resolving it means building that path
- *                  or recording the decision not to — see PENDING_WORK.md,
- *                  instance 6. A constant reserved for scoped-but-unbuilt work
- *                  is indistinguishable from a dead one by reference count
- *                  alone; this test cannot tell them apart, so check the history
- *                  before deleting anything it reports.
+ *   error-codes    SESSION_NOT_FOUND was thrown to clients by auth.service.ts
+ *                  and absent from the FE mirror (case 1, real drift). Seven
+ *                  others were referenced nowhere in src/ and were deleted
+ *                  from the backend (case 3).
+ *
+ * ── A caveat this test cannot enforce ────────────────────────────────────
+ *
+ * One of those seven was NOT dead: AUDIT_ARCHIVE_INTEGRITY_FAILED had been
+ * reserved for an unbuilt "auto-quarantine on mismatch" path
+ * (BUILD_PROGRESS.md). It was removed too, deliberately — the reservation is
+ * recorded in PENDING_WORK.md, Data_Model.md and audit-archive.service.ts, so
+ * it did not also need a constant nothing throws.
+ *
+ * The lesson for the next failure: **a constant reserved for scoped-but-unbuilt
+ * work is indistinguishable from a dead one by reference count alone.** This
+ * test cannot tell them apart and will report both identically. Check the
+ * history before deleting anything it names.
  *
  *   audit-catalog  38 actions and 12 target kinds missing from the FE, plus one
  *                  stale FE entry — `project.clients_update`, retired in the

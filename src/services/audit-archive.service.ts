@@ -482,11 +482,14 @@ export const getArchive = async (id: Types.ObjectId): Promise<AuditArchiveSnapsh
  * and no endpoint does that today — it is a manual forensic
  * procedure. Do not read a passing verify as "the chain is intact".
  *
- * `ERROR_CODES.AUDIT_ARCHIVE_INTEGRITY_FAILED` is thrown by nothing —
- * it was reserved for a future auto-quarantine-on-mismatch path that
- * was never built (`BUILD_PROGRESS.md`). Returning a structured result
- * is why: report-and-wait has no use for an error code. Both gaps are
- * tracked in `PENDING_WORK.md` and `Data_Model.md` (`audit_archives`).
+ * There was once an `AUDIT_ARCHIVE_INTEGRITY_FAILED` error code,
+ * reserved for a future auto-quarantine-on-mismatch path that was
+ * never built (`BUILD_PROGRESS.md`). Nothing ever threw it — returning
+ * a structured result is why: report-and-wait has no use for an error
+ * code. It has been removed; re-add it if auto-quarantine is built.
+ * Both gaps — the missing chain walk and the missing auto-quarantine —
+ * are tracked in `PENDING_WORK.md` and `Data_Model.md`
+ * (`audit_archives`).
  */
 export const verifyArchive = async (id: Types.ObjectId): Promise<VerifyResult> => {
     const doc = await AuditArchive.findById(id);

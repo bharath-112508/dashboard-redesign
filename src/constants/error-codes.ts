@@ -50,8 +50,15 @@ export const ERROR_CODES = {
     ENGAGEMENT_NOT_FOUND: 'ENGAGEMENT_NOT_FOUND',
     INVOICE_NOT_FOUND: 'INVOICE_NOT_FOUND',
     EXPORT_NOT_FOUND: 'EXPORT_NOT_FOUND',
+    // No AUDIT_ARCHIVE_INTEGRITY_FAILED. It existed, was thrown by nothing,
+    // and was reserved for an auto-quarantine-on-mismatch path that was never
+    // built — `verifyArchive` returns a structured result and deliberately
+    // never throws, so report-and-wait has no use for an error code. The
+    // reservation is recorded in PENDING_WORK.md, Data_Model.md
+    // (`audit_archives`), BUILD_PROGRESS.md, and `audit-archive.service.ts`;
+    // it does not need a dead constant as well. If auto-quarantine is ever
+    // built, re-add it then.
     AUDIT_ARCHIVE_NOT_FOUND: 'AUDIT_ARCHIVE_NOT_FOUND',
-    AUDIT_ARCHIVE_INTEGRITY_FAILED: 'AUDIT_ARCHIVE_INTEGRITY_FAILED',
     TASK_TEMPLATE_NOT_FOUND: 'TASK_TEMPLATE_NOT_FOUND',
     REPORT_PRESET_NOT_FOUND: 'REPORT_PRESET_NOT_FOUND',
     REPORT_PRESET_LIMIT_EXCEEDED: 'REPORT_PRESET_LIMIT_EXCEEDED',
