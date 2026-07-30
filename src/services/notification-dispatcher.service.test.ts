@@ -271,30 +271,62 @@ describe('notifyLeaveSubmitted', () => {
         total_days: 2,
     };
 
-    it('routes to the employee reporting manager when one is set', async () => {
+    // Was manager-ONLY. A single recipient meant an away or slow manager left
+    // the request surfaced to nobody else who could approve it, which is how
+    // requests sat unactioned — admins hold `leave_request.approve` too.
+    it('notifies the reporting manager AND the admins', async () => {
         userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
             id.equals(requesterId)
                 ? queryReturning({ ...requester, internal_profile: { reporting_manager_id: managerId } })
                 : queryReturning(requester)
         );
         userFindOneMock.mockReturnValue(queryReturning(manager));
+        userFindMock.mockReturnValue(queryReturning([admin]));
 
         await dispatcher.notifyLeaveSubmitted(baseInput);
 
-        // Only the manager is notified — not the whole admin/manager pool.
-        expect(notificationCreateMock).toHaveBeenCalledTimes(1);
         expect(userFindOneMock.mock.calls[0][0]._id).toEqual(managerId);
+        expect(userFindMock.mock.calls[0][0].role).toEqual(ROLES.ADMIN);
+        const notified = notificationCreateMock.mock.calls.map((c) => String(c[0].user_id));
+        expect(notified.sort()).toEqual([String(managerId), String(adminId)].sort());
     });
 
-    it('falls back to the admin pool (self-excluded) when no reporting manager is set', async () => {
+    it('de-dupes when the reporting manager IS an admin', async () => {
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
+            id.equals(requesterId)
+                ? queryReturning({ ...requester, internal_profile: { reporting_manager_id: adminId } })
+                : queryReturning(requester)
+        );
+        userFindOneMock.mockReturnValue(queryReturning(admin));
+        userFindMock.mockReturnValue(queryReturning([admin]));
+
+        await dispatcher.notifyLeaveSubmitted(baseInput);
+
+        // One person, one notification — not two.
+        expect(notificationCreateMock).toHaveBeenCalledTimes(1);
+        expect(String(notificationCreateMock.mock.calls[0][0].user_id)).toBe(String(adminId));
+    });
+
+    it('never tells an admin about their OWN leave request', async () => {
+        userFindByIdMock.mockImplementation(() => queryReturning(admin));
+        userFindOneMock.mockReturnValue(queryReturning(null));
+        userFindMock.mockReturnValue(queryReturning([admin]));
+
+        await dispatcher.notifyLeaveSubmitted({ ...baseInput, requester_id: adminId });
+
+        expect(notificationCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('still notifies the admins when no reporting manager is set', async () => {
         await dispatcher.notifyLeaveSubmitted(baseInput);
 
         expect(notificationCreateMock).toHaveBeenCalledTimes(2);
         expect(sendEmailMock).toHaveBeenCalledTimes(2);
 
-        // Fallback pool = active admins, excluding the requester.
+        // Admins are queried unfiltered now; the requester is removed after
+        // the query so the same exclusion also covers the manager branch.
         const findCall = userFindMock.mock.calls[0][0];
-        expect(findCall._id).toEqual({ $ne: requesterId });
+        expect(findCall._id).toBeUndefined();
         expect(findCall.role).toEqual(ROLES.ADMIN);
 
         // Each in-app row points at the leave_request entity

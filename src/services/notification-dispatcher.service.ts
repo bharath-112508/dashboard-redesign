@@ -327,10 +327,19 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
 };
 
 /**
- * Recipients for a NEW leave request — route to the employee's reporting
- * manager (leave goes to the related manager, not every reviewer). Falls
- * back to all active admins when the employee has no active reporting
- * manager set, so no request goes unseen.
+ * Recipients for a NEW leave request: the employee's reporting manager AND
+ * every active admin.
+ *
+ * This used to be manager-OR-admins — admins were the fallback only when no
+ * active reporting manager was set. That left a request visible to exactly
+ * one person, so if that manager was away (or simply slow) nothing surfaced
+ * it to anyone who could also approve, and the request just sat. Admins hold
+ * `leave_request.approve`, so they are legitimate reviewers, not bystanders.
+ *
+ * Still NOT every manager/team-lead — the routing stays targeted, it just
+ * always includes the admin backstop. The requester is excluded (nobody
+ * reviews their own request) and the list is de-duplicated, so an admin who
+ * IS the reporting manager gets one notification, not two.
  */
 const RECIPIENT_SELECT =
     '_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled';
@@ -340,19 +349,22 @@ const findLeaveReviewersFor = async (requesterId: Types.ObjectId): Promise<Recip
         .select('internal_profile.reporting_manager_id')
         .lean<{ internal_profile?: { reporting_manager_id?: Types.ObjectId | null } }>();
     const managerId = requester?.internal_profile?.reporting_manager_id ?? null;
-    if (managerId) {
-        const mgr = await User.findOne({ _id: managerId, status: USER_STATUSES.ACTIVE })
-            .select(RECIPIENT_SELECT)
-            .lean<RecipientUser>();
-        if (mgr) return [mgr];
-    }
-    // No active reporting manager set → notify admins so it isn't missed
-    // (excluding the requester, who can't review their own request).
-    return (
-        (await User.find({ role: ROLES.ADMIN, status: USER_STATUSES.ACTIVE, _id: { $ne: requesterId } })
-            .select(RECIPIENT_SELECT)
-            .lean<RecipientUser[]>()) ?? []
-    );
+
+    const [manager, admins] = await Promise.all([
+        managerId
+            ? User.findOne({ _id: managerId, status: USER_STATUSES.ACTIVE })
+                  .select(RECIPIENT_SELECT)
+                  .lean<RecipientUser>()
+            : Promise.resolve(null),
+        User.find({ role: ROLES.ADMIN, status: USER_STATUSES.ACTIVE }).select(RECIPIENT_SELECT).lean<RecipientUser[]>(),
+    ]);
+
+    const byId = new Map<string, RecipientUser>();
+    if (manager) byId.set(String(manager._id), manager);
+    for (const a of admins ?? []) byId.set(String(a._id), a);
+    // An admin applying for their own leave must not be told about it.
+    byId.delete(String(requesterId));
+    return [...byId.values()];
 };
 
 const findUserById = async (id: Types.ObjectId): Promise<RecipientUser | null> => {
