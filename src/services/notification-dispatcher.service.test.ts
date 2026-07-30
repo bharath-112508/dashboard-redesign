@@ -732,6 +732,31 @@ describe('Slack integration', () => {
         expect(sendEmailMock).toHaveBeenCalledTimes(1);
     });
 
+    // Corrections used the blanket reviewer pool — EVERY active admin and
+    // manager, whether or not the requester reported to them. They now use the
+    // same reporting-manager + admins routing as a leave request, so the two
+    // approval flows can't drift apart again.
+    it('routes an attendance correction to the reporting manager AND the admins', async () => {
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
+            id.equals(requesterId)
+                ? queryReturning({ ...requester, internal_profile: { reporting_manager_id: managerId } })
+                : queryReturning(requester)
+        );
+        userFindOneMock.mockReturnValue(queryReturning(manager));
+        userFindMock.mockReturnValue(queryReturning([admin]));
+
+        await dispatcher.notifyAttendanceCorrectionSubmitted({
+            request_id: requestId,
+            requester_id: requesterId,
+            local_date: '2026-04-22',
+        });
+
+        // Admins only — a blanket pool query would also ask for MANAGER.
+        expect(userFindMock.mock.calls[0][0].role).toEqual(ROLES.ADMIN);
+        const notified = notificationCreateMock.mock.calls.map((c) => String(c[0].user_id));
+        expect(notified.sort()).toEqual([String(managerId), String(adminId)].sort());
+    });
+
     it('routes attendance-correction broadcasts to #attendance, not #leaves (category mapping regression)', async () => {
         // The type→category map drives broadcast channel selection.
         // A regression that flipped attendance events to #leaves would

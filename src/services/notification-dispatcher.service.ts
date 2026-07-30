@@ -327,8 +327,8 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
 };
 
 /**
- * Recipients for a NEW leave request: the employee's reporting manager AND
- * every active admin.
+ * Recipients for a NEW approval request — leave or attendance correction:
+ * the employee's reporting manager AND every active admin.
  *
  * This used to be manager-OR-admins — admins were the fallback only when no
  * active reporting manager was set. That left a request visible to exactly
@@ -344,7 +344,7 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
 const RECIPIENT_SELECT =
     '_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled';
 
-const findLeaveReviewersFor = async (requesterId: Types.ObjectId): Promise<RecipientUser[]> => {
+const findRequestReviewersFor = async (requesterId: Types.ObjectId): Promise<RecipientUser[]> => {
     const requester = await User.findById(requesterId)
         .select('internal_profile.reporting_manager_id')
         .lean<{ internal_profile?: { reporting_manager_id?: Types.ObjectId | null } }>();
@@ -403,7 +403,7 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
             findUserById(input.requester_id),
             // Route to the employee's reporting manager (fallback: admins),
             // instead of pinging every manager/admin.
-            findLeaveReviewersFor(input.requester_id),
+            findRequestReviewersFor(input.requester_id),
         ]);
         if (!requester) {
             logger.warn({ context, requester_id: input.requester_id.toString() }, 'requester missing — skipping');
@@ -653,7 +653,11 @@ export const notifyAttendanceCorrectionSubmitted = async (input: CorrectionSubmi
     try {
         const [requester, reviewers] = await Promise.all([
             findUserById(input.requester_id),
-            findReviewerPool(input.requester_id),
+            // Same routing as a leave request. This used to be the blanket
+            // `findReviewerPool` — EVERY active admin and manager, whether or
+            // not the requester reported to them — so one person's correction
+            // pinged managers with no relationship to them.
+            findRequestReviewersFor(input.requester_id),
         ]);
         if (!requester) {
             logger.warn({ context, requester_id: input.requester_id.toString() }, 'requester missing — skipping');
