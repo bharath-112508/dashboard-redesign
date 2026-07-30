@@ -334,6 +334,28 @@ describe('getCompany — staff scope (regression)', () => {
         await expect(svc.getCompany(other, managerCaller())).resolves.toBeDefined();
     });
 
+    it("a manager can list a company's representatives", async () => {
+        // The other half of this fix is the ROUTE gate: GET
+        // /:id/representatives required `representative.write` alone, so a
+        // Manager was refused before reaching the service at all. Widening
+        // that gate only helps because the service guard was relaxed too —
+        // the two fixes have to land together or a Manager passes the gate
+        // and 403s here instead.
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        // Same chain shapes the `listRepresentatives — project scoping` block
+        // below uses: User.find().select().sort().skip().limit().lean() and
+        // Project.find().select().sort().lean().
+        userFindMock.mockReturnValueOnce({
+            select: () => ({ sort: () => ({ skip: () => ({ limit: () => ({ lean: () => Promise.resolve([]) }) }) }) }),
+        });
+        userCountMock.mockResolvedValueOnce(0);
+        projectFindMock.mockReturnValueOnce({ select: () => ({ sort: () => ({ lean: () => Promise.resolve([]) }) }) });
+
+        const out = await svc.listRepresentatives(companyId, { page: 1, limit: 20 } as never, managerCaller());
+
+        expect(out.data).toEqual([]);
+    });
+
     it('the relaxation does NOT extend to mutations — a manager cannot add a representative', async () => {
         // The strict guard is deliberately kept on the write paths: a custom
         // role granted `representative.write` must not reach another company's

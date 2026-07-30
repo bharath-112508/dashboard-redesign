@@ -72,9 +72,17 @@ router.post(
 
 // ─── Representatives ─────────────────────────────────────────────────────
 
+// 🔴 These two are READS and are gated on `COMPANY_READ` as well as
+// `REPRESENTATIVE_WRITE`. They used to require the WRITE bit alone, which
+// meant a Manager — who holds `company.read`, passes the `/:id` gate, and is
+// routed to the company detail page by the frontend — opened that page and
+// got "Couldn't load people / Insufficient permissions" on the Representatives
+// tab. Reading who works at a client is a read; gating it on a write
+// permission was the bug. The mutating routes below correctly keep
+// `REPRESENTATIVE_WRITE` alone.
 router.get(
     '/:id/representatives',
-    requirePermission(PERMISSIONS.REPRESENTATIVE_WRITE),
+    requirePermission(PERMISSIONS.COMPANY_READ, PERMISSIONS.REPRESENTATIVE_WRITE),
     validate({ params: companyIdParamSchema, query: listRepresentativesQuerySchema }),
     asyncHandler(ctrl.getRepresentatives)
 );
@@ -90,7 +98,7 @@ router.get(
  */
 router.get(
     '/:id/representatives/:user_id',
-    requirePermission(PERMISSIONS.REPRESENTATIVE_WRITE),
+    requirePermission(PERMISSIONS.COMPANY_READ, PERMISSIONS.REPRESENTATIVE_WRITE),
     validate({ params: companyRepresentativeParamSchema }),
     asyncHandler(ctrl.getRepresentative)
 );
