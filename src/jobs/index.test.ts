@@ -31,6 +31,7 @@ const {
     runLeaveYearMock,
     runTokenCleanupMock,
     runTimesheetReminderMock,
+    runTaskDueReminderMock,
     runReportExportMock,
     runAuditArchiveMock,
     runRecurringTaskMock,
@@ -53,6 +54,7 @@ const {
     runLeaveYearMock: vi.fn(),
     runTokenCleanupMock: vi.fn(),
     runTimesheetReminderMock: vi.fn(),
+    runTaskDueReminderMock: vi.fn(),
     runReportExportMock: vi.fn(),
     runAuditArchiveMock: vi.fn(),
     runRecurringTaskMock: vi.fn(),
@@ -104,6 +106,9 @@ vi.mock('./token-cleanup.job.js', () => ({
 }));
 vi.mock('./timesheet-reminder.job.js', () => ({
     runTimesheetReminder: runTimesheetReminderMock,
+}));
+vi.mock('./task-due-reminder.job.js', () => ({
+    runTaskDueReminder: runTaskDueReminderMock,
 }));
 vi.mock('./report-export-cleanup.job.js', () => ({
     runReportExportCleanup: runReportExportMock,

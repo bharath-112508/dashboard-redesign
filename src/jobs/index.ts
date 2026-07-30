@@ -19,6 +19,7 @@ import { runAttendanceFinalizer } from './attendance-finalizer.job.js';
 import { runLeaveYearRollover } from './leave-year-rollover.job.js';
 import { runTokenCleanup } from './token-cleanup.job.js';
 import { runTimesheetReminder } from './timesheet-reminder.job.js';
+import { runTaskDueReminder } from './task-due-reminder.job.js';
 import { runReportExportCleanup } from './report-export-cleanup.job.js';
 import { runAuditArchive } from './audit-archive.job.js';
 import { runRecurringTaskSweepJob } from './recurring-task.job.js';
@@ -74,6 +75,7 @@ const REGISTRY: Record<JobName, JobRunner> = {
     [JOB_NAMES.LEAVE_YEAR_ROLLOVER]: () => runLeaveYearRollover(),
     [JOB_NAMES.TOKEN_CLEANUP]: () => runTokenCleanup(),
     [JOB_NAMES.TIMESHEET_REMINDER]: () => runTimesheetReminder(),
+    [JOB_NAMES.TASK_DUE_REMINDER]: () => runTaskDueReminder(),
     [JOB_NAMES.REPORT_EXPORT_CLEANUP]: () => runReportExportCleanup(),
     [JOB_NAMES.AUDIT_ARCHIVE]: () => runAuditArchive(),
     [JOB_NAMES.RECURRING_TASK_SWEEP]: () => runRecurringTaskSweepJob(),

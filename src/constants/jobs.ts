@@ -91,6 +91,7 @@ export const JOB_NAMES = {
     LEAVE_YEAR_ROLLOVER: 'leave_year_rollover',
     TOKEN_CLEANUP: 'token_cleanup',
     TIMESHEET_REMINDER: 'timesheet_reminder',
+    TASK_DUE_REMINDER: 'task_due_reminder',
     REPORT_EXPORT_CLEANUP: 'report_export_cleanup',
     AUDIT_ARCHIVE: 'audit_archive',
     RECURRING_TASK_SWEEP: 'recurring_task_sweep',
@@ -150,6 +151,11 @@ export const JOB_SCHEDULES: Record<JobName, string> = {
     // log time before the reminder fires. Idempotent on the same day so
     // a manual re-run by ops is safe.
     [JOB_NAMES.TIMESHEET_REMINDER]: '0 20 * * *',
+    // Hourly tick. The job itself honours
+    // `reminders.task_due_reminder_run_interval_hours` (1–24) by no-opping
+    // on hours that don't line up, so the admin setting controls the real
+    // cadence without a scheduler restart.
+    [JOB_NAMES.TASK_DUE_REMINDER]: '0 * * * *',
 
     // Daily 03:00 IST — purges report-export rows past `expires_at`
     // (default 7 days) and best-effort deletes their blobs. Off-peak so
@@ -237,6 +243,15 @@ export const tokenCleanupRunKey = (now: Date = new Date()): string => {
  */
 export const timesheetReminderRunKey = (now: Date = new Date()): string => {
     return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD');
+};
+
+/**
+ * Task due/overdue reminders key off the IST date + hour, so an ops re-run
+ * inside the same hour is idempotent while the configured interval still
+ * gets its own slot each time it fires.
+ */
+export const taskDueReminderRunKey = (now: Date = new Date()): string => {
+    return dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD-HH');
 };
 
 /**
