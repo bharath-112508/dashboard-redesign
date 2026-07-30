@@ -24,7 +24,11 @@ const nameSchema = z.string().trim().min(1).max(64);
 // ─── POST /leave-types ────────────────────────────────────────────────────
 
 export const createLeaveTypeBodySchema = z.object({
-    code: codeSchema,
+    // OPTIONAL: the create form doesn't collect a code — the service derives
+    // it from `name` (`utils/leave-type-code.ts`) and suffixes on collision.
+    // Still accepted so a caller that wants an explicit key (seeds, imports,
+    // the standard CL/SL/WFH catalog) can pin one.
+    code: codeSchema.optional(),
     name: nameSchema,
     default_allocation_days: z.number().nonnegative(),
     carry_forward: z.boolean(),

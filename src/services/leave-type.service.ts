@@ -7,6 +7,7 @@ import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { LEAVE_TYPE_SEEDS, RETIRED_LEAVE_TYPE_CODES, type LeaveCode } from '../constants/leave.js';
+import { uniqueCodeFromName } from '../utils/leave-type-code.js';
 import logger from '../utils/logger.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import type { CreateLeaveTypeBody, PatchLeaveTypeBody } from '../validators/leave-type.validator.js';
@@ -121,9 +122,19 @@ export const createLeaveType = async (
     input: CreateLeaveTypeBody,
     audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
+    // No code supplied → derive it from the name. Read the taken set first
+    // so a repeated name lands on NAME_2 instead of dead-ending on the
+    // unique index, which the admin can no longer resolve by hand now that
+    // the field is gone from the form. A concurrent create can still race
+    // to the same suffix; the E11000 below is the backstop.
+    let code = input.code;
+    if (!code) {
+        const existing = await LeaveType.find({}, { code: 1 }).lean();
+        code = uniqueCodeFromName(input.name, new Set(existing.map((r) => String(r.code))));
+    }
     try {
         const doc = await LeaveType.create({
-            code: input.code,
+            code,
             name: input.name,
             default_allocation_days: input.default_allocation_days,
             carry_forward: input.carry_forward,
@@ -149,8 +160,8 @@ export const createLeaveType = async (
         return toPublic(doc);
     } catch (err: unknown) {
         if (isE11000(err)) {
-            throw AppError.conflict(`Leave type "${input.code}" already exists`, ERROR_CODES.DUPLICATE_RESOURCE, {
-                code: input.code,
+            throw AppError.conflict(`Leave type "${code}" already exists`, ERROR_CODES.DUPLICATE_RESOURCE, {
+                code,
             });
         }
         throw err;
