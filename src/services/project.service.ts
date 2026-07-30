@@ -104,6 +104,18 @@ export interface ProjectCaller {
      * sees their projects. Drift costs display accuracy, never access.
      */
     company_id?: Types.ObjectId;
+    /**
+     * The caller's resolved permission list, straight off the JWT. Present
+     * so a service can enforce a permission the route layer can't: one that
+     * only applies on *some* paths through an endpoint. `timesheet.
+     * edit_out_of_window` is the case — `PATCH /timesheets/:id` serves both
+     * ordinary self-edits and manager overrides, so gating the whole route
+     * would block the former.
+     *
+     * Does NOT include the `system.admin` wildcard expansion — check it the
+     * way `callerHasPermission` does, or admins fail the check.
+     */
+    permissions?: readonly string[];
     audit?: AuditContext;
 }
 

@@ -18,7 +18,11 @@ const router = Router();
 router.get('/public', asyncHandler(settings.getPublicSettings));
 
 // ─── Authenticated reads ───────────────────────────────────────────────────
-router.get('/', authenticate, asyncHandler(settings.getSettings));
+// Every role's bundle carries `settings.read`, so this gate turns nobody
+// away who could read before — but the permission existed only in the
+// bundles, gating nothing, which made the catalog claim a control the API
+// didn't have. Admin-only fields stay redacted server-side regardless.
+router.get('/', authenticate, requirePermission(PERMISSIONS.SETTINGS_READ), asyncHandler(settings.getSettings));
 
 // ─── Admin writes ──────────────────────────────────────────────────────────
 router.patch(

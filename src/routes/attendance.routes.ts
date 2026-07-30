@@ -55,9 +55,25 @@ router.get('/me', validate({ query: myAttendanceQuerySchema }), asyncHandler(ctr
 
 // ─── Correction-request routes (must precede /:id) ───────────────────────
 
-router.post('/correction-requests', validate({ body: submitCorrectionBodySchema }), asyncHandler(ctrl.postCorrection));
+// `attendance.correction_request` was catalogued and bundled into every
+// internal role but gated nothing — these two routes ran on the
+// `authenticate` baseline alone. The POST let anyone with a login file a
+// correction; the GET was worse, because `listCorrections` only narrows to
+// `user_id` for the EMPLOYEE role, so a client-side caller fell through to
+// the reviewer branch and got everyone else's requests back.
+router.post(
+    '/correction-requests',
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_REQUEST),
+    validate({ body: submitCorrectionBodySchema }),
+    asyncHandler(ctrl.postCorrection)
+);
 
-router.get('/correction-requests', validate({ query: listCorrectionsQuerySchema }), asyncHandler(ctrl.getCorrections));
+router.get(
+    '/correction-requests',
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_REQUEST),
+    validate({ query: listCorrectionsQuerySchema }),
+    asyncHandler(ctrl.getCorrections)
+);
 
 router.post(
     '/correction-requests/:id/approve',

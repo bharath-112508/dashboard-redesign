@@ -11,6 +11,7 @@ import { User } from '../models/user.model.js';
 import { LeaveRequest } from '../models/leave-request.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES } from '../constants/roles.js';
 import { scopedUserIdFilter } from './reporting-scope.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
@@ -77,6 +78,24 @@ export interface TimesheetWriteResult {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * `timesheet.edit_out_of_window` was catalogued, bundled into the Manager
+ * role, and audited on every override — but never actually *checked*. The
+ * service tested `isManagerOrAdmin(caller.role)`, so the permission decided
+ * nothing and the compliance audit row recorded an override that required
+ * no entitlement. Granting or revoking the bit changed no behaviour.
+ *
+ * Mirrors `callerHasPermission`: the `system.admin` wildcard satisfies it.
+ */
+const canEditOutOfWindow = (caller: Caller): boolean => {
+    const held = caller.permissions ?? [];
+    return (
+        held.includes(PERMISSIONS.SYSTEM_ADMIN) ||
+        held.includes(PERMISSIONS.TIMESHEET_EDIT_OUT_OF_WINDOW) ||
+        caller.role === ROLES.ADMIN
+    );
+};
 
 const isManagerOrAdmin = (role: string): boolean => role === ROLES.ADMIN || role === ROLES.MANAGER;
 
@@ -403,6 +422,14 @@ export const patchEntry = async (
             ERROR_CODES.TIMESHEET_EDIT_WINDOW_EXPIRED
         );
     }
+    // A privileged caller reaching past the window needs the permission that
+    // names the act; the audit row below is the compliance record of it.
+    if (!inWindow && isPrivileged && !canEditOutOfWindow(caller)) {
+        throw AppError.forbidden(
+            `Edits outside the ${policy.selfEditWindowDays}-day window need the out-of-window permission`,
+            ERROR_CODES.TIMESHEET_EDIT_WINDOW_EXPIRED
+        );
+    }
 
     const before = toPublic(entry);
 
@@ -523,6 +550,14 @@ export const deleteEntry = async (id: Types.ObjectId, caller: Caller): Promise<{
     if (isOwner && !isPrivileged && !inWindow) {
         throw AppError.forbidden(
             `Deletes are restricted to the ${policy.selfEditWindowDays}-day window after the entry date`,
+            ERROR_CODES.TIMESHEET_EDIT_WINDOW_EXPIRED
+        );
+    }
+    // A privileged caller reaching past the window needs the permission that
+    // names the act; the audit row below is the compliance record of it.
+    if (!inWindow && isPrivileged && !canEditOutOfWindow(caller)) {
+        throw AppError.forbidden(
+            `Deletes outside the ${policy.selfEditWindowDays}-day window need the out-of-window permission`,
             ERROR_CODES.TIMESHEET_EDIT_WINDOW_EXPIRED
         );
     }

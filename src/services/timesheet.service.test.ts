@@ -96,6 +96,7 @@ const stubReports = (ids: unknown[]) => userFindMock.mockReturnValue({ distinct:
 
 const svc = await import('./timesheet.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES } from '../constants/roles.js';
 import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
 
@@ -105,7 +106,22 @@ const today = (): string => dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
 const daysAgo = (n: number): string => dayjs().tz(DEFAULT_TIMEZONE).subtract(n, 'day').format(DATE_FORMAT);
 
 const adminCaller = () => ({ id: new Types.ObjectId(), role: ROLES.ADMIN, audit: undefined });
-const managerCaller = () => ({ id: new Types.ObjectId(), role: ROLES.MANAGER, audit: undefined });
+// `system-role-definitions.ts` puts `timesheet.edit_out_of_window` in the
+// Manager bundle, so a real manager's token carries it. The fixture models
+// the permission list now that the service checks the permission rather than
+// the role — see `managerCallerWithoutOverride` for the other half.
+const managerCaller = () => ({
+    id: new Types.ObjectId(),
+    role: ROLES.MANAGER,
+    permissions: [PERMISSIONS.TIMESHEET_EDIT_OUT_OF_WINDOW],
+    audit: undefined,
+});
+const managerCallerWithoutOverride = () => ({
+    id: new Types.ObjectId(),
+    role: ROLES.MANAGER,
+    permissions: [],
+    audit: undefined,
+});
 const teamLeadCaller = () => ({ id: new Types.ObjectId(), role: ROLES.TEAM_LEAD, audit: undefined });
 const employeeCaller = (id?: Types.ObjectId) => ({
     id: id ?? new Types.ObjectId(),
@@ -514,6 +530,17 @@ describe('deleteEntry', () => {
         const entry = makeEntry({ local_date: daysAgo(30) });
         entryFindByIdMock.mockResolvedValueOnce(entry);
         await expect(svc.deleteEntry(entry._id, managerCaller())).resolves.toEqual({ deleted: true });
+    });
+
+    it('refuses an out-of-window delete by a manager without the override permission', async () => {
+        // The role used to be the whole check, so `timesheet.edit_out_of_window`
+        // conferred nothing. Strip it and the override must fail.
+        const entry = makeEntry({ local_date: daysAgo(30) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+        await expect(svc.deleteEntry(entry._id, managerCallerWithoutOverride())).rejects.toMatchObject({
+            code: ERROR_CODES.TIMESHEET_EDIT_WINDOW_EXPIRED,
+        });
+        expect(entry.deleteOne).not.toHaveBeenCalled();
     });
 });
 

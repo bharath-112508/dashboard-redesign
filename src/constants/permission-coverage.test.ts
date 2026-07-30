@@ -41,25 +41,35 @@ import { PERMISSIONS } from './permissions.js';
  * pass; the allowlist is for permissions that are enforced somewhere other
  * than a route file, and there is currently exactly one.
  *
- * ── Known failures at the time this test was written ─────────────────────
+ * ── The three original failures, and how each was resolved ───────────────
  *
- * Three permissions fail today. They are deliberately NOT allowlisted — the
- * red test is the finding, and silencing it would recreate the problem it
- * exists to surface:
+ * This test was committed red against three permissions. All three are now
+ * closed, and none by weakening the test:
  *
- *   - `settings.read`                  — vestigial. `GET /settings` is
- *                                        `authenticate`-only and redacts by role.
- *   - `attendance.correction_request`  — vestigial. Correction submission is
- *                                        covered by the router-level
- *                                        `attendance.check_in_out`.
- *   - `timesheet.edit_out_of_window`   — NOT vestigial, and the interesting one.
- *                                        The override is real and enforced, but by
- *                                        `isManagerOrAdmin(caller.role)` in
- *                                        `timesheet.service.ts` — a role check, not
- *                                        the permission that names it. Granting it
- *                                        to a custom role confers nothing.
- *
- * Resolving those three is a product decision, tracked in `PENDING_WORK.md`.
+ *   - `settings.read`                  — gated. `GET /settings` now carries
+ *                                        `requirePermission(SETTINGS_READ)`.
+ *                                        Every role's bundle holds it, so no
+ *                                        caller lost access; the catalog just
+ *                                        stopped claiming a control the API
+ *                                        didn't have. Redaction by role is
+ *                                        unchanged.
+ *   - `attendance.correction_request`  — gated, and it was not vestigial.
+ *                                        `POST`/`GET /attendance/correction-
+ *                                        requests` ran on the `authenticate`
+ *                                        baseline alone, and `listCorrections`
+ *                                        narrows to `user_id` only for the
+ *                                        EMPLOYEE role — so a client-side
+ *                                        caller fell through to the reviewer
+ *                                        branch and read everyone else's
+ *                                        requests.
+ *   - `timesheet.edit_out_of_window`   — now enforced by the permission rather
+ *                                        than `isManagerOrAdmin(caller.role)`,
+ *                                        in `timesheet.service.ts`. It stays
+ *                                        allowlisted below because the route
+ *                                        cannot express it: `PATCH /timesheets/
+ *                                        :id` serves ordinary in-window
+ *                                        self-edits too, so a route-level gate
+ *                                        would block those.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -73,10 +83,16 @@ const ROUTES_DIR = join(HERE, '..', 'routes');
  * so it satisfies every gate without ever being named by one. It is correct
  * for this to appear in no route file.
  *
- * Keep this list at one entry. Anything else added here needs a comment
- * explaining where it IS enforced, or it is just a silenced failure.
+ * `TIMESHEET_EDIT_OUT_OF_WINDOW` is enforced in `timesheet.service.ts`
+ * (`canEditOutOfWindow`), on both the patch and the delete path, because the
+ * endpoint it guards also serves in-window self-edits — a `requirePermission`
+ * on the route would turn those away. It is a permission check, not a role
+ * check: granting the bit to a custom role now genuinely confers the override.
+ *
+ * Anything added here needs a comment explaining where it IS enforced, or it
+ * is just a silenced failure.
  */
-const ALLOWLIST: readonly string[] = ['SYSTEM_ADMIN'];
+const ALLOWLIST: readonly string[] = ['SYSTEM_ADMIN', 'TIMESHEET_EDIT_OUT_OF_WINDOW'];
 
 const readRouteSources = (): string => {
     const files = readdirSync(ROUTES_DIR).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
@@ -117,8 +133,13 @@ describe('permission coverage', () => {
     });
 
     it('the allowlist stays minimal and every entry is a real permission', () => {
-        // A growing allowlist is how this test stops meaning anything.
-        expect(ALLOWLIST.length).toBeLessThanOrEqual(1);
+        // A growing allowlist is how this test stops meaning anything. Raised
+        // from 1 to 2 for `TIMESHEET_EDIT_OUT_OF_WINDOW`, which is enforced in
+        // `timesheet.service.ts` because its endpoint also serves in-window
+        // self-edits. Raise this again only for a permission that genuinely
+        // cannot be expressed as a route gate, and say where it IS enforced in
+        // the ALLOWLIST comment above.
+        expect(ALLOWLIST.length).toBeLessThanOrEqual(2);
         for (const name of ALLOWLIST) {
             expect(Object.keys(PERMISSIONS)).toContain(name);
         }

@@ -38,6 +38,7 @@ export const projectCallerFrom = (req: Request): ProjectCaller => {
         // into one — otherwise a copy that missed this field would silently
         // scope a client's request to "no company" rather than fail to build.
         company_id: req.caller_company_id,
+        permissions: req.user.permissions,
         audit: buildAuditContext(req),
     };
 };
