@@ -3,10 +3,10 @@
 The biggest module in the platform. The Project sits at the root of the work hierarchy and owns visibility for every collection beneath it. Sprints are time-boxed windows inside a project. Stories group tasks. Tasks are the unit of work — they carry comments, activity, attachments, dependencies, and subtasks. Templates create reusable task definitions (with optional recurring instantiation). Share Links grant public read-only access. Timeline serves the Gantt view.
 
 This module owns:
-- **Projects** — root entity, member + client rosters, custom task statuses, built-in status ordering, visibility-scoping engine other services consume.
-- **Sprints** — time-boxed windows within a project.
+- **Projects** — root entity, member roster + client-side representative roster, custom task statuses, built-in status ordering, distinct task-label list, visibility-scoping engine other services consume.
+- **Sprints** — time-boxed windows within a project; `start` / `complete` lifecycle on top of the free-form `status` field.
 - **Stories** — grouping layer between project and tasks (derived status from task rollup).
-- **Tasks** — unit of work; subtasks, dependencies, position, reorder, assign-story, move-sprint.
+- **Tasks** — unit of work; subtasks, dependencies, position, reorder, backlog rank, assign-story, move-sprint.
 - **Task Comments** — sanitised body, mentions, soft-delete, mention-or-watcher fan-out.
 - **Task Activity feed** — UI-facing change history written by hooks.
 - **Task Attachments** — two-step SAS upload to Azure Blob.
@@ -45,10 +45,16 @@ Computed in [`buildVisibilityFilter`](../../src/services/project.service.ts) + `
 | Manager | All projects (`{}`) |
 | Team Lead | Only projects where `member_ids ∋ caller.id` |
 | Employee | Only projects where `member_ids ∋ caller.id` |
-| Client | Only projects where `client_ids ∋ caller.id` |
+| Client (the **company**-level role) | Every project where `company_id === caller.company_id` — **not** roster containment |
+| Representative (the company's project-scoped person) | Only projects where `representative_ids ∋ caller.id` |
+| Client-side caller with **no** `company_id` | Nothing (`DENY_ALL`) — falling back to `{}` would hand them the whole org |
 | Unmapped role | Nothing (defence-in-depth — `{_id: ObjectId('0…0')}`) |
 
+`caller.company_id` is read from the **DB row `authenticate` already loaded, never from the JWT** — a reassigned client would otherwise keep their old company until their token expired.
+
 The same helpers `buildProjectVisibilityFilter` and `loadProjectForCaller` are exported for every dependent service. **Other services MUST NOT re-implement this rule** — they import these helpers. This is the **single source of truth** for the role → filter mapping.
+
+`assertCallerCanRead` mirrors `buildVisibilityFilter` branch-for-branch. If the two ever diverge, a list and a get answer differently for the same caller — that is the failure mode to watch for when editing either.
 
 `loadProjectForCaller(id, caller)` fetches the project and runs `assertCallerCanRead`. Used by sprint/story/task/comment/attachment/template/timeline services. The 404-vs-403 mapping inside the loader keeps existence-probing blocked (cross-project reads return 404 not 403).
 
@@ -62,11 +68,11 @@ The same helpers `buildProjectVisibilityFilter` and `loadProjectForCaller` are e
 | `project.write` | Admin, Manager, Team Lead | Project create/patch, custom-status CRUD, default-status reorder |
 | `project.archive` | Admin, Manager, Team Lead | `DELETE /projects/:id` (G1 — split from `project.write` so a custom role can grant write without delete) |
 | `project.members_write` | Admin, Manager, Team Lead | Member roster bulk + per-id |
-| `project.clients_write` | Admin, Manager (**not Team Lead**) | Client roster bulk + per-id (G1 — split from members_write so Team Leads can manage staff but not external clients) |
-| `sprint.write` | Admin, Manager, Team Lead | Sprint create/patch/delete/archive/unarchive |
+| `project.representatives_write` | Admin, Manager, **and every `client`** (**not Team Lead**, **not `representative`**) | Representative roster bulk + per-id (G1 — split from members_write so Team Leads can manage staff but not the client side). A `client` holds it globally in RBAC; the **service** pins them to their own company's projects |
+| `sprint.write` | Admin, Manager, Team Lead | Sprint create/patch/delete/archive/unarchive/**start**/**complete** |
 | `story.write` | Admin, Manager, Team Lead | Story create/patch/delete/reorder |
-| `task.read` | Everyone authenticated | Task list/get, reorder (service narrows), comment list, activity feed, attachment list/download URL |
-| `task.write` | Admin, Manager, Team Lead, Employee | Task CRUD (employee scope narrowed at service); dependency CRUD |
+| `task.read` | Everyone authenticated | Task list/get, reorder (service narrows), **project task-labels**, comment list, activity feed, attachment list/download URL |
+| `task.write` | Admin, Manager, Team Lead, Employee | Task CRUD (employee scope narrowed at service); dependency CRUD; **rank** (service narrows) |
 | `task_comment.write` | Admin, Manager, Team Lead, Employee, Client | Comment create/patch/delete |
 | `task_attachment.write` | Admin, Manager, Team Lead, Employee, Client | Mint upload URL, finalize, delete attachment |
 | `task_template.read` | Admin, Manager, Team Lead, Employee | List / get templates |
@@ -91,7 +97,9 @@ The same helpers `buildProjectVisibilityFilter` and `loadProjectForCaller` are e
   status,                           // 'active' | 'completed' | 'on_hold'   (default 'active')
   is_archived: boolean,             // archive without losing history
   member_ids:  ObjectId[],          // internal staff (≤ 200)
-  client_ids:  ObjectId[],          // external client users (≤ 50)
+  company_id:  ObjectId | null,     // the client COMPANY (null = internal project)
+  representative_ids: ObjectId[],   // client-side roster (≤ 50) — the company's
+                                    // `representative`s PLUS its `client`s
   custom_task_statuses: [{          // ≤ 12 sub-docs, each with its own _id
     _id, key, label, order, is_terminal, is_active
   }],
@@ -112,7 +120,7 @@ The same helpers `buildProjectVisibilityFilter` and `loadProjectForCaller` are e
 | `description` | ≤ 5,000 chars |
 | `start_date` / `end_date` | ISO `YYYY-MM-DD`; `end_date` must be `>= start_date` (both Zod refine AND a service-layer guard for partial PATCH) |
 | `member_ids` | ≤ 200 user-ids |
-| `client_ids` | ≤ 50 user-ids |
+| `representative_ids` | ≤ 50 user-ids (`PROJECT_CLIENTS_MAX` — the constant kept its pre-rename name) |
 | `custom_task_statuses[].key` | 1–40 chars, regex `^[a-z][a-z0-9_]{0,39}$` (lower_snake) — **must not collide** with `to_do` / `in_progress` / `review` / `done` |
 | `custom_task_statuses[].label` | 1–60 chars |
 | `custom_task_statuses[]` | ≤ 12 per project |
@@ -123,7 +131,8 @@ The same helpers `buildProjectVisibilityFilter` and `loadProjectForCaller` are e
 - `{status: 1, is_archived: 1, created_at: -1}` — **M41**, covers the default list filter + sort
 - `{status: 1, is_archived: 1}` — left in place because it shares the prefix
 - `{member_ids: 1}` — drives the Team Lead / Employee visibility filter
-- `{client_ids: 1}` — drives the Client visibility filter
+- `{representative_ids: 1}` — drives the **Representative** visibility filter
+- `{company_id: 1}` — drives the **Client** visibility filter (the authoritative one for that role)
 - `{'custom_task_statuses._id': 1}` with `partialFilterExpression: {'custom_task_statuses.0': {$exists: true}}` — powers `PATCH|DELETE /project-custom-statuses/:id` reverse lookup
 - `{name: 'text', code: 'text', description: 'text'}` — text index ahead of a future `$text` migration
 
@@ -145,7 +154,7 @@ The model validates that each canonical key appears exactly once — no drift, n
 
 **List query** — schema [`listProjectsQuerySchema`](../../src/validators/project.validator.ts). Defaults: `page=1, limit=20`. `q` requires ≥ 2 chars (R15). Service builds `$or` over `{name, code, description}` with regex specials escaped.
 
-**PATCH semantics** — accepts `name`, `description`, `start_date`, `end_date`, `status`, `is_archived` only. **`member_ids`, `client_ids`, `custom_task_statuses` are intentionally NOT accepted** — those use dedicated bulk endpoints so a partial update never silently truncates a 50-member array to zero because the FE forgot to send it.
+**PATCH semantics** — accepts `name`, `description`, `start_date`, `end_date`, `status`, `is_archived`, `company_id`. **`member_ids`, `representative_ids`, `custom_task_statuses` are intentionally NOT accepted** — those use dedicated bulk endpoints so a partial update never silently truncates a 50-member array to zero because the FE forgot to send it. `company_id` **is** patchable because it's a single scalar, so a partial update can't truncate a list — but see the roster reset in [Representatives](#representatives--the-client-side-roster).
 
 **Archive vs hard-delete** — to archive, `PATCH /projects/:id` with `{is_archived: true}`. To hard-delete, `DELETE /projects/:id` — but the BE refuses with **409 `RESOURCE_HAS_DEPENDENTS`** if any Task, Story, or Sprint references the project (R3). Intended flow: archive when there's history; delete only an empty placeholder.
 
@@ -178,15 +187,57 @@ Audit metadata captures the actually-changed `added[]` and `removed[]` arrays.
 
 **Member list order** — `listProjectMembers` preserves `doc.member_ids` ordering so the FE renders in admin-curated order.
 
-## Clients
+## Representatives — the client-side roster
 
 | Method | Path | Permission | Body | Returns |
 |---|---|---|---|---|
-| `GET` | `/projects/:id/clients` | `project.read` | — | `ProjectClient[]` (hydrated with `full_name`, `email`, `status`, `company_name`) |
-| `POST` | `/projects/:id/clients` | `project.clients_write` | `{add: string[], remove: string[]}` (≥ 1 non-empty) | `ProjectRecord` |
-| `DELETE` | `/projects/:id/clients/:user_id` | `project.clients_write` | — | `ProjectRecord` |
+| `GET` | `/projects/:id/representatives` | `project.read` | — | `RosterRow[]` — `{id, full_name, email, status, role}` |
+| `POST` | `/projects/:id/representatives` | `project.representatives_write` | `{add: string[], remove: string[]}` (≥ 1 non-empty, each ≤ 50) | `ProjectRecord` |
+| `DELETE` | `/projects/:id/representatives/:user_id` | `project.representatives_write` | — | `ProjectRecord` |
 
-Same F4 atomic-mutation pattern as members. Candidate validation requires active **role=client** users — mismatches throw **422 `INVALID_PROJECT_CLIENT_ROLE`**. `company_name` is sourced from `User.client_profile.company_name` (nullable).
+Same F4 atomic-mutation pattern as members (`$pull` then `$addToSet $each` inside `withTransaction`), same "validate only the truly new ids" idempotency guard, same audit shape — action `project.representatives_update`, `metadata: {added[], removed[]}`.
+
+`DELETE /projects/:id/representatives/:user_id` returns **404 `PROJECT_CLIENT_NOT_FOUND`** when the user isn't on the roster, then delegates to the bulk path with `{add: [], remove: [user_id]}`. Roster order is preserved on `GET`, and rows whose `User` no longer resolves are silently dropped from the response.
+
+**`role` replaces `company_name` on the row.** The company is now the *project's* `company_id`, so repeating it per person was noise; `role` is what tells a company-level `client` apart from an assigned-only `representative` on the same roster.
+
+### The roster invariant
+
+`validateRepresentativeCandidates` — every id added must be a user that is **all four** of:
+
+1. `status: active`,
+2. role `client` **or** `representative` (`PROJECT_CLIENT_SIDE_ROLES`),
+3. `client_profile.company_id === this project's company_id`,
+4. …on a project that **has** a `company_id` at all — adding a representative to a project with `company_id: null` throws **422 `INVALID_PROJECT_CLIENT_ROLE`** ("Set company_id first") with every submitted id echoed in `invalid_user_ids`.
+
+**Condition 3 is the load-bearing one.** It is the only thing stopping company B's person being rostered onto company A's project; roles alone would happily accept any active client-side user in the org. Failures return **422 `INVALID_PROJECT_CLIENT_ROLE`** with `{invalid_user_ids: [...]}`.
+
+**A `client` may only staff their OWN company's projects.** RBAC grants `project.representatives_write` to every `client` and cannot express "…but only for your own company", so `updateProjectRepresentatives` calls `assertCallerCanRead(doc, caller)` **before** touching the roster — the same visibility check used for reads. That call is the entire scope guard: remove it and any client of any company can rewrite any project's roster (the candidate check would still block them from adding *their own* people to it, but they could **remove** anyone).
+
+### Changing `company_id` resets the roster
+
+`PATCH /projects/:id {company_id}` — when the value actually changes, the service **discards `representative_ids` wholesale** and re-seeds it with `companyClientIds(nextCompanyId)`: the new company's active `client`-role people, and nothing else. Every `representative` previously assigned to the project is dropped, because they belong to the old company and would violate the invariant. Setting `company_id: null` empties the roster. Re-assigning a project to a different company is therefore **destructive to the roster** and there is no undo — the pre-change list survives only in the `project.update` audit row's `before` snapshot.
+
+`POST /projects` performs the same seeding: whatever `representative_ids` the caller supplies is validated, then the company's `client`s are appended if absent.
+
+### 🔴 For a `client`, `company_id` is authoritative for ACCESS — the roster is not
+
+This is the one distinction in this module worth getting exactly right.
+
+| Role | What grants access | What the roster does for them |
+|---|---|---|
+| `client` | `project.company_id === user.client_profile.company_id` | **Nothing.** They are listed on `representative_ids` as a denormalised convenience so the client-side roster is one explicit field |
+| `representative` | `project.representative_ids ∋ user.id` | **Everything.** The roster *is* their access |
+
+So the cost of drift is asymmetric, and deliberately so:
+
+- **Roster misses a `client`** (auto-seed skipped, someone removed them, they were created after the project) → they still see and open the project; the roster UI just under-reports who is on it. **Display accuracy, never access.**
+- **Roster wrongly contains a `client`** (e.g. left over from a company change that didn't go through PATCH) → still no effect on their access, which is recomputed from `company_id` on every read.
+- **Roster misses a `representative`** → they are locked out of the project. There is no company-level fallback for that role.
+
+The inverse design (deriving client visibility *from* the roster) was rejected because one missed auto-add would silently blind a client to a project they own — so the field that is allowed to be wrong is deliberately the one that grants nothing. Do not "fix" a drifted roster by making it authoritative.
+
+Consumers of `GET /companies/:id/representatives` see the same split from the other side, tagged per person as `project_access: 'company' | 'assigned'` — see [`company.service.ts`](../../src/services/company.service.ts).
 
 ## Custom task statuses
 
@@ -230,6 +281,7 @@ Reverse lookup by sub-doc `_id` is served by the partial-filter index. The URL u
   goal,                        // ≤ 1,000 chars (default '')
   start_date, end_date,        // both 'YYYY-MM-DD' strings, required
   status,                      // 'planned' | 'active' | 'completed'  (default 'planned')
+  completed_at: Date | null,   // stamped on entry to 'completed', cleared on exit
   is_archived: boolean,        // T11 — escape hatch for "decommission with lingering tasks"
   created_by, created_at, updated_at
 }
@@ -241,9 +293,13 @@ Indexes:
 - `{project_id: 1, is_archived: 1}` — **F1** — default list excludes archived
 - `{name: 'text', goal: 'text'}` — text index ready for `$text` migration
 
-### Status transitions are NOT enforced
+### Status transitions are NOT enforced *on PATCH*
 
-The model declares `status` as a static enum but **does not enforce `planned → active → completed` transitions**. Data_Model deliberately leaves this open so an admin can mark a sprint completed without ever activating it (e.g. cancelled mid-plan). The only date-related guardrails:
+The model declares `status` as a static enum but **does not enforce `planned → active → completed` transitions**. Data_Model deliberately leaves this open so an admin can mark a sprint completed without ever activating it (e.g. cancelled mid-plan). `PATCH /sprints/:id {status}` will move a sprint between **any** two states, in either direction.
+
+🔴 **The state machine lives in the two lifecycle endpoints, not in the model — so PATCH is a bypass, not a shortcut.** `POST /sprints/:id/start|complete` enforce the transitions *and* their side effects; `PATCH` enforces neither. A sprint PATCHed to `active` skips the single-active check (leaving a project with two active sprints); a sprint PATCHed to `completed` keeps every unfinished task attached to it. The only thing PATCH does keep in lock-step is `completed_at` — stamped on first entry to `completed`, cleared when it leaves. See [Lifecycle](#lifecycle--start--complete).
+
+The only date-related guardrails:
 
 - `end_date >= start_date` (Zod refine on create + patch)
 - Sprint window must fit within the parent project's window: `assertWithinProjectWindow` — sprint `start_date >= project.start_date` AND (if project has an `end_date`) sprint `end_date <= project.end_date`. **Open-ended projects** (`project.end_date = null`) allow sprints to extend arbitrarily.
@@ -261,12 +317,48 @@ Nested list + create on the project router; item ops on the sprint router.
 | `DELETE` | `/sprints/:id` | `sprint.write` | — |
 | `POST` | `/sprints/:id/archive` | `sprint.write` | — |
 | `POST` | `/sprints/:id/unarchive` | `sprint.write` | — |
+| `POST` | `/sprints/:id/start` | `sprint.write` | — |
+| `POST` | `/sprints/:id/complete` | `sprint.write` | `{move_unfinished_to: 'backlog' \| <sprint_id>}` (default `'backlog'`) |
+
+Every item route re-checks `isProjectAuthor` (admin / manager / team_lead) in the service on top of the route's `requirePermission` — H2.
 
 ### List query
 
 Default sort: `{start_date: -1}` (most recent first).
 
 **F1 archived filter** — when `?is_archived` is **absent**, the service forces `is_archived: false`. The caller must pass `?is_archived=true` explicitly to see the archive bucket. This default-active contract means a `GET /projects/:id/sprints` from a UI that doesn't know about archives still gets a clean active-only response.
+
+### Lifecycle — start / complete
+
+The two endpoints the Backlog screen's buttons drive. Together they are the **only** enforced path through the sprint state machine:
+
+| Endpoint | Legal from | Lands on | Refusal |
+|---|---|---|---|
+| `POST /sprints/:id/start` | `planned` **only** | `active` | 422 `SPRINT_INVALID_TRANSITION` (`{status}`) from any other state; 409 `SPRINT_ALREADY_ACTIVE` (`{active_sprint_id}`) if the project already has one |
+| `POST /sprints/:id/complete` | `active` **only** | `completed` + `completed_at = now` | 422 `SPRINT_INVALID_TRANSITION` (`{status}`) from any other state |
+
+There is **no `reopen` and no `cancel`** — `completed` is terminal through this path. Moving a sprint back out is a `PATCH /sprints/:id {status}`, which the state machine does not police.
+
+**Single-active rule** (`start`) — `Sprint.findOne({project_id, status: 'active', _id: {$ne: this}})`. A project may have at most one active sprint. 🔴 The query does **not** filter on `is_archived`, so an *archived* sprint left in `status: 'active'` still blocks every start in that project, with an error naming a sprint the UI's default list doesn't show (F1 hides archived). Archiving is not "getting it out of the way" — complete it, or PATCH its status.
+
+**What `complete` does to unfinished tasks** — "unfinished" is `status ∉ terminal set`, where the terminal set is the default `done` **plus** every one of the project's `custom_task_statuses` flagged `is_terminal: true`. It is computed per project on every call, so a status's terminal flag decides where its tasks land.
+
+- **Finished tasks stay on the completed sprint** — that's the historical record of what the sprint delivered.
+- **Unfinished tasks are relocated** to `move_unfinished_to`: the literal `'backlog'` (→ `sprint_id: null`, the default when the body is omitted) or a target sprint id. The target must be a `planned` **or** `active` sprint **in the same project**, and cannot be the sprint being completed — all three failures throw **422 `TASK_SPRINT_PROJECT_MISMATCH`**.
+- The `updateMany` + the sprint's status flip run in **one `withTransaction`**, so a mid-move failure can't leave the sprint completed with tasks half-relocated.
+- Response is `{sprint, moved_task_count}` — the count is the pre-move `countDocuments` of the unfinished filter, and it is also carried in the `sprint.complete` audit row's metadata alongside `move_unfinished_to`.
+
+**How this differs from archive** — they are orthogonal axes and neither implies the other:
+
+| | `complete` | `archive` (T11) |
+|---|---|---|
+| Field touched | `status` (+ `completed_at`) | `is_archived` |
+| Precondition | must be `active` | none — idempotent from any state |
+| Effect on tasks | **relocates unfinished ones** | none; tasks keep pointing at the sprint |
+| Effect on `DELETE /sprints/:id` | none — a completed sprint with tasks still refuses R3 | **bypasses the R3 dependant check** |
+| Reversible | `PATCH` only | `POST /sprints/:id/unarchive` |
+
+A completed sprint is still `is_archived: false` and still appears in the default list. Completing does not unblock the delete; archiving does.
 
 ### Archive vs delete (T11 escape hatch)
 
@@ -449,10 +541,14 @@ Projection: `{_id, title, status, sprint_id, primary_assignee_id}`. Sort `{creat
   primary_assignee_id,                // single user; null = unassigned
   collaborator_ids:      ObjectId[],  // ≤ 50
   depends_on_task_ids:   ObjectId[],  // ≤ 50, embedded; same project; no cycles; no self
+  labels: string[],                   // freeform, trimmed, ≤ 20 × ≤ 40 chars; no catalog
   position: number,                   // dense int per (project_id, status); reorder shifts neighbours
+  backlog_rank: number,               // dense int per project_id (status-independent); rank shifts neighbours
   created_by, updated_by, created_at, updated_at
 }
 ```
+
+(Not exhaustive — [`task.model.ts`](../../src/models/task.model.ts) also carries `task_number`, `issue_type`, `story_points`, `assignee_ids[]` and `completed_at`.)
 
 ### Field constraints ([`constants/task.ts`](../../src/constants/task.ts))
 
@@ -515,6 +611,8 @@ Status changes (PATCH or reorder-with-status) **always move the task to the END 
 | `{story_id: 1}` | Reverse lookup from story page |
 | `{primary_assignee_id: 1, status: 1}` | "My tasks" inbox |
 | `{collaborator_ids: 1}` | "Tasks I collaborate on" |
+| `{project_id: 1, backlog_rank: 1}` | Backlog / sprint-list ordering |
+| `{project_id: 1, labels: 1}` | `distinct` for `GET /projects/:id/task-labels`; future label filters |
 | `{parent_task_id: 1}` | Subtask listing |
 | `{due_date: 1}` | Cross-project due-date dashboards |
 | `{title: 'text', description: 'text'}` | Global search (current list endpoint uses regex; text index ready for migration) |
@@ -531,6 +629,8 @@ Status changes (PATCH or reorder-with-status) **always move the task to the END 
 | `PATCH` | `/tasks/:id` | `task.write` | `assertEmployeePatchScope` (employee = owner + whitelist) | `PatchTaskBody` (partial) |
 | `DELETE` | `/tasks/:id` | `task.write` | `requireWriter` | — |
 | `POST` | `/tasks/:id/reorder` | **`task.read`** | Admin / manager / team_lead OR assignee | `{position: number, status?: string}` |
+| `POST` | `/tasks/:id/rank` | **`task.write`** | Admin / manager / team_lead OR assignee | `{after_task_id?, before_task_id?}` — at most one |
+| `GET` | `/projects/:id/task-labels` | `task.read` | `loadProjectForCaller` | — (mounted on the **project** router) |
 | `POST` | `/tasks/:id/assign-story` | `task.write` | `requireWriter` — returns `STORY_WRITE_FORBIDDEN` on failure | `{story_id: string | null}` |
 | `POST` | `/tasks/:id/move-sprint` | `task.write` | `requireWriter` | `{sprint_id: string | null}` |
 | `POST` | `/tasks/:id/dependencies` | `task.write` | `requireWriter` | `{depends_on_task_id: string}` |
@@ -542,9 +642,10 @@ Status changes (PATCH or reorder-with-status) **always move the task to the END 
 |---|---|
 | `POST /tasks`, `DELETE /tasks/:id`, `POST /tasks/:id/move-sprint`, dependency add/remove | `requireWriter` — admin / manager / team_lead only. **Employee and Client always blocked.** |
 | `PATCH /tasks/:id` (as Employee) | Must be the **task's creator OR the primary assignee** AND only the whitelisted fields in [`TASK_EMPLOYEE_PATCH_FIELDS`](../../src/constants/task.ts) (`status`, `description`, `estimated_hours`). Any other field → `TASK_WRITE_FORBIDDEN`. Clients are blocked outright. |
-| `POST /tasks/:id/reorder` | Admin / manager / team_lead **OR the task's `primary_assignee_id`**. Lets a person drag their own Kanban card without a manager round-trip. |
+| `POST /tasks/:id/reorder` | Admin / manager / team_lead **OR one of the task's assignees** (`assignee_ids ∋ caller` OR `primary_assignee_id === caller`). Lets a person drag their own Kanban card without a manager round-trip. |
+| `POST /tasks/:id/rank` | Identical service rule to reorder — admin / manager / team_lead OR an assignee → else `TASK_WRITE_FORBIDDEN`. The **route** gate differs: `task.write`, which `client` / `representative` don't hold, so they are refused at the route rather than in the service. |
 | `POST /tasks/:id/assign-story` | Admin / manager / team_lead. Returns `STORY_WRITE_FORBIDDEN` (not `TASK_WRITE_FORBIDDEN`) per API_Contract §8.2a — story membership is semantically a story-write op. |
-| `GET /tasks` for non-admin/manager | Filter expands to all projects where `member_ids ∋ caller.id` (employee, team_lead) or `client_ids ∋ caller.id` (client), via `buildProjectVisibilityFilter`. |
+| `GET /tasks` for non-admin/manager | Filter expands to all projects where `member_ids ∋ caller.id` (employee, team_lead), `company_id === caller.company_id` (client) or `representative_ids ∋ caller.id` (representative), via `buildProjectVisibilityFilter`. |
 
 ### List query (`GET /tasks`)
 
@@ -591,6 +692,48 @@ Route gate is `task.read`; service narrows to admin/manager/team_lead OR `primar
 2. **Pure intra-column reorder**: `shiftNeighboursInColumn(...)`.
 
 Activity feed: cross-column moves emit `status_changed`. Pure intra-column reorders are silent.
+
+### Rank (`POST /tasks/:id/rank`) — and why it is not reorder
+
+`reorder` and `rank` move a task in **two different orderings that coexist on the same document**. They are not variants of one another and neither writes the other's field:
+
+| | `POST /tasks/:id/reorder` | `POST /tasks/:id/rank` |
+|---|---|---|
+| Field | `position` | `backlog_rank` |
+| Scope of the sequence | per `(project_id, status)` — one Kanban **column** | per `project_id` — one continuous sequence spanning the backlog **and every sprint** |
+| Addressing | absolute: `{position: 3}` | relative: `{after_task_id}` / `{before_task_id}` |
+| Can also change `status` | **yes** (`{status}` moves columns) | no — rank never touches status, sprint, or story |
+| Screen | Board | Backlog |
+| Route gate | `task.read` | `task.write` |
+| Audit / activity | `task.reorder` / `status_changed` on column change | `task.rank` / `rank_changed` (only when the rank actually moved) |
+
+**The ordering scheme is a dense integer, NOT a fractional or lexicographic rank** — despite the name. `backlog_rank` is `0, 1, 2, …` per project with no gaps; `shiftBacklogNeighbours` `$inc`s every row between the old and new rank by ±1, exactly like `position` does inside a column. Creating a task calls `nextBacklogRank` (max + 1, or 0 when the project has none) so new work appends to the bottom.
+
+Body semantics ([`rankTaskBodySchema`](../../src/validators/task.validator.ts)):
+
+- `{after_task_id}` → land immediately after that task; `{before_task_id}` → immediately before it. Sending **both is a 400** (Zod refine).
+- **Both omitted (or both null) → move to the top** (`targetRank = 0`). An empty body `{}` is valid and means "to the top" — it is not a no-op.
+- The neighbour must be in the **same project** and must already have a numeric `backlog_rank`, else **422 `TASK_NOT_FOUND`** ("The neighbour task was not found in this project") — note the 422, not 404.
+- The target index depends on direction of travel, because the moving task vacates one of the dense slots: moving **down**, `before` resolves to `neighbour - 1` and `after` to `neighbour`; moving **up**, `before` → `neighbour` and `after` → `neighbour + 1`. Get this wrong and every drag lands one row off.
+- The final rank is clamped to `[0, maxRank]`, so "rank past the end" lands at the bottom rather than opening a gap.
+
+Rows created before the Backlog shipped may have **no** `backlog_rank` at all. [`scripts/backfill-backlog-rank.ts`](../../scripts/backfill-backlog-rank.ts) assigns them (sprinted tasks first, then `created_at`, then `_id`; re-runnable — it continues above the highest rank already present). Until it has run for a project, an un-ranked neighbour makes `rank` throw the 422 above.
+
+🔴 **No endpoint returns tasks in `backlog_rank` order.** `GET /tasks` sorts `{position, created_at}` when the query is column-scoped and `{created_at: -1, _id: -1}` otherwise — `backlog_rank` is never a sort key anywhere in the BE. The Backlog screen fetches the page and sorts by the field client-side. So the ordering is only as complete as the page the FE happened to load.
+
+🔴 **The neighbour shift is not transactional.** `shiftBacklogNeighbours` runs a bare `updateMany` and then `task.save()`. A failure between them leaves the neighbours shifted and the moved task at its old rank — i.e. two tasks sharing a rank, or a gap. Nothing detects or repairs this; re-running the backfill script won't either (it only fills *missing* ranks). The same shape applies to `position`.
+
+### Project task-labels (`GET /projects/:id/task-labels`)
+
+Mounted on the **project** router ([`project.routes.ts`](../../src/routes/project.routes.ts)) but served by [`task.service.ts`](../../src/services/task.service.ts)`#listProjectTaskLabels`, gated on `task.read`, scoped by `loadProjectForCaller`. Returns `{data: string[]}`.
+
+**Labels are derived from existing tasks — there is no catalog.** The implementation is `Task.distinct('labels', {project_id})`, filtered to non-empty strings and sorted with `localeCompare`. Consequences worth knowing before building anything on it:
+
+- There is **no label enum, no per-project label list on the project document, and no label CRUD**. A label exists exactly as long as some task in the project carries it; removing it from the last task removes it from this endpoint. Renaming means patching every task.
+- The endpoint is a **suggestion feed** for the label input's autocomplete and the board's label filter — not an authority. `PATCH /tasks/:id {labels}` accepts any string that passes the validator; nothing checks it against this list.
+- The validator ([`labelsSchema`](../../src/validators/task.validator.ts)) trims each entry, caps it at `TASK_LABEL_MAX_LEN` (40) and the array at `TASK_LABELS_MAX` (20), **drops** empty/whitespace-only entries rather than rejecting them, and de-dupes **case-insensitively keeping the first spelling** (`["Bug", "bug"]` → `["Bug"]`).
+- 🔴 That de-dupe is **per write**, so casing collides across tasks: task A saved `Bug` and task B saved `bug` yields *two* entries in this response. `distinct` is case-sensitive and nothing normalises at rest. Activity-diffing compares label sets case-insensitively (`labelSetsEqual`), so re-casing a label emits no `labels_changed` row either.
+- `distinct` is unbounded — no pagination, no cap. Bounded in practice by 20 labels × the project's task count.
 
 ### Assign-story / Move-sprint
 
@@ -698,7 +841,7 @@ Indexes: `{task_id, created_at: -1}` powers the feed; `{actor_id, created_at: -1
 
 [`constants/task-activity.ts`](../../src/constants/task-activity.ts) — the enum (`TASK_ACTIVITY_TYPES`):
 
-`created`, `status_changed`, `priority_changed`, `due_date_changed`, `estimate_changed`, `assignee_changed`, `collaborator_added`, `collaborator_removed`, `sprint_changed`, `story_changed`, `dependency_added`, `dependency_removed`, `subtask_added`, `attachment_added`, `attachment_removed`, `comment_added`, `comment_edited`, `comment_deleted`.
+`created`, `status_changed`, `priority_changed`, `due_date_changed`, `estimate_changed`, `assignee_changed`, `collaborator_added`, `collaborator_removed`, `sprint_changed`, `story_changed`, `rank_changed`, `issue_type_changed`, `story_points_changed`, `labels_changed`, `dependency_added`, `dependency_removed`, `subtask_added`, `attachment_added`, `attachment_removed`, `comment_added`, `comment_edited`, `comment_deleted`.
 
 ## `recordActivity` is never-throw
 
@@ -986,7 +1129,9 @@ resolveLink(token):
 
   link.last_accessed_at = now; link.save()                      ← bump timestamp
 
-  project = Project.findById(link.project_id).select('-member_ids -client_ids -created_by')
+  project = Project.findById(link.project_id).select(
+      'name code description status is_archived start_date end_date ' +
+      'custom_task_statuses default_status_orders created_at updated_at')   ← ALLOW-list
   if !project: 404 SHARE_LINK_NOT_FOUND                          ← stale pointer; honest 404
 
   // H19 — pull limit+1 to detect truncation without a countDocuments round-trip
@@ -1004,8 +1149,10 @@ resolveLink(token):
 
 ## Field projections strip enumeration vectors
 
-The public payload strips:
-- `member_ids`, `client_ids` — bulk ObjectId arrays of internal users
+🔴 **The project projection is an ALLOW-list, deliberately — do not turn it back into `.select('-field -field')`.** A deny-list fails **open**: any field later added to `Project` is public by default, and merely *renaming* a denied field silently un-denies it. That is not hypothetical here — the rename `client_ids` → `representative_ids` would have leaked every representative's user id to anyone holding a share token. `company_id` and `representative_ids` are both omitted on purpose.
+
+The public payload therefore omits everything not named in the `select`, including:
+- `member_ids`, `representative_ids`, `company_id` — bulk ObjectId arrays / client linkage
 - `created_by`, `updated_by`, `collaborator_ids` — admin-history bookkeeping
 
 Keeps `primary_assignee_id` (per-task) for FE avatar tile. An authenticated user reading the same project through `/projects/:id` gets the full document.
@@ -1139,11 +1286,11 @@ Even with the 365-day cap, a project with an unusually dense backlog shouldn't b
 
 ### Create a project
 
-1. Caller hits `POST /api/v1/projects` with `{name, code, description, start_date, end_date, status, member_ids[], client_ids[], custom_task_statuses[]}`.
+1. Caller hits `POST /api/v1/projects` with `{name, code, description, start_date, end_date, status, member_ids[], company_id, representative_ids[], custom_task_statuses[]}`.
 2. `authenticate` validates the JWT; `requirePermission(project.write)` checks the bundle; `validate({body: createProjectBodySchema})` runs the Zod refine (code uppercase + regex, end ≥ start, custom-status keys unique + no default collisions).
 3. Controller builds the caller context and calls `service.createProject`.
-4. Service dedupes `member_ids` / `client_ids`. If the caller is a member-scoped role (`team_lead` / `employee`), it auto-adds the caller to `member_ids` (BUG-007) so they don't lose visibility of the project they just made.
-5. `validateMemberCandidates` and `validateClientCandidates` fetch the candidate users in one query each; reject with **422 `INVALID_PROJECT_MEMBER_ROLE` / `_CLIENT_ROLE`** on shape mismatch.
+4. Service dedupes `member_ids` / `representative_ids`. If the caller is a member-scoped role (`team_lead` / `employee`), it auto-adds the caller to `member_ids` (BUG-007) so they don't lose visibility of the project they just made.
+5. `validateMemberCandidates` and `validateRepresentativeCandidates` fetch the candidate users in one query each; reject with **422 `INVALID_PROJECT_MEMBER_ROLE` / `_CLIENT_ROLE`** on shape mismatch. The company's active `client`s are then appended to `representative_ids` if the caller didn't list them.
 6. `Project.create({...})` runs.
 7. On E11000 with `keyPattern.code`, the service translates to **409 `PROJECT_CODE_TAKEN`** with `{code: input.code}`.
 8. Audit row written via `recordAudit({action: PROJECT_CREATE, ...})`.
@@ -1283,7 +1430,7 @@ Same as above with `parent_task_id`. `assertParentTaskUsable` enforces same-proj
 
 1. URL is `${APP_BASE_URL}/share/<token>`. FE viewer calls `GET /share-links/resolve/<token>`.
 2. BE: `findOne({token_hash: sha256Hex(token)})` → live link → bump `last_accessed_at`.
-3. Project loaded (member_ids/client_ids/created_by stripped). Sprints + Stories + Tasks fetched with `limit+1`.
+3. Project loaded through the allow-list projection (no rosters, no `company_id`, no `created_by`). Sprints + Stories + Tasks fetched with `limit+1`.
 4. Response `{project, sprints, stories, tasks, last_accessed_at}`. FE renders a read-only project view.
 
 ### Client deactivation cascades
@@ -1310,15 +1457,18 @@ Same as above with `parent_task_id`. `assertParentTaskUsable` enforces same-proj
 | Action | When |
 |---|---|
 | `PROJECT_CREATE` / `_UPDATE` / `_ARCHIVE` | Project CRUD (`_ARCHIVE` for hard-delete; soft archive is `_UPDATE` with `{is_archived: true}` in diff) |
-| `PROJECT_MEMBERS_UPDATE` / `_CLIENTS_UPDATE` | Roster bulk add/remove |
+| `PROJECT_MEMBERS_UPDATE` (`project.members_update`) / `PROJECT_REPRESENTATIVES_UPDATE` (`project.representatives_update`) | Roster bulk add/remove (per-id delete delegates to the bulk path, so it writes the same action) |
 | `PROJECT_CUSTOM_STATUS_CREATE` / `_UPDATE` / `_DELETE` | Custom status CRUD |
 | `PROJECT_DEFAULT_STATUS_ORDERS_UPDATE` | Default status reorder |
 | `SPRINT_CREATE` / `_UPDATE` / `_DELETE` / `_ARCHIVE` / `_UNARCHIVE` | Sprint lifecycle (carries `metadata: {project_id}`) |
+| `SPRINT_START` (`sprint.start`) | `POST /sprints/:id/start` |
+| `SPRINT_COMPLETE` (`sprint.complete`) | `POST /sprints/:id/complete` — `metadata: {project_id, moved_task_count, move_unfinished_to}`. The relocated tasks get **no** `task.update` rows of their own; this metadata is the only trail of the move |
 | `STORY_CREATE` / `_UPDATE` / `_DELETE` / `_REORDER` | Story lifecycle (delete writes `unset_task_ids` + `detached_count`) |
 | `TASK_CREATE` | Task creation (manual or template-instantiated) |
 | `TASK_UPDATE` | PATCH /tasks/:id |
 | `TASK_DELETE` | DELETE /tasks/:id |
 | `TASK_REORDER` | POST /tasks/:id/reorder |
+| `TASK_RANK` (`task.rank`) | POST /tasks/:id/rank — always written, even when the rank didn't move; the `rank_changed` activity row is the one that's conditional |
 | `TASK_ASSIGN_STORY` | POST /tasks/:id/assign-story |
 | `TASK_MOVE_SPRINT` | POST /tasks/:id/move-sprint |
 | `TASK_DEPENDENCY_ADD` / `_REMOVE` | Dependency edges |
@@ -1341,23 +1491,25 @@ Timeline NEVER audits — read-only.
 | `PROJECT_CODE_TAKEN` | 409 | `POST /projects` with duplicate code (E11000) |
 | `PROJECT_DATE_INVALID` | 422 | PATCH that would make `end_date < start_date` |
 | `PROJECT_MEMBER_NOT_FOUND` | 404 | `DELETE /projects/:id/members/:user_id` when not on roster |
-| `PROJECT_CLIENT_NOT_FOUND` | 404 | `DELETE /projects/:id/clients/:user_id` when not on roster |
+| `PROJECT_CLIENT_NOT_FOUND` | 404 | `DELETE /projects/:id/representatives/:user_id` when not on roster (code kept its pre-rename name) |
 | `INVALID_PROJECT_MEMBER_ROLE` | 422 | Member add candidate isn't an active internal user |
-| `INVALID_PROJECT_CLIENT_ROLE` | 422 | Client add candidate isn't an active `role=client` user OR `owner_client_id` on share link references non-client / non-active |
+| `INVALID_PROJECT_CLIENT_ROLE` | 422 | Representative add candidate isn't an active client-side user **of this project's company**, OR the project has no `company_id` at all, OR `owner_client_id` on a share link references non-client / non-active |
 | `CUSTOM_STATUS_NOT_FOUND` | 404 | PATCH / DELETE of a custom-status sub-doc that doesn't exist |
 | `CUSTOM_STATUS_KEY_TAKEN` | 409 | Duplicate key within the same project |
 | `RESOURCE_HAS_DEPENDENTS` | 409 | Hard-delete project / sprint / custom-status with dependants |
 | `FORBIDDEN` | 403 | `assertCallerCanRead` failed |
 | `SPRINT_NOT_FOUND` | 404 | `findById` miss |
 | `SPRINT_DATE_INVALID` | 422 | `end_date < start_date` OR window outside project window |
+| `SPRINT_INVALID_TRANSITION` | 422 | `start` on a non-`planned` sprint, or `complete` on a non-`active` one |
+| `SPRINT_ALREADY_ACTIVE` | 409 | `start` while another sprint in the project is `active` (`{active_sprint_id}`) |
 | `STORY_NOT_FOUND` | 404 | `findById` miss |
 | `STORY_WRITE_FORBIDDEN` | 403 | Service-layer narrowing (story.write or assign-story by non-writer) |
 | `STORY_PROJECT_MISMATCH` | 422 | A task tries to attach to a story in a different project |
-| `TASK_NOT_FOUND` | 404 | `findById` miss |
+| `TASK_NOT_FOUND` | 404 | `findById` miss — **but 422** when it's the `before`/`after` neighbour on `POST /tasks/:id/rank` |
 | `TASK_INVALID_STATUS` | 422 | Status not in (defaults ∪ project customs) |
 | `TASK_INVALID_ASSIGNEE` | 422 | Assignee isn't an active internal user |
 | `TASK_INVALID_COLLABORATOR` | 422 | Same for a collaborator id |
-| `TASK_SPRINT_PROJECT_MISMATCH` | 422 | Sprint belongs to a different project |
+| `TASK_SPRINT_PROJECT_MISMATCH` | 422 | Sprint belongs to a different project; also the `move_unfinished_to` target on `POST /sprints/:id/complete` (wrong project, not planned/active, or the sprint being completed) |
 | `TASK_PARENT_NOT_FOUND` | 422 | Parent task missing |
 | `TASK_PARENT_PROJECT_MISMATCH` | 422 | Parent is in a different project |
 | `TASK_SUBTASK_DEPTH_EXCEEDED` | 422 | Parent is already a subtask (depth > 1) |
@@ -1395,14 +1547,18 @@ Timeline NEVER audits — read-only.
 | # | Behaviour | Why |
 |---|---|---|
 | 1 | A Team Lead creating a project is **auto-added to `member_ids`** even if they didn't include themselves | BUG-007 — their visibility filter is `member_ids ∋ caller.id`, so otherwise they'd lose access to the project they just made |
-| 2 | PATCH doesn't accept `member_ids` / `client_ids` / `custom_task_statuses` | Whole-set replacement would silently truncate a large roster if the FE forgot to send it; use the dedicated bulk endpoints |
+| 2 | PATCH doesn't accept `member_ids` / `representative_ids` / `custom_task_statuses` (it **does** accept `company_id`) | Whole-set replacement would silently truncate a large roster if the FE forgot to send it; use the dedicated bulk endpoints |
 | 3 | Member/client bulk add/remove is **idempotent** | Re-running the same `{add, remove}` converges; the FE doesn't need to inspect current state |
 | 4 | Bulk endpoint validates only **truly new** add candidates | A stale role change on an existing roster member doesn't make the call fail |
 | 5 | Bulk endpoint uses two separate `updateOne` calls inside `withTransaction` | F4 — Mongo refuses overlapping path operators in one update, but two sequential atomic updates with `$pull` + `$addToSet` are race-safe at the row level |
 | 6 | `DELETE /projects/:id` refuses if any Task / Story / Sprint exists | R3 — admin must archive or reassign dependants first |
 | 7 | `DELETE /project-custom-statuses/:id` refuses if any Task references it | R3 — PATCH each affected task onto another status first |
 | 8 | Custom status sub-doc has its own `_id`; URL uses the `_id`, not the `key` | Lets `key` be renamed without breaking deep links |
-| 9 | Client `role=client` users must be granted access via the **client roster**, not the member roster | `validateClientCandidates` requires `role=client`; `validateMemberCandidates` rejects `role=client` |
+| 9 | 🔴 A `client`'s ACCESS comes from `project.company_id`, **not** from `representative_ids` — a `representative`'s comes from the roster | The roster entry for a `client` is denormalised convenience. Roster drift costs display accuracy for a `client` and **all access** for a `representative`. Never "fix" a drifted roster by making it authoritative |
+| 9a | 🔴 `PATCH /projects/:id {company_id}` **wipes `representative_ids`** and re-seeds it with the new company's `client`s | Every id on the roster must belong to the project's company; the old company's people would violate that. Assigned `representative`s are lost with no undo outside the audit row's `before` |
+| 9b | Roster adds are validated against **this project's company**, removes are not | `validateRepresentativeCandidates` only sees `add`. The scope guard for "whose project may I touch at all" is the `assertCallerCanRead` call at the top of `updateProjectRepresentatives` — remove it and a client of company B can strip company A's roster |
+| 9c | A project with `company_id: null` **cannot** have representatives at all | 422 `INVALID_PROJECT_CLIENT_ROLE` — "Set company_id first". Internal projects have no client side |
+| 9d | Member and representative candidates are validated by **disjoint** role sets | `validateMemberCandidates` accepts admin/manager/team_lead/employee; `validateRepresentativeCandidates` accepts client/representative. A person can't be on both rosters |
 | 10 | The four built-in statuses are **implicit**, not stored in `custom_task_statuses[]` | They're in `default_status_orders[]` (order + visibility only); the keys themselves are constants |
 | 11 | `default_status_orders[]` is **always exactly four entries** | Model + validator both enforce; replaced atomically on reorder |
 | 12 | Project `code` is **uppercased on write** | Both Zod (`transform`) and the model (`uppercase: true`) — case-insensitive de-facto uniqueness |
@@ -1412,12 +1568,19 @@ Timeline NEVER audits — read-only.
 
 | # | Behaviour | Why |
 |---|---|---|
-| 14 | Sprint status transitions are **NOT enforced** (any → any allowed) | Data_Model leaves this open intentionally |
+| 14 | Sprint status transitions are **NOT enforced on `PATCH`** (any → any allowed) | Data_Model leaves the field open intentionally; the state machine lives only in `start` / `complete` |
+| 14a | 🔴 `PATCH {status: 'active'}` is a **bypass of the single-active rule**, and `PATCH {status: 'completed'}` leaves unfinished tasks on the sprint | Only `POST /sprints/:id/start\|complete` run those checks + the task relocation. Two active sprints in one project is reachable and nothing repairs it |
+| 14b | `completed_at` is maintained by **both** paths | `complete` stamps it; `PATCH` stamps on entry to `completed` and clears it on exit |
+| 14c | 🔴 The single-active check ignores `is_archived` | An archived sprint still sitting in `status: 'active'` blocks every `start` in the project, naming a sprint the default (F1) list doesn't return |
+| 14d | `complete` relocates only **non-terminal** tasks; terminal = `done` ∪ the project's `is_terminal` customs | A custom status's `is_terminal` flag decides whether its tasks stay on the completed sprint or move |
+| 14e | The tasks moved by `complete` get **no per-task audit or activity rows** | `updateMany` writes them in bulk; the only record is `moved_task_count` + `move_unfinished_to` on the `sprint.complete` audit row |
+| 14f | `complete` is **not** reachable from `planned` | 422 `SPRINT_INVALID_TRANSITION` — a sprint cancelled before it started has to go through `PATCH` |
 | 15 | Sprint window must fit within project window **only when the project has an `end_date`** | Open-ended projects allow open-ended sprints |
 | 16 | Sprint list **defaults to `is_archived: false`** when the param is absent (F1) | Default-active contract |
 | 17 | Sprint delete **refuses when not archived AND tasks reference it** (R3) | Archive is the operator's escape hatch |
 | 18 | Archived sprint can be deleted even with lingering tasks | The archive flag is the explicit acknowledgement; orphaned tasks keep their `sprint_id` until manually moved |
 | 19 | Sprint archive / unarchive are **idempotent** | Re-archiving is a no-op success |
+| 19a | Completing a sprint does **not** unblock `DELETE /sprints/:id` | R3 counts tasks, not status. Only `is_archived: true` bypasses it — archive and complete are orthogonal axes |
 
 ## Stories
 
@@ -1454,6 +1617,15 @@ Timeline NEVER audits — read-only.
 | 43 | `assign-story` by a non-writer returns `STORY_WRITE_FORBIDDEN`, not `TASK_WRITE_FORBIDDEN` | Per API_Contract §8.2a — story membership is semantically a story-write op |
 | 44 | `?story_id=null` and `?parent_task_id=null` are **literal-string sentinels** | Query strings can't carry `null`; the literal lets the FE filter for "no story" / "top-level" |
 | 45 | List endpoint scopes to **visible projects** (capped at 1,000) when `project_id` is absent | Resolves project visibility once, then a single `$in` on tasks |
+| 45a | 🔴 `reorder` and `rank` are **different operations on different fields** — `position` (per project+status column) vs `backlog_rank` (per project, spans backlog + all sprints) | Neither writes the other's field. A Board drag and a Backlog drag are independent orderings of the same task |
+| 45b | `backlog_rank` is a **dense integer**, not a fractional or lexicographic rank | The name suggests otherwise. Neighbours are `$inc`'d ±1 on every move, exactly like `position` |
+| 45c | `POST /tasks/:id/rank` with an **empty body means "move to the top"**, not "no-op" | Both `after_task_id` and `before_task_id` omitted ⇒ `targetRank = 0`. Sending both is a 400 |
+| 45d | An unknown / un-ranked rank neighbour returns **422 `TASK_NOT_FOUND`**, not 404 | Pre-Backlog rows may have no `backlog_rank` until [`scripts/backfill-backlog-rank.ts`](../../scripts/backfill-backlog-rank.ts) has run for the project |
+| 45e | 🔴 **Nothing sorts by `backlog_rank` server-side** | `GET /tasks` sorts `{position, created_at}` (column-scoped) or `{created_at: -1, _id: -1}`; the Backlog screen sorts by rank in the browser, so the order is only as complete as the loaded page |
+| 45f | 🔴 The neighbour shift in `rank` / `reorder` is **not transactional** — `updateMany` then `save()` | A failure between them leaves duplicate ranks or a gap. Nothing detects it; the backfill script only fills *missing* ranks |
+| 45g | `rank`'s route gate is `task.write` while `reorder`'s is `task.read` | Same service-level rule (writer OR assignee), but a `client`/`representative` is refused by the route on `rank` and by the service on `reorder` |
+| 45h | `GET /projects/:id/task-labels` is **derived from tasks** (`Task.distinct`) — there is no label catalog, no enum, no label CRUD | A label lives only as long as a task carries it. Renaming = patching every task |
+| 45i | 🔴 Label de-dupe is **case-insensitive per write but case-sensitive at rest** | `["Bug","bug"]` in one payload collapses; `Bug` on task A and `bug` on task B yield two entries in the labels response. `labelSetsEqual` also suppresses the `labels_changed` activity row on a pure re-casing |
 | 46 | **Task save is intentionally NOT wrapped in `withTransaction`** even though it writes audit + activity rows | `recordAudit` + `recordActivity` are both never-throw; wrapping would change "task always saves; trail eventually consistent" to "task fails if the activity collection hiccups" |
 
 ## Comments
@@ -1501,7 +1673,7 @@ Timeline NEVER audits — read-only.
 | 70 | Token retry loop max 5 attempts (paranoia ceiling) | 256 bits ≈ 1e-65 collision probability against 1M links |
 | 71 | H19 — public payload caps: 50 sprints, 100 stories, 1000 tasks | Unbounded `.find` on a large project = multi-MB DOS amplification per anonymous request |
 | 72 | H19 — `limit+1` pattern detects truncation without `countDocuments` | Saves a round-trip; `truncated: {sprints?, stories?, tasks?}` surfaces it |
-| 73 | Field projections strip `member_ids`/`client_ids`/`created_by`/`updated_by`/`collaborator_ids` from public payload | Enumeration vectors; authed users get them via `/projects/:id` |
+| 73 | 🔴 The public project projection is an **allow-list**, not `.select('-field …')` | A deny-list fails open: a new field is public by default and a **rename un-denies** it. `client_ids` → `representative_ids` would have leaked the roster to any token holder. Authed users still get the full doc via `/projects/:id` |
 | 74 | `primary_assignee_id` KEPT (per-task ObjectId, not a bulk list) | FE renders an avatar tile |
 | 75 | `last_accessed_at` is a SINGLE timestamp, NOT an event log | v1; future `share_link_accesses` collection if per-visit auditing is needed |
 | 76 | Client-deactivation cascade: each revoke is independently audited (one row per link) | Step-31 audit UI correlates to parent user.deactivate by `revoked_by` + timestamp |

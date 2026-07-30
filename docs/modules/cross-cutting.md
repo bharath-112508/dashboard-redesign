@@ -1,6 +1,6 @@
 # Cross-cutting infrastructure — Backend
 
-The platform plumbing every other module sits on top of. Six themes:
+The platform plumbing every other module sits on top of. Nine themes:
 
 1. **Boot + middleware order** ([`src/index.ts`](../../src/index.ts)) — trust proxy, pino-http, helmet, CORS, Slack-before-parsers, body limits, prom metrics, rate limit, routes, error handler.
 2. **Error model** — `AppError` class + `globalErrorHandler` + canonical `{error: {code, message, details?}}` envelope.
@@ -10,6 +10,7 @@ The platform plumbing every other module sits on top of. Six themes:
 6. **Observability** — pino logger with M23 redaction + App Insights bridge + Prometheus metrics.
 7. **Boot migrations + cron scheduler** — five boot migrations + the registry of 11 scheduled jobs with consecutive-failure tracking.
 8. **Graceful shutdown** — server.close → cron drain → Mongo disconnect, in that exact order.
+9. **Real-time event stream** — the single SSE endpoint `GET /events/stream`, its in-process client registry, and the write-interceptor middleware that pushes to it.
 
 Cross-references: every module documented in this directory uses some of this layer. Auth specifically is documented in [`auth.md`](./auth.md); audit's `recordAudit` non-throwing contract in [`audit-compliance.md`](./audit-compliance.md); JWT details in the auth module.
 
@@ -35,6 +36,7 @@ Cross-references: every module documented in this directory uses some of this la
 | Job scheduler | [`jobs/index.ts`](../../src/jobs/index.ts), [`jobs/runner.ts`](../../src/jobs/runner.ts), per-job `*.job.ts` files |
 | Role utility | [`utils/role-check.ts`](../../src/utils/role-check.ts) |
 | Comment sanitiser | [`utils/comment-sanitiser.ts`](../../src/utils/comment-sanitiser.ts) — HTML allowlist for task comments |
+| Real-time (SSE) | [`routes/events.routes.ts`](../../src/routes/events.routes.ts), [`services/realtime.service.ts`](../../src/services/realtime.service.ts), [`middlewares/realtime-emit.middleware.ts`](../../src/middlewares/realtime-emit.middleware.ts), [`constants/realtime.ts`](../../src/constants/realtime.ts) |
 
 ---
 
@@ -59,6 +61,7 @@ The single most opinionated file in the codebase. **Middleware order matters**; 
     })
 4.  cors({ origin: allowlist or '*' })             ← CORS_ORIGINS from env
 5.  app.use('/api/v1/slack', slackRoutes)          ← MUST be before body parsers (raw-body for HMAC)
+5b. app.use('/api/v1', eventsRoutes)               ← SSE stream; MUST be before compression()
 6.  app.use(compression())                          ← M28: AFTER Slack mount — defensive ordering
 7.  app.use('/api/v1/auth', express.json({limit: '4kb'}))      ← scoped tight on auth bodies
 8.  app.use(express.json({limit: '1mb'}))                       ← global default
@@ -78,6 +81,7 @@ The single most opinionated file in the codebase. **Middleware order matters**; 
 | 2. pino-http | Before middleware → no log of routing decisions. After helmet → headers logged before sanitisation |
 | 3. helmet | Move after auth → 401 responses miss CSP headers |
 | 5. Slack mount | **CRITICAL** — Slack signs raw bytes; if body parsers run first, HMAC fails (slack-webhook.middleware captures `express.raw` itself) |
+| 5b. events (SSE) mount | **CRITICAL** — mounted before `compression()`; after it, the `text/event-stream` response is buffered and never flushes (see §9). Also lands before `generalRateLimiter` (step 10), so the stream is not rate-limited |
 | 6. compression | M28 — kept AFTER Slack mount as defensive ordering for future request-touching variants |
 | 7. auth tight limit | Hostile client sends 5 MB password payload → server burns parser CPU. 4 KB ceiling on `/auth/*` only |
 | 8. global 1 MB | Bulk holiday import + JSON payloads. Tighter would break legitimate bulks |
@@ -384,7 +388,58 @@ Pre-F5, `node-cron`'s `.stop()` only cancelled FUTURE fires; an in-flight handle
 
 ---
 
-## 9. Other plumbing
+## 9. Real-time event stream (SSE)
+
+One endpoint, one in-process registry, one write-interceptor middleware. `GET /events/stream` ([`events.routes.ts`](../../src/routes/events.routes.ts)) is `authenticate`-only — no permission gate — and the mount is `app.use(API_PREFIX, eventsRoutes)` in [`index.ts`](../../src/index.ts), so the wire path is `/api/v1/events/stream`.
+
+**Nothing but topic names travel over the stream.** A frame is `event: change\ndata: {"topics":["leaves"]}\n\n` — no entity, no ids, no payload. That is what makes an unfiltered broadcast safe: the client learns only that *something* in a topic changed and refetches through the authed API, where RBAC applies as normal.
+
+### Response headers
+
+Set explicitly before any body byte, then `res.flushHeaders?.()` and a `: connected\n\n` comment frame so the header block plus some bytes reach the client immediately and its `onopen` resolves.
+
+| Header | Value | Why |
+|---|---|---|
+| `Content-Type` | `text/event-stream` | The SSE media type. The frontend's `onopen` rejects the connection unless the content-type *starts with* it ([`use-realtime-sync.ts`](../../../viljetech-platform-frontend/src/hooks/use-realtime-sync.ts) checks `EventStreamContentType`), so anything that rewrites this header produces a reconnect loop, not a degraded stream |
+| `Cache-Control` | `no-cache, no-transform` | `no-cache` stops any cache from replaying a truncated body; `no-transform` tells intermediaries not to re-encode or compress the stream |
+| `Connection` | `keep-alive` | The response never ends — the socket must stay open |
+| `X-Accel-Buffering` | `no` | nginx-specific opt-out of response buffering. Same failure mode as `compression` below, from a reverse proxy instead of from Express |
+
+### Heartbeat
+
+A `: ping\n\n` **comment frame** (not an event — clients ignore comments) every `SSE_HEARTBEAT_MS` = **25 000 ms** ([`constants/realtime.ts`](../../src/constants/realtime.ts), whose comment names the target: Azure App Service's ~230 s idle timeout). Without it an idle stream is killed by the platform or an intervening proxy and the frontend reconnects with jittered exponential backoff — so the symptom of removing the heartbeat is churning reconnects on a quiet system, not a dead feature. Writes inside the interval are wrapped in a bare `try/catch` that swallows: a write failure means the socket is already gone, and cleanup is the `'close'` handler's job, not the timer's.
+
+### Cleanup
+
+`req.on('close')` clears the interval, calls `removeClient(clientId)` and logs `SSE_CLIENT_DISCONNECTED`. Separately, `publish` deletes any client whose `res.write` throws (`SSE_CLIENT_WRITE_FAILED` at warn) — so a socket that dies without firing `'close'` still leaves the registry on the next event.
+
+### What triggers a push
+
+[`realtimeEmit`](../../src/middlewares/realtime-emit.middleware.ts), mounted at `app.use(API_PREFIX, realtimeEmit)` immediately before `appRoutes`. One interceptor covers every web-app write in every module:
+
+1. Method must be `POST` / `PATCH` / `PUT` / `DELETE`.
+2. Topic = `PATH_TOPIC_MAP[<first path segment>]`, resolved **at middleware entry**. Express mutates `req.url` while descending nested routers, so reading the path inside the `finish` handler is unreliable — the middleware captures it up-front on purpose.
+3. On `res.on('finish')`, publish that one topic **iff** the status is 2xx. Wrapped in `try/catch` → `REALTIME_EMIT_FAILED` at warn; a publish failure can never touch the response.
+
+Slack-driven writes never pass through an HTTP route, so [`slack-interactive.controller.ts`](../../src/controllers/slack-interactive.controller.ts) calls `publish` explicitly at six sites (leave approve/reject → `leaves` + `leave-balances`; check-in/out → `attendance`).
+
+`PATH_TOPIC_MAP` is a **partial** map of 21 path segments onto 18 topics (`leave-types` folds into `leaves`; `attachments` into `tasks`; `project-custom-statuses` into `projects`). **Unmapped segments publish nothing** — `companies`, `engagements`, `invoices`, `cost-rates`, `payroll-profiles`, `salary-structures`, `payslips`, `letters`, `share-links`, `task-templates` and `push` all mutate without ever emitting an event, so those surfaces do not live-refresh. Adding a topic is a one-line entry in the map, not new middleware.
+
+### 🔴 Mount order: before `compression()`, and do not move it
+
+The router is mounted in [`index.ts`](../../src/index.ts) **before `app.use(compression())`**, under the comment *"Real-time SSE stream — mounted BEFORE compression so the long-lived `text/event-stream` response is never buffered. Auth is enforced inside."*
+
+`compression` buffers a response to decide whether gzipping it is worthwhile. A stream mounted *after* it therefore never flushes: the client connects, receives nothing, and hangs — no exception on the server, no error event on the client, no failed request in the network panel. Events surface late and in unpredictable clumps, or not at all. **It looks like a broken feature rather than a middleware-ordering bug**, which is exactly what makes it expensive: the search starts in the realtime service, the frontend hook, and the proxy config, and the actual cause is one line of mount order in `index.ts`. Same class of constraint as the Slack raw-body mount, and equally load-bearing.
+
+### 🔴 The registry is in-process
+
+`clients` is a module-level `Map` in [`realtime.service.ts`](../../src/services/realtime.service.ts). **On a multi-instance fleet, a change event only reaches the clients whose stream is pinned to the instance that served the write.** Everyone connected to another instance sees nothing and keeps showing stale data until their own refetch. Nothing detects or logs this. The service's own comment names the fix (a Redis / Azure Web PubSub backplane behind the same `addClient`/`removeClient`/`publish` interface); until then, live sync is a single-instance guarantee.
+
+`addClient` stores the caller's `userId`, but **`publish` never reads it** — the fan-out is unconditional over every connected client. The field looks like a per-user filter and is not one; the only thing keeping it from being a leak is that events carry no data.
+
+---
+
+## 10. Other plumbing
 
 ### Date helpers ([`utils/date.ts`](../../src/utils/date.ts))
 
@@ -481,3 +536,11 @@ Used by MFA secrets, Slack bot token (J1), and refresh-token storage when AES-at
 | 38 | Crypto envelope supports legacy 3-part AND rotation `kid:<kid>:<3-parts>` formats | Key rotation without re-encryption sweep |
 | 39 | Azure Blob is LAZY — first call throws if env missing; rest of BE runs fine | Dev / on-prem deployments work without storage |
 | 40 | Email mailer is LAZY + PLUGGABLE — `EMAIL_TRANSPORT=stub` (default) logs only | Tests + dev don't need a real mail provider |
+| 41 | 🔴 SSE `events` router MOUNTED BEFORE `compression()` in `src/index.ts` | `compression` buffers to decide whether to gzip → a stream mounted after it never flushes. Client connects, receives nothing, hangs, **no error on either side** |
+| 42 | 🔴 SSE client registry is an in-process `Map` | Multi-instance fleet: an event reaches only the clients pinned to the emitting instance. Silent — no detection, no log |
+| 43 | `addClient` stores `userId`; `publish` never reads it — fan-out is unconditional | Looks like a per-user filter and isn't. Safe only because events carry topic names and no data |
+| 44 | `X-Accel-Buffering: no` on the SSE response | Same never-flushes failure as #41, but caused by an nginx reverse proxy instead of Express |
+| 45 | Heartbeat is a `: ping` comment every `SSE_HEARTBEAT_MS` (25 s) | Sized against Azure App Service's ~230 s idle timeout. Drop it and idle streams get culled → reconnect churn, not an obvious failure |
+| 46 | `realtimeEmit` resolves the topic at middleware ENTRY, not in the `finish` handler | Express mutates `req.url` while descending nested routers; reading the path later is unreliable |
+| 47 | `PATH_TOPIC_MAP` is partial — unmapped segments publish nothing | Invoices, engagements, cost rates, companies, payroll, share links, templates and push mutate without emitting; those surfaces never live-refresh |
+| 48 | `GET /events/stream` sits before `generalRateLimiter` in the mount order | A consequence of the before-`compression` requirement, not a separate decision — the code carries no comment either way. Stream connections are therefore uncapped per IP and the registry has no size limit |
