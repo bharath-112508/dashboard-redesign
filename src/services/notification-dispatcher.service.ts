@@ -847,6 +847,56 @@ export interface TaskCommentMentionDispatchInput {
 // to anyway. Caller is responsible for de-duping against the @mention
 // set so a recipient never gets two rows for the same comment.
 
+export interface LeaveReviewReassignedDispatchInput {
+    request_id: Types.ObjectId;
+    /** The manager the pending request has just become the responsibility of. */
+    reviewer_id: Types.ObjectId;
+    requester_name: string;
+    leave_type_label: string;
+    start_date: string;
+    end_date: string;
+}
+
+/**
+ * Tell ONE newly-assigned reviewer that a pending request is now theirs.
+ *
+ * Deliberately not `notifyLeaveSubmitted`: that fans out to the manager AND
+ * every admin, so replaying it on a reporting-line change gave admins a second
+ * copy of a request they were already told about. The handoff only needs to
+ * reach the person who just inherited the queue.
+ */
+export const notifyLeaveReviewReassigned = async (input: LeaveReviewReassignedDispatchInput): Promise<void> => {
+    const context = 'notify.leave_review_reassigned';
+    try {
+        const reviewer = await User.findOne({ _id: input.reviewer_id, status: USER_STATUSES.ACTIVE })
+            .select(RECIPIENT_SELECT)
+            .lean<RecipientUser>();
+        if (!reviewer) return;
+
+        await dispatchToRecipient(
+            reviewer,
+            {
+                type: NOTIFICATION_TYPES.LEAVE_REQUESTED,
+                title: `Leave request from ${input.requester_name} is now yours to review`,
+                body: `${input.leave_type_label} for ${input.start_date} → ${input.end_date}. It moved to you when you became their reporting manager.`,
+                link_url: `/leaves/${input.request_id.toString()}`,
+                related_entity: {
+                    kind: RELATED_ENTITY_KINDS.LEAVE_REQUEST,
+                    id: input.request_id,
+                },
+            },
+            null,
+            context,
+            null
+        );
+    } catch (err) {
+        logger.warn(
+            { err, code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED, dispatch_event: context },
+            'dispatch failed'
+        );
+    }
+};
+
 export interface TaskAssignedDispatchInput {
     task_id: Types.ObjectId;
     task_title: string;

@@ -19,6 +19,7 @@ import { PROJECT_COMPANY_SCOPED_ROLES } from '../constants/project.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { AssignableQuery, CreateUserBody, ListUsersQuery, UpdateUserBody } from '../validators/user.validator.js';
+import { handOffPendingLeaveReviews } from './leave-reviewer-handoff.service.js';
 import { initializeBalancesForUserYear } from './leave-balance.service.js';
 import { notifyUserInvited } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
@@ -416,11 +417,17 @@ export const updateUser = async (input: {
 
     // Apply shallow merges for sub-docs so unset fields remain. The validator
     // gives `reporting_manager_id` as a hex string; coerce to ObjectId here.
+    // Captured BEFORE the merge below overwrites it — the hand-off needs to
+    // know which manager is being replaced.
+    const previousManagerId: Types.ObjectId | null = target.internal_profile?.reporting_manager_id ?? null;
+    let reportingManagerChanged = false;
+
     if (patch.internal_profile) {
         const coerced: Record<string, unknown> = { ...patch.internal_profile };
         if ('reporting_manager_id' in coerced) {
             const raw = coerced.reporting_manager_id;
             coerced.reporting_manager_id = typeof raw === 'string' ? new Types.ObjectId(raw) : raw;
+            reportingManagerChanged = String(coerced.reporting_manager_id ?? '') !== String(previousManagerId ?? '');
         }
         target.internal_profile = target.internal_profile
             ? ({ ...target.internal_profile, ...coerced } as unknown as UserDocument['internal_profile'])
@@ -451,6 +458,21 @@ export const updateUser = async (input: {
     }
 
     await target.save();
+
+    // Reporting line moved → move the pending leave reviews with it. The
+    // approvals queue already follows the change on its own (it's computed
+    // live), but the notifications were written at apply time and never
+    // revisited: the old manager kept an unread prompt they can no longer act
+    // on, and the new manager was never told the requests had become theirs.
+    // Fire-and-forget — a profile edit must not fail on a notification.
+    if (reportingManagerChanged) {
+        void handOffPendingLeaveReviews({
+            userId: target._id,
+            previousManagerId,
+            nextManagerId: target.internal_profile?.reporting_manager_id ?? null,
+        });
+    }
+
     return toPublicUser(target, await loadPhotoTtlMinutes());
 };
 
