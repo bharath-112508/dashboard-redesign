@@ -8,7 +8,6 @@ export const ERROR_CODES = {
     VALIDATION_ERROR: 'VALIDATION_ERROR',
     INVALID_QR_TOKEN: 'INVALID_QR_TOKEN',
     INVALID_MFA_CODE: 'INVALID_MFA_CODE',
-    INVALID_EXPORT_FORMAT: 'INVALID_EXPORT_FORMAT',
 
     // 401 — Unauthorized
     UNAUTHENTICATED: 'UNAUTHENTICATED',
@@ -51,10 +50,16 @@ export const ERROR_CODES = {
     ENGAGEMENT_NOT_FOUND: 'ENGAGEMENT_NOT_FOUND',
     INVOICE_NOT_FOUND: 'INVOICE_NOT_FOUND',
     EXPORT_NOT_FOUND: 'EXPORT_NOT_FOUND',
+    // No AUDIT_ARCHIVE_INTEGRITY_FAILED. It existed, was thrown by nothing,
+    // and was reserved for an auto-quarantine-on-mismatch path that was never
+    // built — `verifyArchive` returns a structured result and deliberately
+    // never throws, so report-and-wait has no use for an error code. The
+    // reservation is recorded in PENDING_WORK.md, Data_Model.md
+    // (`audit_archives`), BUILD_PROGRESS.md, and `audit-archive.service.ts`;
+    // it does not need a dead constant as well. If auto-quarantine is ever
+    // built, re-add it then.
     AUDIT_ARCHIVE_NOT_FOUND: 'AUDIT_ARCHIVE_NOT_FOUND',
-    AUDIT_ARCHIVE_INTEGRITY_FAILED: 'AUDIT_ARCHIVE_INTEGRITY_FAILED',
     TASK_TEMPLATE_NOT_FOUND: 'TASK_TEMPLATE_NOT_FOUND',
-    TASK_TEMPLATE_RECURRENCE_INVALID: 'TASK_TEMPLATE_RECURRENCE_INVALID',
     REPORT_PRESET_NOT_FOUND: 'REPORT_PRESET_NOT_FOUND',
     REPORT_PRESET_LIMIT_EXCEEDED: 'REPORT_PRESET_LIMIT_EXCEEDED',
     REPORT_SUBSCRIPTION_NOT_FOUND: 'REPORT_SUBSCRIPTION_NOT_FOUND',
@@ -149,7 +154,6 @@ export const ERROR_CODES = {
     TIMESHEET_ZERO_DURATION: 'TIMESHEET_ZERO_DURATION',
     TIMESHEET_DURATION_TOO_LARGE: 'TIMESHEET_DURATION_TOO_LARGE',
     TIMESHEET_TASK_REQUIRED: 'TIMESHEET_TASK_REQUIRED',
-    TIMESHEET_GENERAL_CATEGORY_REQUIRED: 'TIMESHEET_GENERAL_CATEGORY_REQUIRED',
     BILLING_RATE_INVALID_RANGE: 'BILLING_RATE_INVALID_RANGE',
     BILLING_RATE_IN_USE: 'BILLING_RATE_IN_USE',
     /** Billing Phase 2 — Cost Rates & Margin (Task 3). Cost-side twin of
@@ -175,7 +179,6 @@ export const ERROR_CODES = {
 
     // 500 — Internal Server Error
     INTERNAL_ERROR: 'INTERNAL_ERROR',
-    UPLOAD_FAILED: 'UPLOAD_FAILED',
     NOTIFICATION_DISPATCH_FAILED: 'NOTIFICATION_DISPATCH_FAILED',
     SLACK_NOT_CONFIGURED: 'SLACK_NOT_CONFIGURED',
     SLACK_DISPATCH_FAILED: 'SLACK_DISPATCH_FAILED',
@@ -183,13 +186,11 @@ export const ERROR_CODES = {
     // warn-level logs on signature-fail / unknown-action / permission-
     // denied so operators can grep one code.
     SLACK_INTERACTIVE_REJECTED: 'SLACK_INTERACTIVE_REJECTED',
-    PUSH_NOT_CONFIGURED: 'PUSH_NOT_CONFIGURED',
     PUSH_DISPATCH_FAILED: 'PUSH_DISPATCH_FAILED',
     AUDIT_WRITE_FAILED: 'AUDIT_WRITE_FAILED',
     JOB_RUN_FAILED: 'JOB_RUN_FAILED',
 
     // 503 — Service Unavailable
-    MAINTENANCE_MODE: 'MAINTENANCE_MODE',
     STORAGE_NOT_CONFIGURED: 'STORAGE_NOT_CONFIGURED',
 } as const;
 

@@ -467,8 +467,29 @@ export const getArchive = async (id: Types.ObjectId): Promise<AuditArchiveSnapsh
  * the container).
  *
  * Empty-day archives (`row_count = 0`, no blob) report `empty_archive`
- * — there's nothing to verify on the storage side; the chain link is
- * still recorded in Mongo and is checked at the list-walk level.
+ * — there's nothing to verify on the storage side. The chain link is
+ * still recorded in Mongo, but nothing verifies it (see below).
+ *
+ * SCOPE — narrower than the name suggests. This checks ONE archive's
+ * bytes against ONE stored hash. It does NOT walk the chain: nothing
+ * here or anywhere else in `src/` compares a row's
+ * `previous_archive_hash` against its predecessor's `sha256_hash`.
+ * `listArchives` is a plain paginated `find` and compares nothing.
+ *
+ * So verifying every archive individually is NOT the same as verifying
+ * the chain. Per-row verify catches *bytes changed under a row*.
+ * Catching a **deleted or reordered archive** needs the chain walk,
+ * and no endpoint does that today — it is a manual forensic
+ * procedure. Do not read a passing verify as "the chain is intact".
+ *
+ * There was once an `AUDIT_ARCHIVE_INTEGRITY_FAILED` error code,
+ * reserved for a future auto-quarantine-on-mismatch path that was
+ * never built (`BUILD_PROGRESS.md`). Nothing ever threw it — returning
+ * a structured result is why: report-and-wait has no use for an error
+ * code. It has been removed; re-add it if auto-quarantine is built.
+ * Both gaps — the missing chain walk and the missing auto-quarantine —
+ * are tracked in `PENDING_WORK.md` and `Data_Model.md`
+ * (`audit_archives`).
  */
 export const verifyArchive = async (id: Types.ObjectId): Promise<VerifyResult> => {
     const doc = await AuditArchive.findById(id);

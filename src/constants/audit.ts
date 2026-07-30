@@ -361,8 +361,13 @@ export const AUDIT_ACTIONS = {
     // actions (not folded into a generic "download") since they're the
     // sensitive, auditable event — the document leaving the system.
     PAYROLL_PROFILE_UPSERT: 'payroll_profile.upsert',
+    // No SALARY_STRUCTURE_UPDATE: structures are append-only by version
+    // (`effective_from`), so a correction is a new version, not an edit —
+    // `salary-structure.routes.ts` exposes GET / POST / GET :id and nothing
+    // more. The constant existed and was written by nothing, which made the
+    // catalog claim salary-structure edits were tracked when they cannot
+    // happen. Do not re-add it without an update path to audit.
     SALARY_STRUCTURE_CREATE: 'salary_structure.create',
-    SALARY_STRUCTURE_UPDATE: 'salary_structure.update',
     PAYSLIP_GENERATE: 'payslip.generate',
     LETTER_GENERATE: 'letter.generate',
     PAYSLIP_DELETE: 'payslip.delete',

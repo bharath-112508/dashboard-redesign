@@ -1,7 +1,7 @@
 /**
  * System role keys (Phase 4 Step 47).
  *
- * Five system roles are seeded on first boot. They cannot be
+ * Six system roles are seeded on first boot. They cannot be
  * deleted or renamed via the role-CRUD endpoints (`is_system: true`
  * invariant is enforced on PATCH/DELETE). Their permission sets
  * MAY be amended by editing `system-role-definitions.ts` and
