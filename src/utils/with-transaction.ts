@@ -22,8 +22,18 @@ import logger from './logger.js';
  * Atlas is always a replica set; local dev with a standalone `mongod`
  * needs `--replSet rs0` + an `rs.initiate()` one-time setup. We log
  * a warning at startup if the topology doesn't support transactions
- * (see `index.ts` startup hook), and the helper itself will throw
- * the standard Mongoose error if called against a standalone.
+ * (see `index.ts` startup hook).
+ *
+ * On a standalone the helper does NOT throw — it catches the topology
+ * rejection and re-runs the callback with no session, logging
+ * `topology does not support transactions; falling back to
+ * non-atomic sequential writes`. That keeps a standalone usable for
+ * local development, at a cost worth stating plainly: every
+ * multi-write operation still succeeds but without atomicity, so a
+ * partial-failure path that rolls back on Atlas leaves half-written
+ * data locally. **Transaction-boundary bugs cannot be reproduced on a
+ * standalone** — only code review catches them on that path. See
+ * `docs/handover/02-local-setup.md` §2.
  *
  * Idempotency: `session.withTransaction()` retries on
  * `TransientTransactionError` and `UnknownTransactionCommitResult`
