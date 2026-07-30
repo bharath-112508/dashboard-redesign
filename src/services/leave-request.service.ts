@@ -844,7 +844,13 @@ export const listLeaves = async (
 
     const skip = (query.page - 1) * query.limit;
     const [rows, total] = await Promise.all([
-        LeaveRequest.find(filter).sort({ start_date: -1, _id: -1 }).skip(skip).limit(query.limit),
+        // Newest SUBMISSION first. This used to sort by `start_date`, which
+        // ordered the queue by when leave *begins* — so a request filed this
+        // morning for next week sat below one filed last month for next
+        // year, and a reviewer opening the queue didn't see what just came
+        // in. `_id` breaks ties within the same millisecond and keeps
+        // pagination stable.
+        LeaveRequest.find(filter).sort({ created_at: -1, _id: -1 }).skip(skip).limit(query.limit),
         LeaveRequest.countDocuments(filter),
     ]);
 

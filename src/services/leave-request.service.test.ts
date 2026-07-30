@@ -703,6 +703,28 @@ describe('listLeaves — reviewer approvals queue', () => {
         vi.mocked(LeaveRequest.countDocuments).mockResolvedValue(0 as never);
     };
 
+    // The queue used to sort by `start_date`, so a request filed this morning
+    // for next week ranked below one filed last month for next year and the
+    // newest submissions weren't at the top. Nothing asserted the order, so
+    // pin it here.
+    it('orders newest SUBMISSION first, tiebroken by _id', async () => {
+        let sortArg: Record<string, number> = {};
+        leaveRequestFindMock.mockImplementation(() => ({
+            sort: (arg: Record<string, number>) => {
+                sortArg = arg;
+                return { skip: () => ({ limit: () => Promise.resolve([]) }) };
+            },
+        }));
+        vi.mocked(LeaveRequest.countDocuments).mockResolvedValue(0 as never);
+
+        await svc.listLeaves({ page: 1, limit: 50 } as never, {
+            id: new Types.ObjectId(),
+            role: ROLES.ADMIN,
+        });
+
+        expect(sortArg).toEqual({ created_at: -1, _id: -1 });
+    });
+
     it("ADMIN: excludes their OWN requests from the queue (can't self-approve)", async () => {
         const reviewerId = new Types.ObjectId();
         let filter: Record<string, unknown> = {};

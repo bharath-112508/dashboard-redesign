@@ -172,12 +172,19 @@ leaveRequestSchema.index({ approver_id: 1, status: 1 });
 leaveRequestSchema.index({ status: 1, requires_additional_approval: 1 });
 leaveRequestSchema.index({ start_date: 1, end_date: 1 });
 leaveRequestSchema.index({ 'leave_segments.leave_type_id': 1, 'leave_segments.year': 1 });
-// M40 — `listLeaves` admin queue: `find({status, start_date: $lte}).sort({start_date: -1, _id: -1})`.
-// Existing `{user_id, start_date: -1}` doesn't apply (no user_id pin);
-// `{status, requires_additional_approval}` covers the predicate but not
-// the sort, so Mongo in-memory sorts the status-matching rows. This
-// compound serves both the predicate AND the sort in index order.
+// M40 — kept for the date-window reads (`calendarLeaves`, the `start_date`
+// range predicates in `listLeaves`), which still filter on start_date.
 leaveRequestSchema.index({ status: 1, start_date: -1 });
+// `listLeaves` sorts the approvals queue by `created_at: -1` (newest
+// submission first). Without this, the status-matching rows come back
+// unordered and Mongo sorts them in memory — fine on a demo dataset, a
+// 32MB-cap blowup on a real one. Leading with `status` because the queue
+// is almost always filtered to `pending`; the sort key trails it so one
+// index serves predicate AND order.
+leaveRequestSchema.index({ status: 1, created_at: -1 });
+// Same query without a status filter ("All" in the UI), plus the
+// per-user history reads.
+leaveRequestSchema.index({ created_at: -1 });
 
 export const LeaveRequest: Model<LeaveRequestDocument> = model<LeaveRequestDocument>(
     COLLECTIONS.LEAVE_REQUESTS,
