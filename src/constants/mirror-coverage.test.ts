@@ -69,11 +69,22 @@ import { describe, expect, it } from 'vitest';
  *   error-codes    SESSION_NOT_FOUND is thrown to clients by auth.service.ts
  *                  via AppError.notFound and is absent from the FE mirror —
  *                  case 1, real drift. Seven others are referenced NOWHERE in
- *                  src/ and are case 3, dead constants to delete:
- *                  AUDIT_ARCHIVE_INTEGRITY_FAILED, INVALID_EXPORT_FORMAT,
- *                  MAINTENANCE_MODE, PUSH_NOT_CONFIGURED,
- *                  TASK_TEMPLATE_RECURRENCE_INVALID,
- *                  TIMESHEET_GENERAL_CATEGORY_REQUIRED, UPLOAD_FAILED.
+ *                  src/: INVALID_EXPORT_FORMAT, MAINTENANCE_MODE,
+ *                  PUSH_NOT_CONFIGURED, TASK_TEMPLATE_RECURRENCE_INVALID,
+ *                  TIMESHEET_GENERAL_CATEGORY_REQUIRED, UPLOAD_FAILED are
+ *                  case 3, dead constants to delete.
+ *
+ *                  AUDIT_ARCHIVE_INTEGRITY_FAILED is the exception and is NOT
+ *                  case 3 — do not delete it on the strength of this test.
+ *                  It was reserved for an unbuilt "auto-quarantine on mismatch"
+ *                  path (BUILD_PROGRESS.md:1302); verifyArchive returns a
+ *                  structured result and deliberately never throws, which is
+ *                  why nothing raises it. Resolving it means building that path
+ *                  or recording the decision not to — see PENDING_WORK.md,
+ *                  instance 6. A constant reserved for scoped-but-unbuilt work
+ *                  is indistinguishable from a dead one by reference count
+ *                  alone; this test cannot tell them apart, so check the history
+ *                  before deleting anything it reports.
  *
  *   audit-catalog  38 actions and 12 target kinds missing from the FE, plus one
  *                  stale FE entry — `project.clients_update`, retired in the
