@@ -1,12 +1,14 @@
 import { Request, Response } from 'express';
 
 import * as service from '../services/report.service.js';
+import { buildMarginReport } from '../services/margin.service.js';
 import { ok } from '../utils/api-response.js';
 import { AppError } from '../utils/app-error.js';
 import type {
     AttendanceReportQuery,
     BillingReportQuery,
     LeaveReportQuery,
+    MarginReportQuery,
     UtilizationReportQuery,
 } from '../validators/report.validator.js';
 
@@ -54,5 +56,20 @@ export const getAttendance = async (req: Request, res: Response): Promise<Respon
 export const getLeaves = async (req: Request, res: Response): Promise<Response> => {
     ensureCaller(req);
     const data = await service.buildLeaveReport(req.query as unknown as LeaveReportQuery);
+    return ok(res, data);
+};
+
+// ─── GET /reports/margin ─────────────────────────────────────────────────
+//
+// Billing Phase 2 (Task 5). Gated on `cost_rate.read` at the route layer
+// (see report.routes.ts), not the `report.read` blanket the other sync
+// reports share — seeing margin means seeing cost. `project_id`/
+// `company_id` pass through as validated strings; `buildMarginReport`
+// (margin.service.ts) accepts `Types.ObjectId | string` and converts
+// internally, so no controller-side `new Types.ObjectId(...)` is needed.
+
+export const getMargin = async (req: Request, res: Response): Promise<Response> => {
+    ensureCaller(req);
+    const data = await buildMarginReport(req.query as unknown as MarginReportQuery);
     return ok(res, data);
 };

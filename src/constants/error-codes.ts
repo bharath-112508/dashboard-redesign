@@ -45,6 +45,11 @@ export const ERROR_CODES = {
     ATTACHMENT_NOT_FOUND: 'ATTACHMENT_NOT_FOUND',
     TIMESHEET_NOT_FOUND: 'TIMESHEET_NOT_FOUND',
     BILLING_RATE_NOT_FOUND: 'BILLING_RATE_NOT_FOUND',
+    /** Billing Phase 2 — Cost Rates & Margin (Task 3). Cost-side twin of
+     *  `BILLING_RATE_NOT_FOUND`. */
+    COST_RATE_NOT_FOUND: 'COST_RATE_NOT_FOUND',
+    ENGAGEMENT_NOT_FOUND: 'ENGAGEMENT_NOT_FOUND',
+    INVOICE_NOT_FOUND: 'INVOICE_NOT_FOUND',
     EXPORT_NOT_FOUND: 'EXPORT_NOT_FOUND',
     AUDIT_ARCHIVE_NOT_FOUND: 'AUDIT_ARCHIVE_NOT_FOUND',
     AUDIT_ARCHIVE_INTEGRITY_FAILED: 'AUDIT_ARCHIVE_INTEGRITY_FAILED',
@@ -88,6 +93,15 @@ export const ERROR_CODES = {
     SPRINT_ALREADY_ACTIVE: 'SPRINT_ALREADY_ACTIVE',
     /** Refused to delete because dependant rows would be orphaned. (BACKEND_AUDIT.md R3) */
     RESOURCE_HAS_DEPENDENTS: 'RESOURCE_HAS_DEPENDENTS',
+    /** Phase 1 Invoicing (Task 7) — a non-void invoice already covers this
+     *  engagement + overlapping period; caller must re-send with `confirm: true`. */
+    INVOICE_PERIOD_OVERLAP: 'INVOICE_PERIOD_OVERLAP',
+    /** Edit/delete attempted on an invoice that has left `draft` (sent/paid/void
+     *  are immutable snapshots — void, don't edit). */
+    INVOICE_NOT_DRAFT: 'INVOICE_NOT_DRAFT',
+    /** The requested invoice status move is illegal (legal: draft→sent→paid,
+     *  any-non-void→void). */
+    INVOICE_INVALID_TRANSITION: 'INVOICE_INVALID_TRANSITION',
 
     // 410 — Gone
     SHARE_LINK_REVOKED: 'SHARE_LINK_REVOKED',
@@ -138,7 +152,20 @@ export const ERROR_CODES = {
     TIMESHEET_GENERAL_CATEGORY_REQUIRED: 'TIMESHEET_GENERAL_CATEGORY_REQUIRED',
     BILLING_RATE_INVALID_RANGE: 'BILLING_RATE_INVALID_RANGE',
     BILLING_RATE_IN_USE: 'BILLING_RATE_IN_USE',
+    /** Billing Phase 2 — Cost Rates & Margin (Task 3). Cost-side twin of
+     *  `BILLING_RATE_INVALID_RANGE` / `BILLING_RATE_IN_USE`. */
+    COST_RATE_INVALID_RANGE: 'COST_RATE_INVALID_RANGE',
+    COST_RATE_IN_USE: 'COST_RATE_IN_USE',
+    /** Phase 1 Client Engagements — one or more `project_ids` on a create/patch
+     *  don't belong to the engagement's `company_id` (Task 4). */
+    ENGAGEMENT_INVALID_SCOPE: 'ENGAGEMENT_INVALID_SCOPE',
+    /** Phase 1.1 follow-up — a PATCH sets `end_date` earlier than the
+     *  engagement's (unchanged-by-PATCH) `start_date`. */
+    ENGAGEMENT_INVALID_RANGE: 'ENGAGEMENT_INVALID_RANGE',
     PAYROLL_NO_CURRENT_SALARY: 'PAYROLL_NO_CURRENT_SALARY',
+    /** Billing Phase 2 — `toReportingCurrency` had no matching `fx_rates` entry
+     *  for the source currency and it differs from `billing.reporting_currency`. */
+    FX_RATE_MISSING: 'FX_RATE_MISSING',
 
     // 423 — Locked
     ACCOUNT_LOCKED: 'ACCOUNT_LOCKED',

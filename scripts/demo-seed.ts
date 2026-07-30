@@ -1224,7 +1224,221 @@ async function seedTimesheets(): Promise<void> {
     }
 }
 
-// ─── Step 5: attendance today (API) ────────────────────────────────────────
+// ─── Step 5: engagements + invoices ────────────────────────────────────────
+//
+// Phase 1 "Client Engagements & Invoicing" (docs/superpowers/specs/2026-07-24-
+// billing-invoicing-design.md). Runs after billing rates + timesheets so the
+// generated invoices' `hours` lines resolve real rates against real seeded
+// timesheet minutes, exactly like a live demo would. Idempotent by `name`
+// (engagements) / `engagement_id` (invoices) so re-running the seed against a
+// non-wiped DB just skips what already exists.
+
+async function seedEngagements(): Promise<void> {
+    console.log('\n── Engagements + invoices ──');
+
+    const periodDays = [...workingDaysBefore(TODAY, 5), TODAY];
+    const periodStart = periodDays[0]!;
+    const periodEnd = TODAY;
+
+    const engagementSpecs: Array<{ key: string; body: Record<string, unknown>; sendInvoice: boolean }> = [
+        {
+            key: 'aurora-retainer',
+            body: {
+                company_id: companyId.aurora,
+                project_ids: [projectId.afs],
+                name: 'Aurora Foods — 2026 Retainer',
+                currency: 'EUR',
+                billing_type: 'retainer',
+                setup_fee: 1500,
+                retainer_amount: 8000,
+                retainer_period: 'month',
+                included_hours: 40,
+                start_date: '2026-03-02',
+                notes: 'Monthly retainer covering the Aurora Foods Supply Portal build.',
+            },
+            sendInvoice: true,
+        },
+        {
+            key: 'nordmark-hourly',
+            body: {
+                company_id: companyId.nordmark,
+                project_ids: [projectId.nfd],
+                name: 'Nordmark Fleet Dashboard — Hourly',
+                currency: 'NOK',
+                billing_type: 'hourly',
+                start_date: '2026-02-02',
+                notes: 'Hourly billing against the Fleet Dashboard build (billing-rate driven).',
+            },
+            sendInvoice: false,
+        },
+    ];
+
+    for (const spec of engagementSpecs) {
+        const existing = must(
+            await api('GET', `/engagements?company_id=${spec.body.company_id}&limit=50`, undefined, adminToken),
+            `list engagements for ${spec.key}`
+        ) as any[];
+        const already = existing.find((e) => e.name === spec.body.name);
+
+        let engagementId: string;
+        if (already) {
+            console.log(`  engagement "${spec.body.name as string}" already exists — skipping create`);
+            engagementId = idOf(already);
+        } else {
+            const r = await api('POST', '/engagements', spec.body, adminToken);
+            if (r.status !== 201) {
+                quirks.push(`engagement ${spec.key} → ${r.status}: ${JSON.stringify(r.body)?.slice(0, 200)}`);
+                continue;
+            }
+            engagementId = idOf(r.body?.data);
+            bump('engagements');
+            console.log(`  created engagement "${spec.body.name as string}"`);
+        }
+
+        // Idempotency for the invoice half: skip generate if this engagement
+        // already has an invoice (from a prior run against a non-wiped DB).
+        const existingInvoices = must(
+            await api('GET', `/invoices?engagement_id=${engagementId}&limit=50`, undefined, adminToken),
+            `list invoices for ${spec.key}`
+        ) as any[];
+        if (existingInvoices.length > 0) {
+            console.log(`  invoice(s) already exist for "${spec.body.name as string}" — skipping generate`);
+            continue;
+        }
+
+        const genRes = await api(
+            'POST',
+            '/invoices/generate',
+            { engagement_id: engagementId, period_start: periodStart, period_end: periodEnd },
+            adminToken
+        );
+        if (genRes.status !== 201) {
+            quirks.push(
+                `invoice generate ${spec.key} → ${genRes.status}: ${JSON.stringify(genRes.body)?.slice(0, 200)}`
+            );
+            continue;
+        }
+        const invoice = genRes.body?.data;
+        bump('invoices');
+        console.log(`  generated invoice ${invoice.number} for "${spec.body.name as string}" (${invoice.status})`);
+
+        if (spec.sendInvoice) {
+            const sendRes = await api('POST', `/invoices/${idOf(invoice)}/status`, { to: 'sent' }, adminToken);
+            if (sendRes.status === 200) {
+                console.log(`  marked ${invoice.number} as sent`);
+            } else {
+                quirks.push(
+                    `invoice send ${spec.key} → ${sendRes.status}: ${JSON.stringify(sendRes.body)?.slice(0, 200)}`
+                );
+            }
+        }
+    }
+}
+
+// ─── Step 5.5: cost rates + FX (Billing Phase 2 — Cost Rates & Margin) ─────
+//
+// Cost-side twin of `seedBillingRates` — same INR-flat-rate simplification,
+// same "prefetch existing + skip" idempotency (a cost rate is unique per
+// `(user_id, effective_from)`, so re-POSTing the same pair on a re-run
+// would either 409 or, worse, silently auto-close/extend). Mirrors exactly
+// the staff `seedBillingRates`/`seedTimesheets` already covers (`HOURLY_RATES`
+// keys) so the Margin report has both a bill rate AND a cost rate — and
+// therefore real, non-zero numbers — for every billable user out of the box.
+//
+// Also seeds `SystemSettings.billing.reporting_currency = 'INR'` (already
+// the schema default, set explicitly here for clarity) + `fx_rates` for
+// EUR and NOK — the two non-INR currencies `seedEngagements` uses (Aurora
+// retainer = EUR, Nordmark hourly = NOK) — so the demo Margin report shows
+// zero "No FX rate" warnings out of the box. Runs AFTER `seedBillingRates`
+// (references the same users) and AFTER `seedEngagements` (so the FX rates
+// it needs are known) though neither is a hard dependency.
+
+const COST_RATES_INR: Record<string, number> = {
+    kavya: 650,
+    rohan: 650,
+    ananya: 450,
+    vikram: 500,
+    sneha: 400,
+    aditya: 480,
+    ishita: 450,
+    karthik: 500,
+    priya: 700,
+    arjun: 700,
+};
+
+const COST_RATE_EFFECTIVE_FROM = '2026-01-01'; // matches seedBillingRates
+
+async function seedCostRatesAndFx(): Promise<void> {
+    console.log('\n── Cost rates + FX ──');
+
+    // Prefetch existing cost rates so a re-run against a non-wiped DB skips
+    // users who already have one, rather than 409-ing or (for a later
+    // effective_from) silently auto-closing/extending a real admin-entered
+    // rate.
+    const existingUserIds = new Set<string>();
+    for (let page = 1; ; page += 1) {
+        const res = await api('GET', `/cost-rates?limit=100&page=${page}`, undefined, adminToken);
+        const rows = must(res, `list cost rates page ${page}`) as any[];
+        for (const row of rows) existingUserIds.add(String(row.user_id));
+        if (rows.length < 100) break;
+    }
+
+    for (const [key, cost_per_hour] of Object.entries(COST_RATES_INR)) {
+        const uid = userId[key];
+        if (!uid) continue; // defensive — USERS list changed underneath us
+        if (existingUserIds.has(uid)) {
+            console.log(`  cost rate exists for ${key} (skipping)`);
+            continue;
+        }
+        const r = await api(
+            'POST',
+            '/cost-rates',
+            {
+                user_id: uid,
+                cost_per_hour,
+                currency: 'INR',
+                effective_from: COST_RATE_EFFECTIVE_FROM,
+            },
+            adminToken
+        );
+        if (r.status === 201) bump('cost_rates');
+        else if (r.status === 409) console.log(`  cost rate exists for ${key}`);
+        else throw new Error(`cost rate ${key} failed (${r.status}): ${JSON.stringify(r.body)}`);
+    }
+    console.log(`  created ${counts.cost_rates ?? 0} cost rates`);
+
+    // Reporting currency + FX — deep-merge PATCH, so this only ever adds to
+    // (never removes) whatever an admin already configured. Skips the PATCH
+    // entirely once INR/EUR/NOK are all present, so a re-run is a no-op.
+    const settingsRes = must(await api('GET', '/settings', undefined, adminToken), 'get settings');
+    const currentFxRates: Array<{ currency: string; rate_to_base: number }> = settingsRes?.billing?.fx_rates ?? [];
+    const currentReportingCurrency: string = settingsRes?.billing?.reporting_currency ?? 'INR';
+
+    const wantFx: Record<string, number> = { EUR: 90, NOK: 8 };
+    const haveCurrencies = new Set(currentFxRates.map((r) => r.currency.toUpperCase()));
+    const missing = Object.entries(wantFx).filter(([ccy]) => !haveCurrencies.has(ccy));
+
+    if (currentReportingCurrency === 'INR' && missing.length === 0) {
+        console.log('  reporting_currency + fx_rates already cover EUR/NOK — skipping settings patch');
+    } else {
+        const mergedFxRates = [
+            ...currentFxRates,
+            ...missing.map(([currency, rate_to_base]) => ({ currency, rate_to_base })),
+        ];
+        const patchRes = await api(
+            'PATCH',
+            '/settings',
+            { billing: { reporting_currency: 'INR', fx_rates: mergedFxRates } },
+            adminToken
+        );
+        if (patchRes.status !== 200) {
+            throw new Error(`settings billing FX patch failed (${patchRes.status}): ${JSON.stringify(patchRes.body)}`);
+        }
+        console.log(`  reporting_currency=INR, fx_rates=[${mergedFxRates.map((r) => r.currency).join(', ')}]`);
+    }
+}
+
+// ─── Step 6: attendance today (API) ────────────────────────────────────────
 
 async function seedAttendanceToday(): Promise<void> {
     console.log('\n── Attendance (today, via API) ──');
@@ -1242,7 +1456,7 @@ async function seedAttendanceToday(): Promise<void> {
     console.log('  (sneha, aditya left not-checked-in on purpose — aditya is on same-day SL)');
 }
 
-// ─── Step 6: leaves ────────────────────────────────────────────────────────
+// ─── Step 7: leaves ────────────────────────────────────────────────────────
 
 async function seedLeaves(): Promise<void> {
     console.log('\n── Leaves ──');
@@ -1373,7 +1587,7 @@ async function seedLeaves(): Promise<void> {
     }
 }
 
-// ─── Step 7: comp-off ──────────────────────────────────────────────────────
+// ─── Step 8: comp-off ──────────────────────────────────────────────────────
 
 async function seedCompOff(): Promise<void> {
     console.log('\n── Comp-off ──');
@@ -1408,7 +1622,7 @@ async function seedCompOff(): Promise<void> {
     }
 }
 
-// ─── Step 8: holidays ──────────────────────────────────────────────────────
+// ─── Step 9: holidays ──────────────────────────────────────────────────────
 
 async function seedHolidays(): Promise<void> {
     console.log('\n── Holidays ──');
@@ -1422,7 +1636,7 @@ async function seedHolidays(): Promise<void> {
     }
 }
 
-// ─── Step 9: attendance history + today's time variation (direct Mongo) ───
+// ─── Step 10: attendance history + today's time variation (direct Mongo) ──
 
 async function seedAttendanceHistory(): Promise<void> {
     console.log('\n── Attendance history (direct Mongo) ──');
@@ -1488,7 +1702,7 @@ async function seedAttendanceHistory(): Promise<void> {
     await disconnectDB();
 }
 
-// ─── Step 10: verification ─────────────────────────────────────────────────
+// ─── Step 11: verification ─────────────────────────────────────────────────
 
 async function verify(): Promise<void> {
     console.log('\n── Verification ──');
@@ -1585,6 +1799,8 @@ async function main(): Promise<void> {
     await seedProjects();
     await seedBillingRates();
     await seedTimesheets();
+    await seedEngagements();
+    await seedCostRatesAndFx();
     await seedAttendanceToday();
     await seedLeaves();
     await seedCompOff();

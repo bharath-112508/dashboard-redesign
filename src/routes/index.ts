@@ -22,6 +22,9 @@ import { taskActivityRouter } from './task-activity.routes.js';
 import { attachmentsRouter, taskAttachmentsNestedRouter } from './task-attachment.routes.js';
 import timesheetRoutes from './timesheet.routes.js';
 import billingRateRoutes from './billing-rate.routes.js';
+import costRateRoutes from './cost-rate.routes.js';
+import engagementRoutes from './engagement.routes.js';
+import invoiceRoutes from './invoice.routes.js';
 import payrollProfileRoutes from './payroll-profile.routes.js';
 import salaryStructureRoutes from './salary-structure.routes.js';
 import payslipRoutes from './payslip.routes.js';
@@ -81,6 +84,15 @@ appRoutes.use('/comments', commentsRouter());
 appRoutes.use('/attachments', attachmentsRouter());
 appRoutes.use('/timesheets', timesheetRoutes);
 appRoutes.use('/billing-rates', billingRateRoutes);
+// Cost rates (Billing Phase 2 "Cost Rates & Margin", Task 3). No prefix
+// overlap with anything else, so mount order doesn't matter here.
+appRoutes.use('/cost-rates', costRateRoutes);
+// Client engagements (Phase 1 "Client Engagements & Invoicing"). No prefix
+// overlap with anything else, so mount order doesn't matter here.
+appRoutes.use('/engagements', engagementRoutes);
+// Invoices (Phase 1 "Client Engagements & Invoicing", Task 8). No prefix
+// overlap with anything else, so mount order doesn't matter here.
+appRoutes.use('/invoices', invoiceRoutes);
 appRoutes.use('/payroll-profiles', payrollProfileRoutes);
 appRoutes.use('/salary-structures', salaryStructureRoutes);
 appRoutes.use('/payslips', payslipRoutes);

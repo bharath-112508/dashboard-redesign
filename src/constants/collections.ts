@@ -50,6 +50,14 @@ export const COLLECTIONS = {
     TIMESHEET_ENTRIES: 'timesheet_entries',
     BILLING_RATES: 'billing_rates',
 
+    // Invoicing (client engagements + invoices)
+    ENGAGEMENTS: 'engagements',
+    INVOICES: 'invoices',
+    INVOICE_COUNTERS: 'invoice_counters',
+
+    // Cost rates & margin (Billing Phase 2)
+    COST_RATES: 'cost_rates',
+
     // Cross-cutting
     NOTIFICATIONS: 'notifications',
     PUSH_SUBSCRIPTIONS: 'push_subscriptions',

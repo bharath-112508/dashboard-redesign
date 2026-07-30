@@ -148,6 +148,25 @@ export interface CompanySettings {
     login_page_tagline: string;
 }
 
+export interface FxRateSetting {
+    /** ISO-4217-shaped currency code, e.g. `'EUR'`. Letters-only, 3 chars. */
+    currency: string;
+    /** Multiplier to convert 1 unit of `currency` into `reporting_currency`. */
+    rate_to_base: number;
+}
+
+export interface BillingSettings {
+    /** Prefix used by `nextInvoiceNumber` when minting `{prefix}-{year}-{seq}`
+     *  invoice numbers (Phase 1.1 follow-up — was hard-coded to `'INV'`). */
+    invoice_prefix: string;
+    /** Billing Phase 2 — the currency the Margin report (and any other
+     *  cross-currency rollup) normalises amounts into. Letters-only ISO code. */
+    reporting_currency: string;
+    /** Billing Phase 2 — per-currency multipliers into `reporting_currency`,
+     *  consumed by `utils/fx.ts#toReportingCurrency`. */
+    fx_rates: FxRateSetting[];
+}
+
 export interface PayrollSettings {
     company_legal_name: string;
     company_address_lines: string[];
@@ -175,6 +194,7 @@ export interface SystemSettingsDocument extends Document {
     reminders: ReminderSettings;
     company: CompanySettings;
     payroll: PayrollSettings;
+    billing: BillingSettings;
 
     default_timezone: string;
 
@@ -352,6 +372,40 @@ const payrollSchema = new Schema<PayrollSettings>(
     { _id: false }
 );
 
+// Billing & invoicing (Phase 1.1 follow-up) — single configurable field so
+// far: the `nextInvoiceNumber` prefix. Trimmed + upper-cased at write time so
+// `INV`/`inv `/` Inv` all normalise to the same stored value.
+// Billing Phase 2 — reporting currency + FX rate table consumed by
+// `utils/fx.ts#toReportingCurrency` (Margin report). `_id: false` — these
+// are line items in an array, not their own addressable documents.
+const fxRateSettingSchema = new Schema<FxRateSetting>(
+    {
+        currency: { type: String, required: true, trim: true, uppercase: true, match: /^[A-Z]{3}$/ },
+        rate_to_base: {
+            type: Number,
+            required: true,
+            validate: { validator: (v: number) => v > 0, message: 'rate_to_base must be greater than 0' },
+        },
+    },
+    { _id: false }
+);
+
+const billingSchema = new Schema<BillingSettings>(
+    {
+        invoice_prefix: { type: String, required: true, default: 'INV', trim: true, uppercase: true },
+        reporting_currency: {
+            type: String,
+            required: true,
+            default: 'INR',
+            trim: true,
+            uppercase: true,
+            match: /^[A-Z]{3}$/,
+        },
+        fx_rates: { type: [fxRateSettingSchema], default: [] },
+    },
+    { _id: false }
+);
+
 // ─── Top-level schema ──────────────────────────────────────────────────────
 
 const systemSettingsSchema = new Schema<SystemSettingsDocument>(
@@ -375,6 +429,7 @@ const systemSettingsSchema = new Schema<SystemSettingsDocument>(
         reminders: { type: remindersSchema, required: true },
         company: { type: companySchema, required: true },
         payroll: { type: payrollSchema, default: () => ({}) },
+        billing: { type: billingSchema, default: () => ({}) },
 
         default_timezone: { type: String, required: true },
 
