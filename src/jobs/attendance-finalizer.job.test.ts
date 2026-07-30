@@ -1,6 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Types } from 'mongoose';
 
+import { CLIENT_SIDE_ROLES, ROLES } from '../constants/roles.js';
+
 /**
  * Unit tests for `finalizeAttendanceForDate` (Step 14.1) — the pure logic
  * of the attendance EOD finalizer.
@@ -20,6 +22,7 @@ const {
     holidayExistsMock,
     leaveFindMock,
     userCursorMock,
+    userFindMock,
     attendanceUpdateManyMock,
     attendanceUpdateOneMock,
 } = vi.hoisted(() => ({
@@ -27,6 +30,7 @@ const {
     holidayExistsMock: vi.fn(),
     leaveFindMock: vi.fn(),
     userCursorMock: vi.fn(),
+    userFindMock: vi.fn(),
     attendanceUpdateManyMock: vi.fn(),
     attendanceUpdateOneMock: vi.fn(),
 }));
@@ -45,13 +49,18 @@ vi.mock('../models/leave-request.model.js', () => ({
 
 vi.mock('../models/user.model.js', () => ({
     User: {
-        find: () => ({
-            select: () => ({
-                batchSize: () => ({
-                    cursor: () => userCursorMock(),
+        // Records the filter so the role exclusion can be asserted rather
+        // than assumed — the previous mock discarded its argument.
+        find: (filter: unknown) => (
+            userFindMock(filter),
+            {
+                select: () => ({
+                    batchSize: () => ({
+                        cursor: () => userCursorMock(),
+                    }),
                 }),
-            }),
-        }),
+            }
+        ),
     },
 }));
 
@@ -134,6 +143,30 @@ describe('finalizeAttendanceForDate', () => {
             }),
             { upsert: true }
         );
+    });
+
+    /**
+     * Regression: the cursor excluded only `client`, not `representative`.
+     *
+     * `CLIENT_SIDE_ROLES` is `[client, representative]` — both are a client
+     * company's people and neither checks in. Excluding only the first meant
+     * every active representative got an `absent` placeholder inserted for
+     * them every night, indefinitely, in a collection that only grows.
+     *
+     * The rows were invisible in reports (attendance.service.ts filters with
+     * `$nin: CLIENT_SIDE_ROLES` in four places), which is exactly why this
+     * went unnoticed: the job and the service disagreed about who has
+     * attendance, and only the service's answer was ever displayed.
+     */
+    it('excludes BOTH client-side roles from the placeholder sweep', async () => {
+        userCursorMock.mockReturnValueOnce(cursorOf([]));
+
+        await finalizeAttendanceForDate('2026-04-23', log);
+
+        expect(userFindMock).toHaveBeenCalledWith(expect.objectContaining({ role: { $nin: CLIENT_SIDE_ROLES } }));
+        // Pin the membership too — a future edit to CLIENT_SIDE_ROLES that
+        // drops `representative` would otherwise slip past the assertion above.
+        expect(CLIENT_SIDE_ROLES).toEqual(expect.arrayContaining([ROLES.CLIENT, ROLES.REPRESENTATIVE]));
     });
 
     it('inserts `holiday` placeholders when the date matches a holiday row', async () => {

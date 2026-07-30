@@ -4,7 +4,7 @@ import { User } from '../models/user.model.js';
 import { AttendanceRecord } from '../models/attendance-record.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { LeaveRequest } from '../models/leave-request.model.js';
-import { ROLES } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
@@ -159,9 +159,18 @@ export const finalizeAttendanceForDate = async (
     // We stream the user list to keep memory bounded. For each user we do an
     // upsert with `$setOnInsert` so a row inserted concurrently (e.g. the
     // user actually checked in mid-finalizer) is not overwritten.
+    // `$nin: CLIENT_SIDE_ROLES`, not `$ne: ROLES.CLIENT`. Client-side means
+    // BOTH `client` and `representative` — this used to exclude only the
+    // former, so every active representative got an `absent` placeholder row
+    // inserted for them every night, forever. They are a client company's
+    // people; they do not check in and have no attendance to finalize.
+    //
+    // `attendance.service.ts` already used `$nin: CLIENT_SIDE_ROLES` for this
+    // same "internal workforce" notion in four places, so the job and the
+    // service disagreed about who has attendance.
     const cursor = User.find({
         status: USER_STATUSES.ACTIVE,
-        role: { $ne: ROLES.CLIENT },
+        role: { $nin: CLIENT_SIDE_ROLES },
     })
         .select({ _id: 1, role: 1 })
         .batchSize(JOB_USER_BATCH_SIZE)
