@@ -455,6 +455,57 @@ describe('removeRepresentative', () => {
     });
 });
 
+/**
+ * `patchCompany` and `archiveCompany` had NO ownership check at all until
+ * ebce431 — they loaded the company and mutated it on the caller's word.
+ *
+ * Not exploitable today: `company.write` is in no role bundle, so only the
+ * `system.admin` wildcard reaches these routes, and admins pass the guard
+ * anyway. The guard is for the day someone grants `company.write` to a custom
+ * role — without it, that role could rename or archive EVERY company.
+ *
+ * These tests exist so the guard is not quietly removed as dead code by
+ * someone who checks the route gate, sees admin-only, and concludes it is
+ * unreachable. It is unreachable by CONFIGURATION, not by construction.
+ */
+describe('patchCompany / archiveCompany — ownership guard', () => {
+    it('patch: a client of ANOTHER company is refused', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(
+            svc.patchCompany(companyId, { name: 'Renamed' }, clientCaller(new Types.ObjectId()))
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it('archive: a client of ANOTHER company is refused', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(svc.archiveCompany(companyId, clientCaller(new Types.ObjectId()))).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+
+    it('archive: refuses BEFORE the idempotent early return', async () => {
+        // An already-archived company returns 200 without saving. If the guard
+        // sat after that, an unauthorised caller could tell archived from
+        // active by whether they got 200 or 403 — a probe on data they cannot
+        // otherwise read. The guard must fire first for BOTH states.
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany({ status: 'archived' }));
+
+        await expect(svc.archiveCompany(companyId, clientCaller(new Types.ObjectId()))).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+
+    it('an admin may still patch any company', async () => {
+        const doc = makeCompany();
+        companyFindByIdMock.mockResolvedValueOnce(doc);
+
+        await expect(svc.patchCompany(companyId, { name: 'Renamed' }, adminCaller())).resolves.toBeDefined();
+        expect(doc.save).toHaveBeenCalled();
+    });
+});
+
 describe('createCompany', () => {
     it('maps a duplicate-name E11000 to 409 DUPLICATE_RESOURCE', async () => {
         // The case-insensitive unique index is what stops "TCS" and "tcs"
