@@ -231,7 +231,16 @@ export const leaveYearRolloverRunKey = (now: Date = new Date()): string => {
 
 /** Token cleanup keys off the ISO week so a re-run within the same week is a no-op. */
 export const tokenCleanupRunKey = (now: Date = new Date()): string => {
-    const d = dayjs(now).tz(JOB_TIMEZONE);
+    // `.isoWeek()` and `.isoWeekYear()` read the HOST's local time and ignore
+    // the offset `.tz()` applied, unlike `.format()` which respects it. That
+    // made this key depend on the server's timezone: the Sunday-02:00-IST fire
+    // is Saturday 20:30 UTC, which is the *previous* ISO week, so a UTC host
+    // (App Service's default) produced W(n-1) where an IST host produced W(n).
+    //
+    // Re-anchor to the IST calendar date first, then take the week from that
+    // plain date. Every other run key here uses `.format()` directly and was
+    // never affected.
+    const d = dayjs(dayjs(now).tz(JOB_TIMEZONE).format('YYYY-MM-DD'));
     return `${d.isoWeekYear()}-W${String(d.isoWeek()).padStart(2, '0')}`;
 };
 

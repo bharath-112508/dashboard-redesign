@@ -74,7 +74,23 @@ describe('dayjs plugins', () => {
         // The plugin adds `.isoWeek()` to the dayjs prototype.
         const monday = dayjs.tz('2026-01-05', DEFAULT_TIMEZONE);
         expect(typeof monday.isoWeek).toBe('function');
-        // Jan 5 2026 is Monday of ISO week 2.
-        expect(monday.isoWeek()).toBe(2);
+        // Jan 5 2026 is Monday of ISO week 2. Asserted on a plain date rather
+        // than the tz-converted one: `.isoWeek()` reads the HOST's local time
+        // and ignores the offset `.tz()` applied, so the tz-converted form
+        // answers 2 on an IST machine and 1 on a UTC one. That asymmetry is
+        // real — see `tokenCleanupRunKey` — and this test's job is only to
+        // prove the plugin is registered.
+        expect(dayjs('2026-01-05').isoWeek()).toBe(2);
+    });
+
+    it('🔴 `.isoWeek()` does NOT respect `.tz()` — pinned so the trap stays visible', () => {
+        // Not a wish, a fact about dayjs: `.format()` honours the offset that
+        // `.tz()` applied, `.isoWeek()` does not. Any run key or rollup built
+        // on `.tz(...).isoWeek()` therefore varies by server timezone. The
+        // safe shape is to format to a calendar date first, then take the week
+        // from that — which is what `tokenCleanupRunKey` now does.
+        const istInstant = dayjs('2026-01-04T20:30:00Z').tz(DEFAULT_TIMEZONE);
+        expect(istInstant.format(DATE_FORMAT)).toBe('2026-01-05'); // offset honoured
+        expect(dayjs(istInstant.format(DATE_FORMAT)).isoWeek()).toBe(2); // safe shape
     });
 });
