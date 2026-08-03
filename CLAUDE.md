@@ -224,12 +224,36 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 
 ### Billing rates
 
+> 🔴 **The API is live; the UI is hidden.** Since 2026-07-31 the frontend surfaces for
+> billing rates, cost rates, engagements, invoices and the billing + margin reports are
+> suppressed behind the `BILLING_MODULES_ENABLED` feature flag — off in every environment
+> unless `VITE_BILLING_MODULES=true`. The endpoints below are unchanged and still answer
+> any caller with the right permission. The module is finished enough to work and not
+> finished enough to show: no bulk invoice run, no emailing, and the margin report degrades
+> to a warnings banner wherever a bill or cost rate is missing.
+>
+> Related, and worth fixing before it is switched on: **`invoice.read` is bundled into the
+> `manager` role and has no row scoping**, so any Manager can read every company's
+> engagements and invoices.
+
 - **Purpose** — User × project hourly rate with effective/end dates; joined into billing reports
 - **Permissions** — `BILLING_RATE_READ` (Manager+), `BILLING_RATE_WRITE` (Manager+/Admin per seed)
 - **Routes** — [`routes/billing-rate.routes.ts`](src/routes/billing-rate.routes.ts). CRUD + `POST /billing-rates/:id/end` (soft-end with effective date).
 - **Service** — [`services/billing-rate.service.ts`](src/services/billing-rate.service.ts) · **Model** — [`models/billing-rate.model.ts`](src/models/billing-rate.model.ts)
 
 ### Cost rates & Margin
+
+> 🔴 **The API is live; the UI is hidden.** Since 2026-07-31 the frontend surfaces for
+> billing rates, cost rates, engagements, invoices and the billing + margin reports are
+> suppressed behind the `BILLING_MODULES_ENABLED` feature flag — off in every environment
+> unless `VITE_BILLING_MODULES=true`. The endpoints below are unchanged and still answer
+> any caller with the right permission. The module is finished enough to work and not
+> finished enough to show: no bulk invoice run, no emailing, and the margin report degrades
+> to a warnings banner wherever a bill or cost rate is missing.
+>
+> Related, and worth fixing before it is switched on: **`invoice.read` is bundled into the
+> `manager` role and has no row scoping**, so any Manager can read every company's
+> engagements and invoices.
 
 - **Purpose** — Billing Phase 2 "Cost Rates & Margin" (`docs/superpowers/specs/2026-07-24-cost-margin-design.md`). Per-person, effective-dated **cost rate** (fully-loaded cost/hour, own currency) — the cost-side twin of `billing_rates` but per-`user_id` only (no project/task dimension). Feeds a **Margin report** that nets bill-rate revenue against cost-rate cost, per project/per user, normalised into one reporting currency via an admin-managed FX table.
 - **Permissions** — `COST_RATE_READ` (`cost_rate.read`, bundled into the manager role — needed to see the Margin report), `COST_RATE_WRITE` (`cost_rate.write`, admin-only by default, same pattern as `INVOICE_WRITE`). `constants/system-role-definitions.ts` is where the manager bundle is declared.
@@ -242,6 +266,18 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 
 ### Invoicing (client engagements + invoices)
 
+> 🔴 **The API is live; the UI is hidden.** Since 2026-07-31 the frontend surfaces for
+> billing rates, cost rates, engagements, invoices and the billing + margin reports are
+> suppressed behind the `BILLING_MODULES_ENABLED` feature flag — off in every environment
+> unless `VITE_BILLING_MODULES=true`. The endpoints below are unchanged and still answer
+> any caller with the right permission. The module is finished enough to work and not
+> finished enough to show: no bulk invoice run, no emailing, and the margin report degrades
+> to a warnings banner wherever a bill or cost rate is missing.
+>
+> Related, and worth fixing before it is switched on: **`invoice.read` is bundled into the
+> `manager` role and has no row scoping**, so any Manager can read every company's
+> engagements and invoices.
+
 - **Purpose** — Phase 1 "Client Engagements & Invoicing" (`docs/superpowers/specs/2026-07-24-billing-invoicing-design.md`). Models a client **Engagement** (contract: hourly / retainer / fixed / hybrid, scoped to a company and optionally specific projects), then generates and persists numbered **Invoices** from an engagement + period, with billable hours auto-pulled from timesheets. Closes the gap between the billing-rate/billing-report pieces (rates exist, but there was never a persisted, numbered bill) and unblocks the Slack Phase 3 invoice modal.
 - **Permissions** — `INVOICE_READ` (`invoice.read`, bundled into the manager role alongside `BILLING_RATE_READ`/`REPORT_READ`), `INVOICE_WRITE` (`invoice.write`, admin-only by default — not in `MANAGER_ADDITIONS`, granted via `system.admin` wildcard or a custom role). `constants/system-role-definitions.ts` is where the manager bundle is declared.
 - **Models** — [`models/engagement.model.ts`](src/models/engagement.model.ts) (`company_id`, `project_ids[]` where `[]` = all the company's projects, `billing_type: 'hourly'|'retainer'|'fixed'|'hybrid'`, `setup_fee`/`setup_fee_invoiced`, `retainer_amount`/`retainer_period`/`included_hours`, `fixed_amount`, `start_date`/`end_date`, `status`), [`models/invoice.model.ts`](src/models/invoice.model.ts) (`number` unique, `company_id`/`project_ids`/`currency` are **snapshots** taken at generation time — they don't follow later edits to the engagement/company/project — `line_items[]` with `kind: 'hours'|'retainer'|'setup'|'overage'|'fixed'|'manual'`, `subtotal`/`tax_rate`/`tax_label`/`tax_amount`/`total`, `status: 'draft'|'sent'|'paid'|'void'`), [`models/invoice-counter.model.ts`](src/models/invoice-counter.model.ts) (one row per calendar year for the numbering sequence).
@@ -252,6 +288,26 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 - **Gotchas** — **hybrid bills overage OR hours, never both** — an engagement is either retainer-with-overage or hourly-with-per-user-lines for a given period, not both computed simultaneously for the same hours. **Setup fee bills exactly once** via `setup_fee_invoiced` — a second `generateInvoice` call on the same engagement won't re-add the `setup` line once it's flipped true. **No rate found** doesn't fail generation — the `hours` line still lists hours with `rate: null`, `amount: 0` (mirrors the billing report's degradation), surfaced as a warning for the admin to fix rates rather than silently dropped. **Overlap guard** on `POST /invoices/generate` warns (not hard-blocks) when a non-void invoice already covers an overlapping period for the same engagement — the FE confirms before proceeding. **An engagement can never be deleted** — there is no delete route and no delete service function; `POST /engagements/:id/end` (soft-end) is the only retirement path, so the invoices that reference it can't be orphaned by construction. `company_id`/`project_ids`/`currency` on an invoice are snapshots — editing the source engagement/company/project afterward never mutates an already-generated invoice.
 
 ### Payroll & Certificates
+
+> 🔴 **The API is live; the feature is not usable end-to-end.** Everything below is
+> accurate about the backend, and all of it is reachable with a token. Two things this
+> section historically did not say:
+>
+> 1. **PDF generation returns 500 in every deployed environment.** `pdf.service.ts`
+>    launches Playwright Chromium, which cannot run under App Service zipdeploy — both
+>    bundling approaches were tried and both failed. It works locally once
+>    `npx playwright install chromium` has been run, which is why it looks fine in
+>    development. See [`docs/runbooks/pdf-generation-azure.md`](../docs/runbooks/pdf-generation-azure.md);
+>    the fix is the Playwright container image and it is not started.
+> 2. **The frontend surfaces are suppressed.** The payroll UI has no sidebar entry and no
+>    cross-link anywhere — it is reachable only by typing the URL — and since 2026-07-31
+>    payslip/letter **generation** is additionally hidden behind the `PAYROLL_PDF_ENABLED`
+>    feature flag, so those pages are unreachable even by URL. Downloading an
+>    already-issued document still works. See the frontend `CLAUDE.md` §Suppressed
+>    surfaces.
+>
+> Read this before concluding from the endpoint list that payroll is a working feature for
+> users. It is a working API with no reachable UI and a broken renderer in production.
 
 - **Purpose** — Per-user payroll master data (statutory/bank details + versioned salary structure) and on-demand generation of payslip + employee-letter PDFs (offer, joining, internship_offer, relieving, experience, internship, hike, promotion). Foundation phase — no bulk monthly run yet.
 - **Roles & visibility** — The first four permissions below are bundled into `manager` by default (alongside admin's `system.admin` wildcard); the two `*_DELETE` bits are **admin-only** — deliberately not in any role bundle, so only the `system.admin` wildcard grants them. All six are ordinary `requirePermission` gates, so any custom role can also be granted them. Employees have no self-service read/download today (no `/me` routes on these routers).
