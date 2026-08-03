@@ -82,8 +82,7 @@ const countWorkingDays = (from: string, to: string, holidayDates: ReadonlySet<st
  * calendar span makes that kind of gap visible: if the buckets don't sum
  * to `total_days`, some day in the range has no attendance record at all.
  */
-const countCalendarDays = (from: string, to: string): number =>
-    dayjs(to).diff(dayjs(from), 'day') + 1;
+const countCalendarDays = (from: string, to: string): number => dayjs(to).diff(dayjs(from), 'day') + 1;
 
 const loadHolidayDateSet = async (from: string, to: string): Promise<Set<string>> => {
     const rows = await Holiday.find({ date: { $gte: from, $lte: to } })

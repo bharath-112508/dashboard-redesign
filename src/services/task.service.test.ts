@@ -295,10 +295,7 @@ describe('createTask', () => {
         stubFindOneForLastRank(null);
         taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
 
-        await svc.createTask(
-            { ...baseInput(project._id), assignee_ids: [a.toString(), b.toString()] },
-            adminCaller()
-        );
+        await svc.createTask({ ...baseInput(project._id), assignee_ids: [a.toString(), b.toString()] }, adminCaller());
 
         const createArg = taskCreateMock.mock.calls[0][0];
         expect(createArg.assignee_ids.map(String)).toEqual([a.toString(), b.toString()]);
