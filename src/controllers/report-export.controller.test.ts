@@ -25,6 +25,17 @@ vi.mock('../services/report-export.service.js', () => ({
     getExport: getExportMock,
 }));
 
+// The controller branches on `isAzureConfigured()`: configured → enqueue an
+// async export and answer 202; not configured → render inline and stream the
+// file back. These tests are about the ZodError wrap, not that branch, so pin
+// it rather than letting the ambient environment choose. Unpinned, the suite
+// passed on a developer machine with Azure credentials in `.env` and failed in
+// CI, where the fallback path calls a `generateExportInline` the mock above
+// never provided.
+vi.mock('../utils/azure-blob.js', () => ({
+    isAzureConfigured: () => true,
+}));
+
 vi.mock('../utils/audit-context.js', () => ({
     buildAuditContext: () => ({
         actor_id: new Types.ObjectId(),
