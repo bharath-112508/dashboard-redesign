@@ -494,10 +494,16 @@ An admin may act on either role.
 there is no unlink that leaves a valid account. Deactivation is the platform's
 soft-delete: login revoked, history kept, reversible.
 
-The endpoint delegates to `deactivateUser`, which also:
+The endpoint runs its own guards **first** — `loadCompanyOrThrow` →
+`assertCallerOwnsCompany` → `loadCompanyMemberOrThrow` → the non-admin role guard
+(`company.service.ts:478`) — and only then delegates to `deactivateUser`, which also:
 
-- **blocks self-removal** (403) — a Client cannot remove themselves through this route
-  even before the role check;
+- **blocks self-removal** (403). A Client cannot remove themselves through this route, but
+  not via this check: their own target role is `client`, so the role guard above rejects
+  them first with *"Only an administrator can remove a company-level client"*. An admin
+  self-targeting 404s even earlier, at `loadCompanyMemberOrThrow`, because staff roles are
+  not in `PROJECT_CLIENT_SIDE_ROLES`. The conclusion holds; the error code and message do
+  not match what this bullet implies;
 - **revokes all active refresh tokens**;
 - **cascades share-link revocation** for `client`-role targets
   (`revokeLinksForDeactivatedClient`) — each revoke independently audited, never throwing;

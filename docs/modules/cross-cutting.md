@@ -8,8 +8,8 @@ The platform plumbing every other module sits on top of. Nine themes:
 4. **Validation** — Zod middleware + empty-body coercion.
 5. **Persistence atomicity** — `withTransaction` helper + graceful degradation on non-replica-set topology.
 6. **Observability** — pino logger with M23 redaction + App Insights bridge + Prometheus metrics.
-7. **Boot migrations + cron scheduler** — five boot migrations + the registry of 11 scheduled jobs with consecutive-failure tracking.
-8. **Graceful shutdown** — server.close → cron drain → Mongo disconnect, in that exact order.
+7. **Boot migrations + cron scheduler** — five boot migrations + the registry of 16 scheduled jobs with consecutive-failure tracking.
+8. **Graceful shutdown** — server.close → PDF browser close → cron drain → Mongo disconnect, in that exact order.
 9. **Real-time event stream** — the single SSE endpoint `GET /events/stream`, its in-process client registry, and the write-interceptor middleware that pushes to it.
 
 Cross-references: every module documented in this directory uses some of this layer. Auth specifically is documented in [`auth.md`](./auth.md); audit's `recordAudit` non-throwing contract in [`audit-compliance.md`](./audit-compliance.md); JWT details in the auth module.
@@ -105,7 +105,8 @@ The single most opinionated file in the codebase. **Middleware order matters**; 
 ```
 SIGTERM / SIGINT:
   1. server.close()         ← stop accepting new conns; await in-flight (C7 — promisified)
-  2. stopScheduler()        ← cron drain (F5 — await in-flight runJob promises ≤ 25s)
+  2. shutdownPdf()          ← close the singleton Playwright browser, or the process leaks Chromium
+  3. stopScheduler()        ← cron drain (F5 — await in-flight runJob promises ≤ 25s)
   3. disconnectDB()         ← Mongo close
   ── 30s outer watchdog ──  ← logger.error + process.exit(1) if step 1-3 don't complete
 
@@ -264,7 +265,7 @@ The `readyState` check is critical: `mongoose.startSession()` against an unconne
 
 | Component | Purpose |
 |---|---|
-| `redact: {paths: [...], remove: true}` | M23 — strips secrets from ANY log payload tree. 17 known field names: `password`, `token`, `refresh_token`, `authorization`, `bot_token`, `slack_signing_secret`, `vapid_private_key`, `mfa_secret_encrypted`, `mfa_backup_codes_hashed`, `totp_secret`, `mfa_session_token`, `azure_storage_connection_string`, `connection_string`, `api_secret`, `api_key` + 4 HTTP request headers/body paths |
+| `redact: {paths: [...], remove: true}` | M23 — strips secrets from ANY log payload tree. 15 known field names: `password`, `token`, `refresh_token`, `authorization`, `bot_token`, `slack_signing_secret`, `vapid_private_key`, `mfa_secret_encrypted`, `mfa_backup_codes_hashed`, `totp_secret`, `mfa_session_token`, `azure_storage_connection_string`, `connection_string`, `api_secret`, `api_key` + 6 HTTP request header/body paths — 21 redact paths in total |
 | `pino-http` (req/res logger) | x-request-id mint via `ulid()` if header absent; status-code-aware level (5xx → error, 4xx → warn) |
 | App Insights bridge (V2-OPS-3) | When `APPLICATIONINSIGHTS_CONNECTION_STRING` set, multistream to stdout + AI's `trackTrace`/`trackException`. Auto-collection (HTTP/dep/console) disabled to avoid duplicate request logs |
 
@@ -301,7 +302,7 @@ Unauthenticated by design — deploy network restricts to scrape origin (App Ser
 
 ## 7. Rate limiters ([`middlewares/rate-limit.middleware.ts`](../../src/middlewares/rate-limit.middleware.ts))
 
-7 buckets — 4 global per-IP + 3 per-user:
+8 buckets — 4 global per-IP + 4 per-user (plus `buildUserRateLimiter`, the factory the four per-user buckets are built from):
 
 | Limiter | Scope | Window / limit | Notes |
 |---|---|---|---|
@@ -330,7 +331,7 @@ Per-user buckets on `req.user.user_id` (set by `authenticate`) layer on top. Fal
 
 ### Registry
 
-11 scheduled jobs registered with `node-cron` schedules in `JOB_TIMEZONE = 'Asia/Kolkata'`:
+16 scheduled jobs registered with `node-cron` schedules in `JOB_TIMEZONE = 'Asia/Kolkata'`:
 
 | Job | Schedule | Idempotency key |
 |---|---|---|
@@ -345,6 +346,11 @@ Per-user buckets on `req.user.user_id` (set by `authenticate`) layer on top. Fal
 | `stuck_job_sweeper` | */15 min | Per-15m bucket |
 | `audit_log_mirror` | Hourly :07 | Per-hour |
 | `comp_off_reconciliation` | Daily 02:30 IST | Per-day |
+| `comp_off_accrual` | Daily 23:15 IST | Per-day |
+| `comp_off_expiry` | Daily 03:20 IST | Per-day |
+| `task_due_reminder` | Hourly (`0 * * * *`) | Per-run-hour; self-throttles via `reminders.task_due_reminder_run_interval_hours` |
+| `attendance_checkin_nudge` | Daily 11:00 IST | Per-day — Slack DM, gated on `slack.attendance_nudges.enabled` |
+| `attendance_checkout_reminder` | Daily 20:00 IST | Per-day — same gate |
 
 Overlap guard: `{job_name, run_key}` unique index on `job_runs` collection. Same-day manual re-runs collide → "skipped" status.
 
@@ -423,7 +429,7 @@ A `: ping\n\n` **comment frame** (not an event — clients ignore comments) ever
 
 Slack-driven writes never pass through an HTTP route, so [`slack-interactive.controller.ts`](../../src/controllers/slack-interactive.controller.ts) calls `publish` explicitly at six sites (leave approve/reject → `leaves` + `leave-balances`; check-in/out → `attendance`).
 
-`PATH_TOPIC_MAP` is a **partial** map of 21 path segments onto 18 topics (`leave-types` folds into `leaves`; `attachments` into `tasks`; `project-custom-statuses` into `projects`). **Unmapped segments publish nothing** — `companies`, `engagements`, `invoices`, `cost-rates`, `payroll-profiles`, `salary-structures`, `payslips`, `letters`, `share-links`, `task-templates` and `push` all mutate without ever emitting an event, so those surfaces do not live-refresh. Adding a topic is a one-line entry in the map, not new middleware.
+`PATH_TOPIC_MAP` is a **partial** map of 21 path segments onto 18 topics (`leave-types` folds into `leaves`; `attachments` into `tasks`; `project-custom-statuses` into `projects`). **Unmapped segments publish nothing** — `companies`, `engagements`, `invoices`, `cost-rates`, `payroll-profiles`, `salary-structures`, `payslips`, `letters`, `push` all mutate without ever emitting an event, so those surfaces do not live-refresh. **`share-links` and `task-templates` are a half-case**: the topic is read from the FIRST path segment, and their create routes are mounted nested under `/projects` (`POST /projects/:project_id/share-links`, `POST /projects/:project_id/task-templates`), so those DO publish `projects`. Only their top-level item routes are silent — `POST /share-links/:id/revoke` and `PATCH|DELETE|POST /task-templates/:id*`. Adding a topic is a one-line entry in the map, not new middleware.
 
 ### 🔴 Mount order: before `compression()`, and do not move it
 
@@ -518,7 +524,7 @@ Used by MFA secrets, Slack bot token (J1), and refresh-token storage when AES-at
 | 20 | R14 — duplicate handler echoes field NAMES, never values (`keyValue` stripped) | Caller already supplied the value; echoing leaks server-side secrets |
 | 21 | `validate({body})` coerces undefined/null to `{}` for object schemas | Empty curl POSTs work for "all-fields-optional" actions |
 | 22 | `Object.defineProperty(req, 'query', ...)` instead of `Object.assign` | Express 5 made `req.query` a getter; assign silently no-ops |
-| 23 | M23 — pino redact strips 17 known secret field names from any payload tree | Defense against accidental `logger.error({user})` / `logger.warn({settings})` |
+| 23 | M23 — pino redact strips 15 known secret field names (21 paths incl. request headers/body) from any payload tree | Defense against accidental `logger.error({user})` / `logger.warn({settings})` |
 | 24 | App Insights auto-collection (HTTP/dep/console) DISABLED | Avoid duplicate request logs + ~1 MB cold-start hit |
 | 25 | App Insights bootstrap failure → stderr warning + fall through to stdout-only | App's log pipeline never breaks |
 | 26 | T4 — metrics route fallback is `__not_found__` bucket (not regex'd) | Pre-T4 regex conflated unrelated paths AND broke legit segments |
@@ -542,5 +548,5 @@ Used by MFA secrets, Slack bot token (J1), and refresh-token storage when AES-at
 | 44 | `X-Accel-Buffering: no` on the SSE response | Same never-flushes failure as #41, but caused by an nginx reverse proxy instead of Express |
 | 45 | Heartbeat is a `: ping` comment every `SSE_HEARTBEAT_MS` (25 s) | Sized against Azure App Service's ~230 s idle timeout. Drop it and idle streams get culled → reconnect churn, not an obvious failure |
 | 46 | `realtimeEmit` resolves the topic at middleware ENTRY, not in the `finish` handler | Express mutates `req.url` while descending nested routers; reading the path later is unreliable |
-| 47 | `PATH_TOPIC_MAP` is partial — unmapped segments publish nothing | Invoices, engagements, cost rates, companies, payroll, share links, templates and push mutate without emitting; those surfaces never live-refresh |
+| 47 | `PATH_TOPIC_MAP` is partial — unmapped segments publish nothing | Invoices, engagements, cost rates, companies, payroll, push never emits. Share links and templates emit `projects` from their nested create routes, but not from their top-level `/share-links/:id/*` and `/task-templates/:id/*` writes |
 | 48 | `GET /events/stream` sits before `generalRateLimiter` in the mount order | A consequence of the before-`compression` requirement, not a separate decision — the code carries no comment either way. Stream connections are therefore uncapped per IP and the registry has no size limit |

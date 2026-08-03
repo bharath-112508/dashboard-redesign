@@ -73,8 +73,8 @@ The same helpers `buildProjectVisibilityFilter` and `loadProjectForCaller` are e
 | `story.write` | Admin, Manager, Team Lead | Story create/patch/delete/reorder |
 | `task.read` | Everyone authenticated | Task list/get, reorder (service narrows), **project task-labels**, comment list, activity feed, attachment list/download URL |
 | `task.write` | Admin, Manager, Team Lead, Employee | Task CRUD (employee scope narrowed at service); dependency CRUD; **rank** (service narrows) |
-| `task_comment.write` | Admin, Manager, Team Lead, Employee, Client | Comment create/patch/delete |
-| `task_attachment.write` | Admin, Manager, Team Lead, Employee, Client | Mint upload URL, finalize, delete attachment |
+| `task_comment.write` | Admin, Manager, Team Lead, Employee, Client, **Representative** | Comment create/patch/delete. Both are in `CLIENT_SIDE_BASE`, which is the bundle for `client` **and** `representative`. |
+| `task_attachment.write` | Admin, Manager, Team Lead, Employee, Client, **Representative** | Mint upload URL, finalize, delete attachment |
 | `task_template.read` | Admin, Manager, Team Lead, Employee | List / get templates |
 | `task_template.write` | Admin, Manager, Team Lead | Template CRUD + manual instantiate |
 | `share_link.write` | Admin, Manager, Team Lead | List / create / revoke (resolve is **public** — no permission) |
@@ -106,6 +106,9 @@ The same helpers `buildProjectVisibilityFilter` and `loadProjectForCaller` are e
   default_status_orders: [{         // EXACTLY 4 entries — to_do/in_progress/review/done
     key, order, is_active
   }],
+  task_seq:    number,      // monotonic per-project issue-key counter; bumped
+                            // atomically on task create, never decremented,
+                            // so keys are never reused (project.model.ts:262)
   created_by:  ObjectId,
   created_at, updated_at
 }
@@ -146,7 +149,7 @@ The model validates that each canonical key appears exactly once — no drift, n
 
 | Method | Path | Permission | Body / query | Returns |
 |---|---|---|---|---|
-| `GET` | `/projects` | `project.read` | `?page=1&limit=20&status&is_archived&member_id&client_id&q=` | `Paginated<ProjectRecord>` |
+| `GET` | `/projects` | `project.read` | `?page=1&limit=20&status&is_archived&member_id&company_id&q=` — the param is `company_id`, **not** `client_id`, and the schema is `.strict()`, so `?client_id=…` is a 400 rather than an ignored filter | `Paginated<ProjectRecord>` |
 | `POST` | `/projects` | `project.write` | `CreateProjectBody` | `201 ProjectRecord` |
 | `GET` | `/projects/:id` | `project.read` | — | `ProjectRecord` |
 | `PATCH` | `/projects/:id` | `project.write` | `PatchProjectBody` (partial) | `ProjectRecord` |
@@ -158,7 +161,7 @@ The model validates that each canonical key appears exactly once — no drift, n
 
 **Archive vs hard-delete** — to archive, `PATCH /projects/:id` with `{is_archived: true}`. To hard-delete, `DELETE /projects/:id` — but the BE refuses with **409 `RESOURCE_HAS_DEPENDENTS`** if any Task, Story, or Sprint references the project (R3). Intended flow: archive when there's history; delete only an empty placeholder.
 
-**Code conflicts** — `POST /projects` with a duplicate `code` returns **409 `PROJECT_CODE_TAKEN`** (the unique-index E11000 is caught and translated).
+**Code conflicts** — `code` is **optional**. When the caller supplies one, a duplicate returns **409 `PROJECT_CODE_TAKEN`** (the unique-index E11000 is caught and translated). When omitted — the common path, since the create form no longer asks — the service derives a code from the name and, on E11000, regenerates and retries up to 5 times before giving up with the same 409.
 
 **Member auto-add (BUG-007)** — when a Team Lead or Employee creates a project, the service auto-adds the caller to `member_ids` if they're not already in the body. Without this, they'd lose visibility of the project they just made (their visibility filter is `member_ids ∋ caller.id`). Admins and Managers bypass the visibility filter, so the service doesn't pollute their `member_ids`.
 
@@ -320,7 +323,7 @@ Nested list + create on the project router; item ops on the sprint router.
 | `POST` | `/sprints/:id/start` | `sprint.write` | — |
 | `POST` | `/sprints/:id/complete` | `sprint.write` | `{move_unfinished_to: 'backlog' \| <sprint_id>}` (default `'backlog'`) |
 
-Every item route re-checks `isProjectAuthor` (admin / manager / team_lead) in the service on top of the route's `requirePermission` — H2.
+Every item route re-checks `isProjectAuthor` in the service on top of the route's `requirePermission` — H2. It passes for admin / manager / team_lead by legacy `role` **or** by `role_keys` containing one of those system-role keys (`utils/role-check.ts:58-65`), so a Step-47 custom role that bundles a system key still counts.
 
 ### List query
 
@@ -616,6 +619,9 @@ Status changes (PATCH or reorder-with-status) **always move the task to the END 
 | `{parent_task_id: 1}` | Subtask listing |
 | `{due_date: 1}` | Cross-project due-date dashboards |
 | `{title: 'text', description: 'text'}` | Global search (current list endpoint uses regex; text index ready for migration) |
+| `{project_id: 1, task_number: 1}` unique, partial | Per-project issue key (`task.model.ts:198-201`) |
+| `{assignee_ids: 1, status: 1}` | Multi-assignee "my tasks" (`:217`) |
+| `{status: 1, completed_at: 1}` partial | Completion/throughput reporting (`:223`) |
 
 ## Task endpoints
 
@@ -624,7 +630,7 @@ Status changes (PATCH or reorder-with-status) **always move the task to the END 
 | Method | Path | Permission (route) | Service narrow | Body / query |
 |---|---|---|---|---|
 | `GET` | `/tasks` | `task.read` | Visibility filter via project scoping | `?page&limit&project_id&sprint_id&story_id&assignee_id&status&priority&due_before&parent_task_id&q` |
-| `POST` | `/tasks` | `task.write` | `requireWriter` (admin/manager/team_lead) | `CreateTaskBody` |
+| `POST` | `/tasks` | `task.write` | `INTERNAL_ROLES` — admin/manager/team_lead/**employee**; only client-side roles blocked | `CreateTaskBody` |
 | `GET` | `/tasks/:id` | `task.read` | Visibility on the task's project | — |
 | `PATCH` | `/tasks/:id` | `task.write` | `assertEmployeePatchScope` (employee = owner + whitelist) | `PatchTaskBody` (partial) |
 | `DELETE` | `/tasks/:id` | `task.write` | `requireWriter` | — |
@@ -640,8 +646,9 @@ Status changes (PATCH or reorder-with-status) **always move the task to the END 
 
 | Operation | Rule |
 |---|---|
-| `POST /tasks`, `DELETE /tasks/:id`, `POST /tasks/:id/move-sprint`, dependency add/remove | `requireWriter` — admin / manager / team_lead only. **Employee and Client always blocked.** |
-| `PATCH /tasks/:id` (as Employee) | Must be the **task's creator OR the primary assignee** AND only the whitelisted fields in [`TASK_EMPLOYEE_PATCH_FIELDS`](../../src/constants/task.ts) (`status`, `description`, `estimated_hours`). Any other field → `TASK_WRITE_FORBIDDEN`. Clients are blocked outright. |
+| `DELETE /tasks/:id`, `POST /tasks/:id/move-sprint`, dependency add/remove | `requireWriter` — admin / manager / team_lead only. **Employee and Client always blocked.** |
+| `POST /tasks` | **Not** `requireWriter`. Gates on `INTERNAL_ROLES.includes(caller.role)` (`task.service.ts:157`), so **employees may create tasks**; only `client` / `representative` are blocked. |
+| `PATCH /tasks/:id` (as Employee) | Must be the **task's creator OR any assignee** (`isCallerAssignee` checks `assignee_ids` *and* `primary_assignee_id`) AND only the whitelisted fields in [`TASK_EMPLOYEE_PATCH_FIELDS`](../../src/constants/task.ts) — **four**: `status`, `description`, `estimated_hours`, `assignee_ids`. `assignee_ids` additionally passes `assertSelfAddOnly`, so an employee may add themselves but not others. Any other field → `TASK_WRITE_FORBIDDEN`. Clients are blocked outright. |
 | `POST /tasks/:id/reorder` | Admin / manager / team_lead **OR one of the task's assignees** (`assignee_ids ∋ caller` OR `primary_assignee_id === caller`). Lets a person drag their own Kanban card without a manager round-trip. |
 | `POST /tasks/:id/rank` | Identical service rule to reorder — admin / manager / team_lead OR an assignee → else `TASK_WRITE_FORBIDDEN`. The **route** gate differs: `task.write`, which `client` / `representative` don't hold, so they are refused at the route rather than in the service. |
 | `POST /tasks/:id/assign-story` | Admin / manager / team_lead. Returns `STORY_WRITE_FORBIDDEN` (not `TASK_WRITE_FORBIDDEN`) per API_Contract §8.2a — story membership is semantically a story-write op. |
@@ -652,7 +659,7 @@ Status changes (PATCH or reorder-with-status) **always move the task to the END 
 - **`story_id` and `parent_task_id` accept the literal string `'null'`** as a sentinel for "no story" / "top-level (no parent)". You can't pass `null` in a query string, so this sentinel lets the FE filter for those cases.
 - `q` requires ≥ 2 chars (R15) — prevents `?q=a` full-collection regex scans.
 - **Project scoping**: when `project_id` is supplied, the service validates the caller can read it. Otherwise — for non-admin/manager callers — the service resolves visible-project ids (capped at 1,000) and filters `task.project_id ∈ {…}`.
-- Sort: `{position: 1, created_at: 1}` so the board renders in column order.
+- Sort: `{position: 1, created_at: 1}` **only when the query is column-scoped**; otherwise `{created_at: -1, _id: -1}` (`task.service.ts:670`). The board gets column order because it queries per column, not because the list always sorts that way.
 
 ### Create (`POST /tasks`)
 
@@ -686,7 +693,7 @@ Status changes (PATCH or reorder-with-status) **always move the task to the END 
 
 ### Reorder (`POST /tasks/:id/reorder`)
 
-Route gate is `task.read`; service narrows to admin/manager/team_lead OR `primary_assignee_id`. Flow:
+Route gate is `task.read`; service narrows to admin/manager/team_lead OR **any assignee** — `isCallerAssignee` covers `assignee_ids` as well as `primary_assignee_id`. Flow:
 
 1. **Cross-column move** (`body.status` differs from current): validate destination, save with `position = nextPositionInColumn(...)`, then **close the gap in the source column** (`$inc -1` for `position > oldPosition`), then apply any within-new-column shift.
 2. **Pure intra-column reorder**: `shiftNeighboursInColumn(...)`.
@@ -777,13 +784,13 @@ Caps: `body ≤ COMMENT_BODY_MAX`, `mentioned_user_ids ≤ COMMENT_MENTIONS_MAX`
 | `PATCH` | `/comments/:id` | `task_comment.write` |
 | `DELETE` | `/comments/:id` | `task_comment.write` |
 
-List query: `?page&limit&include_deleted`. `include_deleted` is admin/manager-only — other roles silently ignore the flag (the service drops it).
+List query: `?page&limit&include_deleted`. `include_deleted` is honoured for **admin / manager / team lead** — `isManagerOrAdmin` in this service includes `TEAM_LEAD` (`task-comment.service.ts:50-51`), the same set as the attachment list. Other roles silently ignore the flag (the service drops it).
 
 ## Sanitisation
 
 [`utils/comment-sanitiser.ts`](../../src/utils/comment-sanitiser.ts) is called in the service (not the validator). HTML tags are stripped; markdown text is kept intact. The FE renders markdown client-side — we deliberately do NOT pre-render to HTML so we can change the renderer without rewriting history.
 
-If sanitisation reduces the body to whitespace (e.g. body that was `"<script>x</script>"` alone), the service throws **`VALIDATION_ERROR`** with "Comment body is empty after sanitisation".
+If sanitisation reduces the body to whitespace (e.g. body that was `"<script>x</script>"` alone), the service throws **`VALIDATION_ERROR`** with "Your comment can't be empty." (`task-comment.service.ts:228`, `:332`).
 
 ## Mention scoping
 
@@ -1048,7 +1055,7 @@ Returns a summary `{templates_scanned, tasks_created, skipped_already_today, fai
 
 **Pre-fix:** raw token was persisted in `token` and queried via `findOne({token})`. Any read-only DB exposure (backup, replica, mongo-express misconfig, BSON dump in a log line) handed an attacker live ungated read access to every project the link grants.
 
-**Post-fix:** only `sha256Hex(token)` is persisted in `token_hash`. The raw token is returned ONCE in the create response, lives in the URL the admin shares, and is **never in the DB**. Mirrors the password-reset + refresh-token patterns.
+**Post-fix:** `token_hash` holds `sha256Hex(token)` and is what public resolution matches on. 🔴 **The raw token IS also persisted** — AES-256-GCM encrypted in `token_encrypted` (`models/project-share-link.model.ts:44-55`, written at `share-link.service.ts:215`). This is a deliberate later change and it reverses the original design: the token is recoverable, so the create response is no longer the only chance to capture it.
 
 Boot migration (`migrateShareLinkTokensToHashed`):
 ```
@@ -1065,7 +1072,7 @@ The legacy `token` field stays as a nullable transitional column until every dep
 
 | Method | Path | Auth | Body / Query | Returns |
 |---|---|---|---|---|
-| `GET` | `/projects/:project_id/share-links` | `share_link.write` | `?page&limit&active_only=true|false` (strict; H4 booleanish) | Paginated rows, **token + token_hash stripped** |
+| `GET` | `/projects/:project_id/share-links` | `share_link.write` | `?page&limit&active_only=true|false` (strict; H4 booleanish) | Paginated rows via `toPublicWithToken` — **`token_hash` stripped, but the decrypted `token` IS returned** per row (`null` for pre-`token_encrypted` rows) |
 | `POST` | `/projects/:project_id/share-links` | `share_link.write` | `{owner_client_id?, expires_at?}` (both optional, both default null) | `{...row, token: <raw 43-char base64url>}` — token surfaced ONCE |
 | `POST` | `/share-links/:id/revoke` | `share_link.write` | — | The updated row (idempotent on already-revoked) |
 | `GET` | `/share-links/resolve/:token` | **none — public** | path: `:token` | `{project, sprints, stories, tasks, last_accessed_at, truncated?}` |
@@ -1093,7 +1100,7 @@ Birthday collision against 1M issued links at 256 bits ≈ 1e-65 — the retry l
 return {...toPublic(created), token: rawToken};
 ```
 
-`toPublic(doc)` strips `token` AND `token_hash` from the JSON. The raw token rides alongside in `{token}` — admin copies the URL out of the dialog. If they lose the URL: revoke + create new. There's no recovery path because the FE list view never gets the token back.
+`toPublic(doc)` strips `token_hash`. The authed list uses `toPublicWithToken` (`share-link.service.ts:91`, applied at `:168`), which decrypts `token_encrypted` and attaches the raw `token` to each row — so **losing the URL is recoverable**: re-read the list. Legacy rows created before `token_encrypted` return `token: null` and still need revoke + create new.
 
 **Audit row carries `toPublic` shape** (no token, no token_hash) so a forensic read of `audit_logs` doesn't leak the credential either.
 
@@ -1385,7 +1392,7 @@ Same as above with `parent_task_id`. `assertParentTaskUsable` enforces same-proj
 ### Drag a card to a different Kanban column
 
 1. POST `/api/v1/tasks/:id/reorder` with `{position: 3, status: 'in_progress'}`.
-2. Service narrows to admin/manager/team_lead OR `primary_assignee_id`.
+2. Service narrows to admin/manager/team_lead OR any id in `assignee_ids` / `primary_assignee_id`.
 3. Cross-column move: `assertValidStatus`; save with `position = nextPositionInColumn(...)` in new column; close gap in source column; `shiftNeighboursInColumn(task, 3)`.
 4. Audit `TASK_REORDER`; activity `status_changed`.
 
@@ -1476,7 +1483,7 @@ Same as above with `parent_task_id`. `assertParentTaskUsable` enforces same-proj
 | `ATTACHMENT_CREATE` / `_DELETE` | Attachment finalize + delete (mint upload URL is NOT audited — no DB row yet) |
 | `TASK_TEMPLATE_CREATE` / `_UPDATE` / `_DELETE` / `_INSTANTIATE` | Template CRUD + manual instantiate |
 | `TASK_TEMPLATE_RECURRENCE_RUN` | Cron-driven instantiation (system audit) |
-| `SHARE_LINK_CREATE` | `POST /:project_id/share-links` (token + token_hash stripped) |
+| `SHARE_LINK_CREATE` | `POST /:project_id/share-links` (no token or hash in the audit row) |
 | `SHARE_LINK_REVOKE` | Manual revoke OR cascade (metadata `reason: 'manual' \| 'client_deactivated'`) |
 
 Timeline NEVER audits — read-only.
@@ -1514,7 +1521,7 @@ Timeline NEVER audits — read-only.
 | `TASK_PARENT_PROJECT_MISMATCH` | 422 | Parent is in a different project |
 | `TASK_SUBTASK_DEPTH_EXCEEDED` | 422 | Parent is already a subtask (depth > 1) |
 | `TASK_DEPENDENCY_SELF` | 422 | Self-dependency |
-| `TASK_DEPENDENCY_EXISTS` | 409 | Duplicate dep OR cap reached |
+| `TASK_DEPENDENCY_EXISTS` | 409 duplicate / **422 cap** | Duplicate edge is a 409 (`task.service.ts:1317`); hitting the 50-edge cap is `AppError.unprocessable` → 422 (`:1321-1326`), matching the prose above |
 | `TASK_DEPENDENCY_NOT_FOUND` | 404 | Removing a non-existent edge |
 | `TASK_DEPENDENCY_PROJECT_MISMATCH` | 422 | Dep is in a different project |
 | `TASK_DEPENDENCY_CIRCULAR` | 422 | Would form a cycle |
@@ -1532,11 +1539,11 @@ Timeline NEVER audits — read-only.
 | `FILE_TYPE_NOT_ALLOWED` | 422 | MIME not in policy allowlist |
 | `STORAGE_NOT_CONFIGURED` | 503 | Azure isn't wired |
 | `DUPLICATE_RESOURCE` | 409 | Re-finalize with the same blob_key |
-| `TASK_TEMPLATE_NOT_FOUND` | 404 | Template missing OR archived (on instantiate) |
+| `TASK_TEMPLATE_NOT_FOUND` | 404 missing / **422 archived** | Missing is a 404; instantiating an *archived* template is `AppError.unprocessable` → 422 (`task-template.service.ts:265`) |
 | `SHARE_LINK_NOT_FOUND` | 404 | Unknown id (admin path) OR unknown token (public path) OR project deleted while link existed |
 | `SHARE_LINK_REVOKED` | 410 | `revoked_at !== null` on resolve |
 | `SHARE_LINK_EXPIRED` | 410 | `expires_at <= now` on resolve |
-| `VALIDATION_ERROR` | 400 | `expires_at <= now` on share link create; bad token format on resolve; strict-mode unknown keys |
+| `VALIDATION_ERROR` | 400 / **422** | Bad token format on resolve and strict-mode unknown keys are 400 (Zod, at the validate middleware). `expires_at <= now` on share-link create is **422** — it is a service-layer `AppError.unprocessable` (`share-link.service.ts:190-193`), not a schema rejection |
 
 ---
 

@@ -1,6 +1,6 @@
 # Attendance — Backend
 
-The **Attendance** module owns daily check-in / check-out (multi-segment per day per BUG-040), **breaks within a segment** (`break/start` + `break/end`, subtracted from worked time), the **today-only immediate self-edit pair** (`POST /me/breaks`, `POST /me/times`), the correction-request lifecycle (employee proposes a fix → manager approves/rejects, owner can cancel pending), admin direct correction (`PATCH /attendance/:id`), QR-code office check-in (resolves an `office_location` token), optional geofence + WiFi/IP gating, and the EOD finalizer cron (inserts placeholders for absent / holiday / weekend / on-leave days and flips checked-in-but-not-out rows to `incomplete`).
+The **Attendance** module owns daily check-in / check-out (multi-segment per day per BUG-040), **breaks within a segment** (`break/start` + `break/end`, subtracted from worked time), the **today-only immediate self-edit pair** (`POST /me/breaks`, `POST /me/times`), the correction-request lifecycle (employee proposes a fix → manager approves/rejects, owner can cancel pending), admin direct correction (`PATCH /attendance/:id`), QR-code office check-in (resolves an `office_location` token), optional geofence + WiFi/IP gating, and the EOD finalizer cron (flips checked-in-but-not-out rows to `incomplete`, force-closes breaks left open inside them, and inserts placeholders for absent / holiday / weekend / on-leave days).
 
 Cross-module dependencies:
 - **Leave Management** owns `comp_off_ledger`. Attendance still computes and stores `overtime_minutes` on the record, but **nothing reads it** — comp-off accrual moved to billable timesheet minutes (`comp-off-accrual.service.ts`), and the `attendance_overtime` ledger `source_type` is legacy with no writer left. See [`leave-management.md`](./leave-management.md).
@@ -47,10 +47,10 @@ Route-level baseline in [`attendance.routes.ts`](../../src/routes/attendance.rou
 | `GET /attendance/me/today` / `me` | `attendance.check_in_out` (router baseline) | same |
 | `GET /attendance` | `attendance.read_team` | Admin, Manager, Team Lead |
 | `PATCH /attendance/:id` | `attendance.correction_approve` | Admin, Manager, Team Lead |
-| `POST /correction-requests` (submit) | `attendance.check_in_out` (anyone can submit own) | Admin, Manager, Team Lead, Employee |
-| `GET /correction-requests` | `attendance.check_in_out` (auto-filtered by service for non-reviewers) | same |
+| `POST /correction-requests` (submit) | router baseline **+ `attendance.correction_request`** | Admin, Manager, Team Lead, Employee |
+| `GET /correction-requests` | router baseline **+ `attendance.correction_request`** (auto-filtered by service for non-reviewers) | same |
 | `POST /correction-requests/:id/approve` / `reject` | `attendance.correction_approve` | Admin, Manager, Team Lead |
-| `POST /correction-requests/:id/cancel` (M49) | `authenticate` only — service-layer owner gate | Owner of the request |
+| `POST /correction-requests/:id/cancel` (M49) | router baseline `attendance.check_in_out` + service-layer owner gate | Owner of the request |
 
 **Service-layer reinforcement** ([`ATTENDANCE_REVIEW_ROLES`](../../src/constants/attendance.ts) = `[ADMIN, MANAGER, TEAM_LEAD]`):
 - `patchAttendance` and `assertCanReviewCorrections` still gate by **role string** (not permission). The route-level `requirePermission` is the primary gate; the service check is belt-and-braces against direct service callers in tests / cron.
@@ -106,7 +106,8 @@ One document per `(user_id × local_date)`. `local_date` is IST-anchored ("YYYY-
 {
   _id, user_id, attendance_record_id,
   requested_changes: {
-    segments?: [{ check_in: Date, check_out: Date | null }],   // BUG-040 canonical
+    segments?: [{ check_in: Date, check_out: Date | null,
+                  breaks?: [{ break_type, start: Date, end: Date | null }] }],  // BUG-040 canonical
     check_in:  Date | null,                                     // legacy single-pair
     check_out: Date | null,                                     // legacy single-pair
     reason: string,
@@ -439,7 +440,7 @@ Reviewer (Admin/Manager/TL) can patch a record without going through the correct
   - `check_out.time` → updates `segments[last].check_out`.
   - Method / location_id / ip metadata preserved from the existing punch when the patch doesn't override.
 - **Breaks are not patchable here** — `patchAttendanceBodySchema` has no `breaks` key, so a reviewer fixing a past day's breaks must approve a correction request carrying `segments[].breaks` (the seeded-segment branch creates `breaks: []`, and the existing array is otherwise left alone).
-- **Aliases re-synced**; minutes (worked + overtime + break totals) recomputed if both punches now exist; `flagged_for_correction = false`. There is **no** `incomplete → present` flip here — unlike the approve path, `status` only changes if the patch body says so, so filling in a missing check-out without also sending `status` leaves the row reading `incomplete` with a complete pair of punches.
+- **Aliases re-synced**; minutes (worked + overtime + break totals) recomputed if both punches now exist. `flagged_for_correction = false` sits **inside** that same `if (check_in && check_out)` block, so patching only `status` or `notes` on a flagged `incomplete` row leaves the flag set. There is **no** `incomplete → present` flip here — unlike the approve path, `status` only changes if the patch body says so, so filling in a missing check-out without also sending `status` leaves the row reading `incomplete` with a complete pair of punches.
 - `last_corrected_by` / `last_corrected_at` stamped.
 - `recordAudit(ATTENDANCE_PATCH, before=<snapshot>, after=<post-edit state>)`.
 
@@ -458,9 +459,9 @@ Office QR tokens live on `office_locations.qr_code_token` and are regenerable vi
 
 ## EOD finalizer cron ([`attendance-finalizer.job.ts`](../../src/jobs/attendance-finalizer.job.ts))
 
-**Schedule**: daily 23:00 IST (Asia/Kolkata). `runKey = attendanceFinalizerRunKey(now)` = the IST date being closed (i.e. "today" at 23:00, not "yesterday"). The `job_runs {job_name, run_key}` unique index absorbs duplicate fires.
+**Schedule**: daily 23:00 IST (Asia/Kolkata). `runKey = attendanceFinalizerRunKey(now)` = **yesterday** in IST — `dayjs(now).tz(JOB_TIMEZONE).subtract(1, 'day')` (`constants/jobs.ts:223-225`). The same value is passed straight in as `targetDate`, so the 23:00 run closes the **previous** day, not the one just ending. The `job_runs {job_name, run_key}` unique index absorbs duplicate fires.
 
-For every active internal user (excluding clients):
+For every active internal user — `{status: ACTIVE, role: {$nin: CLIENT_SIDE_ROLES}}`, i.e. excluding **both** `client` and `representative`. (This used to exclude only `client`, so every active representative collected a nightly `absent` placeholder; fixed in the job, see its comment at `attendance-finalizer.job.ts:162-170`.)
 
 **Step A — flip incompletes**:
 ```ts
@@ -469,6 +470,10 @@ AttendanceRecord.updateMany(
   { $set: { status: 'incomplete', flagged_for_correction: true } }
 )
 ```
+
+**Step A.1 — force-close open breaks** (undocumented until 2026-07-31, and it changes the outcome of the "break left open" narrative below): a second `updateMany` with
+`arrayFilters: [{ 's.check_out': null, 's.breaks': {$elemMatch: {end: null}} }, { 'b.end': null }]`
+closes every open break **inside a still-open segment**, synthesising `end = {time: 23:59:59 IST on targetDate, source: 'app'}`. It runs between A and B (`attendance-finalizer.job.ts:135-155`) and writes to `segments[].breaks[].end`.
 
 **Step B — insert placeholders** for users with no row. Streams the user list via `User.find().cursor()` in batches of `JOB_USER_BATCH_SIZE` to keep memory flat as headcount climbs. For each user:
 
@@ -547,7 +552,7 @@ No audit row for check-in / check-out — they're an event stream of their own (
 2. `findOne({user_id, local_date})` returns the existing row.
 3. `lastSeg.check_out != null` (the morning's segment was closed before lunch) → append a new segment `{check_in: punch, check_out: null}`.
 4. `syncAliasesFromSegments` updates `check_in` to remain the morning's first arrival (unchanged) and `check_out = null` (the new segment is open).
-5. Save → `200 ok`.
+5. Save → **`201 created`**. The append branch returns through the same controller as a first check-in, and `postCheckIn` unconditionally calls `created(res, data)` — so a second segment on an existing row still answers 201, matching the endpoint table above.
 
 ### Employee takes a lunch break without checking out
 
@@ -578,7 +583,7 @@ No audit row for check-in / check-out — they're an event stream of their own (
 
 ### EOD finalizer marks user absent
 
-1. 23:00 IST cron runs for `target_date = today (IST)`.
+1. 23:00 IST cron runs for `target_date = yesterday (IST)`.
 2. User U was active, no check-in today, no approved leave.
 3. `holiday=false`, `working_day=true` (Wednesday) → `placeholderStatus = 'absent'`.
 4. `$setOnInsert` writes a row `{user_id: U, local_date, status: 'absent', segments: []}`.
@@ -587,7 +592,7 @@ No audit row for check-in / check-out — they're an event stream of their own (
 ### Incomplete day flip
 
 1. User U checks in at 09:00, never checks out (phone died).
-2. 23:00 IST cron runs. Step A: `updateMany` finds the row (check_in set, check_out null) → flips `status: 'incomplete', flagged_for_correction: true`.
+2. **The next night's** 23:00 IST cron runs — the one on the same evening targets the day before, so the row is untouched for a further 24h. Step A: `updateMany` finds the row (check_in set, check_out null) → flips `status: 'incomplete', flagged_for_correction: true`.
 3. U opens `/attendance/me` next day, sees the orange "Missing check-out" pill, taps "Request correction", proposes `{check_out: '17:30'}`.
 
 ### Correction request → approve → record updates
@@ -647,9 +652,9 @@ No audit row for check-in / check-out — they're an event stream of their own (
 | 27 | "One pending per record" enforced at service layer (lookup-then-insert), NOT a partial-unique index | Older Atlas free-tier Mongos didn't always honor partial uniques |
 | 28 | Date-range queries capped at 92 days (`ATTENDANCE_DATE_RANGE_MAX_DAYS`) | Prevents page-aggregation cost of a year-of-records read |
 | 29 | Strict query validation on `GET /correction-requests` (`.strict()` rejects unknown keys) | Anti-typo guard — `?status=APPROVED` (wrong case) returns a 400 instead of "no rows" |
-| 30 | M49 cancel is **owner-only** with no route-level perm check (only `authenticate`) | Service-layer owner gate; admins can still reject if they need to terminate |
+| 30 | M49 cancel adds **no route-level permission of its own** — but `router.use(authenticate, requirePermission(ATTENDANCE_CHECK_IN_OUT))` at `attendance.routes.ts:31` covers every route on the router, so it is not `authenticate`-only | Service-layer owner gate on top; admins can still reject if they need to terminate |
 | 31 | M16 — `migrateAttendanceSegments` removed from boot path | Backfill was running every boot post-migration; preserved in git history if needed |
-| 32 | Finalizer's run key is "today" at 23:00, not "yesterday" | Idempotency key matches the IST date being closed |
+| 32 | Finalizer's run key is **yesterday** (IST), so the 23:00 run closes the previous day — an unclosed row sits open for ~24h before being flagged | Idempotency key matches the IST date being closed |
 | 33 | EOD placeholder rows have `segments: []` (NOT a synthetic null-segment) | Check-in seeds the first segment cleanly, flipping `status` from placeholder to `present` |
 | 34 | Finalizer `$setOnInsert` upsert means a concurrent check-in mid-cron keeps its `present` row | Race-safe by construction |
 | 35 | `daily_expected_hours` defaults to 8 (settings.work_schedule) → overtime = `max(0, total − breaks − 480)` minutes | Per-user expected hours not modeled in v1; break minutes come off before the comparison, so each one cuts overtime one-for-one |

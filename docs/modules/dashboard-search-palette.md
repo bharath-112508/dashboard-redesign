@@ -367,8 +367,8 @@ Returns flat `{users[], projects[], sprints[], tasks[]}` (NOT a paginated envelo
 | Caller | Users bucket | Projects bucket | Sprints + Tasks |
 |---|---|---|---|
 | Admin / Manager | All active | Open (no extra filter) | Open |
-| Team Lead / Employee | All active | `member_ids ∋ caller.id` via `buildProjectVisibilityFilter` | `project_id ∈ visibleProjectIds` |
-| Client | **Always empty** (directory is internal-only) | `client_ids ∋ caller.id` | `project_id ∈ visibleProjectIds` |
+| Team Lead / Employee | **Always empty** — `searchUsers` returns `[]` for every role except admin/manager (`search.service.ts:144`), with no DB round-trip | `member_ids ∋ caller.id` via `buildProjectVisibilityFilter` | `project_id ∈ visibleProjectIds` |
+| Client | **Always empty** (directory is internal-only) | `company_id = caller.company_id` via `buildProjectVisibilityFilter` (`representative` → `representative_ids ∋ caller.id`; no company → `DENY_ALL`) | `project_id ∈ visibleProjectIds` |
 
 `resolveVisibleProjectIds(caller)` runs ONCE per request and is passed to the sprint + task bucket builders. Skipped entirely when neither bucket is requested (saves a round-trip on `?types=users` typeahead).
 
@@ -429,7 +429,7 @@ Static in-memory catalog. Each `CommandPaletteAction`:
   key: '<resource>.<verb>',    // stable id, FE keys icon + analytics off this
   label: string,                // display text
   description?: string,         // subline
-  category: 'navigation'|'projects'|'tasks'|'time'|'leaves'|'attendance'|'reports'|'admin',
+  category: string,   // free-form by design — the eight values below are convention, not a type union
   url: string,                  // FE deep-link target
   keywords?: readonly string[], // additional substring tokens for ?q= filter
   permission?: Permission,      // required to surface; admins bypass via system.admin
@@ -483,9 +483,11 @@ return {actions: actionsResult.data, items}
 
 **`q.length < 2` → items empty** (no DB round-trip). Actions filter on every keystroke; resource hits appear once the query is specific enough to be useful.
 
-**`searchableRole === null` → items empty**. Search's visibility filter branches on the `RoleType` enum; if the caller's role isn't one of `{admin, manager, team_lead, employee, client}` we skip the items fetch (safe default — they get actions-only).
+**`searchableRole === null` → items empty**. Search's visibility filter branches on the `RoleType` enum; if the caller's role isn't a known role we skip the items fetch (safe default — they get actions-only). Note `SEARCHABLE_ROLES = new Set(Object.values(ROLES))` — **all six** roles including `representative`, so in practice every authenticated caller gets an items fetch.
 
-**Visibility delegation** — items fetch delegates to `search.service.search`, NOT a parallel implementation. Single source of truth for visibility scoping (member_ids vs client_ids vs admin-open) so Cmd-K and the dedicated `/search` endpoint never drift.
+**Visibility delegation** — items fetch delegates to `search.service.search`, NOT a parallel implementation. Single source of truth for visibility scoping (member_ids vs company_id vs admin-open).
+
+🔴 **They do drift for client-side callers.** `/search` passes `projectCallerFrom(req)`, which carries `company_id`; the palette calls `searchItems(..., { id, role })` with **no `company_id`** (`command-palette.service.ts:176-179`). `buildVisibilityFilter` then takes its `if (!caller.company_id) return DENY_ALL` branch, so a `client` typing in Cmd-K gets zero project/sprint/task items while the same query on `/search` returns their company's projects.
 
 ---
 
@@ -525,7 +527,7 @@ return {actions: actionsResult.data, items}
 2. Schema: both present, `from <= to`, `diff = 210 days ≤ 366` → passes; `req.query` is replaced with exactly `{from, to}`.
 3. `buildClientOverview(projectCallerFrom(req), from, to)` → `resolveClientProjectIds` → `buildProjectVisibilityFilter` → `{company_id: caller.company_id}` for a `client`, `{representative_ids: caller.id}` for a `representative`.
 4. `projectStatusFor({_id: {$in: ids}})` + `representativesStatusFor(company_id)` in parallel. **Neither reads `from`/`to`.**
-5. Response `{scope: 'client', range: {from, to, is_single_day: false}, summary: [3 tiles], attendance: null, representatives: {...}, projects: {...}}` — byte-identical to the same request with any other window.
+5. Response `{scope: 'client', range: {from, to, is_single_day: false}, summary: [3 tiles], attendance: null, representatives: {...}, projects: {...}}` — every *number* is window-independent, but the bytes differ: `buildRange` echoes `{from, to, is_single_day}` back into the payload.
 
 ### Employee dashboard, fresh joiner with no balance row
 
@@ -559,7 +561,7 @@ return {actions: actionsResult.data, items}
 
 1. `GET /search?q=alice` from a client. Default types = all four.
 2. `searchUsers(...)` first checks `caller.role === CLIENT` → returns `[]` without a DB round-trip.
-3. Projects: `client_ids ∋ caller.id` filter applied. Returns hits limited to projects where the client is on the roster.
+3. Projects: `buildProjectVisibilityFilter` applied — for a `client` that is `{company_id: caller.company_id}`, so hits cover every project of their company, not a roster subset. (`client_ids` no longer exists as a field anywhere in `src/`.)
 4. Sprints + tasks: `visibleProjectIds` resolved (same client roster filter), then matched.
 5. Response: users bucket empty; other 3 may have hits.
 
@@ -594,7 +596,7 @@ return {actions: actionsResult.data, items}
 |---|---|---|
 | `VALIDATION_ERROR` | 400 | `q` too short/long, unknown `types` value, empty `?types=` list; `range` outside the five-key enum; `from`/`to` not `YYYY-MM-DD`; `from > to`; span over 366 days' diff; on `/analytics` only, `from` without `to` (or vice versa) |
 | `FORBIDDEN` | 403 | Missing the route's `dashboard.*` permission — `AppError.forbidden()` from `requirePermission`, message `Insufficient permissions` |
-| `RATE_LIMIT_EXCEEDED` | 429 | Per-user 60/min budget exceeded (separate buckets for search vs palette per H3) — **no rate limiter is mounted on any dashboard route** |
+| *(no `error.code`)* | 429 | Per-user 60/min budget exceeded (separate buckets for search vs palette per H3) — **no rate limiter is mounted on any dashboard route**. 🔴 The limiters do not emit the standard envelope at all: `buildUserRateLimiter` responds with a bare `{"message": "Too many search requests. Please slow down."}` (`rate-limit.middleware.ts:113`), so there is no `error.code` to switch on. The catalog's 429 constant is `RATE_LIMITED`; `RATE_LIMIT_EXCEEDED` does not exist. |
 
 No aggregation failure produces a 5xx on any of the twelve dashboard routes; see §Degradation.
 
