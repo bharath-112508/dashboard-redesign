@@ -23,6 +23,7 @@ import logger from '../utils/logger.js';
 import { refreshTokensIssuedTotal } from '../utils/metrics.js';
 import type { AuthTokenPair, BaseJWTPayload } from '../types/index.js';
 import type { Permission } from '../constants/permissions.js';
+import { assertPasswordPolicy } from '../utils/password-policy.js';
 
 interface LoginInput {
     email: string;
@@ -483,6 +484,11 @@ export const changePassword = async (input: {
     if (!ok) {
         throw AppError.invalidCredentials('Old password is incorrect');
     }
+
+    // After the old-password check, so a caller who can't authenticate learns
+    // nothing about the policy. Zod only checks that the field is non-empty —
+    // the length/character rules are configurable and live here now.
+    await assertPasswordPolicy(input.new_password);
 
     const new_hash = await hashPassword(input.new_password);
 

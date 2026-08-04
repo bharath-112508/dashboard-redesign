@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, PASSWORD_REGEX } from '../constants/auth.js';
 
 /**
  * Zod schemas for `/auth/*` routes. Every schema is parsed by the `validate`
@@ -7,15 +6,18 @@ import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, PASSWORD_REGEX } from '../con
  * shaped per API_Contract §1.5.
  */
 
-const passwordPolicyMessage =
-    `Password must be ${PASSWORD_MIN_LENGTH}–${PASSWORD_MAX_LENGTH} characters ` +
-    'and include upper, lower, number, and special character.';
-
-export const passwordPolicy = z
-    .string()
-    .min(PASSWORD_MIN_LENGTH, passwordPolicyMessage)
-    .max(PASSWORD_MAX_LENGTH, passwordPolicyMessage)
-    .regex(PASSWORD_REGEX, passwordPolicyMessage);
+/**
+ * Structural only — the real rule lives in `utils/password-policy.ts` and is
+ * read from `system_settings.security` at request time.
+ *
+ * This used to be `.min(10).max(12).regex(...)` built from module-scope
+ * constants, which is why the six Settings → Security fields did nothing: a
+ * static Zod schema is frozen at import and cannot see a value an admin
+ * changes at runtime. Enforcement moved down to the service layer, where it
+ * can `await` the settings. Don't reintroduce length/character rules here —
+ * a second definition is exactly the drift this removed.
+ */
+export const passwordPolicy = z.string().min(1, 'Password is required');
 
 export const loginBodySchema = z.object({
     email: z.string().trim().toLowerCase().email(),

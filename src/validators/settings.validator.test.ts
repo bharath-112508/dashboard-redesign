@@ -39,12 +39,19 @@ describe('patchSettingsBodySchema — security.password_max_length', () => {
         expect(parseWith(6).success).toBe(true);
     });
 
-    it('accepts the maximum, 12', () => {
-        expect(parseWith(12).success).toBe(true);
+    // The cap used to be 12, which meant the "maximum length" setting could
+    // not express anything a password manager generates — the field was
+    // configurable in name only. It is now bcrypt's 72-byte hashing limit.
+    it('accepts 20 — a password-manager length, rejected under the old cap of 12', () => {
+        expect(parseWith(20).success).toBe(true);
     });
 
-    it('rejects 13 (above the maximum)', () => {
-        expect(parseWith(13).success).toBe(false);
+    it('accepts the maximum, 72 (bcrypt hashes at most 72 bytes)', () => {
+        expect(parseWith(72).success).toBe(true);
+    });
+
+    it('rejects 73 — past 72 bcrypt silently ignores the rest', () => {
+        expect(parseWith(73).success).toBe(false);
     });
 });
 

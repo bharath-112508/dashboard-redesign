@@ -89,6 +89,11 @@ vi.mock('./audit.service.js', () => ({
 
 vi.mock('./settings.service.js', () => ({
     resolvePasswordResetTtlMinutes: resolvePasswordResetTtlMinutesMock,
+    // `resetPassword` checks the configured password policy before it touches
+    // the token, so it reads settings now. `{}` means every policy field falls
+    // back to the built-in default (10–12 chars, all four character classes) —
+    // which is what these fixtures' passwords were written against.
+    getOrInitSettings: vi.fn(async () => ({ security: {} })),
 }));
 
 const svc = await import('./password-reset.service.js');

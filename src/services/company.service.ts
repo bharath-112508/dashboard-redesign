@@ -561,7 +561,7 @@ export const createRepresentative = async (
         throw AppError.unprocessable('Cannot add representatives to an archived company', ERROR_CODES.VALIDATION_ERROR);
     }
 
-    assertPasswordPolicy(input.initial_password);
+    await assertPasswordPolicy(input.initial_password);
 
     const emailInUse = await User.exists({ email: input.email });
     if (emailInUse) {

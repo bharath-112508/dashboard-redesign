@@ -14,6 +14,7 @@ import { resolvePasswordResetTtlMinutes } from './settings.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
+import { assertPasswordPolicy } from '../utils/password-policy.js';
 
 /**
  * Forgot / reset password flow (API_Contract §2.5 / §2.6).
@@ -90,6 +91,12 @@ interface ResetInput {
 }
 
 export const resetPassword = async (input: ResetInput): Promise<void> => {
+    // Checked FIRST, before the token is looked up or marked used. A password
+    // that fails the policy must not consume the single-use reset link — the
+    // user would be bounced to "invalid or expired link" and have to request a
+    // whole new email just for typing a short password.
+    await assertPasswordPolicy(input.new_password);
+
     const tokenHash = sha256Hex(input.token);
     const row = await PasswordResetToken.findOne({ token_hash: tokenHash });
 

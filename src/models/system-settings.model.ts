@@ -4,6 +4,7 @@ import { BASE_SCHEMA_OPTIONS } from './_base.js';
 import { COLLECTIONS } from '../constants/collections.js';
 import { SETTINGS_SINGLETON_KEY } from '../constants/settings.js';
 import { DEFAULT_BREAK_ALLOWANCE_MINUTES } from '../constants/attendance.js';
+import { PASSWORD_LENGTH_CEILING } from '../constants/auth.js';
 
 /**
  * `system_settings` — Data_Model.md §2.1
@@ -266,7 +267,7 @@ const attendanceSchema = new Schema<AttendanceSettings>(
 const securitySchema = new Schema<SecuritySettings>(
     {
         password_min_length: { type: Number, required: true, min: 6 },
-        password_max_length: { type: Number, required: true, min: 6, max: 12 },
+        password_max_length: { type: Number, required: true, min: 6, max: PASSWORD_LENGTH_CEILING },
         password_require_upper: { type: Boolean, required: true },
         password_require_lower: { type: Boolean, required: true },
         password_require_number: { type: Boolean, required: true },

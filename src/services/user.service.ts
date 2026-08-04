@@ -140,7 +140,7 @@ export const createUser = async (
     created_by: Types.ObjectId,
     audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
-    assertPasswordPolicy(input.initial_password);
+    await assertPasswordPolicy(input.initial_password);
 
     if (input.role === ROLES.ADMIN) {
         await assertSingleAdmin();

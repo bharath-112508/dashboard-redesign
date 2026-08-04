@@ -9,9 +9,23 @@
 
 export const BCRYPT_ROUNDS = 12;
 
+/**
+ * Hard ceiling on any configurable password max-length.
+ *
+ * bcrypt hashes at most 72 BYTES and silently discards the rest, so two
+ * different passwords sharing a 72-byte prefix would both unlock the account.
+ * Letting an admin set a maximum above this would advertise strength the
+ * hashing can't deliver.
+ */
+export const PASSWORD_LENGTH_CEILING = 72;
+
 export const PASSWORD_MIN_LENGTH = 10;
 export const PASSWORD_MAX_LENGTH = 12;
-export const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\da-zA-Z]).{10,12}$/;
+// PASSWORD_REGEX lived here and hardcoded the whole rule (`{10,12}` plus all
+// four character classes), which is why the six Settings → Security password
+// fields did nothing. The rule is now assembled per-request from those
+// settings in `utils/password-policy.ts`. The two constants above survive only
+// as the fallback for a settings row that predates the fields.
 
 export const MAX_LOGIN_ATTEMPTS = 5;
 export const LOGIN_LOCKOUT_MS = 15 * 60 * 1000;

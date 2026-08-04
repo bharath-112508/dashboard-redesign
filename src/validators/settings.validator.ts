@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { SLACK_BOT_TOKEN_MAX } from '../constants/slack.js';
+import { PASSWORD_LENGTH_CEILING } from '../constants/auth.js';
 
 /**
  * Zod schemas for `PATCH /settings`.
@@ -89,8 +90,13 @@ const attendanceSchema = z
 
 const securitySchema = z
     .object({
-        password_min_length: z.number().int().min(6),
-        password_max_length: z.number().int().min(6).max(12),
+        password_min_length: z.number().int().min(6).max(PASSWORD_LENGTH_CEILING),
+        // Was capped at 12, which made the "maximum length" setting unable to
+        // express anything a password manager generates. The ceiling is now
+        // bcrypt's: it hashes at most 72 BYTES and silently ignores the rest,
+        // so allowing more would mean two different long passwords sharing a
+        // 72-byte prefix both unlock the account.
+        password_max_length: z.number().int().min(6).max(PASSWORD_LENGTH_CEILING),
         password_require_upper: z.boolean(),
         password_require_lower: z.boolean(),
         password_require_number: z.boolean(),

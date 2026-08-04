@@ -12,6 +12,7 @@ import {
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import type { PatchSettingsBody } from '../validators/settings.validator.js';
+import { resolvePasswordPolicy, type PasswordPolicy } from '../utils/password-policy.js';
 
 /**
  * System settings service (API_Contract.md §4.1).
@@ -112,27 +113,13 @@ export const resolveLoginLockoutPolicy = async (): Promise<LoginLockoutPolicy> =
     };
 };
 
-export interface PasswordPolicy {
-    min_length: number | null;
-    max_length: number | null;
-    require_upper: boolean | null;
-    require_lower: boolean | null;
-    require_number: boolean | null;
-    require_special: boolean | null;
-}
-
-export const resolvePasswordPolicy = async (): Promise<PasswordPolicy> => {
-    const settings = await getOrInitSettings();
-    const s = settings.security;
-    return {
-        min_length: s?.password_min_length ?? null,
-        max_length: s?.password_max_length ?? null,
-        require_upper: s?.password_require_upper ?? null,
-        require_lower: s?.password_require_lower ?? null,
-        require_number: s?.password_require_number ?? null,
-        require_special: s?.password_require_special ?? null,
-    };
-};
+// `resolvePasswordPolicy` used to live here as a Step-33 resolver returning
+// nullable fields. It had ZERO callers — the settings fields and this reader
+// were both built, and the enforcement side was never connected, which is
+// precisely why the six Settings → Security password fields did nothing. It
+// now lives in `utils/password-policy.ts` next to the code that enforces it,
+// resolves the fallbacks rather than returning nulls for the caller to
+// re-handle, and is imported above.
 
 export const resolvePasswordResetTtlMinutes = async (): Promise<number | null> => {
     const settings = await getOrInitSettings();
@@ -201,6 +188,7 @@ interface PublicSettings {
         primary_color: string;
         login_page_tagline: string;
     };
+    password_policy: PasswordPolicy;
 }
 
 export const getPublicSettings = async (): Promise<PublicSettings> => {
@@ -209,7 +197,15 @@ export const getPublicSettings = async (): Promise<PublicSettings> => {
     for (const field of PUBLIC_COMPANY_FIELDS) {
         company[field] = settings.company[field];
     }
-    return { company: company as PublicSettings['company'] };
+    return {
+        company: company as PublicSettings['company'],
+        // Published on the ANONYMOUS endpoint on purpose: /reset-password is
+        // reached from an emailed link with no session, and it has to tell the
+        // user what a valid password looks like. A password policy is a rule
+        // you must satisfy, not a secret — every site shows it at the input.
+        // Nothing else in `security` is exposed here.
+        password_policy: resolvePasswordPolicy(settings.security),
+    };
 };
 
 // ─── PATCH /settings ───────────────────────────────────────────────────────
