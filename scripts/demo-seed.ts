@@ -17,6 +17,7 @@ import mongoose from 'mongoose';
 
 import connectDB, { disconnectDB } from '../src/config/database.config.js';
 import { COLLECTIONS } from '../src/constants/collections.js';
+import { assertSafeDb } from './_safe-db.js';
 
 const API = 'http://localhost:3001/api/v1';
 const ADMIN_EMAIL = 'admin@viljetech.com';
@@ -1641,6 +1642,7 @@ async function seedHolidays(): Promise<void> {
 async function seedAttendanceHistory(): Promise<void> {
     console.log('\n── Attendance history (direct Mongo) ──');
     await connectDB();
+    assertSafeDb('demo-seed.ts');
     const db = mongoose.connection.db!;
     const col = db.collection(COLLECTIONS.ATTENDANCE_RECORDS);
 

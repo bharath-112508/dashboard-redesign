@@ -17,12 +17,7 @@ import mongoose from 'mongoose';
 
 import connectDB, { disconnectDB } from '../src/config/database.config.js';
 import { COLLECTIONS } from '../src/constants/collections.js';
-
-// Safelist — refuse to wipe anything in production-shaped DB names.
-// `vilje-platform-demo` is the demo dataset the team resets between demos;
-// it is NOT production. Anything not named here is refused outright, which
-// is the whole point — widen this list deliberately, never reflexively.
-const SAFE_DB_NAMES = new Set(['timesheets', 'timesheets_dev', 'timesheets_test', 'vilje-platform-demo']);
+import { assertSafeDb } from './_safe-db.js';
 
 // Collections left completely untouched.
 const KEEP_COLLECTIONS = new Set<string>([COLLECTIONS.SYSTEM_SETTINGS, COLLECTIONS.ROLES, COLLECTIONS.LEAVE_TYPES]);
@@ -34,12 +29,7 @@ async function main(): Promise<void> {
     const db = mongoose.connection.db;
     if (!db) throw new Error('Mongo connection not ready');
 
-    if (!SAFE_DB_NAMES.has(db.databaseName)) {
-        throw new Error(
-            `Refusing to wipe DB '${db.databaseName}' — not in SAFE_DB_NAMES safelist. ` +
-                'Add it to scripts/demo-wipe.ts if you really mean it.'
-        );
-    }
+    assertSafeDb('demo-wipe.ts');
 
     console.log(`Connected to '${db.databaseName}'`);
     console.log(`Keeping untouched: ${[...KEEP_COLLECTIONS].join(', ')}`);

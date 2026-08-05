@@ -5,6 +5,7 @@
  * Run:  npx tsx scripts/smoke-reset-users.ts
  */
 import connectDB, { disconnectDB } from '../src/config/database.config.js';
+import { assertSafeDb } from './_safe-db.js';
 import { User } from '../src/models/user.model.js';
 import { RefreshToken } from '../src/models/refresh-token.model.js';
 import { PasswordResetToken } from '../src/models/password-reset-token.model.js';
@@ -13,6 +14,10 @@ const SEED_EMAIL = 'smoke@example.com';
 
 async function main() {
     await connectDB();
+    // The next line deletes every user but one. "NOT for production" in the
+    // header was the only thing standing between `npm run smoke` and an empty
+    // production user table.
+    assertSafeDb('smoke-reset-users.ts');
     await User.deleteMany({ email: { $ne: SEED_EMAIL } });
     await RefreshToken.deleteMany({});
     await PasswordResetToken.deleteMany({});
