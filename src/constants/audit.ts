@@ -28,6 +28,14 @@ export const AUDIT_ACTIONS = {
     USER_CREATE: 'user.create',
     USER_ROLE_CHANGE: 'user.role_change',
     USER_DEACTIVATE: 'user.deactivate',
+    /**
+     * Login email reassigned — used when the account is handed to a different
+     * person (see `scripts/change-user-email.ts`). Distinct from a profile
+     * edit because it changes WHO the account is, and it clears the cached
+     * `slack_user_id` so the previous person's Slack account stops resolving
+     * here.
+     */
+    USER_EMAIL_CHANGE: 'user.email_change',
     USER_REACTIVATE: 'user.reactivate',
     // Profile photo lifecycle (Phase 2 Step 22). `metadata.size_bytes` /
     // `metadata.mime_type` recorded on set; `metadata.previous_blob_key`

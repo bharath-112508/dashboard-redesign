@@ -90,6 +90,11 @@ const ALLOWLIST: readonly string[] = [
     // Written by `jobs/runner.ts`. The cron runner is not a service; it audits
     // every job execution centrally so individual jobs don't each repeat it.
     'SYSTEM_JOB_RUN',
+    // Written by `scripts/change-user-email.ts`. Reassigning an account's login
+    // email to a different person is an operator action run against the database
+    // directly — there is no HTTP route and no service for it, deliberately, because
+    // it also clears the cached `slack_user_id` and revokes sessions.
+    'USER_EMAIL_CHANGE',
 ];
 
 const readServiceSources = (): string => {
@@ -139,7 +144,9 @@ describe('audit-action coverage', () => {
         // A growing allowlist is how this test stops meaning anything. Raising
         // this number is a deliberate act that needs the justifying comment
         // above the new entry.
-        expect(ALLOWLIST.length).toBe(2);
+        //
+        // 2 -> 3: USER_EMAIL_CHANGE, written by `scripts/change-user-email.ts`.
+        expect(ALLOWLIST.length).toBe(3);
         for (const name of ALLOWLIST) {
             expect(Object.keys(AUDIT_ACTIONS)).toContain(name);
         }
