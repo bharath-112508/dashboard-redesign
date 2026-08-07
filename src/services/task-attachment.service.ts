@@ -72,6 +72,8 @@ import type {
  * inside those projects — same authority a Manager has across the org.
  */
 /** R4 — recognise multi-role admins via `role_keys`. */
+const INTERNAL_ROLES: readonly string[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE];
+
 const isManagerOrAdmin = (caller: ProjectCaller): boolean => {
     if (isAdminLike(caller)) return true;
     return caller.role === ROLES.MANAGER || caller.role === ROLES.TEAM_LEAD;
@@ -89,6 +91,34 @@ const loadTaskAndProject = async (
     if (!task) throw AppError.notFound('Task not found', ERROR_CODES.TASK_NOT_FOUND);
     const project = await loadProjectForCaller(task.project_id, caller);
     return { task, project };
+};
+
+/**
+ * Client-side callers may attach ONLY to an issue they reported themselves.
+ *
+ * `loadTaskForAccess` establishes that the caller can SEE the project, which is
+ * the right test for reading. It is not the right test for writing: a client
+ * can see every task in their company's projects, so visibility alone let them
+ * upload files onto the team's internal work — verified in the UI before this
+ * was added.
+ *
+ * Deliberately NOT frozen by status. The title/priority freeze exists so a
+ * reporter cannot move the goalposts after work starts; adding a screenshot to
+ * a bug someone is actively debugging is the opposite — it is the most useful
+ * thing a client can do, and it is usually the team who asks for it.
+ */
+const assertCanAttachToTask = async (taskId: Types.ObjectId, caller: ProjectCaller): Promise<void> => {
+    if (INTERNAL_ROLES.includes(caller.role)) return;
+    const task = await Task.findById(taskId)
+        .select('source created_by')
+        .lean<{ source?: string | null; created_by: Types.ObjectId } | null>();
+    if (!task) throw AppError.notFound('Task not found', ERROR_CODES.TASK_NOT_FOUND);
+    if (task.source !== 'client' || !task.created_by.equals(caller.id)) {
+        throw AppError.forbidden(
+            'You can only attach files to an issue you reported yourself',
+            ERROR_CODES.TASK_WRITE_FORBIDDEN
+        );
+    }
 };
 
 const loadAttachmentForAccess = async (
@@ -249,6 +279,7 @@ export const mintUploadUrl = async (
 ): Promise<MintUploadUrlResult> => {
     assertAzureConfigured();
     await loadTaskAndProject(taskId, caller); // throws if visibility fails
+    await assertCanAttachToTask(taskId, caller);
 
     const policy = await loadUploadPolicy();
     assertSizeAllowed(input.file_size, policy);
@@ -291,6 +322,9 @@ export const finalizeAttachment = async (
 ): Promise<Record<string, unknown>> => {
     assertAzureConfigured();
     const { task, project } = await loadTaskAndProject(taskId, caller);
+    // Guarded here too, not just on mint: finalize is a separate entry point
+    // and a caller could reach it directly.
+    await assertCanAttachToTask(taskId, caller);
 
     // Re-validate against the *current* policy: the FE may have minted
     // an upload URL when the cap was 25 MiB and the admin has since

@@ -714,3 +714,64 @@ describe('deleteAttachment', () => {
         expect(deleteBlobMock).not.toHaveBeenCalled();
     });
 });
+
+describe('client-side attachment scope — own report only', () => {
+    /**
+     * A client can SEE every task in their company's projects, so project
+     * visibility alone let them upload onto the team's internal work. Verified
+     * in the browser before the guard existed: "Add files" rendered on an
+     * internal task in Review that had nothing to do with them.
+     */
+    const clientCaller = (id?: Types.ObjectId) => ({
+        id: id ?? new Types.ObjectId(),
+        role: ROLES.CLIENT,
+        audit: undefined,
+    });
+
+    /** Second lookup: `assertCanAttachToTask` reads source + created_by. */
+    const stubOwnershipLookup = (row: { source: string | null; created_by: Types.ObjectId } | null): void => {
+        taskFindByIdMock.mockReturnValueOnce({
+            select: () => ({ lean: () => Promise.resolve(row) }),
+        });
+    };
+
+    it('refuses a client uploading to an internal task', async () => {
+        const project = makeProject();
+        const task = makeTaskRow(project._id);
+        loadProjectForCallerMock.mockResolvedValue(project);
+        stubTaskLookup(task);
+        stubOwnershipLookup({ source: null, created_by: new Types.ObjectId() });
+
+        await expect(
+            svc.mintUploadUrl(task._id, { file_name: 'a.png', file_size: 10, mime_type: 'image/png' }, clientCaller())
+        ).rejects.toMatchObject({ statusCode: 403, code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
+    });
+
+    it("refuses a client uploading to another client's report", async () => {
+        const project = makeProject();
+        const task = makeTaskRow(project._id);
+        loadProjectForCallerMock.mockResolvedValue(project);
+        stubTaskLookup(task);
+        stubOwnershipLookup({ source: 'client', created_by: new Types.ObjectId() });
+
+        await expect(
+            svc.mintUploadUrl(task._id, { file_name: 'a.png', file_size: 10, mime_type: 'image/png' }, clientCaller())
+        ).rejects.toMatchObject({ statusCode: 403 });
+    });
+
+    it('allows a client uploading to their OWN report, at any status', async () => {
+        // Deliberately not frozen by status: adding a screenshot to a bug being
+        // actively debugged is the most useful thing a client can do, and it is
+        // usually the team who asks for it.
+        const me = new Types.ObjectId();
+        const project = makeProject();
+        const task = makeTaskRow(project._id);
+        loadProjectForCallerMock.mockResolvedValue(project);
+        stubTaskLookup(task);
+        stubOwnershipLookup({ source: 'client', created_by: me });
+
+        await expect(
+            svc.mintUploadUrl(task._id, { file_name: 'a.png', file_size: 10, mime_type: 'image/png' }, clientCaller(me))
+        ).resolves.toBeDefined();
+    });
+});
