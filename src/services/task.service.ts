@@ -25,7 +25,7 @@ import {
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import { TASK_ACTIVITY_TYPES } from '../constants/task-activity.js';
-import { notifyTaskAssigned } from './notification-dispatcher.service.js';
+import { notifyClientTaskReported, notifyTaskAssigned } from './notification-dispatcher.service.js';
 import { recordAudit } from './audit.service.js';
 import { recordActivity } from './task-activity.service.js';
 import { buildProjectVisibilityFilter, loadProjectForCaller } from './project.service.js';
@@ -1554,6 +1554,19 @@ export const createTaskReport = async (
         actor_id: caller.id,
         activity_type: TASK_ACTIVITY_TYPES.CREATED,
     });
+
+    // Fire-and-forget, like every other dispatch: a notification failure must
+    // never fail the report itself. This matters more here than elsewhere
+    // though — the report has no assignee by design, so this fan-out is the
+    // ONLY signal the team gets. If it silently fails the issue sits unseen.
+    void notifyClientTaskReported({
+        task_id: created._id,
+        task_title: created.title,
+        project_id: projectId,
+        project_name: (project as { name?: string }).name ?? 'a project',
+        actor_id: caller.id,
+    }).catch(() => undefined); // the dispatcher self-catches; this makes the
+    // guarantee hold even if that ever stops being true.
 
     return toPublic(created);
 };

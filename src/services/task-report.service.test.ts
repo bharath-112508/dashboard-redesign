@@ -28,6 +28,7 @@ const {
     loadProjectForCallerMock,
     recordAuditMock,
     recordActivityMock,
+    notifyClientTaskReportedMock,
 } = vi.hoisted(() => ({
     taskCreateMock: vi.fn(),
     taskFindByIdMock: vi.fn(),
@@ -36,6 +37,7 @@ const {
     loadProjectForCallerMock: vi.fn(),
     recordAuditMock: vi.fn(),
     recordActivityMock: vi.fn(),
+    notifyClientTaskReportedMock: vi.fn(),
 }));
 
 vi.mock('../models/task.model.js', () => ({
@@ -68,7 +70,10 @@ vi.mock('./task-activity.service.js', () => ({
     recordActivity: recordActivityMock,
     recordActivityIfChanged: vi.fn(),
 }));
-vi.mock('./notification-dispatcher.service.js', () => ({ notifyTaskAssigned: vi.fn() }));
+vi.mock('./notification-dispatcher.service.js', () => ({
+    notifyTaskAssigned: vi.fn(),
+    notifyClientTaskReported: notifyClientTaskReportedMock,
+}));
 
 const svc = await import('./task.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -98,6 +103,9 @@ const validReport = () => ({
 
 beforeEach(() => {
     vi.clearAllMocks();
+    // The real dispatcher is async, so it always returns a promise. A bare
+    // vi.fn() returns undefined, which the call site's `.catch()` would trip on.
+    notifyClientTaskReportedMock.mockResolvedValue(undefined);
     loadProjectForCallerMock.mockResolvedValue({ _id: projectId, custom_task_statuses: [] });
     projectFindOneAndUpdateMock.mockReturnValue({ lean: () => Promise.resolve({ task_seq: 7 }) });
     stubOrderingLookups();
@@ -180,6 +188,34 @@ describe('createTaskReport — the server decides everything except three fields
         const doc = taskCreateMock.mock.calls[0][0] as Record<string, unknown>;
         expect((doc.created_by as Types.ObjectId).equals(reporter)).toBe(true);
         expect(doc.task_number).toBe(7);
+    });
+});
+
+describe('createTaskReport — the team is told', () => {
+    it('fans out a notification naming the task and project', async () => {
+        loadProjectForCallerMock.mockResolvedValue({
+            _id: projectId,
+            custom_task_statuses: [],
+            name: 'Aurora Foods Supply Portal',
+        });
+        const reporter = new Types.ObjectId();
+        await svc.createTaskReport(validReport(), caller(ROLES.CLIENT, reporter));
+
+        expect(notifyClientTaskReportedMock).toHaveBeenCalledTimes(1);
+        expect(notifyClientTaskReportedMock.mock.calls[0][0]).toMatchObject({
+            task_title: 'Checkout page 500s',
+            project_name: 'Aurora Foods Supply Portal',
+            actor_id: reporter,
+        });
+    });
+
+    it('a dispatch failure never fails the report — it is fire-and-forget', async () => {
+        // The report has no assignee by design, so this fan-out is the only
+        // signal the team gets; it must not be able to take the write down.
+        // `notifyClientTaskReported` is async, so the realistic failure is a
+        // rejected promise — not a synchronous throw.
+        notifyClientTaskReportedMock.mockRejectedValueOnce(new Error('slack exploded'));
+        await expect(svc.createTaskReport(validReport(), caller(ROLES.CLIENT))).resolves.toBeDefined();
     });
 });
 

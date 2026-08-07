@@ -34,6 +34,12 @@ export const NOTIFICATION_TYPES = {
     TASK_DUE_SOON: 'task_due_soon',
     TASK_OVERDUE: 'task_overdue',
     TASK_COMMENT: 'task_comment',
+    /**
+     * A Client or Representative filed an issue on a project. Fans out to the
+     * project's internal team, because a report nobody sees is a report that
+     * never happened — it lands in the backlog with no assignee by design.
+     */
+    TASK_REPORTED_BY_CLIENT: 'task_reported_by_client',
     ATTENDANCE_CORRECTION_REQUESTED: 'attendance_correction_requested',
     ATTENDANCE_CORRECTION_DECIDED: 'attendance_correction_decided',
     TIMESHEET_REMINDER: 'timesheet_reminder',

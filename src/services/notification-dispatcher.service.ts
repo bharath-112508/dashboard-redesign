@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 
 import { Notification, type NotificationDocument } from '../models/notification.model.js';
 import { User, type UserDocument } from '../models/user.model.js';
+import { Project } from '../models/project.model.js';
 import { ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { NOTIFICATION_TYPES, RELATED_ENTITY_KINDS, type NotificationType } from '../constants/notification.js';
@@ -1272,6 +1273,83 @@ export const notifyTimesheetReminder = async (input: {
                 recipient_id: input.recipient._id.toString(),
             },
             'Timesheet-reminder dispatch failed'
+        );
+    }
+};
+
+export interface ClientTaskReportedDispatchInput {
+    task_id: Types.ObjectId;
+    task_title: string;
+    project_id: Types.ObjectId;
+    project_name: string;
+    /** The client / representative who filed it. */
+    actor_id: Types.ObjectId;
+}
+
+/**
+ * A client filed an issue — tell the people who can act on it.
+ *
+ * Audience is the union of:
+ *   - the project's internal roster (`member_ids`), which is where the team
+ *     leads and employees actually working on it live, and
+ *   - every active admin / manager (`findReviewerPool`), who own triage.
+ *
+ * The union matters. Roster-only would miss a manager who oversees the project
+ * without being on it; pool-only would miss the employees doing the work. A
+ * client report has NO assignee by design, so if this fan-out is wrong the
+ * report simply sits in the backlog unseen — there is no second signal.
+ */
+export const notifyClientTaskReported = async (input: ClientTaskReportedDispatchInput): Promise<void> => {
+    const context = 'notify.client_task_reported';
+    try {
+        const actor = await findUserById(input.actor_id);
+        const project = await Project.findById(input.project_id)
+            .select('member_ids')
+            .lean<{ member_ids?: Types.ObjectId[] } | null>();
+
+        const pool = await findReviewerPool(input.actor_id);
+
+        // De-dupe across the two sources by id string; a manager who is also on
+        // the roster must not get two copies.
+        const seen = new Set(pool.map((r) => String(r._id)));
+        const rosterIds = (project?.member_ids ?? []).filter((id: Types.ObjectId) => !seen.has(String(id)));
+
+        const rosterUsers = rosterIds.length
+            ? await User.find({ _id: { $in: rosterIds }, status: USER_STATUSES.ACTIVE })
+                  .select(
+                      '_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled'
+                  )
+                  .lean<RecipientUser[]>()
+            : [];
+
+        const recipients = [...pool, ...rosterUsers];
+        if (recipients.length === 0) {
+            logger.info({ context }, 'No active recipients to notify');
+            return;
+        }
+
+        const actorName = actor?.full_name ?? 'A client';
+        const slack = await loadSlackDispatch();
+
+        await runWithConcurrency(recipients, NOTIFICATION_FAN_OUT_CONCURRENCY, (r) =>
+            dispatchToRecipient(
+                r,
+                {
+                    type: NOTIFICATION_TYPES.TASK_REPORTED_BY_CLIENT,
+                    title: `${actorName} reported an issue on ${input.project_name}`,
+                    body: input.task_title,
+                    link_url: `/tasks/${input.task_id.toString()}`,
+                    related_entity: { kind: RELATED_ENTITY_KINDS.TASK, id: input.task_id },
+                },
+                null,
+                context,
+                slack
+            )
+        );
+    } catch (err) {
+        logger.warn(
+            { err, code: ERROR_CODES.NOTIFICATION_DISPATCH_FAILED, dispatch_event: context },
+            'dispatch failed'
         );
     }
 };
