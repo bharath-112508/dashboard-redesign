@@ -8,6 +8,7 @@ import { AppError } from '../utils/app-error.js';
 import { isAdminLike } from '../utils/role-check.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
+import { DEFAULT_TASK_STATUSES } from '../constants/task.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { TASK_ACTIVITY_TYPES } from '../constants/task-activity.js';
 import {
@@ -102,20 +103,26 @@ const loadTaskAndProject = async (
  * upload files onto the team's internal work — verified in the UI before this
  * was added.
  *
- * Deliberately NOT frozen by status. The title/priority freeze exists so a
- * reporter cannot move the goalposts after work starts; adding a screenshot to
- * a bug someone is actively debugging is the opposite — it is the most useful
- * thing a client can do, and it is usually the team who asks for it.
+ * Frozen at the entry status too, matching the title/priority rule. Once the
+ * team picks the issue up, the reporter's channel is a comment — which they
+ * still hold, and which puts the message where the assignee will see it rather
+ * than as a file quietly appended to a task already in flight.
  */
 const assertCanAttachToTask = async (taskId: Types.ObjectId, caller: ProjectCaller): Promise<void> => {
     if (INTERNAL_ROLES.includes(caller.role)) return;
     const task = await Task.findById(taskId)
-        .select('source created_by')
-        .lean<{ source?: string | null; created_by: Types.ObjectId } | null>();
+        .select('source created_by status')
+        .lean<{ source?: string | null; created_by: Types.ObjectId; status: string } | null>();
     if (!task) throw AppError.notFound('Task not found', ERROR_CODES.TASK_NOT_FOUND);
     if (task.source !== 'client' || !task.created_by.equals(caller.id)) {
         throw AppError.forbidden(
             'You can only attach files to an issue you reported yourself',
+            ERROR_CODES.TASK_WRITE_FORBIDDEN
+        );
+    }
+    if (task.status !== DEFAULT_TASK_STATUSES.TO_DO) {
+        throw AppError.forbidden(
+            'This issue is already being worked on — add a comment instead of attaching files',
             ERROR_CODES.TASK_WRITE_FORBIDDEN
         );
     }

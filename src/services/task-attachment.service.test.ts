@@ -728,8 +728,10 @@ describe('client-side attachment scope — own report only', () => {
         audit: undefined,
     });
 
-    /** Second lookup: `assertCanAttachToTask` reads source + created_by. */
-    const stubOwnershipLookup = (row: { source: string | null; created_by: Types.ObjectId } | null): void => {
+    /** Second lookup: `assertCanAttachToTask` reads source + created_by + status. */
+    const stubOwnershipLookup = (
+        row: { source: string | null; created_by: Types.ObjectId; status?: string } | null
+    ): void => {
         taskFindByIdMock.mockReturnValueOnce({
             select: () => ({ lean: () => Promise.resolve(row) }),
         });
@@ -740,7 +742,7 @@ describe('client-side attachment scope — own report only', () => {
         const task = makeTaskRow(project._id);
         loadProjectForCallerMock.mockResolvedValue(project);
         stubTaskLookup(task);
-        stubOwnershipLookup({ source: null, created_by: new Types.ObjectId() });
+        stubOwnershipLookup({ source: null, created_by: new Types.ObjectId(), status: 'to_do' });
 
         await expect(
             svc.mintUploadUrl(task._id, { file_name: 'a.png', file_size: 10, mime_type: 'image/png' }, clientCaller())
@@ -752,26 +754,36 @@ describe('client-side attachment scope — own report only', () => {
         const task = makeTaskRow(project._id);
         loadProjectForCallerMock.mockResolvedValue(project);
         stubTaskLookup(task);
-        stubOwnershipLookup({ source: 'client', created_by: new Types.ObjectId() });
+        stubOwnershipLookup({ source: 'client', created_by: new Types.ObjectId(), status: 'to_do' });
 
         await expect(
             svc.mintUploadUrl(task._id, { file_name: 'a.png', file_size: 10, mime_type: 'image/png' }, clientCaller())
         ).rejects.toMatchObject({ statusCode: 403 });
     });
 
-    it('allows a client uploading to their OWN report, at any status', async () => {
-        // Deliberately not frozen by status: adding a screenshot to a bug being
-        // actively debugged is the most useful thing a client can do, and it is
-        // usually the team who asks for it.
+    it('allows a client uploading to their OWN report while it is untouched', async () => {
         const me = new Types.ObjectId();
         const project = makeProject();
         const task = makeTaskRow(project._id);
         loadProjectForCallerMock.mockResolvedValue(project);
         stubTaskLookup(task);
-        stubOwnershipLookup({ source: 'client', created_by: me });
+        stubOwnershipLookup({ source: 'client', created_by: me, status: 'to_do' });
 
         await expect(
             svc.mintUploadUrl(task._id, { file_name: 'a.png', file_size: 10, mime_type: 'image/png' }, clientCaller(me))
         ).resolves.toBeDefined();
+    });
+
+    it('refuses once the team has started — same freeze as the title/priority edit', async () => {
+        const me = new Types.ObjectId();
+        const project = makeProject();
+        const task = makeTaskRow(project._id);
+        loadProjectForCallerMock.mockResolvedValue(project);
+        stubTaskLookup(task);
+        stubOwnershipLookup({ source: 'client', created_by: me, status: 'in_progress' });
+
+        await expect(
+            svc.mintUploadUrl(task._id, { file_name: 'a.png', file_size: 10, mime_type: 'image/png' }, clientCaller(me))
+        ).rejects.toMatchObject({ statusCode: 403, code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
     });
 });
