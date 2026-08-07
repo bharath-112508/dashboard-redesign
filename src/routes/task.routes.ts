@@ -9,6 +9,7 @@ import {
     addDependencyBodySchema,
     assignStoryBodySchema,
     createTaskBodySchema,
+    createTaskReportBodySchema,
     listTasksQuerySchema,
     moveSprintBodySchema,
     patchTaskBodySchema,
@@ -57,6 +58,17 @@ router.post(
     asyncHandler(ctrl.postCreate)
 );
 
+// Declared BEFORE `/:id` routes for the same reason `/summary` is on the
+// timesheet router — otherwise Express matches `report` as an ObjectId param.
+// Gated on TASK_REPORT, not TASK_WRITE: this is the one write a client-side
+// user may perform on the task tree.
+router.post(
+    '/report',
+    requirePermission(PERMISSIONS.TASK_REPORT),
+    validate({ body: createTaskReportBodySchema }),
+    asyncHandler(ctrl.postReport)
+);
+
 // ─── Item ────────────────────────────────────────────────────────────────
 
 router.get(
@@ -66,9 +78,12 @@ router.get(
     asyncHandler(ctrl.getOne)
 );
 
+// TASK_REPORT is accepted alongside TASK_WRITE (requirePermission is OR) so a
+// client can amend their own report. The service narrows them to their own
+// `source: 'client'` rows and to TASK_CLIENT_PATCH_FIELDS.
 router.patch(
     '/:id',
-    requirePermission(PERMISSIONS.TASK_WRITE),
+    requirePermission(PERMISSIONS.TASK_WRITE, PERMISSIONS.TASK_REPORT),
     validate({ params: taskIdParamSchema, body: patchTaskBodySchema }),
     asyncHandler(ctrl.patchOne)
 );

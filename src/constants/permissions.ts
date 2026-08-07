@@ -87,6 +87,15 @@ export const PERMISSIONS = {
     TASK_WRITE: 'task.write',
     TASK_COMMENT_WRITE: 'task_comment.write',
     TASK_ATTACHMENT_WRITE: 'task_attachment.write',
+    /**
+     * Raise an issue on a project you can already see — the client-side
+     * reporting bit. Deliberately NOT `task.write`: that one gates nine
+     * routes including delete, reorder, move-sprint and dependency editing,
+     * so granting it to a client would let them restructure the team's board.
+     * This grants exactly one thing: create a report, then edit its title,
+     * description and suggested priority while it is theirs.
+     */
+    TASK_REPORT: 'task.report',
 
     // ─── Task templates (Step 40) ──────────────────────────────────────
     TASK_TEMPLATE_READ: 'task_template.read',

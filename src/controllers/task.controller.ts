@@ -8,6 +8,7 @@ import type {
     AddDependencyBody,
     AssignStoryBody,
     CreateTaskBody,
+    CreateTaskReportBody,
     ListTasksQuery,
     MoveSprintBody,
     PatchTaskBody,
@@ -29,6 +30,12 @@ const idOf = (req: Request, key = 'id'): Types.ObjectId => new Types.ObjectId(re
 
 export const postCreate = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.createTask(req.body as CreateTaskBody, projectCallerFrom(req));
+    return created(res, data);
+};
+
+/** `POST /tasks/report` — the client-side issue form. */
+export const postReport = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.createTaskReport(req.body as CreateTaskReportBody, projectCallerFrom(req));
     return created(res, data);
 };
 

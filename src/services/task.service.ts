@@ -1,5 +1,7 @@
 import { Types } from 'mongoose';
 
+import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
+
 import { Task, type TaskDocument } from '../models/task.model.js';
 import { Story } from '../models/story.model.js';
 import { Sprint } from '../models/sprint.model.js';
@@ -14,6 +16,7 @@ import {
     DEFAULT_TASK_STATUSES,
     DEFAULT_TASK_STATUS_VALUES,
     TASK_DEPENDENCIES_MAX,
+    TASK_CLIENT_PATCH_FIELDS,
     TASK_EMPLOYEE_PATCH_FIELDS,
     TASK_ISSUE_TYPES,
     TASK_MAX_SUBTASK_DEPTH,
@@ -155,8 +158,24 @@ const assertSelfAddOnly = (patch: PatchTaskBody, task: TaskDocument, caller: Pro
 const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
     if (isManagerOrAdmin(caller)) return;
     if (!INTERNAL_ROLES.includes(caller.role)) {
-        // Clients / representatives have read-only project access; PATCH is never theirs.
-        throw AppError.forbidden('Clients cannot update tasks', ERROR_CODES.TASK_WRITE_FORBIDDEN);
+        // Client-side callers reach this route via TASK_REPORT (the route gate
+        // is OR). They may amend ONLY a report they filed themselves, and only
+        // the fields in TASK_CLIENT_PATCH_FIELDS. Every other task in a project
+        // they can see stays read-only to them.
+        if (task.source !== 'client' || !task.created_by.equals(caller.id)) {
+            throw AppError.forbidden(
+                'You can only edit an issue you reported yourself',
+                ERROR_CODES.TASK_WRITE_FORBIDDEN
+            );
+        }
+        const outside = Object.keys(patch).filter((k) => !TASK_CLIENT_PATCH_FIELDS.includes(k));
+        if (outside.length > 0) {
+            throw AppError.forbidden(
+                `You may only update: ${TASK_CLIENT_PATCH_FIELDS.join(', ')}`,
+                ERROR_CODES.TASK_WRITE_FORBIDDEN
+            );
+        }
+        return;
     }
     // Fields outside the employee whitelist are never allowed for any employee.
     const offending = Object.keys(patch).filter((k) => !TASK_EMPLOYEE_PATCH_FIELDS.includes(k));
@@ -1431,4 +1450,110 @@ export const removeTaskDependency = async (
     });
 
     return toPublic(task);
+};
+
+// ─── Client-side issue reporting ──────────────────────────────────────────
+
+/**
+ * Roles allowed to file a report. Deliberately the client side only: the
+ * `source: 'client'` marker this writes must be TRUE, and an internal user
+ * filing through here would make it a lie. Internal staff already have the
+ * full `createTask`.
+ */
+const REPORTER_ROLES: readonly string[] = [ROLES.CLIENT, ROLES.REPRESENTATIVE];
+
+/**
+ * Raise an issue on a project the caller can already see.
+ *
+ * This is NOT `createTask` with a different gate. A client controls exactly
+ * three things — title, description and a suggested priority — and the server
+ * decides everything else:
+ *
+ *   sprint_id  = null   → lands in the BACKLOG, never straight onto the board.
+ *                         A client report must not silently insert itself into
+ *                         the team's committed sprint scope; triage decides.
+ *   story_id   = null   → not attached to an epic by an outsider.
+ *   assignees  = []     → a client does not pick who works on it.
+ *   status     = to_do  → the project's entry status.
+ *   issue_type = bug    → this surface is the bug-report form.
+ *   source     = client → survives every later status/priority change, so
+ *                         "what did the client raise" stays answerable.
+ *
+ * `due_date` is required by the model but meaningless on an unread report, so
+ * it starts at today (IST) and triage re-dates it.
+ */
+export const createTaskReport = async (
+    input: { project_id: string; title: string; description?: string; priority?: string },
+    caller: ProjectCaller
+): Promise<Record<string, unknown>> => {
+    if (!REPORTER_ROLES.includes(caller.role)) {
+        throw AppError.forbidden('Only client-side users can file an issue report', ERROR_CODES.TASK_WRITE_FORBIDDEN);
+    }
+
+    const projectId = new Types.ObjectId(input.project_id);
+    // The whole access decision. A `client` reaches every project of their
+    // company; a `representative` only the ones they're rostered on. Neither
+    // can name a project id they cannot already open.
+    const project = await loadProjectForCaller(projectId, caller);
+
+    const status = DEFAULT_TASK_STATUSES.TO_DO;
+    assertValidStatus(status, project);
+
+    const position = await nextPositionInColumn(projectId, status);
+    const backlogRank = await nextBacklogRank(projectId);
+
+    // Same atomic reservation as `createTask` — concurrent reports get
+    // distinct issue keys without a transaction.
+    const counter = await Project.findOneAndUpdate(
+        { _id: projectId },
+        { $inc: { task_seq: 1 } },
+        { new: true, projection: { task_seq: 1 } }
+    ).lean<{ task_seq: number } | null>();
+    if (!counter) {
+        throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    }
+
+    const created = await Task.create({
+        project_id: projectId,
+        task_number: counter.task_seq,
+        sprint_id: null,
+        story_id: null,
+        parent_task_id: null,
+        title: input.title,
+        description: input.description ?? '',
+        status,
+        priority: input.priority ?? TASK_PRIORITIES.MEDIUM,
+        issue_type: TASK_ISSUE_TYPES.BUG,
+        story_points: null,
+        labels: [],
+        due_date: dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT),
+        estimated_hours: 0,
+        assignee_ids: [],
+        primary_assignee_id: null,
+        collaborator_ids: [],
+        depends_on_task_ids: [],
+        position,
+        backlog_rank: backlogRank,
+        source: 'client',
+        created_by: caller.id,
+        updated_by: caller.id,
+        completed_at: null,
+    });
+
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.TASK_CREATE,
+            target: { kind: AUDIT_TARGET_KINDS.TASK, id: created._id },
+            after: toPublic(created),
+            metadata: { project_id: projectId.toString(), source: 'client' },
+        });
+    }
+
+    void recordActivity({
+        task_id: created._id,
+        actor_id: caller.id,
+        activity_type: TASK_ACTIVITY_TYPES.CREATED,
+    });
+
+    return toPublic(created);
 };

@@ -59,6 +59,10 @@ const EMPLOYEE_BASE: readonly Permission[] = [
     PERMISSIONS.TASK_WRITE,
     PERMISSIONS.TASK_COMMENT_WRITE,
     PERMISSIONS.TASK_ATTACHMENT_WRITE,
+    // Both `client` (company-wide project visibility) and `representative`
+    // (rostered projects only) may raise issues. The project scope each of
+    // them gets is decided by `loadProjectForCaller`, not by this bit.
+    PERMISSIONS.TASK_REPORT,
     PERMISSIONS.TASK_TEMPLATE_READ,
     PERMISSIONS.TIMESHEET_WRITE,
     // M3 — `ATTENDANCE_READ_OWN`, `LEAVE_BALANCE_READ_OWN`,
@@ -147,6 +151,10 @@ const CLIENT_SIDE_BASE: readonly Permission[] = [
     // Client-side users can attach files on tasks within their visible
     // projects. Per-project visibility is enforced at the service layer.
     PERMISSIONS.TASK_ATTACHMENT_WRITE,
+    // Both `client` (company-wide project visibility) and `representative`
+    // (rostered projects only) may raise issues. The project scope each of
+    // them gets is decided by `loadProjectForCaller`, not by this bit.
+    PERMISSIONS.TASK_REPORT,
     // Org-wide holiday calendar + leave-type catalog (read-only) — same as
     // the pre-Step-47 client behaviour.
     PERMISSIONS.HOLIDAY_READ,

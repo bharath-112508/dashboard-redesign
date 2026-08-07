@@ -90,6 +90,14 @@ export interface TaskDocument extends Document {
      * on create (appended to the end); reordered via `POST /tasks/:id/rank`.
      */
     backlog_rank: number;
+    /**
+     * Where the task came from. `'client'` marks an issue raised by a Client
+     * or Representative through the report form; `null` is ordinary internal
+     * work. A FIELD rather than a status or label on purpose: it survives
+     * every status change and re-prioritisation, so "what did the client
+     * raise" stays answerable months later.
+     */
+    source: 'client' | null;
     created_by: Types.ObjectId;
     updated_by: Types.ObjectId | null;
     /**
@@ -162,6 +170,9 @@ const taskSchema = new Schema<TaskDocument>(
         assignee_ids: { type: [Schema.Types.ObjectId], ref: COLLECTIONS.USERS, default: [] },
         primary_assignee_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
         collaborator_ids: { type: [Schema.Types.ObjectId], ref: COLLECTIONS.USERS, default: [] },
+        // `null` = internal. Existing rows have no value and read as null, so
+        // this needs no backfill.
+        source: { type: String, enum: ['client'], default: null },
         depends_on_task_ids: { type: [Schema.Types.ObjectId], ref: COLLECTIONS.TASKS, default: [] },
         position: { type: Number, required: true, default: 0, min: 0 },
         // Server-assigned (see task.service.createTask + rankTask). `required`

@@ -126,5 +126,15 @@ export const TASK_EMPLOYEE_PATCH_FIELDS: readonly string[] = [
     'assignee_ids',
 ];
 
+/**
+ * What a client-side reporter may change on their OWN report
+ * (`source: 'client'` && `created_by === caller`).
+ *
+ * Note what is absent: `status`. A client cannot close, reopen or advance
+ * their own report — that is the team's call, and letting the reporter drive
+ * status turns the board into a negotiation. They can always comment.
+ */
+export const TASK_CLIENT_PATCH_FIELDS: readonly string[] = ['title', 'description', 'priority'];
+
 /** Max people a single task can be assigned to. */
 export const TASK_MAX_ASSIGNEES = 20;

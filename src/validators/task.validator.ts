@@ -111,6 +111,24 @@ export const labelsSchema = z
 
 // ─── POST /tasks ──────────────────────────────────────────────────────────
 
+/**
+ * Client-side issue report. `.strict()` matters here: a client sending
+ * `assignee_ids` or `sprint_id` gets a 400 rather than having it quietly
+ * dropped, so nobody is left believing they set something they did not.
+ * Everything not listed is decided server-side — see `createTaskReport`.
+ */
+export const createTaskReportBodySchema = z
+    .object({
+        project_id: objectIdSchema,
+        title: z.string().trim().min(1).max(TASK_TITLE_MAX),
+        description: z.string().trim().max(TASK_DESCRIPTION_MAX).default(''),
+        // A suggestion the team may override during triage.
+        priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
+    })
+    .strict();
+
+export type CreateTaskReportBody = z.infer<typeof createTaskReportBodySchema>;
+
 export const createTaskBodySchema = z
     .object({
         project_id: objectIdSchema,
