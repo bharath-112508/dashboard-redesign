@@ -227,6 +227,12 @@ describe('client PATCH scope — the narrowing that keeps this safe', () => {
         created_by: owner,
         status: DEFAULT_TASK_STATUSES.TO_DO,
         assignee_ids: [] as Types.ObjectId[],
+        collaborator_ids: [] as Types.ObjectId[],
+        depends_on_task_ids: [] as Types.ObjectId[],
+        labels: [] as string[],
+        title: 'Reported issue',
+        description: '',
+        priority: TASK_PRIORITIES.MEDIUM as string,
         save: vi.fn(),
         toJSON: () => ({}),
     });
@@ -263,6 +269,21 @@ describe('client PATCH scope — the narrowing that keeps this safe', () => {
         await expect(
             patchAs(ownReport(me), caller(ROLES.CLIENT, me), { status: DEFAULT_TASK_STATUSES.DONE })
         ).rejects.toMatchObject({ statusCode: 403, code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
+    });
+
+    it('refuses once the team has started — an in-progress report is frozen', async () => {
+        const me = new Types.ObjectId();
+        const started = { ...ownReport(me), status: DEFAULT_TASK_STATUSES.IN_PROGRESS };
+        await expect(patchAs(started, caller(ROLES.CLIENT, me), { title: 'new wording' })).rejects.toMatchObject({
+            statusCode: 403,
+            code: ERROR_CODES.TASK_WRITE_FORBIDDEN,
+        });
+    });
+
+    it('still allows an edit while the report is untouched at the entry status', async () => {
+        const me = new Types.ObjectId();
+        const fresh = ownReport(me); // status: to_do
+        await expect(patchAs(fresh, caller(ROLES.CLIENT, me), { title: 'clearer title' })).resolves.toBeDefined();
     });
 
     it('refuses a client assigning the work to someone', async () => {

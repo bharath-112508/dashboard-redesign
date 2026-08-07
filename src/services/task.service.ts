@@ -168,6 +168,17 @@ const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, call
                 ERROR_CODES.TASK_WRITE_FORBIDDEN
             );
         }
+        // Frozen once the team picks it up. While the report still sits at the
+        // entry status nobody has acted on it, so a reporter correcting their
+        // own wording costs nothing. The moment it moves, someone is working to
+        // that description — letting the client rewrite the title or re-rank the
+        // priority underneath them changes the job after it started.
+        if (task.status !== DEFAULT_TASK_STATUSES.TO_DO) {
+            throw AppError.forbidden(
+                'This issue is already being worked on — add a comment instead of editing it',
+                ERROR_CODES.TASK_WRITE_FORBIDDEN
+            );
+        }
         const outside = Object.keys(patch).filter((k) => !TASK_CLIENT_PATCH_FIELDS.includes(k));
         if (outside.length > 0) {
             throw AppError.forbidden(
