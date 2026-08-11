@@ -72,3 +72,13 @@ export const BILLING_RATE_LIST_MAX_LIMIT = 100;
 
 export const TIMESHEET_DEFAULT_SELF_EDIT_WINDOW_DAYS = 7;
 export const TIMESHEET_DEFAULT_DAILY_WARN_THRESHOLD_HOURS = 8;
+
+/**
+ * Hard ceiling on a single timesheet export.
+ *
+ * Deliberately far above the 200-row list cap: an export is a deliberate,
+ * one-off action, not a page render. If a window genuinely exceeds this the
+ * file still downloads and says on its face that it was truncated, rather
+ * than silently handing over a short one.
+ */
+export const TIMESHEET_EXPORT_MAX_ROWS = 5000;

@@ -46,6 +46,20 @@ router.get(
     asyncHandler(ctrl.getSummary)
 );
 
+// ─── /export — manager + admin ──────────────────────────────────────────
+
+// MUST stay above `/:id` (see the file header): Express would otherwise
+// match "export" as an ObjectId param and 400 on the cast.
+//
+// Same gate and the same service call as the list below, so the export can
+// never widen what a caller is allowed to read.
+router.get(
+    '/export',
+    requirePermission(PERMISSIONS.TIMESHEET_READ),
+    validate({ query: listTimesheetsQuerySchema }),
+    asyncHandler(ctrl.getExport)
+);
+
 // ─── Collection — manager + admin ───────────────────────────────────────
 
 router.get(

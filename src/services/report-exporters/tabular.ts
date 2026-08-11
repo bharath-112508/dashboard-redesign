@@ -211,3 +211,146 @@ export const toTabularLeaves = (data: LeaveReportResult): TabularReport => {
         rows,
     };
 };
+
+// ─── Team timesheets ──────────────────────────────────────────────────────
+
+/** One enriched entry as `listAllEntries` returns it (names already resolved). */
+export interface TeamTimesheetExportRow {
+    local_date: string;
+    entry_type: string;
+    description?: string | null;
+    general_category?: string | null;
+    billable_total_minutes: number;
+    non_billable_total_minutes: number;
+    user_id: unknown;
+    user?: { id?: string; full_name?: string } | null;
+    project?: { name?: string } | null;
+    task?: { title?: string } | null;
+}
+
+export interface TeamTimesheetExportInput {
+    from_date: string;
+    to_date: string;
+    /** Resolved display names, or null when the filter wasn't applied. */
+    user_label: string | null;
+    project_label: string | null;
+    rows: TeamTimesheetExportRow[];
+    /** True when the row cap was hit, so the file can say so out loud. */
+    truncated: boolean;
+}
+
+/**
+ * Team timesheets → one row per entry, followed by a per-employee roll-up.
+ *
+ * The detail rows answer "what did people do"; the roll-up answers "how many
+ * hours did each person put in", which is what the file is usually downloaded
+ * for — and which otherwise requires a pivot table. Both live in one sheet so
+ * a reader never has to reconcile two files.
+ *
+ * The roll-up is keyed on user id, not display name: two people can share a
+ * name, and a deleted user has none at all.
+ */
+export const toTabularTeamTimesheets = (input: TeamTimesheetExportInput): TabularReport => {
+    const hours = (m: number): number => Math.round((m / 60) * 100) / 100;
+
+    const detail = input.rows.map((r) => ({
+        local_date: r.local_date,
+        user: r.user?.full_name ?? 'Deleted user',
+        entry_type: r.entry_type === 'task_linked' ? 'Task' : 'General',
+        project: r.project?.name ?? '',
+        task: r.entry_type === 'task_linked' ? (r.task?.title ?? '') : (r.general_category ?? ''),
+        notes: r.description ?? '',
+        billable_hours: hours(r.billable_total_minutes),
+        non_billable_hours: hours(r.non_billable_total_minutes),
+        total_hours: hours(r.billable_total_minutes + r.non_billable_total_minutes),
+    }));
+
+    const byUser = new Map<string, { name: string; b: number; nb: number; n: number }>();
+    for (const r of input.rows) {
+        const key = r.user?.id ?? String(r.user_id);
+        const acc = byUser.get(key) ?? { name: r.user?.full_name ?? 'Deleted user', b: 0, nb: 0, n: 0 };
+        acc.b += r.billable_total_minutes;
+        acc.nb += r.non_billable_total_minutes;
+        acc.n += 1;
+        byUser.set(key, acc);
+    }
+    const totals = [...byUser.values()].sort((a, b) => b.b + b.nb - (a.b + a.nb));
+
+    // A blank spacer, a banner, then the roll-up — rendered through the same
+    // columns so the single-sheet layout holds for both CSV and XLSX.
+    const rollUp: Array<Record<string, CellValue>> = [
+        {
+            local_date: '',
+            user: '',
+            entry_type: '',
+            project: '',
+            task: '',
+            notes: '',
+            billable_hours: null,
+            non_billable_hours: null,
+            total_hours: null,
+        },
+        {
+            local_date: 'TOTALS BY EMPLOYEE',
+            user: '',
+            entry_type: '',
+            project: '',
+            task: '',
+            notes: '',
+            billable_hours: null,
+            non_billable_hours: null,
+            total_hours: null,
+        },
+        ...totals.map((t) => ({
+            local_date: '',
+            user: t.name,
+            entry_type: '',
+            project: '',
+            task: '',
+            notes: `${t.n} ${t.n === 1 ? 'entry' : 'entries'}`,
+            billable_hours: hours(t.b),
+            non_billable_hours: hours(t.nb),
+            total_hours: hours(t.b + t.nb),
+        })),
+        {
+            local_date: '',
+            user: 'TOTAL',
+            entry_type: '',
+            project: '',
+            task: '',
+            notes: `${input.rows.length} ${input.rows.length === 1 ? 'entry' : 'entries'}`,
+            billable_hours: hours(totals.reduce((a, t) => a + t.b, 0)),
+            non_billable_hours: hours(totals.reduce((a, t) => a + t.nb, 0)),
+            total_hours: hours(totals.reduce((a, t) => a + t.b + t.nb, 0)),
+        },
+    ];
+
+    const summary = [
+        { label: 'From', value: input.from_date },
+        { label: 'To', value: input.to_date },
+        { label: 'User', value: input.user_label ?? 'All users' },
+        { label: 'Project', value: input.project_label ?? 'All projects' },
+    ];
+    // Never silently short: if the cap was hit the file says so on its face,
+    // not just in a toast the reader never saw.
+    if (input.truncated) {
+        summary.push({ label: 'NOTE', value: `Truncated to the first ${input.rows.length} entries.` });
+    }
+
+    return {
+        title: 'Team timesheets',
+        summary,
+        columns: [
+            { key: 'local_date', label: 'Date' },
+            { key: 'user', label: 'User' },
+            { key: 'entry_type', label: 'Type' },
+            { key: 'project', label: 'Project' },
+            { key: 'task', label: 'Task / Category' },
+            { key: 'notes', label: 'Notes' },
+            { key: 'billable_hours', label: 'Billable (h)' },
+            { key: 'non_billable_hours', label: 'Non-billable (h)' },
+            { key: 'total_hours', label: 'Total (h)' },
+        ],
+        rows: [...detail, ...rollUp],
+    };
+};
