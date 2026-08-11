@@ -71,19 +71,20 @@ export const toTabularBilling = (data: BillingReportResult): TabularReport => ({
 
 export const toTabularUtilization = (data: UtilizationReportResult): TabularReport => {
     // One row per (user, project) so the export carries the same per-project
-    // breakdown the UI shows in the expandable accordion. User-level fields
-    // (expected hours, utilization %) repeat on each of that user's rows so
-    // every row is self-contained and pivots cleanly by user OR by project.
-    // `% of time` is the project's share of that user's logged time. A user
-    // with no logged time still gets one row (project "—") so headcount is
-    // complete.
+    // breakdown the UI shows in the expandable accordion. `% of time` is the
+    // project's share of that user's logged time. A user with no logged time
+    // still gets one row (project "—") so headcount is complete.
+    //
+    // Expected hours and utilization % are deliberately NOT exported. They are
+    // user-level figures, so on a per-(user, project) grid they repeated
+    // identically down every row belonging to one person — which reads as a
+    // per-project number and invites the wrong sum. They remain on screen,
+    // where one row is one person and they mean what they say.
     const rows: Array<Record<string, CellValue>> = [];
     for (const r of data.rows) {
         const base = {
             user: r.user.full_name,
             role: r.user.role,
-            expected_hours: formatMinutes(r.expected_minutes),
-            utilization_pct: r.utilization_pct,
         };
         if (r.projects.length === 0) {
             rows.push({
@@ -123,8 +124,6 @@ export const toTabularUtilization = (data: UtilizationReportResult): TabularRepo
             { key: 'non_billable_hours', label: 'Non-billable hours' },
             { key: 'total_hours', label: 'Total hours' },
             { key: 'share_pct', label: '% of time' },
-            { key: 'expected_hours', label: 'Expected hours' },
-            { key: 'utilization_pct', label: 'User utilization %' },
         ],
         rows,
     };

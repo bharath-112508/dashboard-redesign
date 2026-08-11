@@ -70,9 +70,26 @@ describe('toTabularUtilization', () => {
         // Hours are decimal-hour numbers; Apollo = 1200 min = 20h.
         expect(anna[0].total_hours).toBe(20);
         expect(anna[0].share_pct).toBe(66.67);
-        // User-level fields repeat on each of the user's rows.
-        expect(anna[0].utilization_pct).toBe(18.75);
-        expect(anna[1].utilization_pct).toBe(18.75);
+    });
+
+    it('omits expected hours and utilization %', () => {
+        const out = toTabularUtilization(base);
+        const keys = out.columns.map((c) => c.key);
+        const labels = out.columns.map((c) => c.label);
+
+        // Dropped on purpose: both are USER-level figures, so on a grid of one
+        // row per (user, project) they repeated identically down every row of a
+        // person — reading as per-project values and inviting a wrong sum. They
+        // stay in the UI, where one row is one person.
+        expect(keys).not.toContain('expected_hours');
+        expect(keys).not.toContain('utilization_pct');
+        expect(labels).not.toContain('Expected hours');
+        expect(labels).not.toContain('User utilization %');
+        // ...and no row smuggles them back in as stray fields.
+        for (const r of out.rows) {
+            expect(r).not.toHaveProperty('expected_hours');
+            expect(r).not.toHaveProperty('utilization_pct');
+        }
     });
 
     it('gives a user with no logged time a single "—" row', () => {
@@ -81,6 +98,5 @@ describe('toTabularUtilization', () => {
         expect(bob).toHaveLength(1);
         expect(bob[0].project).toBe('—');
         expect(bob[0].total_hours).toBe(0);
-        expect(bob[0].utilization_pct).toBe(0);
     });
 });
