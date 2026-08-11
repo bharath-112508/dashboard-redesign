@@ -19,6 +19,7 @@ import {
     TASK_CLIENT_PATCH_FIELDS,
     TASK_EMPLOYEE_PATCH_FIELDS,
     TASK_ISSUE_TYPES,
+    TASK_REPORT_KINDS,
     TASK_MAX_SUBTASK_DEPTH,
     TASK_PRIORITIES,
 } from '../constants/task.js';
@@ -1494,12 +1495,13 @@ const REPORTER_ROLES: readonly string[] = [ROLES.CLIENT, ROLES.REPRESENTATIVE];
  * it starts at today (IST) and triage re-dates it.
  */
 export const createTaskReport = async (
-    input: { project_id: string; title: string; description?: string; priority?: string },
+    input: { project_id: string; title: string; description?: string; priority?: string; kind?: string },
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
     if (!REPORTER_ROLES.includes(caller.role)) {
-        throw AppError.forbidden('Only client-side users can file an issue report', ERROR_CODES.TASK_WRITE_FORBIDDEN);
+        throw AppError.forbidden('Only client-side users can file a report', ERROR_CODES.TASK_WRITE_FORBIDDEN);
     }
+    const isFeature = input.kind === TASK_REPORT_KINDS.FEATURE;
 
     const projectId = new Types.ObjectId(input.project_id);
     // The whole access decision. A `client` reaches every project of their
@@ -1534,9 +1536,15 @@ export const createTaskReport = async (
         description: input.description ?? '',
         status,
         priority: input.priority ?? TASK_PRIORITIES.MEDIUM,
-        issue_type: TASK_ISSUE_TYPES.BUG,
+        issue_type: isFeature ? TASK_ISSUE_TYPES.IMPROVEMENT : TASK_ISSUE_TYPES.BUG,
         story_points: null,
         labels: [],
+        // Same-day, as for issue reports. A feature request nobody has accepted
+        // yet arguably shouldn't carry a due date at all, but `due_date` is
+        // `required: true` on the model and on every create validator — no task
+        // in the system has a null one — so a null here would be a schema
+        // migration touching the indexes and the Gantt's right edge, not a
+        // one-line default. Left consistent with every other task instead.
         due_date: dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT),
         estimated_hours: 0,
         assignee_ids: [],
@@ -1556,7 +1564,7 @@ export const createTaskReport = async (
             action: AUDIT_ACTIONS.TASK_CREATE,
             target: { kind: AUDIT_TARGET_KINDS.TASK, id: created._id },
             after: toPublic(created),
-            metadata: { project_id: projectId.toString(), source: 'client' },
+            metadata: { project_id: projectId.toString(), source: 'client', kind: input.kind ?? 'issue' },
         });
     }
 
@@ -1576,6 +1584,7 @@ export const createTaskReport = async (
         project_id: projectId,
         project_name: (project as { name?: string }).name ?? 'a project',
         actor_id: caller.id,
+        is_feature: isFeature,
     }).catch(() => undefined); // the dispatcher self-catches; this makes the
     // guarantee hold even if that ever stops being true.
 

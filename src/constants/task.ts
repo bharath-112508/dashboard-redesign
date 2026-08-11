@@ -49,6 +49,26 @@ export const TASK_PRIORITY_VALUES: readonly TaskPriority[] = Object.values(TASK_
 // bug / improvement) gives the Jira "typed issue" feel without touching the
 // hierarchy. Default `task`.
 
+/**
+ * What a client-side user can file from a project. Two kinds, mapped onto the
+ * internal `TASK_ISSUE_TYPES` in `createTaskReport`:
+ *
+ *   issue   → bug          — something is broken
+ *   feature → improvement  — they want something new
+ *
+ * Kept as its own vocabulary so the customer-facing API doesn't leak (or get
+ * pinned to) our internal issue taxonomy. Both land in the backlog carrying
+ * `source: 'client'`, which is what marks them as requested-not-committed.
+ */
+export const TASK_REPORT_KINDS = {
+    ISSUE: 'issue',
+    FEATURE: 'feature',
+} as const;
+
+export type TaskReportKind = (typeof TASK_REPORT_KINDS)[keyof typeof TASK_REPORT_KINDS];
+
+export const TASK_REPORT_KIND_VALUES: readonly TaskReportKind[] = Object.values(TASK_REPORT_KINDS);
+
 export const TASK_ISSUE_TYPES = {
     TASK: 'task',
     BUG: 'bug',

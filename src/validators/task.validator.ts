@@ -16,6 +16,7 @@ import {
     TASK_STATUS_KEY_MAX,
     TASK_STORY_POINT_VALUES,
     TASK_TITLE_MAX,
+    TASK_REPORT_KIND_VALUES,
 } from '../constants/task.js';
 
 /**
@@ -112,14 +113,21 @@ export const labelsSchema = z
 // ─── POST /tasks ──────────────────────────────────────────────────────────
 
 /**
- * Client-side issue report. `.strict()` matters here: a client sending
- * `assignee_ids` or `sprint_id` gets a 400 rather than having it quietly
- * dropped, so nobody is left believing they set something they did not.
+ * Client-side issue report OR feature request. `.strict()` matters here: a
+ * client sending `assignee_ids` or `sprint_id` gets a 400 rather than having it
+ * quietly dropped, so nobody is left believing they set something they did not.
  * Everything not listed is decided server-side — see `createTaskReport`.
+ *
+ * `kind` is the client-facing vocabulary, deliberately NOT the internal
+ * `issue_type` enum: the two are mapped in the service. A customer should not
+ * have to know that our word for "feature request" is `improvement`, and
+ * pinning the wire contract to the internal enum would make renaming that enum
+ * a breaking API change.
  */
 export const createTaskReportBodySchema = z
     .object({
         project_id: objectIdSchema,
+        kind: z.enum(TASK_REPORT_KIND_VALUES as unknown as [string, ...string[]]).default('issue'),
         title: z.string().trim().min(1).max(TASK_TITLE_MAX),
         description: z.string().trim().max(TASK_DESCRIPTION_MAX).default(''),
         // A suggestion the team may override during triage.

@@ -78,7 +78,7 @@ vi.mock('./notification-dispatcher.service.js', () => ({
 const svc = await import('./task.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
-import { DEFAULT_TASK_STATUSES, TASK_ISSUE_TYPES, TASK_PRIORITIES } from '../constants/task.js';
+import { DEFAULT_TASK_STATUSES, TASK_ISSUE_TYPES, TASK_PRIORITIES, TASK_REPORT_KINDS } from '../constants/task.js';
 
 const projectId = new Types.ObjectId();
 
@@ -166,11 +166,30 @@ describe('createTaskReport — the server decides everything except three fields
         expect(doc.depends_on_task_ids).toEqual([]);
     });
 
-    it('opens at the entry status and is typed as a bug', async () => {
+    it('opens at the entry status and defaults to a bug', async () => {
         const doc = await fileIt();
         expect(doc.status).toBe(DEFAULT_TASK_STATUSES.TO_DO);
         expect(doc.issue_type).toBe(TASK_ISSUE_TYPES.BUG);
         expect(doc.completed_at).toBeNull();
+    });
+
+    // The client-facing `kind` vocabulary maps onto the internal issue
+    // taxonomy here and nowhere else, so this is the only place that pin can
+    // be checked.
+    it('files a feature request as an improvement, still in the backlog', async () => {
+        const doc = await fileIt({ kind: TASK_REPORT_KINDS.FEATURE });
+        expect(doc.issue_type).toBe(TASK_ISSUE_TYPES.IMPROVEMENT);
+        // Everything that keeps it "requested, not committed" must hold for a
+        // feature exactly as it does for a bug.
+        expect(doc.sprint_id).toBeNull();
+        expect(doc.assignee_ids).toEqual([]);
+        expect(doc.source).toBe('client');
+        expect(doc.status).toBe(DEFAULT_TASK_STATUSES.TO_DO);
+    });
+
+    it('treats an absent or unknown kind as an issue', async () => {
+        expect((await fileIt()).issue_type).toBe(TASK_ISSUE_TYPES.BUG);
+        expect((await fileIt({ kind: 'nonsense' })).issue_type).toBe(TASK_ISSUE_TYPES.BUG);
     });
 
     it("stamps source: 'client' so the origin survives later status changes", async () => {

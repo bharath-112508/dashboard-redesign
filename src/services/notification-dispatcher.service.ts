@@ -1284,6 +1284,8 @@ export interface ClientTaskReportedDispatchInput {
     project_name: string;
     /** The client / representative who filed it. */
     actor_id: Types.ObjectId;
+    /** A feature request rather than an issue report — changes the wording. */
+    is_feature?: boolean;
 }
 
 /**
@@ -1336,7 +1338,13 @@ export const notifyClientTaskReported = async (input: ClientTaskReportedDispatch
                 r,
                 {
                     type: NOTIFICATION_TYPES.TASK_REPORTED_BY_CLIENT,
-                    title: `${actorName} reported an issue on ${input.project_name}`,
+                    // The fan-out is the ONLY signal the team gets (the task
+                    // has no assignee by design), so it has to say which of the
+                    // two things arrived — a broken checkout and a wishlist
+                    // item warrant very different response times.
+                    title: input.is_feature
+                        ? `${actorName} requested a feature on ${input.project_name}`
+                        : `${actorName} reported an issue on ${input.project_name}`,
                     body: input.task_title,
                     link_url: `/tasks/${input.task_id.toString()}`,
                     related_entity: { kind: RELATED_ENTITY_KINDS.TASK, id: input.task_id },
