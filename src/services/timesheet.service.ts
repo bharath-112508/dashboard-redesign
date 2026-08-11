@@ -684,7 +684,8 @@ const loadTimesheetProjectDisplays = async (ids: Types.ObjectId[]): Promise<Map<
  */
 const toClientPublic = (
     r: TimesheetEntryDocument,
-    taskMap: Map<string, TimesheetTaskDisplay>
+    taskMap: Map<string, TimesheetTaskDisplay>,
+    userMap: Map<string, TimesheetUserDisplay>
 ): Record<string, unknown> => ({
     id: r._id.toString(),
     local_date: r.local_date,
@@ -694,6 +695,7 @@ const toClientPublic = (
     billable_total_minutes: r.billable_total_minutes,
     total_minutes: r.billable_total_minutes,
     task: r.task_id ? (taskMap.get(r.task_id.toString()) ?? { id: r.task_id.toString(), title: null }) : null,
+    user: userMap.get(r.user_id.toString()) ?? { id: r.user_id.toString(), full_name: null },
 });
 
 /**
@@ -709,11 +711,17 @@ const toClientPublic = (
  *     other project read uses. This endpoint has no row scoping of its own and
  *     trusts the `project_id` it is handed, so relaxing the role check without
  *     this would let a client read another customer's hours by editing an id.
- *  3. `group_by: 'user'` is refused, and non-billable/idle figures are dropped
- *     from the response. Per-person output is internal information (and
- *     personal data); non-billable time is our cost, not the customer's.
- *     Dropped server-side rather than hidden in the UI — a field that never
- *     leaves the API cannot leak through a future component.
+ *  3. Non-billable and idle figures are dropped from the response — that time
+ *     is our cost, not the customer's. Dropped server-side rather than hidden
+ *     in the UI: a field that never leaves the API cannot leak through a
+ *     future component.
+ *
+ * Per-person output (`group_by: 'user'`, a `user_id` filter, and the author on
+ * each row) IS exposed, deliberately — the customer is shown who did the work
+ * they are billed for, the way an agency invoice names its consultants. It was
+ * withheld in the first cut of this view; widening it was a product decision,
+ * so don't "restore" the block on the assumption it was an oversight. The
+ * project scoping above is what keeps it to their own people.
  */
 const CLIENT_SIDE_ROLES: readonly string[] = [ROLES.CLIENT, ROLES.REPRESENTATIVE];
 
@@ -723,11 +731,6 @@ const assertClientProjectScope = async (
 ): Promise<void> => {
     if (!query.project_id) {
         throw AppError.forbidden('A project must be specified.');
-    }
-    // Both halves are needed: blocking the grouping alone still lets a caller
-    // filter to one person and read that person's total off the project row.
-    if (query.group_by === 'user' || query.user_id) {
-        throw AppError.forbidden('Per-person hours are not available on a client view.');
     }
     // Throws if this caller cannot open the project at all.
     await loadProjectForCaller(new Types.ObjectId(query.project_id), caller);
@@ -746,32 +749,35 @@ export const listAllEntries = async (
     }
     // Reporting-chain scoping — Admin sees all; Manager/Team-Lead only their
     // direct reports. `undefined` → no user_id restriction (admin, no filter).
-    // Client-side callers are scoped by project instead (asserted above) and
-    // may not filter by person at all, so they skip this entirely.
-    const scopeUserId = isClientSide ? undefined : await scopedUserIdFilter(caller, query.user_id);
+    // Client-side callers are scoped by project instead (asserted above); the
+    // reporting chain is an internal-staff concept and would resolve to nothing
+    // for them, so their `user_id` filter is passed through as given.
+    const scopeUserId = isClientSide
+        ? query.user_id && new Types.ObjectId(query.user_id)
+        : await scopedUserIdFilter(caller, query.user_id);
     const filter = buildListFilter(query, scopeUserId);
     // Same billable-only narrowing as `summary`: a row with no billable time is
     // internal effort the customer neither pays for nor needs to see.
     if (isClientSide) filter.billable_total_minutes = { $gt: 0 };
     const skip = (query.page - 1) * query.limit;
-    // `user_id` in the sort clusters a day's rows by person, which hands a
-    // client the person boundaries the rest of this function removes.
-    const sort: Record<string, 1 | -1> = isClientSide
-        ? { local_date: -1, created_at: -1 }
-        : { local_date: -1, user_id: 1, created_at: -1 };
     const [rows, total] = await Promise.all([
-        TimesheetEntry.find(filter).sort(sort).skip(skip).limit(query.limit),
+        TimesheetEntry.find(filter).sort({ local_date: -1, user_id: 1, created_at: -1 }).skip(skip).limit(query.limit),
         TimesheetEntry.countDocuments(filter),
     ]);
 
     if (isClientSide) {
-        const taskMap = await loadTimesheetTaskDisplays(
-            Array.from(new Set(rows.filter((r) => r.task_id).map((r) => r.task_id!.toString()))).map(
-                (id) => new Types.ObjectId(id)
-            )
-        );
+        const [taskMap, userMap] = await Promise.all([
+            loadTimesheetTaskDisplays(
+                Array.from(new Set(rows.filter((r) => r.task_id).map((r) => r.task_id!.toString()))).map(
+                    (id) => new Types.ObjectId(id)
+                )
+            ),
+            loadTimesheetUserDisplays(
+                Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id))
+            ),
+        ]);
         return {
-            data: rows.map((r) => toClientPublic(r, taskMap)),
+            data: rows.map((r) => toClientPublic(r, taskMap, userMap)),
             meta: {
                 page: query.page,
                 limit: query.limit,

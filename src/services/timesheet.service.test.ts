@@ -626,23 +626,21 @@ describe('list & summary RBAC', () => {
     // it is handed — so every one of these is load-bearing, not cosmetic.
 
     it('listAllEntries applies the same client scoping as summary', async () => {
-        const project_id = new Types.ObjectId().toString();
-        const q = { page: 1, limit: 20 };
-
-        await expect(svc.listAllEntries(q, clientCaller())).rejects.toMatchObject({
+        await expect(svc.listAllEntries({ page: 1, limit: 20 }, clientCaller())).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
-        await expect(
-            svc.listAllEntries({ ...q, project_id, user_id: new Types.ObjectId().toString() }, clientCaller())
-        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
     });
 
     it('listAllEntries gives a client billable rows with the task and notes, and no person', async () => {
         const project_id = new Types.ObjectId().toString();
         const taskId = new Types.ObjectId();
+        const authorId = new Types.ObjectId();
         loadProjectForCallerMock.mockResolvedValueOnce({ _id: new Types.ObjectId(project_id) });
         taskFindMock.mockReturnValueOnce({
             select: () => ({ lean: () => Promise.resolve([{ _id: taskId, title: 'Fix invoice rounding' }]) }),
+        });
+        userFindMock.mockReturnValueOnce({
+            select: () => ({ lean: () => Promise.resolve([{ _id: authorId, full_name: 'Rohan Iyer' }]) }),
         });
 
         let filter: Record<string, unknown> = {};
@@ -654,6 +652,7 @@ describe('list & summary RBAC', () => {
                         limit: () =>
                             Promise.resolve([
                                 makeEntry({
+                                    user_id: authorId,
                                     task_id: taskId,
                                     project_id: new Types.ObjectId(project_id),
                                     description: 'Pairing session on SEK rounding',
@@ -676,8 +675,9 @@ describe('list & summary RBAC', () => {
         expect(row.description).toBe('Pairing session on SEK rounding');
         expect(row.task).toMatchObject({ title: 'Fix invoice rounding' });
         expect(row.billable_total_minutes).toBe(120);
-        // …and everything the whitelist must keep out.
-        expect(row.user).toBeUndefined();
+        expect(row.user).toMatchObject({ full_name: 'Rohan Iyer' });
+        // …and everything the whitelist must still keep out. `user_id` stays
+        // off: the hydrated `user` object is the whole of what's needed.
         expect(row.user_id).toBeUndefined();
         expect(row.non_billable_total_minutes).toBeUndefined();
         expect(row.idle_total_minutes).toBeUndefined();
@@ -691,16 +691,43 @@ describe('list & summary RBAC', () => {
         });
     });
 
-    it('summary refuses a client asking for per-person hours', async () => {
+    // Per-person output is deliberately allowed (the client is shown who did
+    // the work they are billed for) — but still ONLY inside a project they can
+    // open, and still with no non-billable figures attached.
+    it('summary gives a client per-person totals, billable-only, for their own project', async () => {
         const project_id = new Types.ObjectId().toString();
-        await expect(svc.summary({ group_by: 'user', project_id }, clientCaller())).rejects.toMatchObject({
-            code: ERROR_CODES.FORBIDDEN,
+        const userId = new Types.ObjectId();
+        loadProjectForCallerMock.mockResolvedValueOnce({ _id: new Types.ObjectId(project_id) });
+        userFindMock.mockReturnValueOnce({
+            select: () => ({ lean: () => Promise.resolve([{ _id: userId, full_name: 'Rohan Iyer' }]) }),
         });
-        // Filtering to one person reads that person's total off the project
-        // row, so blocking the grouping alone is not enough.
+        entryAggregateMock.mockResolvedValueOnce([
+            {
+                _id: { user_id: userId },
+                billable_total_minutes: 6720,
+                non_billable_total_minutes: 900,
+                idle_total_minutes: 0,
+                total_minutes: 7620,
+                entry_count: 14,
+            },
+        ]);
+
+        const rows = await svc.summary({ group_by: 'user', project_id }, clientCaller());
+
+        expect(rows[0]).toMatchObject({
+            billable_total_minutes: 6720,
+            total_minutes: 6720,
+            user: { full_name: 'Rohan Iyer' },
+        });
+        expect(rows[0].non_billable_total_minutes).toBeUndefined();
+    });
+
+    it('summary still refuses a client a per-person view of a project they cannot open', async () => {
+        loadProjectForCallerMock.mockRejectedValueOnce(new Error('no access'));
         await expect(
-            svc.summary({ group_by: 'date', project_id, user_id: new Types.ObjectId().toString() }, clientCaller())
-        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+            svc.summary({ group_by: 'user', project_id: new Types.ObjectId().toString() }, clientCaller())
+        ).rejects.toThrow();
+        expect(entryAggregateMock).not.toHaveBeenCalled();
     });
 
     it("summary refuses a client a project they can't open", async () => {
