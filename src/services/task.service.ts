@@ -1503,12 +1503,19 @@ export const createTaskReport = async (
         throw AppError.forbidden('Only client-side users can file a report', ERROR_CODES.TASK_WRITE_FORBIDDEN);
     }
     const isFeature = input.kind === TASK_REPORT_KINDS.FEATURE;
-    const priority = input.priority ?? TASK_PRIORITIES.MEDIUM;
-    // See TASK_REPORT_IMPACT_NOTE: `priority` alone can't carry what a client
-    // said about a REQUEST, so the sentence is recorded where triage can't
-    // quietly drop it. Issue reports keep their description verbatim — Low /
-    // Medium / High already means the right thing for a defect.
-    const impact = TASK_REPORT_IMPACT_NOTE[priority];
+    const stated = input.priority ?? TASK_PRIORITIES.MEDIUM;
+    // A FEATURE request carries no client-chosen priority. The customer is
+    // asked how much it would help — which is worth knowing — but that answer
+    // is theirs about impact, not a scheduling decision, and letting it land on
+    // `task.priority` would put an outsider's ranking into the queue the team
+    // plans from. It goes in the description instead (see
+    // TASK_REPORT_IMPACT_NOTE), and the team sets the real priority at triage.
+    //
+    // Issue reports still honour the suggestion: for a defect, Low / Medium /
+    // High is the same scale the team uses, and the route comment has always
+    // called it a suggestion the team may override.
+    const priority = isFeature ? TASK_PRIORITIES.MEDIUM : stated;
+    const impact = TASK_REPORT_IMPACT_NOTE[stated];
     const description =
         isFeature && impact
             ? [`Client impact: ${impact}`, input.description?.trim()].filter(Boolean).join('\n\n')

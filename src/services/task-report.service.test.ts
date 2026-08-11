@@ -196,7 +196,15 @@ describe('createTaskReport — the server decides everything except three fields
             description: 'We rebuild this by hand every Monday.',
         });
         expect(doc.description).toBe('Client impact: Blocked without it\n\nWe rebuild this by hand every Monday.');
-        // The priority itself is untouched — triage still sorts on it.
+        // …and it does NOT become the task's priority. An outsider's ranking
+        // must not land in the queue the team plans from; triage sets that.
+        expect(doc.priority).toBe(TASK_PRIORITIES.MEDIUM);
+    });
+
+    it('still honours the priority suggestion on an ISSUE report', async () => {
+        // The two paths differ deliberately: for a defect, Low / Medium / High
+        // is the same scale the team uses, so the suggestion is worth keeping.
+        const doc = await fileIt({ priority: TASK_PRIORITIES.HIGH });
         expect(doc.priority).toBe(TASK_PRIORITIES.HIGH);
     });
 
