@@ -20,7 +20,7 @@ import {
     TASK_EMPLOYEE_PATCH_FIELDS,
     TASK_ISSUE_TYPES,
     TASK_REPORT_KINDS,
-    TASK_REPORT_IMPACT_NOTE,
+    TASK_REPORT_IMPACT_LABEL,
     TASK_MAX_SUBTASK_DEPTH,
     TASK_PRIORITIES,
 } from '../constants/task.js';
@@ -1515,11 +1515,10 @@ export const createTaskReport = async (
     // High is the same scale the team uses, and the route comment has always
     // called it a suggestion the team may override.
     const priority = isFeature ? TASK_PRIORITIES.MEDIUM : stated;
-    const impact = TASK_REPORT_IMPACT_NOTE[stated];
-    const description =
-        isFeature && impact
-            ? [`Client impact: ${impact}`, input.description?.trim()].filter(Boolean).join('\n\n')
-            : (input.description ?? '');
+    // The client's answer becomes a LABEL, not a priority and not a line in
+    // their own description: labels are what a developer sees on the board card
+    // and the task row, which is where the triage decision actually gets made.
+    const impactLabel = isFeature ? TASK_REPORT_IMPACT_LABEL[stated] : undefined;
 
     const projectId = new Types.ObjectId(input.project_id);
     // The whole access decision. A `client` reaches every project of their
@@ -1551,12 +1550,12 @@ export const createTaskReport = async (
         story_id: null,
         parent_task_id: null,
         title: input.title,
-        description,
+        description: input.description ?? '',
         status,
         priority,
         issue_type: isFeature ? TASK_ISSUE_TYPES.IMPROVEMENT : TASK_ISSUE_TYPES.BUG,
         story_points: null,
-        labels: [],
+        labels: impactLabel ? [impactLabel] : [],
         // Same-day, as for issue reports. A feature request nobody has accepted
         // yet arguably shouldn't carry a due date at all, but `due_date` is
         // `required: true` on the model and on every create validator — no task

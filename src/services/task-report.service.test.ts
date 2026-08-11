@@ -187,30 +187,33 @@ describe('createTaskReport — the server decides everything except three fields
         expect(doc.status).toBe(DEFAULT_TASK_STATUSES.TO_DO);
     });
 
-    // `priority` flattens "we're blocked without it" into "high", so the
-    // sentence is recorded somewhere triage can't quietly drop it.
-    it("records the client's impact wording on a feature request", async () => {
+    // A feature request files with NO priority of its own — that is the team's
+    // call — and the client's answer rides along as a label instead, where the
+    // board card and task row will show it.
+    it("labels a feature request with the client's impact, and sets no priority", async () => {
         const doc = await fileIt({
             kind: TASK_REPORT_KINDS.FEATURE,
             priority: TASK_PRIORITIES.HIGH,
             description: 'We rebuild this by hand every Monday.',
         });
-        expect(doc.description).toBe('Client impact: Blocked without it\n\nWe rebuild this by hand every Monday.');
-        // …and it does NOT become the task's priority. An outsider's ranking
-        // must not land in the queue the team plans from; triage sets that.
+        expect(doc.labels).toEqual(['Client: Blocked without it']);
+        // The client's ranking must not land in the queue the team plans from.
         expect(doc.priority).toBe(TASK_PRIORITIES.MEDIUM);
+        // …and their own words are left exactly as written.
+        expect(doc.description).toBe('We rebuild this by hand every Monday.');
     });
 
-    it('still honours the priority suggestion on an ISSUE report', async () => {
+    it('still honours the priority suggestion on an ISSUE report, and adds no label', async () => {
         // The two paths differ deliberately: for a defect, Low / Medium / High
         // is the same scale the team uses, so the suggestion is worth keeping.
         const doc = await fileIt({ priority: TASK_PRIORITIES.HIGH });
         expect(doc.priority).toBe(TASK_PRIORITIES.HIGH);
+        expect(doc.labels).toEqual([]);
     });
 
-    it('still writes the impact line when the client left the detail blank', async () => {
+    it('labels a feature request even when the client left the detail blank', async () => {
         const doc = await fileIt({ kind: TASK_REPORT_KINDS.FEATURE, description: '' });
-        expect(doc.description).toBe('Client impact: Would help a lot');
+        expect(doc.labels).toEqual(['Client: Would help a lot']);
     });
 
     it('leaves an issue report description verbatim', async () => {
