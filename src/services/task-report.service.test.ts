@@ -187,6 +187,29 @@ describe('createTaskReport — the server decides everything except three fields
         expect(doc.status).toBe(DEFAULT_TASK_STATUSES.TO_DO);
     });
 
+    // `priority` flattens "we're blocked without it" into "high", so the
+    // sentence is recorded somewhere triage can't quietly drop it.
+    it("records the client's impact wording on a feature request", async () => {
+        const doc = await fileIt({
+            kind: TASK_REPORT_KINDS.FEATURE,
+            priority: TASK_PRIORITIES.HIGH,
+            description: 'We rebuild this by hand every Monday.',
+        });
+        expect(doc.description).toBe('Client impact: Blocked without it\n\nWe rebuild this by hand every Monday.');
+        // The priority itself is untouched — triage still sorts on it.
+        expect(doc.priority).toBe(TASK_PRIORITIES.HIGH);
+    });
+
+    it('still writes the impact line when the client left the detail blank', async () => {
+        const doc = await fileIt({ kind: TASK_REPORT_KINDS.FEATURE, description: '' });
+        expect(doc.description).toBe('Client impact: Would help a lot');
+    });
+
+    it('leaves an issue report description verbatim', async () => {
+        const doc = await fileIt({ description: 'Since this morning.' });
+        expect(doc.description).toBe('Since this morning.');
+    });
+
     it('treats an absent or unknown kind as an issue', async () => {
         expect((await fileIt()).issue_type).toBe(TASK_ISSUE_TYPES.BUG);
         expect((await fileIt({ kind: 'nonsense' })).issue_type).toBe(TASK_ISSUE_TYPES.BUG);

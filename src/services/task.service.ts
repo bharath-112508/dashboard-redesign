@@ -20,6 +20,7 @@ import {
     TASK_EMPLOYEE_PATCH_FIELDS,
     TASK_ISSUE_TYPES,
     TASK_REPORT_KINDS,
+    TASK_REPORT_IMPACT_NOTE,
     TASK_MAX_SUBTASK_DEPTH,
     TASK_PRIORITIES,
 } from '../constants/task.js';
@@ -1502,6 +1503,16 @@ export const createTaskReport = async (
         throw AppError.forbidden('Only client-side users can file a report', ERROR_CODES.TASK_WRITE_FORBIDDEN);
     }
     const isFeature = input.kind === TASK_REPORT_KINDS.FEATURE;
+    const priority = input.priority ?? TASK_PRIORITIES.MEDIUM;
+    // See TASK_REPORT_IMPACT_NOTE: `priority` alone can't carry what a client
+    // said about a REQUEST, so the sentence is recorded where triage can't
+    // quietly drop it. Issue reports keep their description verbatim — Low /
+    // Medium / High already means the right thing for a defect.
+    const impact = TASK_REPORT_IMPACT_NOTE[priority];
+    const description =
+        isFeature && impact
+            ? [`Client impact: ${impact}`, input.description?.trim()].filter(Boolean).join('\n\n')
+            : (input.description ?? '');
 
     const projectId = new Types.ObjectId(input.project_id);
     // The whole access decision. A `client` reaches every project of their
@@ -1533,9 +1544,9 @@ export const createTaskReport = async (
         story_id: null,
         parent_task_id: null,
         title: input.title,
-        description: input.description ?? '',
+        description,
         status,
-        priority: input.priority ?? TASK_PRIORITIES.MEDIUM,
+        priority,
         issue_type: isFeature ? TASK_ISSUE_TYPES.IMPROVEMENT : TASK_ISSUE_TYPES.BUG,
         story_points: null,
         labels: [],

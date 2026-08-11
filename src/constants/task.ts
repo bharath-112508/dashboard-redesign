@@ -69,6 +69,28 @@ export type TaskReportKind = (typeof TASK_REPORT_KINDS)[keyof typeof TASK_REPORT
 
 export const TASK_REPORT_KIND_VALUES: readonly TaskReportKind[] = Object.values(TASK_REPORT_KINDS);
 
+/**
+ * The line prepended to a FEATURE request's description, recording how much
+ * the client said it would help.
+ *
+ * The three `priority` values are the right vocabulary for a defect — Low /
+ * Medium / High reads as severity — but they flatten what a client actually
+ * told us about a request. "High" and "we're blocked without it" are not the
+ * same sentence, and only the first one survives into `task.priority`.
+ *
+ * It goes in the DESCRIPTION rather than a label or a status because those are
+ * both routinely rewritten during triage (see `ClientReportedBadge` in the
+ * frontend, which makes the same argument for reading `source`). What the
+ * customer said should not be erasable by dragging a card.
+ *
+ * Server-side, so it cannot be forged, skipped, or forgotten by a caller.
+ */
+export const TASK_REPORT_IMPACT_NOTE: Record<string, string> = {
+    low: 'Nice to have',
+    medium: 'Would help a lot',
+    high: 'Blocked without it',
+};
+
 export const TASK_ISSUE_TYPES = {
     TASK: 'task',
     BUG: 'bug',
