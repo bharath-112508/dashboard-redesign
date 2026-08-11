@@ -37,11 +37,16 @@ router.get('/me', validate({ query: listTimesheetsQuerySchema }), asyncHandler(c
 
 router.get('/me/day/:date', validate({ params: dayDatePathSchema }), asyncHandler(ctrl.getMyDay));
 
-// ─── /summary — manager + admin ─────────────────────────────────────────
+// ─── /summary — manager + admin, plus a narrow client-side slice ────────
 
+// `PROJECT_READ` is listed as an alternative (anyOf) so client-side callers,
+// who hold no `timesheet.*` permission at all, can reach the billable-only
+// project view. It does NOT widen the endpoint: `summary()` refuses any role
+// that is neither client-side nor a team-timesheet reader, so an Employee —
+// who also holds `project.read` — still gets a 403 from the service.
 router.get(
     '/summary',
-    requirePermission(PERMISSIONS.TIMESHEET_READ),
+    requirePermission(PERMISSIONS.TIMESHEET_READ, PERMISSIONS.PROJECT_READ),
     validate({ query: summaryQuerySchema }),
     asyncHandler(ctrl.getSummary)
 );
@@ -60,11 +65,14 @@ router.get(
     asyncHandler(ctrl.getExport)
 );
 
-// ─── Collection — manager + admin ───────────────────────────────────────
+// ─── Collection — manager + admin, plus the client-side slice ───────────
 
+// `PROJECT_READ` alternative for the same reason as `/summary` above: the
+// client-side project view lists its billable rows through this endpoint, and
+// `listAllEntries` is what actually decides who sees what.
 router.get(
     '/',
-    requirePermission(PERMISSIONS.TIMESHEET_READ),
+    requirePermission(PERMISSIONS.TIMESHEET_READ, PERMISSIONS.PROJECT_READ),
     validate({ query: listTimesheetsQuerySchema }),
     asyncHandler(ctrl.getList)
 );

@@ -28,6 +28,7 @@ const {
     entryAggregateMock,
     entryDistinctMock,
     taskFindByIdMock,
+    taskFindMock,
     leaveExistsMock,
     loadProjectForCallerMock,
     recordAuditMock,
@@ -40,6 +41,7 @@ const {
     entryAggregateMock: vi.fn(),
     entryDistinctMock: vi.fn(),
     taskFindByIdMock: vi.fn(),
+    taskFindMock: vi.fn(),
     leaveExistsMock: vi.fn(),
     loadProjectForCallerMock: vi.fn(),
     recordAuditMock: vi.fn(),
@@ -62,7 +64,7 @@ vi.mock('../models/timesheet-entry.model.js', async (importOriginal) => {
 });
 
 vi.mock('../models/task.model.js', () => ({
-    Task: { findById: taskFindByIdMock },
+    Task: { findById: taskFindByIdMock, find: taskFindMock },
 }));
 
 vi.mock('../models/leave-request.model.js', () => ({
@@ -614,6 +616,131 @@ describe('list & summary RBAC', () => {
     it('summary allows a team lead', async () => {
         entryAggregateMock.mockResolvedValueOnce([]);
         await expect(svc.summary({ group_by: 'project' }, teamLeadCaller())).resolves.toEqual([]);
+    });
+
+    const clientCaller = () => ({ id: new Types.ObjectId(), role: ROLES.CLIENT, audit: undefined });
+
+    // ─── Client-side slice of `summary` ─────────────────────────────────
+    //
+    // The endpoint has no row scoping of its own — it trusts the `project_id`
+    // it is handed — so every one of these is load-bearing, not cosmetic.
+
+    it('listAllEntries applies the same client scoping as summary', async () => {
+        const project_id = new Types.ObjectId().toString();
+        const q = { page: 1, limit: 20 };
+
+        await expect(svc.listAllEntries(q, clientCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+        await expect(
+            svc.listAllEntries({ ...q, project_id, user_id: new Types.ObjectId().toString() }, clientCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it('listAllEntries gives a client billable rows with the task and notes, and no person', async () => {
+        const project_id = new Types.ObjectId().toString();
+        const taskId = new Types.ObjectId();
+        loadProjectForCallerMock.mockResolvedValueOnce({ _id: new Types.ObjectId(project_id) });
+        taskFindMock.mockReturnValueOnce({
+            select: () => ({ lean: () => Promise.resolve([{ _id: taskId, title: 'Fix invoice rounding' }]) }),
+        });
+
+        let filter: Record<string, unknown> = {};
+        entryFindMock.mockImplementationOnce((f: Record<string, unknown>) => {
+            filter = f;
+            return {
+                sort: () => ({
+                    skip: () => ({
+                        limit: () =>
+                            Promise.resolve([
+                                makeEntry({
+                                    task_id: taskId,
+                                    project_id: new Types.ObjectId(project_id),
+                                    description: 'Pairing session on SEK rounding',
+                                    billable_total_minutes: 120,
+                                    non_billable_total_minutes: 300,
+                                    total_minutes: 420,
+                                }),
+                            ]),
+                    }),
+                }),
+            };
+        });
+        entryCountMock.mockResolvedValueOnce(1);
+
+        const res = await svc.listAllEntries({ page: 1, limit: 20, project_id }, clientCaller());
+
+        expect(filter.billable_total_minutes).toEqual({ $gt: 0 });
+        const row = res.data[0];
+        // What the client is meant to get…
+        expect(row.description).toBe('Pairing session on SEK rounding');
+        expect(row.task).toMatchObject({ title: 'Fix invoice rounding' });
+        expect(row.billable_total_minutes).toBe(120);
+        // …and everything the whitelist must keep out.
+        expect(row.user).toBeUndefined();
+        expect(row.user_id).toBeUndefined();
+        expect(row.non_billable_total_minutes).toBeUndefined();
+        expect(row.idle_total_minutes).toBeUndefined();
+        // Echoing the real total would expose the non-billable difference.
+        expect(row.total_minutes).toBe(120);
+    });
+
+    it('summary refuses a client with no project_id (would span every project)', async () => {
+        await expect(svc.summary({ group_by: 'project' }, clientCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+
+    it('summary refuses a client asking for per-person hours', async () => {
+        const project_id = new Types.ObjectId().toString();
+        await expect(svc.summary({ group_by: 'user', project_id }, clientCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+        // Filtering to one person reads that person's total off the project
+        // row, so blocking the grouping alone is not enough.
+        await expect(
+            svc.summary({ group_by: 'date', project_id, user_id: new Types.ObjectId().toString() }, clientCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it("summary refuses a client a project they can't open", async () => {
+        loadProjectForCallerMock.mockRejectedValueOnce(
+            Object.assign(new Error('nope'), { code: ERROR_CODES.PROJECT_NOT_FOUND })
+        );
+        await expect(
+            svc.summary({ group_by: 'date', project_id: new Types.ObjectId().toString() }, clientCaller())
+        ).rejects.toThrow();
+        expect(entryAggregateMock).not.toHaveBeenCalled();
+    });
+
+    it('summary gives a client billable-only rows, matched on billable time only', async () => {
+        const project_id = new Types.ObjectId().toString();
+        loadProjectForCallerMock.mockResolvedValueOnce({ _id: new Types.ObjectId(project_id) });
+        entryAggregateMock.mockResolvedValueOnce([
+            {
+                _id: { local_date: '2026-08-01' },
+                billable_total_minutes: 120,
+                non_billable_total_minutes: 300,
+                idle_total_minutes: 60,
+                total_minutes: 480,
+                entry_count: 3,
+            },
+        ]);
+
+        const rows = await svc.summary({ group_by: 'date', project_id }, clientCaller());
+
+        // Non-billable / idle never leave the API — a field that isn't in the
+        // response can't leak through a future component.
+        expect(rows[0]).toEqual({
+            group_key: { local_date: '2026-08-01' },
+            billable_total_minutes: 120,
+            total_minutes: 120,
+            entry_count: 3,
+        });
+
+        const pipeline = entryAggregateMock.mock.calls[0][0] as Array<Record<string, unknown>>;
+        const match = pipeline.find((s) => '$match' in s) as { $match: Record<string, unknown> };
+        expect(match.$match.billable_total_minutes).toEqual({ $gt: 0 });
     });
 
     it('summary builds the correct aggregation $group key for group_by=user', async () => {

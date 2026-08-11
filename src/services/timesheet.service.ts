@@ -673,21 +673,113 @@ const loadTimesheetProjectDisplays = async (ids: Types.ObjectId[]): Promise<Map<
     return new Map(projects.map((p) => [p._id.toString(), { id: p._id.toString(), name: p.name, code: p.code }]));
 };
 
+/**
+ * The client-facing row. An explicit whitelist, not a `delete` list: a field
+ * added to the model later is absent here by default, whereas a blacklist
+ * would start leaking it the day it is introduced.
+ *
+ * `total_minutes` deliberately repeats the billable figure — the client is
+ * shown the billable slice as the whole of what they see, and echoing the real
+ * total (billable + non-billable + idle) would expose the difference.
+ */
+const toClientPublic = (
+    r: TimesheetEntryDocument,
+    taskMap: Map<string, TimesheetTaskDisplay>
+): Record<string, unknown> => ({
+    id: r._id.toString(),
+    local_date: r.local_date,
+    entry_type: r.entry_type,
+    general_category: r.general_category ?? null,
+    description: r.description ?? null,
+    billable_total_minutes: r.billable_total_minutes,
+    total_minutes: r.billable_total_minutes,
+    task: r.task_id ? (taskMap.get(r.task_id.toString()) ?? { id: r.task_id.toString(), title: null }) : null,
+});
+
+/**
+ * Client-side callers get a deliberately narrow slice of the two team-timesheet
+ * readers (`listAllEntries` and `summary`): the BILLABLE effort on ONE project
+ * they can already open, and nothing else.
+ *
+ * Three constraints, each load-bearing:
+ *
+ *  1. `project_id` is mandatory. Without it the aggregation spans every
+ *     project in the system.
+ *  2. The project goes through `loadProjectForCaller` — the same scoping every
+ *     other project read uses. This endpoint has no row scoping of its own and
+ *     trusts the `project_id` it is handed, so relaxing the role check without
+ *     this would let a client read another customer's hours by editing an id.
+ *  3. `group_by: 'user'` is refused, and non-billable/idle figures are dropped
+ *     from the response. Per-person output is internal information (and
+ *     personal data); non-billable time is our cost, not the customer's.
+ *     Dropped server-side rather than hidden in the UI — a field that never
+ *     leaves the API cannot leak through a future component.
+ */
+const CLIENT_SIDE_ROLES: readonly string[] = [ROLES.CLIENT, ROLES.REPRESENTATIVE];
+
+const assertClientProjectScope = async (
+    query: { project_id?: string; user_id?: string; group_by?: TimesheetSummaryGroupBy },
+    caller: Caller
+): Promise<void> => {
+    if (!query.project_id) {
+        throw AppError.forbidden('A project must be specified.');
+    }
+    // Both halves are needed: blocking the grouping alone still lets a caller
+    // filter to one person and read that person's total off the project row.
+    if (query.group_by === 'user' || query.user_id) {
+        throw AppError.forbidden('Per-person hours are not available on a client view.');
+    }
+    // Throws if this caller cannot open the project at all.
+    await loadProjectForCaller(new Types.ObjectId(query.project_id), caller);
+};
+
 /** Manager/admin listing — `user_id` filter optional. */
 export const listAllEntries = async (
     query: ListTimesheetsQuery,
     caller: Caller
 ): Promise<{ data: Record<string, unknown>[]; meta: PaginationMeta }> => {
-    if (!canReadTeamTimesheets(caller.role)) throw AppError.forbidden();
+    const isClientSide = CLIENT_SIDE_ROLES.includes(caller.role);
+    if (isClientSide) {
+        await assertClientProjectScope(query, caller);
+    } else if (!canReadTeamTimesheets(caller.role)) {
+        throw AppError.forbidden();
+    }
     // Reporting-chain scoping — Admin sees all; Manager/Team-Lead only their
     // direct reports. `undefined` → no user_id restriction (admin, no filter).
-    const scopeUserId = await scopedUserIdFilter(caller, query.user_id);
+    // Client-side callers are scoped by project instead (asserted above) and
+    // may not filter by person at all, so they skip this entirely.
+    const scopeUserId = isClientSide ? undefined : await scopedUserIdFilter(caller, query.user_id);
     const filter = buildListFilter(query, scopeUserId);
+    // Same billable-only narrowing as `summary`: a row with no billable time is
+    // internal effort the customer neither pays for nor needs to see.
+    if (isClientSide) filter.billable_total_minutes = { $gt: 0 };
     const skip = (query.page - 1) * query.limit;
+    // `user_id` in the sort clusters a day's rows by person, which hands a
+    // client the person boundaries the rest of this function removes.
+    const sort: Record<string, 1 | -1> = isClientSide
+        ? { local_date: -1, created_at: -1 }
+        : { local_date: -1, user_id: 1, created_at: -1 };
     const [rows, total] = await Promise.all([
-        TimesheetEntry.find(filter).sort({ local_date: -1, user_id: 1, created_at: -1 }).skip(skip).limit(query.limit),
+        TimesheetEntry.find(filter).sort(sort).skip(skip).limit(query.limit),
         TimesheetEntry.countDocuments(filter),
     ]);
+
+    if (isClientSide) {
+        const taskMap = await loadTimesheetTaskDisplays(
+            Array.from(new Set(rows.filter((r) => r.task_id).map((r) => r.task_id!.toString()))).map(
+                (id) => new Types.ObjectId(id)
+            )
+        );
+        return {
+            data: rows.map((r) => toClientPublic(r, taskMap)),
+            meta: {
+                page: query.page,
+                limit: query.limit,
+                total,
+                total_pages: Math.max(1, Math.ceil(total / query.limit)),
+            },
+        };
+    }
 
     const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
     const projectIds = Array.from(new Set(rows.filter((r) => r.project_id).map((r) => r.project_id!.toString()))).map(
@@ -783,7 +875,12 @@ const loadTimesheetTaskDisplays = async (ids: Types.ObjectId[]): Promise<Map<str
 };
 
 export const summary = async (query: SummaryQuery, caller: Caller): Promise<Array<Record<string, unknown>>> => {
-    if (!canReadTeamTimesheets(caller.role)) throw AppError.forbidden();
+    const isClientSide = CLIENT_SIDE_ROLES.includes(caller.role);
+    if (isClientSide) {
+        await assertClientProjectScope(query, caller);
+    } else if (!canReadTeamTimesheets(caller.role)) {
+        throw AppError.forbidden();
+    }
     const match: Record<string, unknown> = {};
     if (query.user_id) match.user_id = new Types.ObjectId(query.user_id);
     if (query.project_id) match.project_id = new Types.ObjectId(query.project_id);
@@ -795,6 +892,9 @@ export const summary = async (query: SummaryQuery, caller: Caller): Promise<Arra
     } else if (query.to_date) {
         match.local_date = { $lte: query.to_date };
     }
+    // Rows with no billable time would still surface as 0.00 h groups with a
+    // live `entry_count` — i.e. a count of internal, non-billable activity.
+    if (isClientSide) match.billable_total_minutes = { $gt: 0 };
 
     const rows = await TimesheetEntry.aggregate<{
         _id: Record<string, unknown>;
@@ -844,14 +944,24 @@ export const summary = async (query: SummaryQuery, caller: Caller): Promise<Arra
     }
 
     return rows.map((r) => {
-        const out: Record<string, unknown> = {
-            group_key: r._id,
-            billable_total_minutes: r.billable_total_minutes,
-            non_billable_total_minutes: r.non_billable_total_minutes,
-            idle_total_minutes: r.idle_total_minutes,
-            total_minutes: r.total_minutes,
-            entry_count: r.entry_count,
-        };
+        // Client-side callers get billable only. `total_minutes` is re-stated
+        // as the billable figure so a consumer that reads it can't accidentally
+        // surface non-billable effort it was never sent.
+        const out: Record<string, unknown> = isClientSide
+            ? {
+                  group_key: r._id,
+                  billable_total_minutes: r.billable_total_minutes,
+                  total_minutes: r.billable_total_minutes,
+                  entry_count: r.entry_count,
+              }
+            : {
+                  group_key: r._id,
+                  billable_total_minutes: r.billable_total_minutes,
+                  non_billable_total_minutes: r.non_billable_total_minutes,
+                  idle_total_minutes: r.idle_total_minutes,
+                  total_minutes: r.total_minutes,
+                  entry_count: r.entry_count,
+              };
         if (query.group_by === 'user') {
             const id = r._id.user_id;
             const idStr = id instanceof Types.ObjectId ? id.toString() : id ? String(id) : null;
