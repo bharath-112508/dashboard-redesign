@@ -1440,6 +1440,35 @@ describe('listTasks read-visibility scoping', () => {
 // — appended at the END of its column, i.e. a high position — landed on the
 // LAST page and was invisible to a user viewing page 1. The flat list now sorts
 // newest-first; column-scoped lists (board/sprint/story/subtask) keep position.
+describe('listTasks — assignee filter', () => {
+    const chain = (rows: unknown[]) => ({
+        sort: () => ({ skip: () => ({ limit: () => Promise.resolve(rows) }) }),
+    });
+
+    const filterFor = async (assignee_id: string) => {
+        taskFindMock.mockReturnValueOnce(chain([]) as never);
+        taskCountDocumentsMock.mockResolvedValueOnce(0 as never);
+        await svc.listTasks({ page: 1, limit: 20, assignee_id } as never, adminCaller() as never);
+        return taskFindMock.mock.calls.at(-1)![0] as Record<string, unknown>;
+    };
+
+    it('`assignee_id=null` selects the unassigned queue via the indexed field', async () => {
+        const filter = await filterFor('null');
+        // `primary_assignee_id: null`, not `assignee_ids: {$size: 0}` — the two
+        // are equivalent given the primary/array sync, but only this one can
+        // use the {primary_assignee_id, status} index.
+        expect(filter.primary_assignee_id).toBeNull();
+        expect(filter.assignee_ids).toBeUndefined();
+    });
+
+    it('a real id still matches against the multi-assignee array', async () => {
+        const id = new Types.ObjectId();
+        const filter = await filterFor(id.toString());
+        expect(filter.assignee_ids).toEqual(id);
+        expect(filter.primary_assignee_id).toBeUndefined();
+    });
+});
+
 describe('listTasks sort order', () => {
     const captureSort = (rows: unknown[], cap: { sort?: unknown }) => ({
         sort: (arg: unknown) => {

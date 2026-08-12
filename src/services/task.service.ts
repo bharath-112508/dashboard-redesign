@@ -669,7 +669,15 @@ export const listTasks = async (
     if (query.sprint_id) filter.sprint_id = new Types.ObjectId(query.sprint_id);
     // "My tasks" — match any task where the caller is ONE OF the assignees
     // (multi-assignee). `assignee_ids` carries the primary too (kept in sync).
-    if (query.assignee_id) filter.assignee_ids = new Types.ObjectId(query.assignee_id);
+    //
+    // `null` selects the UNASSIGNED queue. Tested on `primary_assignee_id`
+    // rather than `assignee_ids: { $size: 0 }`: the two are equivalent (the
+    // service keeps primary = assignee_ids[0]), but `$size` cannot use an
+    // index, and there is a `{primary_assignee_id, status}` index right here.
+    if (query.assignee_id !== undefined) {
+        if (query.assignee_id === 'null') filter.primary_assignee_id = null;
+        else filter.assignee_ids = new Types.ObjectId(query.assignee_id);
+    }
     if (query.status) filter.status = query.status;
     if (query.priority) filter.priority = query.priority;
     if (query.due_before) filter.due_date = { $lte: query.due_before };

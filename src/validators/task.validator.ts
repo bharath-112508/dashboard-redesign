@@ -264,7 +264,11 @@ export const listTasksQuerySchema = z
          * param at all, no story filter is applied.
          */
         story_id: z.union([objectIdSchema, z.literal('null')]).optional(),
-        assignee_id: objectIdSchema.optional(),
+        /**
+         * `assignee_id=null` literal sentinel selects UNASSIGNED tasks — the
+         * triage queue. Same shape as `story_id` / `parent_task_id` below.
+         */
+        assignee_id: z.union([objectIdSchema, z.literal('null')]).optional(),
         status: z.string().trim().min(1).max(TASK_STATUS_KEY_MAX).optional(),
         priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
         due_before: isoDateSchema.optional(),
