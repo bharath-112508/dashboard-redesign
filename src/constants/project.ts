@@ -35,6 +35,13 @@ export const PROJECT_STATUS_VALUES: readonly ProjectStatus[] = Object.values(PRO
 
 // ─── Sprint status ───────────────────────────────────────────────────────
 
+/**
+ * Cap on the cross-project sprint picker (`GET /sprints`). It is a dropdown,
+ * not a browsable list — past this many options a filter stops being usable
+ * and wants a search box instead.
+ */
+export const SPRINT_PICKER_MAX = 200;
+
 export const SPRINT_STATUSES = {
     PLANNED: 'planned',
     ACTIVE: 'active',

@@ -33,6 +33,14 @@ export const getList = async (req: Request, res: Response): Promise<Response> =>
     return paginated(res, data, meta);
 };
 
+// ─── Top-level /sprints ──────────────────────────────────────────────────
+
+/** Cross-project sprint list — the `/tasks` sprint-filter option list. */
+export const getAll = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.listAllSprints(projectCallerFrom(req));
+    return ok(res, data);
+};
+
 // ─── Top-level /sprints/:id ──────────────────────────────────────────────
 
 export const getOne = async (req: Request, res: Response): Promise<Response> => {

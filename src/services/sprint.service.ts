@@ -1,18 +1,18 @@
 import { Types } from 'mongoose';
 
 import { Sprint, type SprintDocument } from '../models/sprint.model.js';
-import { type ProjectDocument } from '../models/project.model.js';
+import { Project, type ProjectDocument } from '../models/project.model.js';
 import { Task } from '../models/task.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { type RoleType } from '../constants/roles.js';
-import { isProjectAuthor } from '../utils/role-check.js';
-import { SPRINT_STATUSES, type SprintStatus } from '../constants/project.js';
+import { ROLES, type RoleType } from '../constants/roles.js';
+import { isAdminLike, isProjectAuthor } from '../utils/role-check.js';
+import { SPRINT_PICKER_MAX, SPRINT_STATUSES, type SprintStatus } from '../constants/project.js';
 import { DEFAULT_TASK_STATUSES } from '../constants/task.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { withTransaction } from '../utils/with-transaction.js';
 import { recordAudit } from './audit.service.js';
-import { loadProjectForCaller } from './project.service.js';
+import { buildProjectVisibilityFilter, loadProjectForCaller } from './project.service.js';
 import type { ProjectCaller } from './project.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
@@ -133,6 +133,38 @@ const loadSprintAndProject = async (
     if (!sprint) throw AppError.notFound('Sprint not found', ERROR_CODES.SPRINT_NOT_FOUND);
     const project = await loadProjectForCaller(sprint.project_id, caller);
     return { sprint, project };
+};
+
+/**
+ * Cross-project sprint listing — the option list for the `/tasks` sprint
+ * filter, which spans every project the caller can see.
+ *
+ * `listSprints` above is project-scoped and takes a `projectId`; there was no
+ * way to ask "every sprint I can see" without one request per project, which
+ * is an N+1 the task page would pay on every load.
+ *
+ * Read scope mirrors `listTasks` EXACTLY — admin/manager see all, everyone
+ * else is narrowed to the projects `buildProjectVisibilityFilter` returns. If
+ * these two ever disagree, the filter would offer a sprint whose tasks the
+ * caller cannot list, and the picker would silently return nothing.
+ *
+ * Archived sprints are excluded: this feeds a filter for current work, and a
+ * closed-out sprint is noise in that list.
+ */
+export const listAllSprints = async (caller: ProjectCaller): Promise<Record<string, unknown>[]> => {
+    const filter: Record<string, unknown> = { is_archived: false };
+
+    const seesAllProjects = isAdminLike(caller) || caller.role === ROLES.MANAGER;
+    if (!seesAllProjects) {
+        const visible = buildProjectVisibilityFilter(caller);
+        const ids = await Project.find(visible).select('_id').limit(1_000).lean<{ _id: Types.ObjectId }[]>();
+        filter.project_id = { $in: ids.map((p) => p._id) };
+    }
+
+    // Capped rather than paginated: this is a dropdown, not a browsable list.
+    // Newest first so the sprints in flight sit at the top.
+    const rows = await Sprint.find(filter).sort({ start_date: -1 }).limit(SPRINT_PICKER_MAX);
+    return rows.map(toPublic);
 };
 
 export const getSprint = async (sprintId: Types.ObjectId, caller: ProjectCaller): Promise<Record<string, unknown>> => {

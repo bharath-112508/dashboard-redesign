@@ -28,6 +28,15 @@ const router = Router();
 
 router.use(authenticate);
 
+// ─── /sprints — cross-project list ───────────────────────────────────────
+
+// MUST stay above `/:id` or Express matches the empty path first... it does
+// not, but the ordering convention in this codebase is to declare literal
+// routes before param routes, and a future `/sprints/active` would break
+// silently otherwise. `PROJECT_READ` matches the item route below; the
+// service does the row-level scoping.
+router.get('/', requirePermission(PERMISSIONS.PROJECT_READ), asyncHandler(ctrl.getAll));
+
 // ─── /sprints/:id ────────────────────────────────────────────────────────
 
 router.get(
