@@ -887,8 +887,34 @@ export const summary = async (query: SummaryQuery, caller: Caller): Promise<Arra
     } else if (!canReadTeamTimesheets(caller.role)) {
         throw AppError.forbidden();
     }
+
+    // Row scoping for INTERNAL callers. This endpoint had none — it was the
+    // only team-timesheet read without it — so a Team Lead whose `listAllEntries`
+    // returned nothing still got every employee's totals here. Same data, two
+    // endpoints, two different answers about who may see it.
+    //
+    // Which scope applies depends on the question being asked:
+    //
+    //  - WITH `project_id` (the project Timesheet tab): the project itself is
+    //    the boundary. `loadProjectForCaller` decides whether the caller may
+    //    open it at all, and everyone who may sees the project's whole effort —
+    //    a project total that silently omitted non-reports would be a wrong
+    //    number, not a filtered one.
+    //  - WITHOUT it (the org-wide Team timesheets page): the reporting chain,
+    //    exactly as `listAllEntries` does, so the two tabs of that page finally
+    //    agree.
+    let scopedUserId: unknown | undefined;
+    if (!isClientSide) {
+        if (query.project_id) {
+            await loadProjectForCaller(new Types.ObjectId(query.project_id), caller);
+        } else {
+            scopedUserId = await scopedUserIdFilter(caller, query.user_id);
+        }
+    }
+
     const match: Record<string, unknown> = {};
-    if (query.user_id) match.user_id = new Types.ObjectId(query.user_id);
+    if (scopedUserId !== undefined) match.user_id = scopedUserId;
+    else if (query.user_id) match.user_id = new Types.ObjectId(query.user_id);
     if (query.project_id) match.project_id = new Types.ObjectId(query.project_id);
     if (query.task_id) match.task_id = new Types.ObjectId(query.task_id);
     if (query.from_date && query.to_date) {

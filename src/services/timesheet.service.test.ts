@@ -614,8 +614,56 @@ describe('list & summary RBAC', () => {
     });
 
     it('summary allows a team lead', async () => {
+        stubReports([]);
         entryAggregateMock.mockResolvedValueOnce([]);
         await expect(svc.summary({ group_by: 'project' }, teamLeadCaller())).resolves.toEqual([]);
+    });
+
+    // ─── `summary` row scoping for INTERNAL callers ──────────────────────
+    //
+    // This endpoint had none, so a Team Lead whose `listAllEntries` returned
+    // nothing still got every employee's totals from here. The two now agree.
+
+    const summaryMatch = () => {
+        const pipeline = entryAggregateMock.mock.calls.at(-1)![0] as Array<Record<string, unknown>>;
+        return (pipeline.find((st) => '$match' in st) as { $match: Record<string, unknown> }).$match;
+    };
+
+    it('summary scopes a manager to their direct reports, exactly as the list does', async () => {
+        const reports = [new Types.ObjectId(), new Types.ObjectId()];
+        stubReports(reports);
+        entryAggregateMock.mockResolvedValueOnce([]);
+
+        await svc.summary({ group_by: 'user' }, managerCaller());
+        expect(summaryMatch().user_id).toEqual({ $in: reports });
+    });
+
+    it('summary leaves an ADMIN unscoped', async () => {
+        entryAggregateMock.mockResolvedValueOnce([]);
+        await svc.summary({ group_by: 'user' }, adminCaller());
+        expect(summaryMatch().user_id).toBeUndefined();
+    });
+
+    it('summary scopes by PROJECT, not the reporting chain, when a project is named', async () => {
+        // The project Timesheet tab. A project total that silently omitted
+        // non-reports would be a wrong number, not a filtered one — so the
+        // project is the boundary and `loadProjectForCaller` is the gate.
+        const project_id = new Types.ObjectId().toString();
+        loadProjectForCallerMock.mockResolvedValueOnce({ _id: new Types.ObjectId(project_id) });
+        entryAggregateMock.mockResolvedValueOnce([]);
+
+        await svc.summary({ group_by: 'user', project_id }, teamLeadCaller());
+
+        expect(loadProjectForCallerMock).toHaveBeenCalled();
+        expect(summaryMatch().user_id).toBeUndefined();
+    });
+
+    it('summary refuses a team lead a project they cannot open', async () => {
+        loadProjectForCallerMock.mockRejectedValueOnce(new Error('no access'));
+        await expect(
+            svc.summary({ group_by: 'user', project_id: new Types.ObjectId().toString() }, teamLeadCaller())
+        ).rejects.toThrow();
+        expect(entryAggregateMock).not.toHaveBeenCalled();
     });
 
     const clientCaller = () => ({ id: new Types.ObjectId(), role: ROLES.CLIENT, audit: undefined });
