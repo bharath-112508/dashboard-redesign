@@ -7,6 +7,7 @@ import { Story } from '../models/story.model.js';
 import { Task } from '../models/task.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
+import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { deriveProjectCodeBase, pickProjectCode } from '../utils/project-code.js';
 import { pickCustomStatusKey, slugifyCustomStatusKey } from '../utils/custom-status-key.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -177,7 +178,54 @@ const assertCallerCanRead = (project: ProjectDocument, caller: ProjectCaller): v
 
 // ─── Serialisation ───────────────────────────────────────────────────────
 
-const toPublic = (doc: ProjectDocument): Record<string, unknown> => doc.toJSON() as Record<string, unknown>;
+/**
+ * `completed_on` — `completed_at` as an IST `YYYY-MM-DD` string, derived here
+ * and never stored.
+ *
+ * It exists so the on-time verdict is a string-vs-string compare against
+ * `end_date`, exactly like every other date comparison in the app. The
+ * alternative — shipping the raw instant and converting UTC → IST in the
+ * browser — puts timezone math on the client, where `lib/iso-date.ts` has no
+ * tz-aware helper, and the resulting off-by-one only shows up for projects
+ * completed after 18:30 UTC. The backend already owns IST anchoring; it stays
+ * here.
+ */
+const toPublic = (doc: ProjectDocument): Record<string, unknown> => ({
+    ...(doc.toJSON() as Record<string, unknown>),
+    completed_on: doc.completed_at ? dayjs(doc.completed_at).tz(DEFAULT_TIMEZONE).format(DATE_FORMAT) : null,
+});
+
+/**
+ * Per-project task rollup shipped on every `GET /projects` row.
+ *
+ * `task_count` / `done_task_count` describe **delivery scope only** —
+ * post-delivery work is excluded so a shipped project's progress bar keeps
+ * reading 100% when a client files a bug against it afterwards. The two
+ * `post_delivery_*` counts carry that work instead.
+ *
+ * `on_time + late <= done_task_count`: a task completed before
+ * `Task.completed_at` existed has no stamp, so it is evidence neither way.
+ * Consumers must not treat the two as a partition of `done_task_count`.
+ */
+interface ProjectTaskRollup {
+    task_count: number;
+    done_task_count: number;
+    on_time_task_count: number;
+    late_task_count: number;
+    overdue_task_count: number;
+    post_delivery_task_count: number;
+    post_delivery_open_count: number;
+}
+
+const emptyRollup = (): ProjectTaskRollup => ({
+    task_count: 0,
+    done_task_count: 0,
+    on_time_task_count: 0,
+    late_task_count: 0,
+    overdue_task_count: 0,
+    post_delivery_task_count: 0,
+    post_delivery_open_count: 0,
+});
 
 /**
  * Resolve `company_id` → `company: {id, name} | null` for a page of projects.
@@ -338,9 +386,19 @@ const generateUniqueProjectCode = async (name: string): Promise<string> => {
 };
 
 /**
- * A project can't be "completed" with no end date — that's the date it
- * completed ON, and reports/timelines have nothing to anchor the bar's
- * right edge to without it.
+ * A project can't be "completed" with no end date. `end_date` is the
+ * **target** — the date the project was due — not the date it finished on;
+ * the actual delivery moment is `completed_at`, stamped by the service on the
+ * transition. Without a target there is nothing for reports/timelines to
+ * anchor the bar's right edge to, and no baseline for the on-time verdict.
+ *
+ * Known hole, accepted: this forces a value, so someone completing a project
+ * that never carried a deadline will type today's date and manufacture an
+ * "on time" verdict. The mitigation is free rather than structural —
+ * `recordAudit` snapshots before/after on every project update, so a deadline
+ * first set (or moved) at completion time is already evidenced in
+ * `audit_logs`. Blocking the edit instead would need an approval flow for what
+ * is usually a legitimate correction.
  *
  * Lives here rather than in the validator because a PATCH carries only
  * the changed fields: `{status: 'completed'}` alone can't see the
@@ -411,6 +469,10 @@ export const createProject = async (
                 company_id: companyId,
                 representative_ids: representativeIds,
                 custom_task_statuses: input.custom_task_statuses,
+                // A project can legitimately be created already `completed`
+                // (back-filling finished work). Stamp the delivery moment here
+                // too, or such a row would be permanently verdict-less.
+                completed_at: input.status === PROJECT_STATUSES.COMPLETED ? new Date() : null,
                 created_by: caller.id,
             });
             break;
@@ -474,14 +536,19 @@ export const listProjects = async (
         Project.countDocuments(filter),
     ]);
 
-    // ─── Task completion rollup ─────────────────────────────────────────
-    // One aggregate over the page's project IDs: group by (project_id, status)
-    // so we can compute total tasks and done (terminal) tasks per project.
-    // Wrapped in try/catch so a DB hiccup never 500s the list — the rollup
-    // is supplemental, not load-bearing.
+    // ─── Task completion + timeliness rollup ────────────────────────────
+    // One aggregate over the page's project IDs: group by
+    // (project_id, status, is_post_delivery) so we can compute, per project,
+    // total/done tasks AND the on-time/late/overdue split. Wrapped in
+    // try/catch so a DB hiccup never 500s the list — the rollup is
+    // supplemental, not load-bearing.
+    //
+    // Terminal-ness stays a JS decision (it is per-project config, not task
+    // data), so the pipeline only ever emits raw per-status sums and the loop
+    // below decides which bucket they land in. That is why `on_time`/`late`
+    // are summed for every status and only *credited* for terminal ones.
 
-    /** Map of project id → { task_count, done_task_count } */
-    const rollupById = new Map<string, { task_count: number; done_task_count: number }>();
+    const rollupById = new Map<string, ProjectTaskRollup>();
 
     if (rows.length > 0) {
         const projectIds = rows.map((r) => r._id);
@@ -497,44 +564,144 @@ export const listProjects = async (
             terminalByProject.set(r._id.toString(), set);
         }
 
+        // The post-delivery cut-off is per project, so it has to be injected
+        // into the pipeline. Only projects that actually shipped have one, and
+        // a page is `query.limit` rows (20 by default), so this switch stays
+        // small. No completed projects on the page ⇒ a constant `null` and the
+        // whole post-delivery branch collapses to false.
+        const shipped = rows.filter((r) => r.completed_at);
+        const cutoffExpr = shipped.length
+            ? {
+                  $switch: {
+                      branches: shipped.map((r) => ({
+                          case: { $eq: ['$project_id', r._id] },
+                          then: r.completed_at,
+                      })),
+                      default: null,
+                  },
+              }
+            : { $literal: null };
+
+        // `completed_at` is a UTC instant, `due_date` a YYYY-MM-DD string.
+        // Anchor the instant to an IST calendar date and compare as strings —
+        // lexicographic ordering is correct for ISO dates, and IST is what
+        // every other local-date comparison in the app uses.
+        const completedOnIst = {
+            $dateToString: { date: '$completed_at', timezone: DEFAULT_TIMEZONE, format: '%Y-%m-%d' },
+        };
+        const today = dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
+
         try {
-            const perStatusBuckets = await Task.aggregate<{
-                _id: { project: Types.ObjectId; status: string };
+            const buckets = await Task.aggregate<{
+                _id: { project: Types.ObjectId; status: string; post: boolean };
                 count: number;
+                on_time: number;
+                late: number;
+                overdue: number;
             }>([
                 { $match: { project_id: { $in: projectIds } } },
-                { $group: { _id: { project: '$project_id', status: '$status' }, count: { $sum: 1 } } },
+                { $addFields: { _cutoff: cutoffExpr } },
+                {
+                    $group: {
+                        _id: {
+                            project: '$project_id',
+                            status: '$status',
+                            // A task created after its project shipped is
+                            // post-delivery work (typically a client-reported
+                            // bug against a delivered project).
+                            post: {
+                                $and: [{ $ne: ['$_cutoff', null] }, { $gt: ['$created_at', '$_cutoff'] }],
+                            },
+                        },
+                        count: { $sum: 1 },
+                        // The `$ne: [completed_at, null]` guard is load-bearing:
+                        // BSON orders null BEFORE strings, so a bare
+                        // `$lte: [null, due_date]` is TRUE and every task
+                        // missing a completion stamp would score as on time.
+                        on_time: {
+                            $sum: {
+                                $cond: [
+                                    {
+                                        $and: [
+                                            { $ne: ['$completed_at', null] },
+                                            { $lte: [completedOnIst, '$due_date'] },
+                                        ],
+                                    },
+                                    1,
+                                    0,
+                                ],
+                            },
+                        },
+                        late: {
+                            $sum: {
+                                $cond: [
+                                    {
+                                        $and: [
+                                            { $ne: ['$completed_at', null] },
+                                            { $gt: [completedOnIst, '$due_date'] },
+                                        ],
+                                    },
+                                    1,
+                                    0,
+                                ],
+                            },
+                        },
+                        overdue: { $sum: { $cond: [{ $lt: ['$due_date', today] }, 1, 0] } },
+                    },
+                },
             ]);
 
-            // Accumulate counts per project.
-            for (const b of perStatusBuckets) {
+            for (const b of buckets) {
                 const pid = b._id.project.toString();
-                const existing = rollupById.get(pid) ?? { task_count: 0, done_task_count: 0 };
-                existing.task_count += b.count;
+                const acc = rollupById.get(pid) ?? emptyRollup();
                 const terminal = terminalByProject.get(pid) ?? new Set([DEFAULT_DONE_TASK_STATUS_KEY]);
-                if (terminal.has(b._id.status)) {
-                    existing.done_task_count += b.count;
+                const isTerminal = terminal.has(b._id.status);
+
+                // Post-delivery work is NOT delivery scope: it stays out of
+                // the progress denominator (so a shipped project keeps reading
+                // 100%) and out of the on-time/late/overdue counts (so the
+                // card's timeliness line describes the delivery, not the
+                // support tail). It surfaces on its own as a support badge.
+                //
+                // This matters more than it looks: `createTaskReport` dates a
+                // fresh report `due_date = today`, so an untriaged client
+                // ticket turns "overdue" tomorrow by itself. Counting those in
+                // would put permanent phantom overdue numbers on every
+                // delivered project.
+                if (b._id.post) {
+                    acc.post_delivery_task_count += b.count;
+                    if (!isTerminal) acc.post_delivery_open_count += b.count;
+                    rollupById.set(pid, acc);
+                    continue;
                 }
-                rollupById.set(pid, existing);
+
+                acc.task_count += b.count;
+                if (isTerminal) {
+                    acc.done_task_count += b.count;
+                    // A terminal task with no `completed_at` (written before
+                    // that field existed) counts as done but is evidence
+                    // neither way, so on_time + late <= done_task_count.
+                    acc.on_time_task_count += b.on_time ?? 0;
+                    acc.late_task_count += b.late ?? 0;
+                } else {
+                    acc.overdue_task_count += b.overdue ?? 0;
+                }
+                rollupById.set(pid, acc);
             }
         } catch (err) {
-            logger.warn({ err }, 'project.listProjects: task rollup failed — defaulting to 0/0');
-            // rollupById stays empty; rows get 0/0 below.
+            logger.warn({ err }, 'project.listProjects: task rollup failed — defaulting to zeroes');
+            // rollupById stays empty; rows get an empty rollup below.
         }
     }
 
     const companyById = await attachCompanies(rows);
 
     return {
-        data: rows.map((r) => {
-            const counts = rollupById.get(r._id.toString()) ?? { task_count: 0, done_task_count: 0 };
-            return {
-                ...toPublic(r),
-                company: companyOf(r, companyById),
-                task_count: counts.task_count,
-                done_task_count: counts.done_task_count,
-            };
-        }),
+        data: rows.map((r) => ({
+            ...toPublic(r),
+            company: companyOf(r, companyById),
+            ...(rollupById.get(r._id.toString()) ?? emptyRollup()),
+        })),
         meta: {
             page: query.page,
             limit: query.limit,
@@ -588,6 +755,7 @@ export const updateProject = async (
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
 
     const before = toPublic(doc);
+    const statusBefore = doc.status;
 
     if (patch.name !== undefined) doc.name = patch.name;
     if (patch.description !== undefined) doc.description = patch.description;
@@ -624,6 +792,21 @@ export const updateProject = async (
 
     if (doc.end_date !== null && doc.end_date < doc.start_date) {
         throw AppError.unprocessable("The end date can't be before the start date.", ERROR_CODES.PROJECT_DATE_INVALID);
+    }
+
+    // Keep `completed_at` in lock-step with the status, the same way
+    // `sprint.service.ts` does. Only on an actual TRANSITION — re-saving an
+    // already-completed project (a rename, an archive) must not re-stamp the
+    // delivery moment, or every later edit would quietly move the date the
+    // on-time verdict is measured against.
+    //
+    // Un-completing clears it, which also discards the delivery-scope freeze
+    // and folds any post-delivery tasks back into ordinary scope. That is the
+    // correct reading: the project is being declared not-delivered.
+    if (doc.status === PROJECT_STATUSES.COMPLETED && statusBefore !== PROJECT_STATUSES.COMPLETED) {
+        doc.completed_at = new Date();
+    } else if (doc.status !== PROJECT_STATUSES.COMPLETED) {
+        doc.completed_at = null;
     }
 
     await doc.save();

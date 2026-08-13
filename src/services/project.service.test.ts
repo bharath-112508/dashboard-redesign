@@ -173,6 +173,7 @@ interface FakeProject {
         is_terminal: boolean;
     }>;
     created_by: Types.ObjectId;
+    completed_at: Date | null;
     save: ReturnType<typeof vi.fn>;
     deleteOne: ReturnType<typeof vi.fn>;
     toJSON: () => Record<string, unknown>;
@@ -193,6 +194,7 @@ const makeProject = (overrides: Partial<FakeProject> = {}): FakeProject => {
         representative_ids: [],
         custom_task_statuses: makeSubArray(),
         created_by: new Types.ObjectId(),
+        completed_at: null,
         save: vi.fn(),
         deleteOne: vi.fn(),
         toJSON() {
@@ -594,6 +596,59 @@ describe('updateProject', () => {
         expect(proj.save).toHaveBeenCalledTimes(1);
         expect(out).toMatchObject({ name: 'New', status: 'on_hold' });
     });
+
+    // ── completed_at: the delivery moment the on-time verdict measures ──
+    //
+    // It must be stamped on the TRANSITION and never re-stamped, because
+    // `end_date` (the target) is compared against it. A later edit that moved
+    // the stamp would silently rewrite whether the project shipped on time.
+
+    it('stamps completed_at when the status flips to completed', async () => {
+        const proj = makeProject({ status: 'active', end_date: '2026-12-31' });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { status: 'completed' }, adminCaller());
+
+        expect(proj.completed_at).toBeInstanceOf(Date);
+    });
+
+    it('does NOT re-stamp completed_at when an already-completed project is edited', async () => {
+        const shippedAt = new Date('2026-03-01T10:00:00Z');
+        const proj = makeProject({ status: 'completed', end_date: '2026-12-31', completed_at: shippedAt });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { name: 'Renamed' }, adminCaller());
+
+        expect(proj.completed_at).toBe(shippedAt);
+    });
+
+    it('clears completed_at when a completed project is re-opened', async () => {
+        const proj = makeProject({
+            status: 'completed',
+            end_date: '2026-12-31',
+            completed_at: new Date('2026-03-01T10:00:00Z'),
+        });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { status: 'active' }, adminCaller());
+
+        expect(proj.completed_at).toBeNull();
+    });
+
+    it('exposes completed_on as the IST calendar date of completed_at', async () => {
+        // 18:45 UTC on the 1st is already the 2nd in IST (+05:30) — the
+        // off-by-one this field exists to keep out of the browser.
+        const proj = makeProject({
+            status: 'completed',
+            end_date: '2026-12-31',
+            completed_at: new Date('2026-03-01T18:45:00Z'),
+        });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        const out = await svc.updateProject(proj._id, { name: 'Renamed' }, adminCaller());
+
+        expect(out).toMatchObject({ completed_on: '2026-03-02' });
+    });
 });
 
 // ─── updateProjectMembers (bulk add/remove + role validation) ────────────
@@ -890,6 +945,7 @@ describe('listProjects — task-completion rollup', () => {
             _id: Types.ObjectId;
             custom_task_statuses: { key: string; is_terminal: boolean }[];
             company_id: Types.ObjectId | null;
+            completed_at: Date | null;
         }> = {}
     ) => {
         const id = overrides._id ?? new Types.ObjectId();
@@ -897,6 +953,7 @@ describe('listProjects — task-completion rollup', () => {
         return {
             _id: id,
             company_id: overrides.company_id ?? null,
+            completed_at: overrides.completed_at ?? null,
             name: 'P',
             code: 'P-1',
             description: '',
@@ -963,6 +1020,66 @@ describe('listProjects — task-completion rollup', () => {
 
         const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
         expect(result.data[0]).toMatchObject({ task_count: 4, done_task_count: 3 });
+    });
+
+    // ── Timeliness + post-delivery scope ────────────────────────────────
+    //
+    // The load-bearing assertion is the LAST one: a delivered project that has
+    // since collected a client-reported bug must still read 100%. If someone
+    // later folds post-delivery work back into the denominator, this fails.
+
+    it('splits on-time / late / overdue and keeps post-delivery work out of delivery scope', async () => {
+        const projId = new Types.ObjectId();
+        const row = makeRowDoc({ _id: projId, completed_at: new Date('2026-03-01T10:00:00Z') });
+        stubFindWithRows([row]);
+
+        taskAggregateMock.mockResolvedValueOnce([
+            // Delivery scope, terminal: 2 finished on time, 1 late.
+            { _id: { project: projId, status: 'done', post: false }, count: 3, on_time: 2, late: 1, overdue: 0 },
+            // Delivery scope, open: 1 of them is past its due date.
+            {
+                _id: { project: projId, status: 'in_progress', post: false },
+                count: 2,
+                on_time: 0,
+                late: 0,
+                overdue: 1,
+            },
+            // Post-delivery: a client-filed bug, still open. Its own `overdue`
+            // is deliberately non-zero to prove it is not credited anywhere —
+            // an untriaged report is due "today" and goes overdue by itself.
+            { _id: { project: projId, status: 'to_do', post: true }, count: 1, on_time: 0, late: 0, overdue: 1 },
+        ]);
+
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+
+        expect(result.data[0]).toMatchObject({
+            task_count: 5,
+            done_task_count: 3,
+            on_time_task_count: 2,
+            late_task_count: 1,
+            overdue_task_count: 1,
+            post_delivery_task_count: 1,
+            post_delivery_open_count: 1,
+        });
+    });
+
+    it('counts a terminal task with no completed_at as done but neither on-time nor late', async () => {
+        // Rows written before Task.completed_at existed carry no stamp. They
+        // are evidence in neither direction, so on_time + late < done_count.
+        const projId = new Types.ObjectId();
+        stubFindWithRows([makeRowDoc({ _id: projId })]);
+
+        taskAggregateMock.mockResolvedValueOnce([
+            { _id: { project: projId, status: 'done', post: false }, count: 4, on_time: 1, late: 1, overdue: 0 },
+        ]);
+
+        const result = await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+
+        expect(result.data[0]).toMatchObject({
+            done_task_count: 4,
+            on_time_task_count: 1,
+            late_task_count: 1,
+        });
     });
 
     it('returns 0/0 for a zero-task project', async () => {

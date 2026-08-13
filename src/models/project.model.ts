@@ -159,6 +159,27 @@ export interface ProjectDocument extends Document {
     /** Monotonic per-project issue-key counter. Incremented atomically on task
      *  create (task.service); never decremented, so keys are never reused. */
     task_seq: number;
+    /**
+     * When the project most recently entered `completed` (`null` otherwise).
+     * Stamped by the service on the transition and cleared on the reverse, so
+     * it is a true delivery moment rather than `updated_at` (which any edit
+     * re-dates). Mirrors `Sprint.completed_at` / `Task.completed_at`.
+     *
+     * Two things read it, and both need the real moment rather than a date the
+     * user typed:
+     *  - the on-time verdict — `completed_at` (as an IST calendar date) vs
+     *    `end_date`, which is the **target**, not the completion date
+     *  - the delivery-scope freeze — a task created after this instant is
+     *    post-delivery work (a client-reported bug against a shipped project)
+     *    and is excluded from the progress rollup, so the bar keeps reading
+     *    100% for the scope that was actually delivered
+     *
+     * `null` on a completed project is a legitimate state, not missing data: it
+     * means the project was completed before this field existed and the audit
+     * trail no longer holds the transition. Consumers must render "no verdict"
+     * rather than inferring one — see `scripts/backfill-project-completed-at.ts`.
+     */
+    completed_at: Date | null;
     created_by: Types.ObjectId;
     created_at: Date;
     updated_at: Date;
@@ -260,6 +281,9 @@ const projectSchema = new Schema<ProjectDocument>(
             },
         },
         task_seq: { type: Number, required: true, default: 0, min: 0 },
+        // No index: read only on rows the list/detail queries already loaded,
+        // never used as a filter predicate.
+        completed_at: { type: Date, required: false, default: null },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
     },
     {
