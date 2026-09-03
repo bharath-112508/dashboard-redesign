@@ -29,6 +29,27 @@ import {
  */
 
 const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId');
+
+/**
+ * Notes are mandatory on every entry: a logged hour that says nothing about
+ * what was done is unreviewable, and the whole point of the project rollups
+ * is that someone can read them later.
+ *
+ * Enforced HERE and not on the model. `description` on `timesheet_entries`
+ * stays `default: ''` with no `required`, because Mongoose rejects an empty
+ * string for a required String — every entry logged before this rule would
+ * then fail validation on `entry.save()` when someone edited an unrelated
+ * field, e.g. correcting the hours. History stays saveable; new input must
+ * carry notes.
+ *
+ * On PATCH the KEY is optional (you may edit just the hours) but the VALUE
+ * can never be blanked, which is what `.min(1)` buys on the partial schema.
+ */
+const descriptionSchema = z
+    .string()
+    .trim()
+    .min(1, 'Add a note describing what you worked on.')
+    .max(TIMESHEET_DESCRIPTION_MAX);
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a YYYY-MM-DD date');
 
 // Shared duration shape — same on create and patch. Every entry splits its
@@ -54,7 +75,7 @@ const taskLinkedCreateSchema = z
         sprint_id: objectIdSchema.optional().nullable(),
         task_id: objectIdSchema,
         general_category: z.null().optional(),
-        description: z.string().trim().max(TIMESHEET_DESCRIPTION_MAX).optional().default(''),
+        description: descriptionSchema,
     })
     .extend(durationSchema.shape);
 
@@ -66,7 +87,7 @@ const generalCreateSchema = z
         sprint_id: z.null().optional(),
         task_id: z.null().optional(),
         general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable().optional(),
-        description: z.string().trim().max(TIMESHEET_DESCRIPTION_MAX).optional().default(''),
+        description: descriptionSchema,
     })
     .extend(durationSchema.shape)
     // A general entry has to say what the time was FOR — but a project is an
@@ -100,7 +121,7 @@ export const patchTimesheetBodySchema = z
         non_billable_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
         idle_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
         idle_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
-        description: z.string().trim().max(TIMESHEET_DESCRIPTION_MAX),
+        description: descriptionSchema,
         general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX),
         project_id: objectIdSchema.nullable(),
         sprint_id: objectIdSchema.nullable(),

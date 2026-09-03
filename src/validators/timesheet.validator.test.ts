@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createTimesheetBodySchema } from './timesheet.validator.js';
+import { createTimesheetBodySchema, patchTimesheetBodySchema } from './timesheet.validator.js';
 
 /**
  * A `general` entry is the "log time without a task" path. It must stay
@@ -15,6 +15,8 @@ describe('createTimesheetBodySchema — general entries', () => {
         billable_minutes: 0,
         non_billable_hours: 0,
         non_billable_minutes: 0,
+        // Notes are mandatory on every entry.
+        description: 'Reviewed the supplier onboarding flow',
     };
     const projectId = 'a'.repeat(24);
 
@@ -33,12 +35,39 @@ describe('createTimesheetBodySchema — general entries', () => {
         expect(parsed.success).toBe(false);
     });
 
+    it('rejects an entry with no note', () => {
+        const { description: _omitted, ...noNote } = base;
+        expect(createTimesheetBodySchema.safeParse({ ...noNote, project_id: projectId }).success).toBe(false);
+    });
+
+    it('rejects a whitespace-only note', () => {
+        const parsed = createTimesheetBodySchema.safeParse({
+            ...base,
+            project_id: projectId,
+            description: '   ',
+        });
+        expect(parsed.success).toBe(false);
+    });
+
     it('still requires a task for a task_linked entry', () => {
         const parsed = createTimesheetBodySchema.safeParse({
             ...base,
             entry_type: 'task_linked',
             project_id: projectId,
         });
+        expect(parsed.success).toBe(false);
+    });
+});
+
+describe('patchTimesheetBodySchema — notes', () => {
+    it('allows editing only the hours, without resending the note', () => {
+        const parsed = patchTimesheetBodySchema.safeParse({ billable_hours: 3, billable_minutes: 0 });
+        expect(parsed.success).toBe(true);
+    });
+
+    it('refuses to blank an existing note', () => {
+        // The KEY is optional on a partial patch; the VALUE never may be empty.
+        const parsed = patchTimesheetBodySchema.safeParse({ description: '' });
         expect(parsed.success).toBe(false);
     });
 });
