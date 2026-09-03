@@ -110,6 +110,11 @@ Sub-modules with their own routers; grouped because they share `LeaveRequest`/`L
   freelancer therefore has **no balance rows at all**, not zeroed ones.
   Freelancers ARE still counted in every headcount (they're `role: employee`;
   headcounts filter by role, never by employment type).
+- 🔴 **Freelancers bank no comp-off** either — `processCompOffForDay` returns
+  `reason: 'ineligible'` for them, alongside the existing client-side check.
+  Comp-off is time off in lieu: it accrues from billable hours and is SPENT as
+  leave, so granting it to someone who accrues no leave would hand them the
+  only leave days they could take. They're paid for those hours by invoice.
 - **Gotchas** — **C4 SL month attribution**: SL caps are per calendar month; on apply, the service replays historical requests in `created_at` order to reconstruct the cap state at the new request's apply time. **Self-approval refused** by service. **Cancel is author-only** even though the route has no perm gate.
 
 #### Comp-off
@@ -351,13 +356,19 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 - **Settings** — `SystemSettings.payroll` ([`models/system-settings.model.ts`](src/models/system-settings.model.ts)) holds the company letterhead/signatory block (`company_legal_name`, `company_address_lines`, `company_email`, `cin_no`, `iec_code`, `signatory_name`, `signatory_title`, `hr_reply_to_address`, `hr_reply_to_name`) shared by every payslip/letter template. Edited via the normal `PATCH /settings` body (gated on `SETTINGS_WRITE`, same as every other settings subsection — no separate payroll-settings route). All fields default to `''`/safe defaults so the subsection is savable field-by-field from day one.
 - 🔴 **`internship_offer` vs `internship`.** `internship_offer` is issued at the START of an internship (position, fixed window, work mode, paid/unpaid, responsibilities, terms — own template, `internship-offer-letter-template.ts`). `internship` renders an **Internship Experience Letter**, issued at the END. Different documents; don't collapse them. Like `joining`, `internship_offer` may name its subject manually (`candidate_name`) with no `user_id`, because an intern usually isn't a platform user when the offer goes out.
 - **All three letter entry points share `resolveRender`** in `letter.service.ts` (generate / preview / preview-html). They each used to carry their own copy of the per-type if/else, so a new type could be wired into two of them and silently render the WRONG template in the live preview.
-- 🔴 **Freelancers have no payslip.** `buildPayslipRenderData` throws
-  `PAYSLIP_NOT_APPLICABLE` (422) for them. Guarded on the render builder, not on
-  `generatePayslip`, because generate / preview / preview-html all funnel
-  through it — a guard on generate alone would still let the two preview
-  endpoints render a full payslip for someone who should never have one.
-  **Letters are deliberately unaffected**: they use `loadEmployeeCore` directly,
-  and a freelancer may legitimately need an engagement or experience letter.
+- 🔴 **Freelancers get no payslip and no letters.** Two guards, each on the one
+  funnel its document type passes through, because in both cases generate /
+  preview / preview-html would otherwise need three copies:
+    - **Payslip** — `buildPayslipRenderData` throws `PAYSLIP_NOT_APPLICABLE`
+      (422). Guarding `generatePayslip` alone would still let the two preview
+      endpoints render a full payslip for someone who should never have one.
+    - **Letters** — `letter.service:resolveRender` throws
+      `LETTER_NOT_APPLICABLE` (422), covering **all eight types** including
+      `offer` and `internship_offer`, which build their data ad-hoc and never
+      touch `loadEmployeeCore` — a guard down there would have missed them.
+      A **missing `user_id` is not refused**: `joining` / `offer` /
+      `internship_offer` may name a candidate with no platform account, so
+      there is simply nobody to check.
 - **Gotchas** — Structures are append-only by version (`effective_from`), not editable — correcting a mistake means creating a new version, not patching the old one; a unique `(user_id, effective_from)` index turns a parallel-create race into a clean `E11000` the service maps to `409 DUPLICATE_RESOURCE`. Payslip/letter rows are likewise immutable — regenerating for the same period/type always inserts a new row rather than overwriting. No employee self-service yet (no `/me` payslip/letter routes) and no bulk/batch generation — both are **Phase-2 deferred**, along with emailing generated documents out automatically (see `PENDING_WORK.md`).
 
 ### Reports & exports

@@ -11,6 +11,7 @@ import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { COMP_OFF_SOURCES } from '../constants/leave.js';
 import { NOTIFICATION_TYPES } from '../constants/notification.js';
 import { ROLES } from '../constants/roles.js';
+import { EMPLOYMENT_TYPES } from '../constants/user-statuses.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import { overtimeBank, weekendGrantDays } from '../utils/comp-off-accrual.js';
 import { REALTIME_TOPICS } from '../constants/realtime.js';
@@ -94,9 +95,16 @@ export const processCompOffForDay = async (userId: Types.ObjectId, date: string)
     if (date >= istToday()) return { ...base, reason: 'not_closed' };
 
     const user = await User.findById(userId).select(
-        'role comp_off_overtime_bank_minutes comp_off_pending_contributions'
+        'role internal_profile.employment_type comp_off_overtime_bank_minutes comp_off_pending_contributions'
     );
     if (!user || user.role === ROLES.CLIENT) return { ...base, reason: 'ineligible' };
+    // Freelancers bank no comp-off. Comp-off is time off in lieu — it accrues
+    // from billable hours and is SPENT as leave, so granting it to someone who
+    // accrues no leave would hand them the only leave days they can take.
+    // They are paid for those billable hours through their invoice instead.
+    if (user.internal_profile?.employment_type === EMPLOYMENT_TYPES.FREELANCER) {
+        return { ...base, reason: 'ineligible' };
+    }
 
     // Idempotency: this day already folded into the bank → do nothing (HELD).
     if (await CompOffAccrualDay.exists({ user_id: userId, local_date: date })) {

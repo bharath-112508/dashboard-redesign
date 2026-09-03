@@ -20,6 +20,9 @@ vi.mock('../utils/azure-blob.js', () => ({
 vi.mock('../models/letter.model.js', () => ({
     Letter: { create: vi.fn(), find: vi.fn(), findById: vi.fn(), countDocuments: vi.fn() },
 }));
+// `resolveRender` looks the subject up to refuse letters for freelancers.
+// Defaults to a staff member so the existing cases are unaffected.
+vi.mock('../models/user.model.js', () => ({ User: { findById: vi.fn() } }));
 vi.mock('./audit.service.js', () => ({ recordAudit: vi.fn() }));
 
 import { Types } from 'mongoose';
@@ -29,11 +32,26 @@ import { renderOfferLetterHtml } from './payroll/offer-letter-template.js';
 import { htmlToPdf } from './payroll/pdf.service.js';
 import { putBlob } from '../utils/azure-blob.js';
 import { Letter } from '../models/letter.model.js';
+import { User } from '../models/user.model.js';
 import { recordAudit } from './audit.service.js';
 import * as service from './letter.service.js';
 
+/** The subject-lookup stub `resolveRender` performs. */
+const mockSubject = (employmentType?: string) =>
+    (User.findById as never as ReturnType<typeof vi.fn>).mockReturnValue({
+        select: () => ({
+            lean: () =>
+                Promise.resolve({
+                    internal_profile: employmentType ? { employment_type: employmentType } : {},
+                }),
+        }),
+    });
+
 describe('letter.service', () => {
-    beforeEach(() => vi.clearAllMocks());
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockSubject();
+    });
 
     it('renders via renderLetterHtml, uploads, persists, and audits a promotion letter', async () => {
         (buildLetterRenderData as never as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -156,5 +174,46 @@ describe('letter.service', () => {
         expect(putBlob).not.toHaveBeenCalled();
         expect(Letter.create).not.toHaveBeenCalled();
         expect(recordAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses every letter type for a freelancer', async () => {
+        // Guarded in `resolveRender`, so this holds for generate, preview and
+        // preview-html across all eight types — including `offer`, which builds
+        // its data ad-hoc and never touches the employee render adapter.
+        mockSubject('freelancer');
+        const caller = { id: new Types.ObjectId(), audit: undefined as never };
+        const userId = new Types.ObjectId().toString();
+
+        await expect(
+            service.generateLetter(
+                { type: 'promotion', user_id: userId, effective_date: '2026-04-01' } as never,
+                caller
+            )
+        ).rejects.toMatchObject({ code: 'LETTER_NOT_APPLICABLE' });
+
+        await expect(service.generateLetter({ type: 'offer', user_id: userId } as never, caller)).rejects.toMatchObject(
+            { code: 'LETTER_NOT_APPLICABLE' }
+        );
+
+        expect(Letter.create).not.toHaveBeenCalled();
+        expect(putBlob).not.toHaveBeenCalled();
+    });
+
+    it('allows a letter for a candidate with no platform account', async () => {
+        // `joining` / `offer` / `internship_offer` may name someone who has no
+        // user record yet. There is nobody to check, so it must not refuse.
+        (buildLetterRenderData as never as ReturnType<typeof vi.fn>).mockResolvedValue({ type: 'offer' });
+        (Letter.create as never as ReturnType<typeof vi.fn>).mockResolvedValue({
+            _id: new Types.ObjectId(),
+            toJSON: () => ({ id: '1', type: 'offer' }),
+        });
+
+        await expect(
+            service.generateLetter({ type: 'offer', candidate_name: 'Outside Hire' } as never, {
+                id: new Types.ObjectId(),
+                audit: undefined as never,
+            })
+        ).resolves.toBeDefined();
+        expect(User.findById).not.toHaveBeenCalled();
     });
 });

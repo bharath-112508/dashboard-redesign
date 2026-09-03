@@ -26,6 +26,7 @@ import { putBlob, mintDownloadSas, deleteBlob } from '../utils/azure-blob.js';
 import { AZURE_BLOB_PAYROLL_DOCUMENTS_CONTAINER } from '../config/server.config.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
+import { EMPLOYMENT_TYPES } from '../constants/user-statuses.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import type { PaginationMeta } from '../utils/api-response.js';
@@ -262,10 +263,37 @@ const buildInternshipOfferRenderData = async (
  * be wired into two of them and silently render the WRONG template in the
  * live preview — a failure you'd only notice by eyeballing the page.
  */
+/**
+ * Freelancers get no company letters — they are engaged per contract, not
+ * employed, so an offer / joining / relieving / experience letter would assert
+ * an employment relationship that does not exist.
+ *
+ * Guarded here rather than in the render builders because this is the single
+ * point all three entry points (generate, preview, preview-html) and all eight
+ * letter types pass through — including `offer` and `internship_offer`, which
+ * build their data ad-hoc and never touch `loadEmployeeCore`, so a guard down
+ * there would have missed them.
+ *
+ * A missing `user_id` is not an error: `joining`, `offer` and
+ * `internship_offer` may name a candidate who has no platform account yet.
+ * There is simply nobody to check, so the letter proceeds.
+ */
+const assertNotFreelancer = async (userId: Types.ObjectId | undefined): Promise<void> => {
+    if (!userId) return;
+    const subject = await User.findById(userId).select('internal_profile.employment_type').lean();
+    if (subject?.internal_profile?.employment_type === EMPLOYMENT_TYPES.FREELANCER) {
+        throw AppError.unprocessable(
+            'Freelancers are engaged per contract, not employed, so they have no company letters.',
+            ERROR_CODES.LETTER_NOT_APPLICABLE
+        );
+    }
+};
+
 const resolveRender = async (
     input: GenerateLetterBody
 ): Promise<{ html: string; data: unknown; subjectName?: string }> => {
     const userId = input.user_id ? new Types.ObjectId(input.user_id) : undefined;
+    await assertNotFreelancer(userId);
 
     if (input.type === 'offer') {
         const data = await buildOfferRenderData(input);

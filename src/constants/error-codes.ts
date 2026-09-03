@@ -28,6 +28,9 @@ export const ERROR_CODES = {
     PROJECT_WRITE_FORBIDDEN: 'PROJECT_WRITE_FORBIDDEN',
     /** The subject is a freelancer, who is not on payroll and has no payslip. */
     PAYSLIP_NOT_APPLICABLE: 'PAYSLIP_NOT_APPLICABLE',
+    /** The subject is a freelancer, engaged per contract rather than employed,
+     *  so no employment letter applies to them. */
+    LETTER_NOT_APPLICABLE: 'LETTER_NOT_APPLICABLE',
     STORY_WRITE_FORBIDDEN: 'STORY_WRITE_FORBIDDEN',
     TASK_WRITE_FORBIDDEN: 'TASK_WRITE_FORBIDDEN',
     COMMENT_EDIT_FORBIDDEN: 'COMMENT_EDIT_FORBIDDEN',

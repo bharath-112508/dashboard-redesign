@@ -132,6 +132,20 @@ describe('processCompOffForDay', () => {
         expect(createEarnedLotMock).not.toHaveBeenCalled();
     });
 
+    it('is ineligible for a freelancer (comp-off is spent as leave, which they do not accrue)', async () => {
+        getSettingsMock.mockResolvedValue(settings(true));
+        userFindByIdMock.mockReturnValue(
+            userQuery({ role: ROLES.EMPLOYEE, internal_profile: { employment_type: 'freelancer' } })
+        );
+
+        const res = await svc.processCompOffForDay(new Types.ObjectId(), WEEKDAY);
+
+        expect(res.reason).toBe('ineligible');
+        expect(res.granted_days).toBe(0);
+        expect(timesheetAggregateMock).not.toHaveBeenCalled();
+        expect(createEarnedLotMock).not.toHaveBeenCalled();
+    });
+
     it('is ineligible for a CLIENT user (no comp-off for the client side)', async () => {
         getSettingsMock.mockResolvedValue(settings(true));
         userFindByIdMock.mockReturnValue(userQuery({ role: ROLES.CLIENT }));
