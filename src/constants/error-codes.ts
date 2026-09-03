@@ -23,6 +23,9 @@ export const ERROR_CODES = {
     MFA_REQUIRED: 'MFA_REQUIRED',
     MFA_ENROLLMENT_NOT_FOUND: 'MFA_ENROLLMENT_NOT_FOUND',
     MFA_NOT_ENABLED: 'MFA_NOT_ENABLED',
+    /** Caller may read the project but not change it — see
+     *  `project.service:assertCallerCanWrite` for the per-role scope. */
+    PROJECT_WRITE_FORBIDDEN: 'PROJECT_WRITE_FORBIDDEN',
     STORY_WRITE_FORBIDDEN: 'STORY_WRITE_FORBIDDEN',
     TASK_WRITE_FORBIDDEN: 'TASK_WRITE_FORBIDDEN',
     COMMENT_EDIT_FORBIDDEN: 'COMMENT_EDIT_FORBIDDEN',

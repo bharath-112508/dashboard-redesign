@@ -64,6 +64,15 @@ const EMPLOYEE_BASE: readonly Permission[] = [
     // them gets is decided by `loadProjectForCaller`, not by this bit.
     PERMISSIONS.TASK_REPORT,
     PERMISSIONS.TASK_TEMPLATE_READ,
+    // Anyone may start a project and staff it. `project.write` is not the
+    // org-wide edit bit it looks like: `project.service:assertCallerCanWrite`
+    // scopes an Employee's writes to projects they CREATED, and the
+    // visibility filter already scopes their reads to projects they're a
+    // member of. Without that guard this pair would be a licence to edit or
+    // delete any project by id — check it is still wired before assuming
+    // this line is safe.
+    PERMISSIONS.PROJECT_WRITE,
+    PERMISSIONS.PROJECT_MEMBERS_WRITE,
     PERMISSIONS.TIMESHEET_WRITE,
     // M3 — `ATTENDANCE_READ_OWN`, `LEAVE_BALANCE_READ_OWN`,
     // `LEAVE_REQUEST_READ_OWN` were dead: catalogued + assigned, but no
@@ -92,9 +101,10 @@ const TEAM_LEAD_ADDITIONS: readonly Permission[] = [
     PERMISSIONS.ATTENDANCE_READ_TEAM,
     PERMISSIONS.ATTENDANCE_CORRECTION_APPROVE,
     PERMISSIONS.TIMESHEET_READ,
-    PERMISSIONS.PROJECT_WRITE,
+    // PROJECT_WRITE + PROJECT_MEMBERS_WRITE moved to EMPLOYEE_BASE. Team Lead
+    // still gets them through that bundle; what's added here is the archive
+    // (delete) bit, which employees deliberately do NOT get.
     PERMISSIONS.PROJECT_ARCHIVE,
-    PERMISSIONS.PROJECT_MEMBERS_WRITE,
     PERMISSIONS.SPRINT_WRITE,
     PERMISSIONS.STORY_WRITE,
     PERMISSIONS.TASK_TEMPLATE_WRITE,

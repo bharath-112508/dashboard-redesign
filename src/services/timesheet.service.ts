@@ -348,7 +348,10 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
             await loadProjectForCaller(pOid, caller);
             projectId = pOid;
         }
-        generalCategory = input.general_category;
+        // Omitted is stored as `null`, not `undefined` — the column is
+        // `String | null` and an undefined would leave the key off the doc,
+        // so `{ project_id: null }` grouping in the summary would miss it.
+        generalCategory = input.general_category ?? null;
     }
 
     const policy = await loadPolicy();
@@ -744,7 +747,8 @@ export const listAllEntries = async (
     const isClientSide = CLIENT_SIDE_ROLES.includes(caller.role);
     if (isClientSide) {
         await assertClientProjectScope(query, caller);
-    } else if (!canReadTeamTimesheets(caller.role)) {
+    } else if (!canReadTeamTimesheets(caller.role) && !query.project_id) {
+        // Mirrors `summary` — see the note there.
         throw AppError.forbidden();
     }
     // Reporting-chain scoping — Admin sees all; Manager/Team-Lead only their
@@ -752,9 +756,21 @@ export const listAllEntries = async (
     // Client-side callers are scoped by project instead (asserted above); the
     // reporting chain is an internal-staff concept and would resolve to nothing
     // for them, so their `user_id` filter is passed through as given.
-    const scopeUserId = isClientSide
-        ? query.user_id && new Types.ObjectId(query.user_id)
-        : await scopedUserIdFilter(caller, query.user_id);
+    let scopeUserId: unknown | undefined;
+    if (isClientSide) {
+        scopeUserId = query.user_id ? new Types.ObjectId(query.user_id) : undefined;
+    } else if (query.project_id) {
+        // The project is the boundary, exactly as `summary` already treats it
+        // — and this is the call that authorises the caller to open it at all.
+        // Without this branch the entries list applied the reporting chain
+        // while the totals above it did not, so the project's Timesheet tab
+        // showed a Team Lead a full billable figure over a list containing
+        // only their own direct reports' rows.
+        await loadProjectForCaller(new Types.ObjectId(query.project_id), caller);
+        scopeUserId = query.user_id ? new Types.ObjectId(query.user_id) : undefined;
+    } else {
+        scopeUserId = await scopedUserIdFilter(caller, query.user_id);
+    }
     const filter = buildListFilter(query, scopeUserId);
     // Same billable-only narrowing as `summary`: a row with no billable time is
     // internal effort the customer neither pays for nor needs to see.
@@ -884,7 +900,13 @@ export const summary = async (query: SummaryQuery, caller: Caller): Promise<Arra
     const isClientSide = CLIENT_SIDE_ROLES.includes(caller.role);
     if (isClientSide) {
         await assertClientProjectScope(query, caller);
-    } else if (!canReadTeamTimesheets(caller.role)) {
+    } else if (!canReadTeamTimesheets(caller.role) && !query.project_id) {
+        // An Employee holds no `timesheet.read`, so the org-wide question
+        // ("everyone's hours") stays closed to them. One project they can
+        // already open is a different question, and now that anyone can create
+        // a project, the person who owns one has to be able to see what it
+        // cost. `loadProjectForCaller` below is what actually authorises it —
+        // this branch only insists they name a project first.
         throw AppError.forbidden();
     }
 

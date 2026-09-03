@@ -21,6 +21,7 @@ const {
     userCreateMock,
     userFindByIdMock,
     userFindMock,
+    userCountMock,
     userUpdateOneMock,
     userFindOneMock,
     projectFindByIdMock,
@@ -41,6 +42,7 @@ const {
     userCreateMock: vi.fn(),
     userFindByIdMock: vi.fn(),
     userFindMock: vi.fn(),
+    userCountMock: vi.fn(),
     userUpdateOneMock: vi.fn(),
     userFindOneMock: vi.fn(),
     projectFindByIdMock: vi.fn(),
@@ -66,7 +68,7 @@ vi.mock('../models/user.model.js', () => ({
         updateOne: userUpdateOneMock,
         findOne: userFindOneMock,
         find: userFindMock,
-        countDocuments: vi.fn(),
+        countDocuments: userCountMock,
     },
 }));
 
@@ -779,5 +781,45 @@ describe('updateUser — employment-editor (user.employment_write)', () => {
             })
         ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
         expect(t.save).not.toHaveBeenCalled();
+    });
+});
+
+describe('listUsers — employment_type filter', () => {
+    // The Staff filter must not be an equality match: every user created
+    // before `internal_profile.employment_type` existed carries no such key,
+    // and an equality would hide the whole pre-existing workforce behind a
+    // filter that reads like it should show everyone.
+    const listChain = (rows: unknown[]) => ({
+        collation: () => ({
+            sort: () => ({
+                skip: () => ({
+                    limit: () => Promise.resolve(rows),
+                }),
+            }),
+        }),
+    });
+
+    const runList = async (employment_type?: 'staff' | 'freelancer') => {
+        userFindMock.mockReturnValueOnce(listChain([]));
+        userCountMock.mockReturnValueOnce({ collation: () => Promise.resolve(0) });
+        settingsMock.mockResolvedValueOnce({ uploads: { sas_token_ttl_minutes: 15 } });
+        photoTtlMock.mockReturnValueOnce(15);
+        await svc.listUsers({ page: 1, limit: 20, employment_type } as never);
+        return userFindMock.mock.calls[0]![0] as Record<string, unknown>;
+    };
+
+    it('matches "not a freelancer" for staff, so pre-existing users are included', async () => {
+        const filter = await runList('staff');
+        expect(filter['internal_profile.employment_type']).toEqual({ $ne: 'freelancer' });
+    });
+
+    it('matches freelancer exactly — it is never the implied default', async () => {
+        const filter = await runList('freelancer');
+        expect(filter['internal_profile.employment_type']).toBe('freelancer');
+    });
+
+    it('omits the predicate entirely when no employment_type is asked for', async () => {
+        const filter = await runList();
+        expect(filter).not.toHaveProperty('internal_profile.employment_type');
     });
 });

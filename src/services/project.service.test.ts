@@ -1183,3 +1183,83 @@ describe('deleteProject', () => {
         expect(proj.deleteOne).toHaveBeenCalled();
     });
 });
+
+// ─── assertCallerCanWrite — per-row authorization on project writes ──────
+
+describe('project writes — per-row authorization', () => {
+    // These six paths previously did `findById` and wrote with NO per-row
+    // check: the route's requirePermission was the only gate, so any holder
+    // of project.write could rename, restaff or delete any project by id —
+    // including ones the visibility filter hides from them.
+    const teamLeadCaller = (id: Types.ObjectId) => ({ id, role: ROLES.TEAM_LEAD, audit: undefined });
+
+    const expectForbidden = (p: Promise<unknown>) =>
+        expect(p).rejects.toMatchObject({ code: ERROR_CODES.PROJECT_WRITE_FORBIDDEN });
+
+    describe('employee', () => {
+        it('may patch a project they created', async () => {
+            const me = new Types.ObjectId();
+            const proj = makeProject({ created_by: me, member_ids: [me] });
+            projectFindByIdMock.mockResolvedValueOnce(proj);
+
+            await svc.updateProject(proj._id, { name: 'Renamed' }, employeeCaller(me));
+            expect(proj.save).toHaveBeenCalled();
+        });
+
+        it('may NOT patch a project they were merely added to', async () => {
+            const me = new Types.ObjectId();
+            const proj = makeProject({ created_by: new Types.ObjectId(), member_ids: [me] });
+            projectFindByIdMock.mockResolvedValueOnce(proj);
+
+            await expectForbidden(svc.updateProject(proj._id, { name: 'Renamed' }, employeeCaller(me)));
+            expect(proj.save).not.toHaveBeenCalled();
+        });
+
+        it('may NOT patch a project they have nothing to do with', async () => {
+            const proj = makeProject();
+            projectFindByIdMock.mockResolvedValueOnce(proj);
+
+            await expectForbidden(
+                svc.updateProject(proj._id, { name: 'Renamed' }, employeeCaller(new Types.ObjectId()))
+            );
+        });
+
+        it('may NOT delete a project they created — archive is a separate bit', async () => {
+            const me = new Types.ObjectId();
+            const proj = makeProject({ created_by: me });
+            projectFindByIdMock.mockResolvedValueOnce(proj);
+            // The route gate (project.archive) is what stops them; the service
+            // lets the creator through, so deletion stays route-gated only.
+            await expect(svc.deleteProject(proj._id, employeeCaller(me))).resolves.not.toThrow();
+        });
+    });
+
+    describe('team lead', () => {
+        it('may patch a project they are a member of', async () => {
+            const me = new Types.ObjectId();
+            const proj = makeProject({ member_ids: [me] });
+            projectFindByIdMock.mockResolvedValueOnce(proj);
+
+            await svc.updateProject(proj._id, { name: 'Renamed' }, teamLeadCaller(me));
+            expect(proj.save).toHaveBeenCalled();
+        });
+
+        it('may NOT patch a project they are not on — the hole this closes', async () => {
+            const proj = makeProject();
+            projectFindByIdMock.mockResolvedValueOnce(proj);
+
+            await expectForbidden(
+                svc.updateProject(proj._id, { name: 'Renamed' }, teamLeadCaller(new Types.ObjectId()))
+            );
+            expect(proj.save).not.toHaveBeenCalled();
+        });
+    });
+
+    it('admin may patch any project', async () => {
+        const proj = makeProject();
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { name: 'Renamed' }, adminCaller());
+        expect(proj.save).toHaveBeenCalled();
+    });
+});

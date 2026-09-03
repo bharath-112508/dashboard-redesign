@@ -176,6 +176,48 @@ const assertCallerCanRead = (project: ProjectDocument, caller: ProjectCaller): v
     throw AppError.forbidden('You do not have access to this project', ERROR_CODES.FORBIDDEN);
 };
 
+/**
+ * Per-row authorization for project WRITES — the counterpart to
+ * `assertCallerCanRead`, and the reason it exists at all.
+ *
+ * `updateProject`, `updateProjectMembers`, `addCustomStatus`,
+ * `patchCustomStatus`, `deleteCustomStatus` and `deleteProject` all used to
+ * `findById` and write with no per-row check whatsoever: the route's
+ * `requirePermission(project.write / project.archive)` was the only gate. So
+ * any holder of those bits — Team Lead upward — could rename, restaff or
+ * delete ANY project in the org by id, including ones the visibility filter
+ * hides from them. Reads were scoped and writes were not, which is the wrong
+ * way round.
+ *
+ * The tiers, and why each is what it is:
+ *
+ *   - **Admin / Manager** — every project, exactly as they read them.
+ *   - **Team Lead** — projects they're a member of. This is a *tightening*,
+ *     and it restores what `system-role-definitions.ts` already claims is
+ *     true ("the per-row visibility filter still gates them to projects the
+ *     team-lead is actually a member of"). It was never implemented.
+ *   - **Employee** — only projects they created. Employees hold
+ *     `project.write` so anyone can start a project and staff it; without
+ *     this line that same bit would let them edit or delete every project
+ *     they happen to be added to, and — before the tightening above —
+ *     every project in the company.
+ *
+ * Creator-scoping has one consequence worth knowing: when the creator leaves,
+ * no other Employee can edit that project. Admin / Manager / a Team Lead on
+ * the roster still can, so it's a handover, not a dead end.
+ *
+ * NOT used for the client-side roster (`updateProjectRepresentatives`) — a
+ * `client` legitimately writes that on their own company's projects, and
+ * their scope is `company_id`, which `assertCallerCanRead` already enforces
+ * there alongside the roster invariant.
+ */
+const assertCallerCanWrite = (project: ProjectDocument, caller: ProjectCaller): void => {
+    if (caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER) return;
+    if (caller.role === ROLES.TEAM_LEAD && project.member_ids.some((u) => u.equals(caller.id))) return;
+    if (caller.role === ROLES.EMPLOYEE && project.created_by.equals(caller.id)) return;
+    throw AppError.forbidden('You can only change projects you created or lead.', ERROR_CODES.PROJECT_WRITE_FORBIDDEN);
+};
+
 // ─── Serialisation ───────────────────────────────────────────────────────
 
 /**
@@ -753,6 +795,7 @@ export const updateProject = async (
 ): Promise<Record<string, unknown>> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    assertCallerCanWrite(doc, caller);
 
     const before = toPublic(doc);
     const statusBefore = doc.status;
@@ -850,6 +893,7 @@ export const updateProjectMembers = async (
 ): Promise<Record<string, unknown>> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    assertCallerCanWrite(doc, caller);
 
     const addIds = dedupeObjectIds(body.add);
     const removeIds = body.remove.map((r) => new Types.ObjectId(r));
@@ -1127,6 +1171,7 @@ export const addCustomStatus = async (
 ): Promise<Record<string, unknown>> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    assertCallerCanWrite(doc, caller);
 
     // Key is auto-derived from the label when the caller omits it (the common
     // path — the create dialog no longer asks for one). The slug is deduped
@@ -1199,7 +1244,7 @@ export const patchDefaultStatusOrders = async (
 }> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
-    assertCallerCanRead(doc, caller);
+    assertCallerCanWrite(doc, caller);
 
     // Snapshot current is_active per key so we can preserve values for
     // entries where the caller omitted the flag (validator marks it
@@ -1257,6 +1302,7 @@ export const patchCustomStatus = async (
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
     const doc = await findProjectByCustomStatusId(statusId);
+    assertCallerCanWrite(doc, caller);
     const sub = findCustomStatusOrThrow(doc, statusId);
 
     const before = {
@@ -1305,6 +1351,7 @@ export const patchCustomStatus = async (
 
 export const deleteCustomStatus = async (statusId: Types.ObjectId, caller: ProjectCaller): Promise<void> => {
     const doc = await findProjectByCustomStatusId(statusId);
+    assertCallerCanWrite(doc, caller);
     const sub = findCustomStatusOrThrow(doc, statusId);
 
     const snapshot = {
@@ -1353,6 +1400,7 @@ export const deleteCustomStatus = async (statusId: Types.ObjectId, caller: Proje
 export const deleteProject = async (id: Types.ObjectId, caller: ProjectCaller): Promise<void> => {
     const doc = await Project.findById(id);
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
+    assertCallerCanWrite(doc, caller);
 
     const [taskCount, storyCount, sprintCount] = await Promise.all([
         Task.countDocuments({ project_id: id }),

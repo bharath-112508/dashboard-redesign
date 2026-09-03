@@ -65,10 +65,20 @@ const generalCreateSchema = z
         project_id: objectIdSchema.nullable().optional(),
         sprint_id: z.null().optional(),
         task_id: z.null().optional(),
-        general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX),
+        general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable().optional(),
         description: z.string().trim().max(TIMESHEET_DESCRIPTION_MAX).optional().default(''),
     })
-    .extend(durationSchema.shape);
+    .extend(durationSchema.shape)
+    // A general entry has to say what the time was FOR — but a project is an
+    // answer to that on its own. Requiring the category unconditionally meant
+    // "log two hours against Project X" also demanded a free-text label, so
+    // people typed "work" and the field carried no information. Requiring at
+    // least one keeps the entry attributable without inventing a category
+    // where the project already is one.
+    .refine((d) => Boolean(d.project_id) || Boolean(d.general_category), {
+        message: 'Pick a project or name a category, so the time is attributable.',
+        path: ['general_category'],
+    });
 
 export const createTimesheetBodySchema = z.discriminatedUnion('entry_type', [
     taskLinkedCreateSchema,

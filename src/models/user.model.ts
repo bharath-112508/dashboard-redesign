@@ -4,7 +4,13 @@ import { BASE_SCHEMA_OPTIONS, sensitiveToJSON } from './_base.js';
 import type { CompOffContribution } from './comp-off-ledger.model.js';
 import { COLLECTIONS } from '../constants/collections.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
-import { USER_STATUSES, type UserStatus } from '../constants/user-statuses.js';
+import {
+    EMPLOYMENT_TYPES,
+    EMPLOYMENT_TYPE_VALUES,
+    USER_STATUSES,
+    type EmploymentType,
+    type UserStatus,
+} from '../constants/user-statuses.js';
 import { PERMISSION_VALUES } from '../constants/permissions.js';
 import { DEFAULT_TIMEZONE } from '../utils/date.js';
 
@@ -33,6 +39,19 @@ export interface InternalProfile {
     job_title: string;
     department: string;
     date_of_joining: string; // YYYY-MM-DD
+    /**
+     * How this person is engaged — `staff` or `freelancer`. Orthogonal to
+     * `role`: a freelancer is usually `role: 'employee'` and gets exactly the
+     * same permissions. This is the HR distinction, so reports and the staff
+     * directory can tell the two apart.
+     *
+     * Defaulted rather than required so the field could land without a
+     * migration — every pre-existing user reads back as `staff`. Note a
+     * `.lean()` read of an old document returns `undefined` (Mongoose applies
+     * defaults on hydration, not on lean projections), so consumers must
+     * fall back to `staff` rather than assuming the key is present.
+     */
+    employment_type: EmploymentType;
     reporting_manager_id: Types.ObjectId | null;
     emergency_contact?: EmergencyContact;
 }
@@ -160,6 +179,12 @@ const internalProfileSchema = new Schema<InternalProfile>(
         job_title: { type: String, required: true, trim: true },
         department: { type: String, required: true, trim: true },
         date_of_joining: { type: String, required: true },
+        employment_type: {
+            type: String,
+            required: true,
+            enum: EMPLOYMENT_TYPE_VALUES,
+            default: EMPLOYMENT_TYPES.STAFF,
+        },
         reporting_manager_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
         emergency_contact: { type: emergencyContactSchema, required: false },
     },

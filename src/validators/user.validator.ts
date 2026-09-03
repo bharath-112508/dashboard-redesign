@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
 import { ROLES } from '../constants/roles.js';
-import { USER_STATUSES } from '../constants/user-statuses.js';
+import { EMPLOYMENT_TYPES, USER_STATUSES } from '../constants/user-statuses.js';
 
 // ─── Phone — BUG-044 ─────────────────────────────────────────────────────
 //
@@ -80,6 +80,8 @@ const timezoneSchema = z
 const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId');
 const dateYMD = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD');
 
+const employmentTypeEnum = z.enum([EMPLOYMENT_TYPES.STAFF, EMPLOYMENT_TYPES.FREELANCER]);
+
 const emergencyContactSchema = z.object({
     name: z.string().trim().min(1),
     phone: z.string().trim().min(1),
@@ -91,6 +93,10 @@ const internalProfileCreateSchema = z.object({
     job_title: z.string().trim().min(1),
     department: z.string().trim().min(1),
     date_of_joining: dateYMD,
+    // Optional-with-default: every caller that predates the field (the demo
+    // seeder, the smoke suite, existing integrations) keeps working and gets
+    // `staff`, which is what they all meant.
+    employment_type: employmentTypeEnum.default(EMPLOYMENT_TYPES.STAFF),
     reporting_manager_id: objectIdSchema.nullable().optional(),
     emergency_contact: emergencyContactSchema.optional(),
 });
@@ -254,6 +260,7 @@ export const listUsersQuerySchema = z
             .pipe(z.array(filterRoleEnum).min(1).max(10))
             .optional(),
         status: statusEnum.optional(),
+        employment_type: employmentTypeEnum.optional(),
         // BUG-002 — when true, include soft-deleted (deactivated) users in the
         // result. Default false → list shows only active users. The controller
         // silently drops this if the caller lacks USER_WRITE so non-privileged

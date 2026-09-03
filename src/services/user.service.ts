@@ -16,7 +16,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { PROJECT_COMPANY_SCOPED_ROLES } from '../constants/project.js';
-import { USER_STATUSES } from '../constants/user-statuses.js';
+import { EMPLOYMENT_TYPES, USER_STATUSES } from '../constants/user-statuses.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type { AssignableQuery, CreateUserBody, ListUsersQuery, UpdateUserBody } from '../validators/user.validator.js';
 import { handOffPendingLeaveReviews } from './leave-reviewer-handoff.service.js';
@@ -65,6 +65,9 @@ const EMPLOYMENT_PROFILE_FIELDS = new Set([
     'job_title',
     'department',
     'date_of_joining',
+    // Staff vs Freelancer is an employment fact, so it belongs to the same
+    // editor as job title and department — not behind full `user.write`.
+    'employment_type',
     'reporting_manager_id',
 ]);
 
@@ -280,6 +283,22 @@ export const listUsers = async (
     // An explicit `?status=` always wins (e.g. status=deactivated for a
     // permitted caller listing only the soft-deleted bucket).
     else if (!query.show_deleted) filter.status = USER_STATUSES.ACTIVE;
+    if (query.employment_type) {
+        // `staff` matches "not a freelancer" rather than an equality, because
+        // every user created before the field existed has no
+        // `internal_profile.employment_type` key at all — an equality match
+        // would hide the entire pre-existing workforce from the Staff filter,
+        // and a backfill script only fixes the rows that exist on the day it
+        // runs. Freelancer stays an equality: it's never the implied default.
+        //
+        // ponytail: exact only while there are two types. A third value makes
+        // `$ne: freelancer` wrong — switch to an explicit `$in` + a backfill
+        // at that point.
+        filter['internal_profile.employment_type'] =
+            query.employment_type === EMPLOYMENT_TYPES.FREELANCER
+                ? EMPLOYMENT_TYPES.FREELANCER
+                : { $ne: EMPLOYMENT_TYPES.FREELANCER };
+    }
     if (query.q) {
         const safe = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         filter.$or = [{ email: { $regex: safe, $options: 'i' } }, { full_name: { $regex: safe, $options: 'i' } }];
