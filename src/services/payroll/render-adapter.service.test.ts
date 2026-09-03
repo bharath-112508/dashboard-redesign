@@ -225,6 +225,37 @@ describe('buildPayslipRenderData', () => {
         ).rejects.toMatchObject({ code: 'USER_NOT_FOUND' });
     });
 
+    it('refuses to build a payslip for a freelancer', async () => {
+        // Guarded on the builder, not on generatePayslip, so preview and
+        // preview-html — which render the same document — are covered too.
+        (User.findById as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () =>
+                Promise.resolve({
+                    full_name: 'Freelance Fred',
+                    email: 'fred@example.com',
+                    internal_profile: {
+                        employee_id: 'F-1',
+                        job_title: 'Contractor',
+                        department: 'Engineering',
+                        date_of_joining: '2026-01-05',
+                        employment_type: 'freelancer',
+                    },
+                }),
+        });
+        (PayrollProfile.findOne as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+            lean: () => Promise.resolve(null),
+        });
+        (getCurrentStructure as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            earnings: [],
+            deductions: [],
+        });
+        mockSettings();
+
+        await expect(
+            buildPayslipRenderData(new Types.ObjectId(), 'March-2026', 20, '2026-03-31')
+        ).rejects.toMatchObject({ code: 'PAYSLIP_NOT_APPLICABLE' });
+    });
+
     it('formats a stored YYYY-MM-DD date_of_joining to D-MMM-YYYY', async () => {
         (User.findById as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
             lean: () =>

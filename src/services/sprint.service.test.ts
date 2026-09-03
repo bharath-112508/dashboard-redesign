@@ -88,6 +88,15 @@ const employeeCaller = () => ({
     audit: undefined,
 });
 
+// Employees author sprints now, so the service-layer guard's remaining job is
+// keeping the client side out — a representative can SEE a project's board and
+// must never restructure it.
+const representativeCaller = () => ({
+    id: new Types.ObjectId(),
+    role: ROLES.REPRESENTATIVE,
+    audit: undefined,
+});
+
 const makeProject = (overrides: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(),
     start_date: '2026-01-01',
@@ -213,10 +222,23 @@ describe('createSprint — project window', () => {
 // ─── updateSprint ────────────────────────────────────────────────────────
 
 describe('updateSprint', () => {
-    it('non-manager (employee) is forbidden even if they are a project member', async () => {
-        await expect(svc.updateSprint(new Types.ObjectId(), { name: 'X' }, employeeCaller())).rejects.toMatchObject({
-            code: ERROR_CODES.FORBIDDEN,
-        });
+    it('a client-side caller is forbidden', async () => {
+        await expect(
+            svc.updateSprint(new Types.ObjectId(), { name: 'X' }, representativeCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    it('an employee may update a sprint on a project they belong to', async () => {
+        // `loadProjectForCaller` is the membership boundary — resolving it here
+        // is what "they belong to the project" means for an employee.
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await svc.updateSprint(sprint._id, { name: 'Renamed' }, employeeCaller());
+
+        expect(sprint.save).toHaveBeenCalled();
     });
 
     it('rejects PATCHing the sprint outside the project window', async () => {
@@ -247,8 +269,8 @@ describe('updateSprint', () => {
 // ─── deleteSprint ────────────────────────────────────────────────────────
 
 describe('deleteSprint', () => {
-    it('non-manager forbidden', async () => {
-        await expect(svc.deleteSprint(new Types.ObjectId(), employeeCaller())).rejects.toMatchObject({
+    it('a client-side caller is forbidden', async () => {
+        await expect(svc.deleteSprint(new Types.ObjectId(), representativeCaller())).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
     });
@@ -329,8 +351,8 @@ describe('archiveSprint / unarchiveSprint', () => {
         expect(sprint.save).not.toHaveBeenCalled();
     });
 
-    it('archiveSprint: non-manager is forbidden', async () => {
-        await expect(svc.archiveSprint(new Types.ObjectId(), employeeCaller())).rejects.toMatchObject({
+    it('archiveSprint: a client-side caller is forbidden', async () => {
+        await expect(svc.archiveSprint(new Types.ObjectId(), representativeCaller())).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
     });
@@ -423,8 +445,8 @@ const stubActiveLookup = (returns: { _id: Types.ObjectId } | null): void => {
 };
 
 describe('startSprint', () => {
-    it('non-manager (employee) is forbidden', async () => {
-        await expect(svc.startSprint(new Types.ObjectId(), employeeCaller())).rejects.toMatchObject({
+    it('a client-side caller is forbidden', async () => {
+        await expect(svc.startSprint(new Types.ObjectId(), representativeCaller())).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
     });

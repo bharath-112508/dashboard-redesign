@@ -47,8 +47,8 @@ Role keys ([`SYSTEM_ROLE_KEYS`](src/constants/role-keys.ts)) and bundled permiss
 |---|---|---|---|
 | Admin | `admin` | Everything | `system.admin` wildcard — every `requirePermission` short-circuits true |
 | Manager | `manager` | Team Lead bundle + 14 more | Adds `company.read`, `project.representatives_write`, `billing_rate.read`, `invoice.read`, `cost_rate.read`, `report.read`, `report_export.write`, `leave_balance.read_team`, `timesheet.edit_out_of_window`, `user.employment_write`, `payroll.read`/`write`, `payslip.generate`, `letter.generate` |
-| Team Lead | `team_lead` | Employee bundle + 14 more | Adds `leave_request.read_team`/`approve`, `attendance.read_team`/`correction_approve`, `timesheet.read`, `project.write`/`archive`/`members_write`, `sprint.write`, `story.write`, `task_template.write`, `share_link.write`, `role.read`, `dashboard.manager` |
-| Employee | `employee` | Bulk of the user base | 18 perms — own task/timesheet/attendance/leave + project read + dashboard.employee |
+| Team Lead | `team_lead` | Employee bundle + 10 more | Adds `leave_request.read_team`/`approve`, `attendance.read_team`/`correction_approve`, `timesheet.read`, `project.archive`, `task_template.write`, `share_link.write`, `role.read`, `dashboard.manager`. **`project.write`, `project.members_write`, `sprint.write` and `story.write` moved down to Employee** — Team Lead still gets them, via that bundle. |
+| Employee | `employee` | Bulk of the user base | 22 perms — own task/timesheet/attendance/leave + project read + dashboard.employee, **plus `project.write`, `project.members_write`, `sprint.write`, `story.write`**: anyone may start a project, staff it, and plan the work. Scope is per-row, not per-caller — see the two rules under §Project management. |
 | Client | `client` | The client **company**, at the person level | `CLIENT_SIDE_BASE` (8) + `representative.write` + `project.representatives_write`. Sees **every** project of their company. **No leave / attendance / timesheets / billing / reports.** |
 | Representative | `representative` | A client company's project-scoped person | `CLIENT_SIDE_BASE` (8) — `project.read`, `task.read`, `task_comment.write`, `task_attachment.write`, `holiday.read`, `leave_type.read`, `settings.read`, `dashboard.client`. Sees **only** projects they're rostered on. |
 
@@ -100,6 +100,16 @@ Sub-modules with their own routers; grouped because they share `LeaveRequest`/`L
 #### Leave requests
 [`routes/leave-request.routes.ts`](src/routes/leave-request.routes.ts) · [`services/leave-request.service.ts`](src/services/leave-request.service.ts). `POST /leaves/preview-split` (dry-run segment generation), `GET /leaves/calendar` (org-wide approved; gated on `LEAVE_REQUEST_READ_TEAM` per C5 to prevent rank-and-file enumeration), `POST /leaves` (apply), `POST /leaves/:id/approve|reject|cancel`.
 - **Flow** — apply → preview-split computes segments excluding holidays + non-working days → `withTransaction(LeaveBalance.pending++ via $gte CAS predicate, LeaveRequest.create)` → notify (Slack DM + push + in-app). On approve: `findOneAndUpdate({status: 'pending'}, {$set: {status: 'approved'}})` (race-safe gate) + `withTransaction(LeaveBalance.used++, LeaveBalance.pending--)` + audit row + Slack `chat.update` against the persisted `slack_message.{channel, ts}` so the same DM mutates in-place through the lifecycle.
+- 🔴 **Freelancers accrue no leave.** `initializeBalancesForUserYear` returns 0
+  for `internal_profile.employment_type === 'freelancer'`, and
+  `initializeYearForAllUsers` excludes them in its query as well (that caller
+  pre-resolves the joining date, which skips the per-user guard). Guarded at
+  that one function because every path that can create a balance row funnels
+  through it — `createUser`, the rollover cron, the manual initialize-year
+  endpoint, the dashboard self-heal, and apply-leave's just-in-time init. A
+  freelancer therefore has **no balance rows at all**, not zeroed ones.
+  Freelancers ARE still counted in every headcount (they're `role: employee`;
+  headcounts filter by role, never by employment type).
 - **Gotchas** — **C4 SL month attribution**: SL caps are per calendar month; on apply, the service replays historical requests in `created_at` order to reconstruct the cap state at the new request's apply time. **Self-approval refused** by service. **Cancel is author-only** even though the route has no perm gate.
 
 #### Comp-off
@@ -184,6 +194,23 @@ The full surface — projects + members + clients + custom statuses + sprints + 
   - **F4** — Member/client bulk add/remove uses two atomic updates (`$pull` then `$addToSet`) inside `withTransaction` to avoid lost-write races between concurrent admin callers.
   - **R3** — Hard-delete project / sprint / custom-status refuses with `RESOURCE_HAS_DEPENDENTS` when anything still references it. Archive is the escape hatch.
   - **BUG-007** — Team Lead/Employee creating a project is auto-added to `member_ids` so they don't lose visibility of their own project.
+  - 🔴 **Two different scopes now govern an Employee's project writes — don't conflate them.**
+    `assertCallerCanWrite` (project.service) gates the project SHELL — rename,
+    status, members, custom statuses, delete — and for an Employee that means
+    **`created_by === them`**. The WORK inside it (sprints, epics) is gated by
+    `loadProjectForCaller` alone, so an Employee may plan **any project they're
+    a member of**. That asymmetry is deliberate: you can help plan a project
+    you're on without being able to rename or restaff it.
+    Before this existed those six write paths had **no per-row check at all** —
+    the route's `requirePermission` was the only gate, so any `project.write`
+    holder could edit or delete any project by id, including ones the
+    visibility filter hides. Don't remove the assert to "simplify".
+  - **`isProjectAuthor` vs `isProjectWorkAuthor`** (`utils/role-check.ts`) —
+    the first is admin/manager/team_lead and still gates `task_template.write`;
+    the second adds Employee and gates sprints + stories. They are separate
+    because folding Employee into the first would silently widen templates too.
+    Both exist only to keep the **client side** out; WHICH project is always
+    decided by `loadProjectForCaller`.
   - **T11** — Sprint archive lets a sprint with lingering tasks be decommissioned without forcing each task into a terminal status.
   - **F1** — Sprint list defaults to `is_archived: false` when the param is absent.
   - **H2** — Service-layer `isProjectAuthor` checks admin/manager/team_lead (not just admin/manager) so Team Leads who pass the route gate don't get 403'd inside the service.
@@ -324,6 +351,13 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 - **Settings** — `SystemSettings.payroll` ([`models/system-settings.model.ts`](src/models/system-settings.model.ts)) holds the company letterhead/signatory block (`company_legal_name`, `company_address_lines`, `company_email`, `cin_no`, `iec_code`, `signatory_name`, `signatory_title`, `hr_reply_to_address`, `hr_reply_to_name`) shared by every payslip/letter template. Edited via the normal `PATCH /settings` body (gated on `SETTINGS_WRITE`, same as every other settings subsection — no separate payroll-settings route). All fields default to `''`/safe defaults so the subsection is savable field-by-field from day one.
 - 🔴 **`internship_offer` vs `internship`.** `internship_offer` is issued at the START of an internship (position, fixed window, work mode, paid/unpaid, responsibilities, terms — own template, `internship-offer-letter-template.ts`). `internship` renders an **Internship Experience Letter**, issued at the END. Different documents; don't collapse them. Like `joining`, `internship_offer` may name its subject manually (`candidate_name`) with no `user_id`, because an intern usually isn't a platform user when the offer goes out.
 - **All three letter entry points share `resolveRender`** in `letter.service.ts` (generate / preview / preview-html). They each used to carry their own copy of the per-type if/else, so a new type could be wired into two of them and silently render the WRONG template in the live preview.
+- 🔴 **Freelancers have no payslip.** `buildPayslipRenderData` throws
+  `PAYSLIP_NOT_APPLICABLE` (422) for them. Guarded on the render builder, not on
+  `generatePayslip`, because generate / preview / preview-html all funnel
+  through it — a guard on generate alone would still let the two preview
+  endpoints render a full payslip for someone who should never have one.
+  **Letters are deliberately unaffected**: they use `loadEmployeeCore` directly,
+  and a freelancer may legitimately need an engagement or experience letter.
 - **Gotchas** — Structures are append-only by version (`effective_from`), not editable — correcting a mistake means creating a new version, not patching the old one; a unique `(user_id, effective_from)` index turns a parallel-create race into a clean `E11000` the service maps to `409 DUPLICATE_RESOURCE`. Payslip/letter rows are likewise immutable — regenerating for the same period/type always inserts a new row rather than overwriting. No employee self-service yet (no `/me` payslip/letter routes) and no bulk/batch generation — both are **Phase-2 deferred**, along with emailing generated documents out automatically (see `PENDING_WORK.md`).
 
 ### Reports & exports

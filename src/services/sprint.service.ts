@@ -6,7 +6,7 @@ import { Task } from '../models/task.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
-import { isAdminLike, isProjectAuthor } from '../utils/role-check.js';
+import { isAdminLike, isProjectWorkAuthor } from '../utils/role-check.js';
 import { SPRINT_PICKER_MAX, SPRINT_STATUSES, type SprintStatus } from '../constants/project.js';
 import { DEFAULT_TASK_STATUSES } from '../constants/task.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
@@ -184,7 +184,7 @@ export const updateSprint = async (
     // service-layer check must accept Admin / Manager / Team Lead. Pre-H2 the
     // gate compared role-string against admin/manager only, contradicting the
     // bundle and 403'ing Team Leads who'd already passed the route gate.
-    if (!isProjectAuthor(caller)) {
+    if (!isProjectWorkAuthor(caller)) {
         throw AppError.forbidden();
     }
 
@@ -244,7 +244,7 @@ export const updateSprint = async (
 
 export const deleteSprint = async (sprintId: Types.ObjectId, caller: ProjectCaller): Promise<void> => {
     // H2 — Team Lead holds `sprint.write`; see updateSprint comment.
-    if (!isProjectAuthor(caller)) {
+    if (!isProjectWorkAuthor(caller)) {
         throw AppError.forbidden();
     }
 
@@ -287,7 +287,7 @@ export const archiveSprint = async (
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
     // H2 — Team Lead holds `sprint.write`; see updateSprint comment.
-    if (!isProjectAuthor(caller)) {
+    if (!isProjectWorkAuthor(caller)) {
         throw AppError.forbidden();
     }
 
@@ -319,7 +319,7 @@ export const unarchiveSprint = async (
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
     // H2 — Team Lead holds `sprint.write`; see updateSprint comment.
-    if (!isProjectAuthor(caller)) {
+    if (!isProjectWorkAuthor(caller)) {
         throw AppError.forbidden();
     }
 
@@ -359,7 +359,7 @@ export const startSprint = async (
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
     // H2 — Team Lead holds `sprint.write`; defence-in-depth behind the route.
-    if (!isProjectAuthor(caller)) {
+    if (!isProjectWorkAuthor(caller)) {
         throw AppError.forbidden();
     }
 
@@ -421,7 +421,7 @@ export const completeSprint = async (
     caller: ProjectCaller
 ): Promise<{ sprint: Record<string, unknown>; moved_task_count: number }> => {
     // H2 — Team Lead holds `sprint.write`; defence-in-depth behind the route.
-    if (!isProjectAuthor(caller)) {
+    if (!isProjectWorkAuthor(caller)) {
         throw AppError.forbidden();
     }
 

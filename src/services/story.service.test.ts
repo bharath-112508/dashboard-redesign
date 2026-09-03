@@ -146,12 +146,26 @@ beforeEach(() => {
 // ─── RBAC ────────────────────────────────────────────────────────────────
 
 describe('story write RBAC', () => {
-    it('createStory rejects employees with STORY_WRITE_FORBIDDEN before any DB call', async () => {
+    it('createStory rejects clients with STORY_WRITE_FORBIDDEN before any DB call', async () => {
         await expect(
-            svc.createStory(new Types.ObjectId(), { title: 'T', description: '' }, employeeCaller())
+            svc.createStory(new Types.ObjectId(), { title: 'T', description: '' }, clientCaller())
         ).rejects.toMatchObject({ code: ERROR_CODES.STORY_WRITE_FORBIDDEN });
         expect(loadProjectForCallerMock).not.toHaveBeenCalled();
         expect(storyCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('createStory lets an employee through to the project membership check', async () => {
+        // Employees author epics now. The role gate must NOT stop them — the
+        // project scope does, via `loadProjectForCaller` (member_ids), so the
+        // proof that the role gate passed is that the project lookup ran.
+        loadProjectForCallerMock.mockRejectedValueOnce(
+            Object.assign(new Error('forbidden'), { code: ERROR_CODES.FORBIDDEN })
+        );
+
+        await expect(
+            svc.createStory(new Types.ObjectId(), { title: 'T', description: '' }, employeeCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+        expect(loadProjectForCallerMock).toHaveBeenCalled();
     });
 
     it('updateStory rejects clients with STORY_WRITE_FORBIDDEN', async () => {
@@ -161,8 +175,8 @@ describe('story write RBAC', () => {
         expect(storyFindByIdMock).not.toHaveBeenCalled();
     });
 
-    it('deleteStory rejects employees with STORY_WRITE_FORBIDDEN', async () => {
-        await expect(svc.deleteStory(new Types.ObjectId(), employeeCaller())).rejects.toMatchObject({
+    it('deleteStory rejects clients with STORY_WRITE_FORBIDDEN', async () => {
+        await expect(svc.deleteStory(new Types.ObjectId(), clientCaller())).rejects.toMatchObject({
             code: ERROR_CODES.STORY_WRITE_FORBIDDEN,
         });
         expect(detachStoryFromTasksMock).not.toHaveBeenCalled();

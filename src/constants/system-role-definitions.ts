@@ -73,6 +73,13 @@ const EMPLOYEE_BASE: readonly Permission[] = [
     // this line is safe.
     PERMISSIONS.PROJECT_WRITE,
     PERMISSIONS.PROJECT_MEMBERS_WRITE,
+    // Plan the work on any project you're ON, not just ones you created.
+    // Deliberately a wider scope than `project.write`: `createSprint` /
+    // `createStory` go through `loadProjectForCaller`, which for an Employee
+    // means `member_ids ∋ them` — so membership is the boundary here, while
+    // editing the project shell itself stays with its creator.
+    PERMISSIONS.SPRINT_WRITE,
+    PERMISSIONS.STORY_WRITE,
     PERMISSIONS.TIMESHEET_WRITE,
     // M3 — `ATTENDANCE_READ_OWN`, `LEAVE_BALANCE_READ_OWN`,
     // `LEAVE_REQUEST_READ_OWN` were dead: catalogued + assigned, but no
@@ -105,8 +112,6 @@ const TEAM_LEAD_ADDITIONS: readonly Permission[] = [
     // still gets them through that bundle; what's added here is the archive
     // (delete) bit, which employees deliberately do NOT get.
     PERMISSIONS.PROJECT_ARCHIVE,
-    PERMISSIONS.SPRINT_WRITE,
-    PERMISSIONS.STORY_WRITE,
     PERMISSIONS.TASK_TEMPLATE_WRITE,
     PERMISSIONS.SHARE_LINK_WRITE,
     PERMISSIONS.DASHBOARD_MANAGER,

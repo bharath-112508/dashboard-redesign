@@ -40,7 +40,13 @@ const storySchema = new Schema<StoryDocument>(
     {
         project_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.PROJECTS, required: true },
         title: { type: String, required: true, trim: true, maxlength: STORY_TITLE_MAX },
-        description: { type: String, required: true, default: '', maxlength: STORY_DESCRIPTION_MAX },
+        // `required: false`, matching Project and Task. It was `required: true`
+        // with `default: ''` — a combination Mongoose can never satisfy, because
+        // an empty string fails its `required` check for a String. Since the
+        // create dialog omits the field when the box is blank and the validator
+        // then defaults it to `''`, creating an epic without a description
+        // always 400'd with "Path `description` is required."
+        description: { type: String, required: false, default: '', maxlength: STORY_DESCRIPTION_MAX },
         position: { type: Number, required: true, default: 0, min: 0 },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
         updated_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },

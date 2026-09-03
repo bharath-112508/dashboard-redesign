@@ -6,6 +6,7 @@ import { getCurrentStructure } from '../salary-structure.service.js';
 import { getOrInitSettings } from '../settings.service.js';
 import { AppError } from '../../utils/app-error.js';
 import { ERROR_CODES } from '../../constants/error-codes.js';
+import { EMPLOYMENT_TYPES } from '../../constants/user-statuses.js';
 import dayjs, { DATE_FORMAT } from '../../utils/date.js';
 import type { PayslipRenderData } from './payslip-template.js';
 import type { LetterRenderData, LetterType } from './letter-template.js';
@@ -66,6 +67,9 @@ interface EmployeeCore {
     department: string;
     dateOfJoining: string;
     email: string;
+    /** Staff vs freelancer. Used by the payslip builder to refuse a document
+     *  a freelancer should never have; never rendered into a template. */
+    employmentType: string | undefined;
 }
 
 /** Render-facing date format for payslips/letters, e.g. `2-Mar-2022`. */
@@ -110,6 +114,7 @@ const loadEmployeeCore = async (userId: Types.ObjectId): Promise<EmployeeCore> =
         department: profile?.department ?? '',
         dateOfJoining: formatRenderDate(profile?.date_of_joining),
         email: user.email ?? '',
+        employmentType: profile?.employment_type,
     };
 };
 
@@ -135,6 +140,21 @@ export const buildPayslipRenderData = async (
         getCurrentStructure(userId, effectiveOn),
         getCompanyBlock(),
     ]);
+
+    // Freelancers are not on payroll — they invoice. Guarded on the render
+    // builder rather than on `generatePayslip`, because generate, preview and
+    // preview-html all funnel through here: a guard on generate alone would
+    // still let the two preview endpoints render a full payslip for someone
+    // who should never have one. Read off the user document
+    // `loadEmployeeCore` already fetched — a second lookup here would be a
+    // wasted round trip on every payslip. Letters are unaffected: a freelancer
+    // may legitimately need an engagement or experience letter.
+    if (employee.employmentType === EMPLOYMENT_TYPES.FREELANCER) {
+        throw AppError.unprocessable(
+            'Freelancers are not on payroll, so they have no payslip. Raise an invoice instead.',
+            ERROR_CODES.PAYSLIP_NOT_APPLICABLE
+        );
+    }
 
     // No PayrollProfile row yet — the payslip still renders, just with blank
     // statutory/bank fields rather than 404ing.

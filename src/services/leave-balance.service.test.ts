@@ -254,6 +254,55 @@ describe('initializeBalancesForUserYear', () => {
         expect(leaveBalanceUpdateOneMock).not.toHaveBeenCalled();
     });
 
+    it('skips freelancers early (no DB writes)', async () => {
+        // A freelancer is engaged per contract, not on an employment
+        // allocation. Guarding here rather than per-caller is what makes it
+        // hold for createUser, the rollover cron, the manual init endpoint,
+        // the dashboard self-heal AND apply-leave's just-in-time init.
+        userFindByIdMock.mockReturnValueOnce({
+            select: () =>
+                Promise.resolve({
+                    role: ROLES.EMPLOYEE,
+                    status: 'active',
+                    internal_profile: {
+                        date_of_joining: '2024-06-15',
+                        employment_type: 'freelancer',
+                    },
+                }),
+        });
+
+        const inserted = await svc.initializeBalancesForUserYear({
+            user_id: new Types.ObjectId(),
+            year: 2026,
+        });
+
+        expect(inserted).toBe(0);
+        expect(leaveTypeFindMock).not.toHaveBeenCalled();
+        expect(leaveBalanceUpdateOneMock).not.toHaveBeenCalled();
+    });
+
+    it('still accrues for staff, who carry no explicit employment_type on older records', async () => {
+        userFindByIdMock.mockReturnValueOnce({
+            select: () =>
+                Promise.resolve({
+                    role: ROLES.EMPLOYEE,
+                    status: 'active',
+                    // No `employment_type` key at all — every user predating
+                    // the field. They must keep accruing.
+                    internal_profile: { date_of_joining: '2024-06-15' },
+                }),
+        });
+        leaveTypeFindMock.mockResolvedValueOnce([fullType({ code: 'CL', default_allocation_days: 12 })]);
+        leaveBalanceUpdateOneMock.mockResolvedValueOnce({ upsertedCount: 1 });
+
+        const inserted = await svc.initializeBalancesForUserYear({
+            user_id: new Types.ObjectId(),
+            year: 2026,
+        });
+
+        expect(inserted).toBe(1);
+    });
+
     it('inserts one row per active type, counting only fresh upserts', async () => {
         userFindByIdMock.mockReturnValueOnce({
             select: () =>

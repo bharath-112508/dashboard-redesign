@@ -11,7 +11,7 @@ import { LEAVE_CODES, PRO_RATA_STRATEGIES, type ProRataStrategy } from '../const
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { notifyLeaveBalanceAdjusted } from './notification-dispatcher.service.js';
 import { scopedUserIdFilter } from './reporting-scope.service.js';
-import { USER_STATUSES } from '../constants/user-statuses.js';
+import { EMPLOYMENT_TYPES, USER_STATUSES } from '../constants/user-statuses.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import logger from '../utils/logger.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
@@ -124,12 +124,23 @@ export const initializeBalancesForUserYear = async (params: {
     // so an unconditional chain breaks them; the production code path
     // (where Mongoose returns real Query objects) supports both forms.
     if (joining_year === undefined || joining_month === undefined) {
-        const userQuery = User.findById(params.user_id).select('role status internal_profile.date_of_joining');
+        const userQuery = User.findById(params.user_id).select(
+            'role status internal_profile.date_of_joining internal_profile.employment_type'
+        );
         if (params.session) userQuery.session(params.session);
         const u = await userQuery;
         if (!u) return 0;
         // Clients don't apply for leave.
         if (u.role === ROLES.CLIENT) return 0;
+        // Freelancers accrue no leave — they're engaged per contract, not on
+        // an employment allocation. Guarded HERE rather than in each caller
+        // because every path that can create a balance row funnels through
+        // this function: createUser, the year-rollover cron, the manual
+        // initialize-year endpoint, the dashboard self-heal, and apply-leave's
+        // just-in-time init. A freelancer therefore ends up with no balance
+        // rows at all, so the leave screens show nothing to spend rather than
+        // an allocation they were never entitled to.
+        if (u.internal_profile?.employment_type === EMPLOYMENT_TYPES.FREELANCER) return 0;
         const doj = u.internal_profile?.date_of_joining;
         if (!doj) {
             // No joining date on file (e.g. seeded admin accounts that never
@@ -200,6 +211,11 @@ export const initializeYearForAllUsers = async (
     const users = await User.find({
         status: USER_STATUSES.ACTIVE,
         role: { $ne: ROLES.CLIENT },
+        // Freelancers accrue no leave. Excluded in the QUERY as well as in
+        // `initializeBalancesForUserYear` because this caller pre-resolves the
+        // joining date and passes it in, which skips that function's user
+        // lookup — and with it, its freelancer guard.
+        'internal_profile.employment_type': { $ne: EMPLOYMENT_TYPES.FREELANCER },
         'internal_profile.date_of_joining': { $exists: true, $ne: null },
     }).select('_id internal_profile.date_of_joining');
 

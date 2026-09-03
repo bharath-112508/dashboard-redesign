@@ -4,7 +4,7 @@ import { Story, type StoryDocument } from '../models/story.model.js';
 import { type ProjectDocument } from '../models/project.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { isProjectAuthor } from '../utils/role-check.js';
+import { isProjectWorkAuthor } from '../utils/role-check.js';
 import {
     BLOCKED_TASK_STATUS_KEY,
     DEFAULT_DONE_TASK_STATUS_KEY,
@@ -55,14 +55,14 @@ import type {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 
-// H2 — Team Lead holds `story.write` per the Step-47 system-role bundle
-// (`system-role-definitions.ts`). Pre-H2 this gate compared role-string
-// against admin/manager only, contradicting the bundle and 403'ing Team
-// Leads who'd already passed the route's `requirePermission(STORY_WRITE)`.
+// H2 — mirrors the route's `requirePermission(STORY_WRITE)` for
+// defence-in-depth. Every internal role now holds `story.write`, so what
+// this actually turns away is the client side; WHICH project an Employee
+// may write is decided by `loadProjectForCaller` (member_ids), not here.
 const requireWriter = (caller: ProjectCaller): void => {
-    if (!isProjectAuthor(caller)) {
+    if (!isProjectWorkAuthor(caller)) {
         throw AppError.forbidden(
-            'Only admins, managers, and team leads can create, update, or delete stories',
+            'Only the internal team can create, update, or delete epics',
             ERROR_CODES.STORY_WRITE_FORBIDDEN
         );
     }

@@ -42,18 +42,20 @@ export const isAdminLike = (caller: AdminCheckable): boolean => {
 };
 
 /**
- * H2 — defence-in-depth role check for project-author writes (sprints,
- * stories, task templates, etc.). Admin / Manager / Team Lead all hold
- * `sprint.write` / `story.write` / `task_template.write` per the
- * Step-47 system-role bundle (`system-role-definitions.ts`), and the
- * route layer's `requirePermission(...)` gate is the authoritative
- * coarse check. The service layer mirrors that gate for defence-in-
- * depth and to give honest 4xx codes when callers bypass the route
- * (e.g. tests, internal callers).
+ * H2 — defence-in-depth role check for **lead-tier** project authoring:
+ * task templates, and anything else Employees deliberately don't get. The
+ * route layer's `requirePermission(...)` gate is the authoritative coarse
+ * check; the service layer mirrors it for defence-in-depth and to give
+ * honest 4xx codes when callers bypass the route (e.g. tests, internal
+ * callers).
  *
  * Pre-H2 the service gate was `caller.role !== ADMIN && caller.role
  * !== MANAGER` — Team Lead held the permission per the bundle but
  * was rejected at the service, contradicting the bundle's intent.
+ *
+ * Employee is NOT included: `task_template.write` stays team-lead-and-up.
+ * For sprints and stories — which every internal role may now author on a
+ * project they belong to — use `isProjectWorkAuthor` below instead.
  */
 export const isProjectAuthor = (caller: AdminCheckable): boolean => {
     if (caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER || caller.role === ROLES.TEAM_LEAD) return true;
@@ -63,4 +65,25 @@ export const isProjectAuthor = (caller: AdminCheckable): boolean => {
         keys.includes(SYSTEM_ROLE_KEYS.MANAGER) ||
         keys.includes(SYSTEM_ROLE_KEYS.TEAM_LEAD)
     );
+};
+
+/**
+ * Defence-in-depth check for authoring the WORK inside a project — sprints
+ * and stories/epics. Every internal role holds `sprint.write` /
+ * `story.write`, because anyone on a project should be able to plan it.
+ *
+ * Separate from `isProjectAuthor` because the two policies genuinely differ
+ * now: templates stay team-lead-and-up, sprints and epics do not. Folding
+ * Employee into `isProjectAuthor` instead would have silently widened the
+ * template guard as well.
+ *
+ * This does NOT decide WHICH project: every call site resolves the project
+ * through `loadProjectForCaller` first, which scopes an Employee to
+ * `member_ids ∋ them`. What's left for this function is keeping the client
+ * side out — `client` and `representative` can see a project's board and
+ * must never restructure it — so don't "simplify" it to `true`.
+ */
+export const isProjectWorkAuthor = (caller: AdminCheckable): boolean => {
+    if (isProjectAuthor(caller)) return true;
+    return caller.role === ROLES.EMPLOYEE || (caller.role_keys ?? []).includes(SYSTEM_ROLE_KEYS.EMPLOYEE);
 };
