@@ -273,6 +273,29 @@ const parseBool = (raw: string | undefined, defaultValue: boolean): boolean => {
 export const JOBS_ENABLED = parseBool(process.env.JOBS_ENABLED, true);
 
 /**
+ * `BILLING_MODULES_ENABLED` — master switch for the money surfaces:
+ * billing rates, cost rates, client engagements, invoices, and the
+ * Billing + Margin reports.
+ *
+ * **Off by default in every environment**, including dev. Phase 1 does not
+ * cover billing, engagements or payments, and the frontend has hidden these
+ * behind `VITE_BILLING_MODULES` since 2026-07-31 — but the API stayed open,
+ * so the data was one authenticated request away from anyone with the
+ * permission. This is the backend half of the same switch, so "hidden" now
+ * means unreachable rather than merely unlinked.
+ *
+ * Worth knowing while it's off: `invoice.read` is bundled into the manager
+ * role and has **no row scoping**, so any Manager could read every company's
+ * engagements and invoices. That is a real gap to close before switching
+ * this on — not a reason to leave the module reachable in the meantime.
+ *
+ * The permissions stay granted and the services stay compiled; only the HTTP
+ * surface goes away, so flipping this back on is a one-line change with
+ * nothing to re-wire. Set `BILLING_MODULES_ENABLED=true` to work on it.
+ */
+export const BILLING_MODULES_ENABLED = parseBool(process.env.BILLING_MODULES_ENABLED, false);
+
+/**
  * `EXPORT_WORKER_INLINE` — test seam. When true, the report-export
  * worker awaits the render synchronously instead of `setImmediate`-
  * dispatching it. Tests use this to assert on the final state without

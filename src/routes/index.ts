@@ -21,6 +21,7 @@ import { commentsRouter, taskCommentsNestedRouter } from './task-comment.routes.
 import { taskActivityRouter } from './task-activity.routes.js';
 import { attachmentsRouter, taskAttachmentsNestedRouter } from './task-attachment.routes.js';
 import timesheetRoutes from './timesheet.routes.js';
+import { requireBillingModules } from '../middlewares/feature-flag.middleware.js';
 import billingRateRoutes from './billing-rate.routes.js';
 import costRateRoutes from './cost-rate.routes.js';
 import engagementRoutes from './engagement.routes.js';
@@ -83,16 +84,18 @@ appRoutes.use('/tasks', taskAttachmentsNestedRouter());
 appRoutes.use('/comments', commentsRouter());
 appRoutes.use('/attachments', attachmentsRouter());
 appRoutes.use('/timesheets', timesheetRoutes);
-appRoutes.use('/billing-rates', billingRateRoutes);
-// Cost rates (Billing Phase 2 "Cost Rates & Margin", Task 3). No prefix
-// overlap with anything else, so mount order doesn't matter here.
-appRoutes.use('/cost-rates', costRateRoutes);
-// Client engagements (Phase 1 "Client Engagements & Invoicing"). No prefix
-// overlap with anything else, so mount order doesn't matter here.
-appRoutes.use('/engagements', engagementRoutes);
-// Invoices (Phase 1 "Client Engagements & Invoicing", Task 8). No prefix
-// overlap with anything else, so mount order doesn't matter here.
-appRoutes.use('/invoices', invoiceRoutes);
+// ─── Money surfaces — gated OFF by default ──────────────────────────────
+//
+// Billing rates, cost rates, engagements and invoices are out of scope for
+// the current phase. `requireBillingModules` 404s every one of them unless
+// `BILLING_MODULES_ENABLED=true`; the frontend hides the same set behind
+// `VITE_BILLING_MODULES`. The mounts stay listed (rather than deleted) so
+// it's obvious the module exists and is switched off, not missing.
+// None of these prefixes overlap anything else, so mount order is free.
+appRoutes.use('/billing-rates', requireBillingModules, billingRateRoutes);
+appRoutes.use('/cost-rates', requireBillingModules, costRateRoutes);
+appRoutes.use('/engagements', requireBillingModules, engagementRoutes);
+appRoutes.use('/invoices', requireBillingModules, invoiceRoutes);
 appRoutes.use('/payroll-profiles', payrollProfileRoutes);
 appRoutes.use('/salary-structures', salaryStructureRoutes);
 appRoutes.use('/payslips', payslipRoutes);

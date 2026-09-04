@@ -4,6 +4,7 @@ import * as ctrl from '../controllers/report.controller.js';
 import * as exportCtrl from '../controllers/report-export.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
+import { requireBillingModules, requireExportableReport } from '../middlewares/feature-flag.middleware.js';
 import { exportRateLimiter, reportReadRateLimiter } from '../middlewares/rate-limit.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -53,6 +54,8 @@ router.use(authenticate);
 // blanket gate).
 router.get(
     '/margin',
+    // Out of scope for the current phase — 404s unless BILLING_MODULES_ENABLED.
+    requireBillingModules,
     reportReadRateLimiter,
     requirePermission(PERMISSIONS.COST_RATE_READ),
     validate({ query: marginReportQuerySchema }),
@@ -67,7 +70,13 @@ router.use(requirePermission(PERMISSIONS.REPORT_READ));
 // doesn't share one bucket. The router-level `.use` binds it to every
 // GET below this line.
 router.use(reportReadRateLimiter);
-router.get('/billing', validate({ query: billingReportQuerySchema }), asyncHandler(ctrl.getBilling));
+// Same gate as /margin: billing is a money surface, out of scope this phase.
+router.get(
+    '/billing',
+    requireBillingModules,
+    validate({ query: billingReportQuerySchema }),
+    asyncHandler(ctrl.getBilling)
+);
 router.get('/utilization', validate({ query: utilizationReportQuerySchema }), asyncHandler(ctrl.getUtilization));
 router.get('/attendance', validate({ query: attendanceReportQuerySchema }), asyncHandler(ctrl.getAttendance));
 router.get('/leaves', validate({ query: leaveReportQuerySchema }), asyncHandler(ctrl.getLeaves));
@@ -90,6 +99,9 @@ router.get(
 );
 router.post(
     '/:name/export',
+    // An export renders the same builder as the sync GET, so a gated report
+    // must be unavailable in both shapes or the file is a way around it.
+    requireExportableReport,
     // Per-user export limiter (P2-9): 10 exports / 15 min / user. The
     // export worker spins up a PDF / XLSX render in the background; a
     // tight loop here would back-pressure the worker for everyone. Lower

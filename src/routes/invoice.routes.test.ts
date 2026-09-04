@@ -8,6 +8,14 @@
 // authenticate → requirePermission → validate chain; only the invoice
 // service and the User model (read by `authenticate`) are mocked.
 
+// These suites exercise the billing module's real behaviour, so they run with
+// the feature gate ON. `vi.hoisted` is the only hook that fires before the
+// import graph, and `server.config` parses this flag once at module load — a
+// plain assignment here would run after the config was already frozen.
+vi.hoisted(() => {
+    process.env.BILLING_MODULES_ENABLED = 'true';
+});
+
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Types } from 'mongoose';
 import jwt from 'jsonwebtoken';

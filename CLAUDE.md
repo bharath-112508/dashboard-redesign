@@ -256,17 +256,30 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 
 ### Billing rates
 
-> 🔴 **The API is live; the UI is hidden.** Since 2026-07-31 the frontend surfaces for
-> billing rates, cost rates, engagements, invoices and the billing + margin reports are
-> suppressed behind the `BILLING_MODULES_ENABLED` feature flag — off in every environment
-> unless `VITE_BILLING_MODULES=true`. The endpoints below are unchanged and still answer
-> any caller with the right permission. The module is finished enough to work and not
-> finished enough to show: no bulk invoice run, no emailing, and the margin report degrades
-> to a warnings banner wherever a bill or cost rate is missing.
+> 🔴 **The API is GATED OFF, not just hidden.** Billing rates, cost rates, engagements,
+> invoices and the Billing + Margin reports are out of scope for the current phase, so
+> **every endpoint below 404s** unless `BILLING_MODULES_ENABLED=true`
+> (`config/server.config.ts`, off by default in every environment including dev). The
+> frontend hides the same set behind `VITE_BILLING_MODULES`; **both halves must be on** to
+> work on the module.
 >
-> Related, and worth fixing before it is switched on: **`invoice.read` is bundled into the
-> `manager` role and has no row scoping**, so any Manager can read every company's
-> engagements and invoices.
+> This used to read "the API is live; the UI is hidden" — the endpoints answered any caller
+> with the right permission, so the data was one authenticated request away from a surface
+> nobody could see. `requireBillingModules` (`middlewares/feature-flag.middleware.ts`)
+> closes that at the mount point; `requireExportableReport` closes the matching
+> `POST /reports/billing/export`, because an export renders the same builder as the
+> synchronous GET and would otherwise be a way around the gate.
+>
+> **404, not 403** — the resource genuinely doesn't exist in this deployment, and 403 would
+> confirm to a prober that an invoices API is there and merely closed to them. The gate is
+> a phase switch layered ON TOP of the permission checks, not a replacement for them:
+> flipping it on restores the ordinary `requirePermission` behaviour underneath, unchanged.
+> Permissions stay granted and services stay compiled, so re-enabling is one env var.
+>
+> Fix before switching it on: **`invoice.read` is bundled into the `manager` role and has no
+> row scoping**, so any Manager can read every company's engagements and invoices. The
+> module is also unfinished — no bulk invoice run, no emailing, and the margin report
+> degrades to a warnings banner wherever a bill or cost rate is missing.
 
 - **Purpose** — User × project hourly rate with effective/end dates; joined into billing reports
 - **Permissions** — `BILLING_RATE_READ` (Manager+), `BILLING_RATE_WRITE` (Manager+/Admin per seed)
@@ -275,17 +288,30 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 
 ### Cost rates & Margin
 
-> 🔴 **The API is live; the UI is hidden.** Since 2026-07-31 the frontend surfaces for
-> billing rates, cost rates, engagements, invoices and the billing + margin reports are
-> suppressed behind the `BILLING_MODULES_ENABLED` feature flag — off in every environment
-> unless `VITE_BILLING_MODULES=true`. The endpoints below are unchanged and still answer
-> any caller with the right permission. The module is finished enough to work and not
-> finished enough to show: no bulk invoice run, no emailing, and the margin report degrades
-> to a warnings banner wherever a bill or cost rate is missing.
+> 🔴 **The API is GATED OFF, not just hidden.** Billing rates, cost rates, engagements,
+> invoices and the Billing + Margin reports are out of scope for the current phase, so
+> **every endpoint below 404s** unless `BILLING_MODULES_ENABLED=true`
+> (`config/server.config.ts`, off by default in every environment including dev). The
+> frontend hides the same set behind `VITE_BILLING_MODULES`; **both halves must be on** to
+> work on the module.
 >
-> Related, and worth fixing before it is switched on: **`invoice.read` is bundled into the
-> `manager` role and has no row scoping**, so any Manager can read every company's
-> engagements and invoices.
+> This used to read "the API is live; the UI is hidden" — the endpoints answered any caller
+> with the right permission, so the data was one authenticated request away from a surface
+> nobody could see. `requireBillingModules` (`middlewares/feature-flag.middleware.ts`)
+> closes that at the mount point; `requireExportableReport` closes the matching
+> `POST /reports/billing/export`, because an export renders the same builder as the
+> synchronous GET and would otherwise be a way around the gate.
+>
+> **404, not 403** — the resource genuinely doesn't exist in this deployment, and 403 would
+> confirm to a prober that an invoices API is there and merely closed to them. The gate is
+> a phase switch layered ON TOP of the permission checks, not a replacement for them:
+> flipping it on restores the ordinary `requirePermission` behaviour underneath, unchanged.
+> Permissions stay granted and services stay compiled, so re-enabling is one env var.
+>
+> Fix before switching it on: **`invoice.read` is bundled into the `manager` role and has no
+> row scoping**, so any Manager can read every company's engagements and invoices. The
+> module is also unfinished — no bulk invoice run, no emailing, and the margin report
+> degrades to a warnings banner wherever a bill or cost rate is missing.
 
 - **Purpose** — Billing Phase 2 "Cost Rates & Margin" (`docs/superpowers/specs/2026-07-24-cost-margin-design.md`). Per-person, effective-dated **cost rate** (fully-loaded cost/hour, own currency) — the cost-side twin of `billing_rates` but per-`user_id` only (no project/task dimension). Feeds a **Margin report** that nets bill-rate revenue against cost-rate cost, per project/per user, normalised into one reporting currency via an admin-managed FX table.
 - **Permissions** — `COST_RATE_READ` (`cost_rate.read`, bundled into the manager role — needed to see the Margin report), `COST_RATE_WRITE` (`cost_rate.write`, admin-only by default, same pattern as `INVOICE_WRITE`). `constants/system-role-definitions.ts` is where the manager bundle is declared.
@@ -298,17 +324,30 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 
 ### Invoicing (client engagements + invoices)
 
-> 🔴 **The API is live; the UI is hidden.** Since 2026-07-31 the frontend surfaces for
-> billing rates, cost rates, engagements, invoices and the billing + margin reports are
-> suppressed behind the `BILLING_MODULES_ENABLED` feature flag — off in every environment
-> unless `VITE_BILLING_MODULES=true`. The endpoints below are unchanged and still answer
-> any caller with the right permission. The module is finished enough to work and not
-> finished enough to show: no bulk invoice run, no emailing, and the margin report degrades
-> to a warnings banner wherever a bill or cost rate is missing.
+> 🔴 **The API is GATED OFF, not just hidden.** Billing rates, cost rates, engagements,
+> invoices and the Billing + Margin reports are out of scope for the current phase, so
+> **every endpoint below 404s** unless `BILLING_MODULES_ENABLED=true`
+> (`config/server.config.ts`, off by default in every environment including dev). The
+> frontend hides the same set behind `VITE_BILLING_MODULES`; **both halves must be on** to
+> work on the module.
 >
-> Related, and worth fixing before it is switched on: **`invoice.read` is bundled into the
-> `manager` role and has no row scoping**, so any Manager can read every company's
-> engagements and invoices.
+> This used to read "the API is live; the UI is hidden" — the endpoints answered any caller
+> with the right permission, so the data was one authenticated request away from a surface
+> nobody could see. `requireBillingModules` (`middlewares/feature-flag.middleware.ts`)
+> closes that at the mount point; `requireExportableReport` closes the matching
+> `POST /reports/billing/export`, because an export renders the same builder as the
+> synchronous GET and would otherwise be a way around the gate.
+>
+> **404, not 403** — the resource genuinely doesn't exist in this deployment, and 403 would
+> confirm to a prober that an invoices API is there and merely closed to them. The gate is
+> a phase switch layered ON TOP of the permission checks, not a replacement for them:
+> flipping it on restores the ordinary `requirePermission` behaviour underneath, unchanged.
+> Permissions stay granted and services stay compiled, so re-enabling is one env var.
+>
+> Fix before switching it on: **`invoice.read` is bundled into the `manager` role and has no
+> row scoping**, so any Manager can read every company's engagements and invoices. The
+> module is also unfinished — no bulk invoice run, no emailing, and the margin report
+> degrades to a warnings banner wherever a bill or cost rate is missing.
 
 - **Purpose** — Phase 1 "Client Engagements & Invoicing" (`docs/superpowers/specs/2026-07-24-billing-invoicing-design.md`). Models a client **Engagement** (contract: hourly / retainer / fixed / hybrid, scoped to a company and optionally specific projects), then generates and persists numbered **Invoices** from an engagement + period, with billable hours auto-pulled from timesheets. Closes the gap between the billing-rate/billing-report pieces (rates exist, but there was never a persisted, numbered bill) and unblocks the Slack Phase 3 invoice modal.
 - **Permissions** — `INVOICE_READ` (`invoice.read`, bundled into the manager role alongside `BILLING_RATE_READ`/`REPORT_READ`), `INVOICE_WRITE` (`invoice.write`, admin-only by default — not in `MANAGER_ADDITIONS`, granted via `system.admin` wildcard or a custom role). `constants/system-role-definitions.ts` is where the manager bundle is declared.
@@ -488,7 +527,8 @@ The full surface — projects + members + clients + custom statuses + sprints + 
   Two ordering dependencies are deliberate: `comp_off_accrual` runs right after `attendance_finalizer` so it accrues against the same just-closed day, and `comp_off_expiry` (03:20) runs after `comp_off_reconciliation` (02:30) so the expiry sweep reads just-repaired balances.
 
   Overlap guard via `{job_name, run_key}` unique index on the `job_runs` collection. **`JOBS_ENABLED=true` must be set on exactly one instance** in a multi-instance fleet.
-- **Env vars** — [`config/server.config.ts`](src/config/server.config.ts). Required: `MONGO_URI`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `MFA_ENCRYPTION_KEY`, `APP_BASE_URL`, `PASSWORD_RESET_URL_PATH`. Optional (defaulted): `NODE_ENV`, `PORT` (3001), `LOG_LEVEL`, `CORS_ORIGIN`, rate-limit caps, `JOBS_ENABLED`, `EMAIL_TRANSPORT` (stub/acs/mailjet), `EXPORT_WORKER_INLINE`. Azure Blob is lazy — first blob call throws `AzureNotConfiguredError` if missing; the rest of the BE runs fine without it.
+- **Feature gates** — [`middlewares/feature-flag.middleware.ts`](src/middlewares/feature-flag.middleware.ts). `requireBillingModules` / `requireExportableReport` 404 the money surfaces unless `BILLING_MODULES_ENABLED=true`. A gate answers "does this exist yet"; `requirePermission` answers "may THIS caller do it" — they layer, and a gate never replaces a permission check. Applied at the mount point in [`routes/index.ts`](src/routes/index.ts) so the mount list still shows what's gated rather than hiding that anything is switched off.
+- **Env vars** — [`config/server.config.ts`](src/config/server.config.ts). Required: `MONGO_URI`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `MFA_ENCRYPTION_KEY`, `APP_BASE_URL`, `PASSWORD_RESET_URL_PATH`. Optional (defaulted): `NODE_ENV`, `PORT` (3001), `LOG_LEVEL`, `CORS_ORIGIN`, rate-limit caps, `JOBS_ENABLED`, `BILLING_MODULES_ENABLED` (off), `EMAIL_TRANSPORT` (stub/acs/mailjet), `EXPORT_WORKER_INLINE`. Azure Blob is lazy — first blob call throws `AzureNotConfiguredError` if missing; the rest of the BE runs fine without it.
 - **Azure Blob** — [`utils/azure-blob.ts`](src/utils/azure-blob.ts). `mintSas` (15-min upload SAS, `create` only, content-type pinned), `mintDownloadSas` (download SAS with optional RFC 5987 `filename*` override per L14), `putBlobStream` (streaming uploads — used by audit archive + GDPR export to keep the worker out of buffer-the-world territory).
 - **Email transports** — [`utils/email-transports/`](src/utils/email-transports/). `stub` (default — logs only), `acs` (Azure Communication Services), `mailjet`. Cache reset via `__resetEmailTransportCache()` for tests that swap `EMAIL_TRANSPORT`.
 
