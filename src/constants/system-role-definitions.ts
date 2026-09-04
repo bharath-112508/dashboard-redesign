@@ -126,12 +126,26 @@ const TEAM_LEAD_ADDITIONS: readonly Permission[] = [
 const MANAGER_ADDITIONS: readonly Permission[] = [
     PERMISSIONS.COMPANY_READ,
     PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE,
-    PERMISSIONS.BILLING_RATE_READ,
-    PERMISSIONS.INVOICE_READ,
-    // Cost rates & margin (Billing Phase 2) — manager can read per-person
-    // cost rates for the Margin report; cost_rate.write stays admin-only
-    // (via the system.admin wildcard), same split as billing_rate.*.
-    PERMISSIONS.COST_RATE_READ,
+    // NO money permissions here — `billing_rate.read`, `invoice.read` and
+    // `cost_rate.read` were all bundled in and have been removed.
+    //
+    // `invoice.read` was the sharp one: `GET /engagements` and `GET /invoices`
+    // have NO row scoping of any kind, so every Manager could read every
+    // client's contracts and bills. That is a wider grant than anything else
+    // in this bundle — the other manager reads are scoped by the reporting
+    // chain or by project visibility — and it was never a deliberate decision,
+    // just the read half of a module whose write half is admin-only.
+    //
+    // Keeping the split coherent: `invoice.write` and `cost_rate.write` were
+    // already admin-only (via the `system.admin` wildcard). The money module is
+    // now admin-only end to end, which is also what the phase-1 gate says —
+    // every one of these endpoints 404s unless `BILLING_MODULES_ENABLED=true`,
+    // so no role should advertise reaching them.
+    //
+    // Re-granting is a deliberate act when the module comes back: either add
+    // them here again (having first scoped the invoice/engagement reads) or
+    // grant a custom role. The permissions themselves still exist in the
+    // catalog — only this default bundle changed.
     PERMISSIONS.REPORT_READ,
     PERMISSIONS.REPORT_EXPORT_WRITE,
     PERMISSIONS.LEAVE_BALANCE_READ_TEAM,

@@ -81,4 +81,33 @@ describe('system-role-definitions drift guards', () => {
         expect(client).toBeDefined();
         expect(client?.permissions).not.toContain(PERMISSIONS.SYSTEM_ADMIN);
     });
+
+    // The money module (billing rates, cost rates, engagements, invoices,
+    // Billing + Margin reports) is gated OFF for this phase — every one of
+    // those endpoints 404s unless BILLING_MODULES_ENABLED=true. No default
+    // role should advertise reaching them.
+    //
+    // `invoice.read` is the one that mattered: GET /engagements and
+    // GET /invoices have no row scoping at all, so bundling it into `manager`
+    // let every Manager read every client's contracts and bills. Re-adding it
+    // means first scoping those two reads — this test is here to make that a
+    // deliberate decision rather than a quiet regression.
+    it('no system role bundles a money permission while the module is gated off', () => {
+        const MONEY_PERMISSIONS: readonly string[] = [
+            PERMISSIONS.BILLING_RATE_READ,
+            PERMISSIONS.BILLING_RATE_WRITE,
+            PERMISSIONS.COST_RATE_READ,
+            PERMISSIONS.COST_RATE_WRITE,
+            PERMISSIONS.INVOICE_READ,
+            PERMISSIONS.INVOICE_WRITE,
+        ];
+
+        for (const def of SYSTEM_ROLE_DEFINITIONS) {
+            // Admin holds only the wildcard, which is checked separately; it
+            // reaches everything by design and is not a per-permission grant.
+            if (def.key === SYSTEM_ROLE_KEYS.ADMIN) continue;
+            const leaked = def.permissions.filter((p) => MONEY_PERMISSIONS.includes(p));
+            expect(leaked, `role "${def.key}" bundles money permissions: ${leaked.join(', ')}`).toEqual([]);
+        }
+    });
 });
