@@ -392,6 +392,32 @@ describe('listProjects — visibility filter', () => {
         projectCountDocumentsMock.mockResolvedValueOnce(0);
     };
 
+    // `overdue` powers the Overdue tile on the projects list. It is a server
+    // -side flag rather than a client-supplied date range on purpose: the
+    // comparison is against *today*, and two browsers in different timezones
+    // would otherwise disagree about which projects are late.
+    it('overdue filters on end_date < today, unfinished, and not archived', async () => {
+        stubFindChain();
+        await svc.listProjects({ page: 1, limit: 20, overdue: true } as never, adminCaller());
+
+        const [filter] = projectFindMock.mock.calls[0]!;
+        const f = filter as Record<string, unknown>;
+        expect(f.status).toEqual({ $ne: 'completed' });
+        expect(f.is_archived).toBe(false);
+        // A `$lt` on an existing value — never a null sweep, because a project
+        // with no end_date had no deadline to miss.
+        expect(f.end_date).toHaveProperty('$lt');
+        expect(String((f.end_date as { $lt: string }).$lt)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('omits the overdue predicate entirely when the flag is absent', async () => {
+        stubFindChain();
+        await svc.listProjects({ page: 1, limit: 20 }, adminCaller());
+
+        const [filter] = projectFindMock.mock.calls[0]!;
+        expect(filter).not.toHaveProperty('end_date');
+    });
+
     it('admin sees no visibility filter applied', async () => {
         stubFindChain();
         await svc.listProjects({ page: 1, limit: 20 }, adminCaller());

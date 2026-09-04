@@ -559,6 +559,26 @@ export const listProjects = async (
     if (query.status) filter.status = query.status;
     if (query.is_archived !== undefined) filter.is_archived = query.is_archived;
 
+    // `overdue` — past the target end date and still unfinished.
+    //
+    // Three conditions, each load-bearing:
+    //  - `end_date < today`. Compared as `YYYY-MM-DD` strings, which sort
+    //    lexicographically, and resolved in IST server-side so the answer
+    //    doesn't change with the reader's timezone.
+    //  - NOT completed. A project that shipped is not overdue — whether it
+    //    shipped LATE is a different question, and `delivery-verdict.ts`
+    //    already answers it per project.
+    //  - NOT archived. Decommissioned work can't be late.
+    //
+    // A project with no `end_date` is never overdue: there was no deadline to
+    // miss. That's why this is `$lt` on an existing value rather than anything
+    // that would sweep nulls in.
+    if (query.overdue) {
+        filter.end_date = { $lt: dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT) };
+        filter.status = { $ne: PROJECT_STATUSES.COMPLETED };
+        filter.is_archived = false;
+    }
+
     // Admins/managers can additionally filter by membership.
     if (query.member_id) filter.member_ids = new Types.ObjectId(query.member_id);
     if (query.company_id) filter.company_id = new Types.ObjectId(query.company_id);

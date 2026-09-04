@@ -188,6 +188,14 @@ export const listProjectsQuerySchema = z
             .union([z.literal('true'), z.literal('false'), z.boolean()])
             .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
             .optional(),
+        // Overdue = past its target end date and not finished. Its own flag
+        // rather than a date range because the comparison is against *today*
+        // server-side: a client-supplied date would let two browsers in
+        // different timezones disagree about which projects are late.
+        overdue: z
+            .union([z.literal('true'), z.literal('false'), z.boolean()])
+            .transform((v) => (typeof v === 'boolean' ? v : v === 'true'))
+            .optional(),
         member_id: objectIdSchema.optional(),
         // Was `client_id` (a client USER). Projects now belong to a company,
         // so the filter is by company.
