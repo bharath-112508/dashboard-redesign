@@ -97,6 +97,10 @@ const internalProfileCreateSchema = z.object({
     // seeder, the smoke suite, existing integrations) keeps working and gets
     // `staff`, which is what they all meant.
     employment_type: employmentTypeEnum.default(EMPLOYMENT_TYPES.STAFF),
+    // Shape stays nullable here; whether it may be EMPTY is decided per-role
+    // in the superRefine below (required for everyone but the admin). Keeping
+    // the field itself nullable is what lets the PATCH schema — which derives
+    // from this one — still express "clear it" for an existing record.
     reporting_manager_id: objectIdSchema.nullable().optional(),
     emergency_contact: emergencyContactSchema.optional(),
 });
@@ -174,6 +178,24 @@ export const createUserBodySchema = z
                     code: z.ZodIssueCode.custom,
                     path: ['internal_profile'],
                     message: `internal_profile is required for role=${data.role}`,
+                });
+            }
+            // Every team-facing surface — leave approvals, team attendance,
+            // team timesheets, comp-off ledger, team leave balances, the Slack
+            // App Home — narrows a non-admin reviewer to their direct reports
+            // via `reporting-scope.service`. Someone created without a manager
+            // is therefore invisible to every reviewer except an admin, on
+            // every one of those screens at once, and nothing surfaces the
+            // omission. It was optional and quietly skipped.
+            //
+            // Admin is exempt because the admin IS the root of the chain —
+            // requiring one there would mean inventing a manager for the
+            // person at the top.
+            if (data.role !== ROLES.ADMIN && data.internal_profile && !data.internal_profile.reporting_manager_id) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ['internal_profile', 'reporting_manager_id'],
+                    message: 'Pick a reporting manager — team screens and leave approvals route through it.',
                 });
             }
             if (data.client_profile) {

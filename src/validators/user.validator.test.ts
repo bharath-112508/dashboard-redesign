@@ -11,11 +11,16 @@ import { createUserBodySchema, updateUserBodySchema, listUsersQuerySchema } from
  * cross-checks are covered by integration smoke tests.
  */
 
+const MANAGER_ID = 'a'.repeat(24);
+
 const baseInternalProfile = {
     employee_id: 'EMP-1',
     job_title: 'Engineer',
     department: 'Eng',
     date_of_joining: '2024-01-15',
+    // Required for every non-admin role — see the reporting-manager suite at
+    // the bottom of this file for why.
+    reporting_manager_id: MANAGER_ID,
 };
 
 const baseCreatePayload = {
@@ -226,5 +231,55 @@ describe('createUserBodySchema — representative is not creatable here', () => 
                 initial_password: 'Vilje@1234',
             })
         ).toThrow();
+    });
+});
+
+/**
+ * A reporting manager is REQUIRED for every role except admin.
+ *
+ * `reporting-scope.service` narrows every team-facing surface — leave
+ * approvals, team attendance, team timesheets, comp-off ledger, team leave
+ * balances, the Slack App Home — to the reviewer's direct reports. Someone
+ * created without a manager is therefore invisible to every reviewer except
+ * an admin, on all of those screens at once, and nothing surfaces the
+ * omission. It used to be optional and was routinely skipped.
+ */
+describe('createUserBodySchema — reporting manager', () => {
+    const withProfile = (profile: Record<string, unknown>, role = 'employee') => ({
+        ...baseCreatePayload,
+        role,
+        internal_profile: { ...baseInternalProfile, ...profile },
+    });
+
+    it.each([['employee'], ['team_lead'], ['manager']])('requires one for role=%s', (role) => {
+        const r = createUserBodySchema.safeParse(withProfile({ reporting_manager_id: undefined }, role));
+        expect(r.success).toBe(false);
+        if (!r.success) {
+            expect(r.error.issues.some((i) => i.path.includes('reporting_manager_id'))).toBe(true);
+        }
+    });
+
+    it('rejects an explicit null just as it rejects an omission', () => {
+        // `null` is what the create form sent by default, so this is the shape
+        // the gap actually arrived in.
+        expect(createUserBodySchema.safeParse(withProfile({ reporting_manager_id: null })).success).toBe(false);
+    });
+
+    it('accepts one when supplied', () => {
+        expect(createUserBodySchema.safeParse(withProfile({ reporting_manager_id: MANAGER_ID })).success).toBe(true);
+    });
+
+    // The admin is the ROOT of the reporting chain — requiring one there would
+    // mean inventing a manager for the person at the top of the org.
+    it('exempts admin', () => {
+        const r = createUserBodySchema.safeParse(withProfile({ reporting_manager_id: undefined }, 'admin'));
+        expect(r.success).toBe(true);
+    });
+
+    it('leaves PATCH untouched, so existing records without one stay editable', () => {
+        // Everyone already created without a manager must still be able to have
+        // their job title fixed; requiring it on PATCH would have locked them.
+        const r = updateUserBodySchema.safeParse({ internal_profile: { job_title: 'Staff Engineer' } });
+        expect(r.success).toBe(true);
     });
 });

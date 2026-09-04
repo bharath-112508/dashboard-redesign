@@ -127,6 +127,10 @@ const validInternalProfile = {
     department: 'Engineering',
     job_title: 'Senior Engineer',
     date_of_joining: '2026-01-15',
+    // Required for every non-admin role: `reporting-scope.service` narrows
+    // every team surface to the reviewer's direct reports, so a user created
+    // without one is invisible to everyone but an admin.
+    reporting_manager_id: 'b'.repeat(24),
 };
 
 const validCreatePayload = {
