@@ -296,6 +296,27 @@ export const JOBS_ENABLED = parseBool(process.env.JOBS_ENABLED, true);
 export const BILLING_MODULES_ENABLED = parseBool(process.env.BILLING_MODULES_ENABLED, false);
 
 /**
+ * `OFFICE_LOCATIONS_ENABLED` — the multi-office directory (named locations,
+ * per-location geofence coordinates, and the QR tokens for on-site check-in).
+ *
+ * **Off by default.** With a single office there is nothing to pick between,
+ * and the one thing that actually needs configuring — where the office is and
+ * how far the geofence reaches — lives on `SystemSettings.attendance.geofence`
+ * and is edited under Settings → Work schedule.
+ *
+ * What this does NOT switch off: attendance itself. Geofence enforcement reads
+ * the settings document, and `POST /attendance/qr-verify` resolves a scanned
+ * token by reading the `office_locations` model directly rather than through
+ * this router — so QR codes already printed keep working. What goes away is
+ * the ability to LIST, CREATE, EDIT or ROTATE them, which is the management
+ * surface, not the check-in path.
+ *
+ * Turn back on (with `VITE_OFFICE_LOCATIONS=true` on the frontend) when a
+ * second office makes a directory worth having.
+ */
+export const OFFICE_LOCATIONS_ENABLED = parseBool(process.env.OFFICE_LOCATIONS_ENABLED, false);
+
+/**
  * `EXPORT_WORKER_INLINE` — test seam. When true, the report-export
  * worker awaits the render synchronously instead of `setImmediate`-
  * dispatching it. Tests use this to assert on the final state without

@@ -21,7 +21,7 @@ import { commentsRouter, taskCommentsNestedRouter } from './task-comment.routes.
 import { taskActivityRouter } from './task-activity.routes.js';
 import { attachmentsRouter, taskAttachmentsNestedRouter } from './task-attachment.routes.js';
 import timesheetRoutes from './timesheet.routes.js';
-import { requireBillingModules } from '../middlewares/feature-flag.middleware.js';
+import { requireBillingModules, requireOfficeLocations } from '../middlewares/feature-flag.middleware.js';
 import billingRateRoutes from './billing-rate.routes.js';
 import costRateRoutes from './cost-rate.routes.js';
 import engagementRoutes from './engagement.routes.js';
@@ -59,7 +59,10 @@ appRoutes.use('/users', userRoutes);
 appRoutes.use('/users', userRolesAssignRouter());
 appRoutes.use('/roles', roleRoutes);
 appRoutes.use('/settings', settingsRoutes);
-appRoutes.use('/office-locations', officeLocationRoutes);
+// Single-office setup: the directory is gated off and the office's geofence
+// lives on `SystemSettings.attendance.geofence` instead. Attendance check-in
+// is unaffected — see `requireOfficeLocations`.
+appRoutes.use('/office-locations', requireOfficeLocations, officeLocationRoutes);
 appRoutes.use('/attendance', attendanceRoutes);
 appRoutes.use('/holidays', holidayRoutes);
 appRoutes.use('/leave-types', leaveTypeRoutes);

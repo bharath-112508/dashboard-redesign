@@ -146,6 +146,17 @@ The ledger is append-only and **lot-based**. Every `earned` row IS a lot: `remai
 
 ### Office locations
 
+> 🔴 **Gated OFF by default** (`OFFICE_LOCATIONS_ENABLED`) — single-office setup.
+> Every route below 404s unless it is set. The office's coordinates and geofence
+> radius live on `SystemSettings.attendance.geofence` instead, edited under
+> Settings → Work schedule on the frontend.
+>
+> **Attendance is NOT switched off with it.** Geofence enforcement reads the
+> settings document, and `POST /attendance/qr-verify` resolves a scanned token by
+> reading the `office_locations` model **directly** rather than through this
+> router — so codes already printed keep working. What goes away is the ability
+> to list, create, edit or rotate them.
+
 - **Purpose** — Office addresses with geofence coords + QR-code tokens for on-site check-in
 - **Roles & visibility** — All authed roles read via `OFFICE_LOCATION_READ` (sidebar nav shows the list to admins). Admin writes via `OFFICE_LOCATION_WRITE`.
 - **Routes** — [`routes/office-location.routes.ts`](src/routes/office-location.routes.ts). CRUD + `POST /office-locations/:id/regenerate-qr`.
@@ -528,7 +539,7 @@ The full surface — projects + members + clients + custom statuses + sprints + 
 
   Overlap guard via `{job_name, run_key}` unique index on the `job_runs` collection. **`JOBS_ENABLED=true` must be set on exactly one instance** in a multi-instance fleet.
 - **Feature gates** — [`middlewares/feature-flag.middleware.ts`](src/middlewares/feature-flag.middleware.ts). `requireBillingModules` / `requireExportableReport` 404 the money surfaces unless `BILLING_MODULES_ENABLED=true`. A gate answers "does this exist yet"; `requirePermission` answers "may THIS caller do it" — they layer, and a gate never replaces a permission check. Applied at the mount point in [`routes/index.ts`](src/routes/index.ts) so the mount list still shows what's gated rather than hiding that anything is switched off.
-- **Env vars** — [`config/server.config.ts`](src/config/server.config.ts). Required: `MONGO_URI`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `MFA_ENCRYPTION_KEY`, `APP_BASE_URL`, `PASSWORD_RESET_URL_PATH`. Optional (defaulted): `NODE_ENV`, `PORT` (3001), `LOG_LEVEL`, `CORS_ORIGIN`, rate-limit caps, `JOBS_ENABLED`, `BILLING_MODULES_ENABLED` (off), `EMAIL_TRANSPORT` (stub/acs/mailjet), `EXPORT_WORKER_INLINE`. Azure Blob is lazy — first blob call throws `AzureNotConfiguredError` if missing; the rest of the BE runs fine without it.
+- **Env vars** — [`config/server.config.ts`](src/config/server.config.ts). Required: `MONGO_URI`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, `MFA_ENCRYPTION_KEY`, `APP_BASE_URL`, `PASSWORD_RESET_URL_PATH`. Optional (defaulted): `NODE_ENV`, `PORT` (3001), `LOG_LEVEL`, `CORS_ORIGIN`, rate-limit caps, `JOBS_ENABLED`, `BILLING_MODULES_ENABLED` (off), `OFFICE_LOCATIONS_ENABLED` (off), `EMAIL_TRANSPORT` (stub/acs/mailjet), `EXPORT_WORKER_INLINE`. Azure Blob is lazy — first blob call throws `AzureNotConfiguredError` if missing; the rest of the BE runs fine without it.
 - **Azure Blob** — [`utils/azure-blob.ts`](src/utils/azure-blob.ts). `mintSas` (15-min upload SAS, `create` only, content-type pinned), `mintDownloadSas` (download SAS with optional RFC 5987 `filename*` override per L14), `putBlobStream` (streaming uploads — used by audit archive + GDPR export to keep the worker out of buffer-the-world territory).
 - **Email transports** — [`utils/email-transports/`](src/utils/email-transports/). `stub` (default — logs only), `acs` (Azure Communication Services), `mailjet`. Cache reset via `__resetEmailTransportCache()` for tests that swap `EMAIL_TRANSPORT`.
 

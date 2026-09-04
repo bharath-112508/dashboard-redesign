@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 
-import { BILLING_MODULES_ENABLED } from '../config/server.config.js';
+import { BILLING_MODULES_ENABLED, OFFICE_LOCATIONS_ENABLED } from '../config/server.config.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
 
@@ -52,6 +52,23 @@ const GATED_REPORT_NAMES: readonly string[] = ['billing'];
 export const requireExportableReport: RequestHandler = (req: Request, _res: Response, next: NextFunction) => {
     const name = typeof req.params.name === 'string' ? req.params.name : '';
     if (!BILLING_MODULES_ENABLED && GATED_REPORT_NAMES.includes(name)) {
+        next(AppError.notFound('Not found', ERROR_CODES.RESOURCE_NOT_FOUND));
+        return;
+    }
+    next();
+};
+
+/**
+ * Guards the office-location directory behind `OFFICE_LOCATIONS_ENABLED`
+ * (off by default; see `server.config.ts`).
+ *
+ * Same 404-not-403 reasoning as the billing gate. Scoped to the MANAGEMENT
+ * routes only — attendance check-in is untouched, because geofence policy is
+ * read from `SystemSettings.attendance.geofence` and QR verification resolves
+ * its token straight off the model rather than through this router.
+ */
+export const requireOfficeLocations: RequestHandler = (_req: Request, _res: Response, next: NextFunction) => {
+    if (!OFFICE_LOCATIONS_ENABLED) {
         next(AppError.notFound('Not found', ERROR_CODES.RESOURCE_NOT_FOUND));
         return;
     }

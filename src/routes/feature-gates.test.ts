@@ -1,10 +1,10 @@
-// src/routes/billing-modules-gate.test.ts
+// src/routes/feature-gates.test.ts
 //
-// The money surfaces — billing rates, cost rates, engagements, invoices and
-// the Billing + Margin reports — are out of scope for the current phase and
-// must be UNREACHABLE, not merely unlinked in the UI. The frontend has hidden
-// them since 2026-07-31 while the API stayed open, which left the data one
-// authenticated request away from anyone holding the permission.
+// Surfaces that are built but out of scope for the current phase must be
+// UNREACHABLE, not merely unlinked in the UI. The frontend hid the billing
+// module from 2026-07-31 while the API stayed open, which left the data one
+// authenticated request away from anyone holding the permission — that is the
+// failure mode these gates exist to prevent, so it is the one pinned here.
 //
 // This file is the inverse of `invoice.routes.test.ts` / `report.routes.test.ts`:
 // those two opt the gate ON to exercise the module's real behaviour, this one
@@ -95,5 +95,33 @@ describe('billing modules gate (BILLING_MODULES_ENABLED unset → off)', () => {
         // (200, 400 on a missing filter) means the route still exists.
         const res = await request(app).get('/api/v1/reports/leaves').set(auth());
         expect(res.status).not.toBe(404);
+    });
+});
+
+describe('office locations gate (OFFICE_LOCATIONS_ENABLED unset → off)', () => {
+    const auth = () => ({ Authorization: `Bearer ${adminToken()}` });
+
+    // Single office: its coordinates and geofence radius live on
+    // SystemSettings.attendance.geofence, edited under Settings → Work
+    // schedule. A directory of one entry earns no screen.
+    it.each([['get'], ['post']] as const)('404s %s /api/v1/office-locations for an admin', async (verb) => {
+        const res =
+            verb === 'get'
+                ? await request(app).get('/api/v1/office-locations').set(auth())
+                : await request(app).post('/api/v1/office-locations').set(auth()).send({ name: 'X' });
+        expect(res.status).toBe(404);
+    });
+
+    it('leaves attendance alone — the gate is the directory, not check-in', async () => {
+        // Geofence policy is read from the settings document and QR check-in
+        // resolves its token straight off the model, so neither goes through
+        // the gated router. 404 here would mean the guard was mounted too
+        // broadly and had taken working check-in down with the directory.
+        //
+        // Deliberately sends a bad date so the query validator rejects it
+        // BEFORE the service reaches Mongo — this asserts the route is still
+        // mounted, without needing the whole attendance service stubbed.
+        const res = await request(app).get('/api/v1/attendance/me?from_date=nonsense').set(auth());
+        expect(res.status).toBe(400);
     });
 });
