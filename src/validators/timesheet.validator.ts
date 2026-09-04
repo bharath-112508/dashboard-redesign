@@ -122,7 +122,13 @@ export const patchTimesheetBodySchema = z
         idle_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
         idle_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
         description: descriptionSchema,
-        general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX),
+        // Nullable so a category can be CLEARED, now that it's optional on
+        // create. Still `.min(1)` when a string is sent, so it can't be
+        // blanked to '' — that's the un-representable state the create schema
+        // already refuses. `updateEntry` re-checks attributability after the
+        // patch is applied, since one field alone can't express "a project OR
+        // a category" on a partial body.
+        general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable(),
         project_id: objectIdSchema.nullable(),
         sprint_id: objectIdSchema.nullable(),
         task_id: objectIdSchema,

@@ -65,6 +65,16 @@ describe('patchTimesheetBodySchema — notes', () => {
         expect(parsed.success).toBe(true);
     });
 
+    it('allows clearing the category with null, now that a task is optional', () => {
+        expect(patchTimesheetBodySchema.safeParse({ general_category: null }).success).toBe(true);
+    });
+
+    it('still refuses an empty-string category', () => {
+        // '' is the un-representable state the create schema already rejects;
+        // `null` is how you clear it.
+        expect(patchTimesheetBodySchema.safeParse({ general_category: '' }).success).toBe(false);
+    });
+
     it('refuses to blank an existing note', () => {
         // The KEY is optional on a partial patch; the VALUE never may be empty.
         const parsed = patchTimesheetBodySchema.safeParse({ description: '' });

@@ -458,6 +458,17 @@ export const patchEntry = async (
         }
     }
 
+    // Same attributability rule the create schema enforces, re-checked against
+    // the POST-patch state. A partial body can't express "a project OR a
+    // category" on its own: clearing either one alone is legal, clearing the
+    // last one leaves an entry that says nothing about what the time was for.
+    if (entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL && !entry.project_id && !entry.general_category) {
+        throw AppError.unprocessable(
+            'Keep either a project or a category on the entry, so the time stays attributable.',
+            ERROR_CODES.VALIDATION_ERROR
+        );
+    }
+
     if (entry.entry_type === TIMESHEET_ENTRY_TYPES.TASK_LINKED) {
         if (patch.task_id !== undefined) {
             const newTaskOid = new Types.ObjectId(patch.task_id);
