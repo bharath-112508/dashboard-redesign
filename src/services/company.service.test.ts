@@ -111,6 +111,15 @@ const adminCaller = () => ({
     audit: undefined,
 });
 
+/** Internal staff. Carries NO `company_id` — which is exactly why the
+ *  ownership guard refuses them on the mutation paths. */
+const employeeCaller = () => ({
+    id: new Types.ObjectId(),
+    role: ROLES.EMPLOYEE,
+    role_keys: [ROLES.EMPLOYEE],
+    audit: undefined,
+});
+
 /** A Client of `companyId` — the company-level role. */
 const clientCaller = (ofCompany: Types.ObjectId = companyId) => ({
     id: new Types.ObjectId(),
@@ -490,14 +499,19 @@ describe('removeRepresentative', () => {
  * `patchCompany` and `archiveCompany` had NO ownership check at all until
  * ebce431 — they loaded the company and mutated it on the caller's word.
  *
- * Not exploitable today: `company.write` is in no role bundle, so only the
- * `system.admin` wildcard reaches these routes, and admins pass the guard
- * anyway. The guard is for the day someone grants `company.write` to a custom
- * role — without it, that role could rename or archive EVERY company.
+ * That day has arrived. `company.write` is now in EMPLOYEE_BASE so anyone who
+ * can start a project can also create the client it belongs to — which means
+ * every employee's token now passes the ROUTE gate on patch and archive, and
+ * this guard is the only thing standing between them and renaming or
+ * archiving any client company in the system.
  *
- * These tests exist so the guard is not quietly removed as dead code by
- * someone who checks the route gate, sees admin-only, and concludes it is
- * unreachable. It is unreachable by CONFIGURATION, not by construction.
+ * It holds because it demands one of two things: `isAdminLike`, or a
+ * `company_id` on the caller that matches the target. Internal staff carry no
+ * `company_id` at all, so they fail both and get a 403 — create is granted,
+ * edit and archive are not.
+ *
+ * Do NOT relax this to "any internal role" to make the write bit feel
+ * complete. The grant is deliberately create-only.
  */
 describe('patchCompany / archiveCompany — ownership guard', () => {
     it('patch: a client of ANOTHER company is refused', async () => {
@@ -512,6 +526,22 @@ describe('patchCompany / archiveCompany — ownership guard', () => {
         companyFindByIdMock.mockResolvedValueOnce(makeCompany());
 
         await expect(svc.archiveCompany(companyId, clientCaller(new Types.ObjectId()))).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+
+    it('patch: an EMPLOYEE is refused, even though they now hold company.write', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(svc.patchCompany(companyId, { name: 'Renamed' }, employeeCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+
+    it('archive: an EMPLOYEE is refused, even though they now hold company.write', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await expect(svc.archiveCompany(companyId, employeeCaller())).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
     });

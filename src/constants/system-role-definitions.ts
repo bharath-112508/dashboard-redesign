@@ -73,6 +73,18 @@ const EMPLOYEE_BASE: readonly Permission[] = [
     // this line is safe.
     PERMISSIONS.PROJECT_WRITE,
     PERMISSIONS.PROJECT_MEMBERS_WRITE,
+    // A project can belong to a client company, and anyone who may start a
+    // project needs to be able to name that client — otherwise every
+    // employee-created project is forced to be internal.
+    //
+    // `company.write` here grants CREATE and nothing more. Renaming and
+    // archiving go through `company.service:assertCallerOwnsCompany`, which
+    // passes only an admin or a caller whose own `company_id` matches —
+    // internal staff carry no `company_id`, so those two verbs still 403 for
+    // them. That guard was written for exactly this moment; its comment says
+    // "for the day someone grants company.write to a custom role".
+    PERMISSIONS.COMPANY_READ,
+    PERMISSIONS.COMPANY_WRITE,
     // Plan the work on any project you're ON, not just ones you created.
     // Deliberately a wider scope than `project.write`: `createSprint` /
     // `createStory` go through `loadProjectForCaller`, which for an Employee
@@ -124,7 +136,7 @@ const TEAM_LEAD_ADDITIONS: readonly Permission[] = [
 
 /** Manager adds on top of team-lead: reports + billing + clients + audit-log read. */
 const MANAGER_ADDITIONS: readonly Permission[] = [
-    PERMISSIONS.COMPANY_READ,
+    // COMPANY_READ moved to EMPLOYEE_BASE — Manager still gets it from there.
     PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE,
     // NO money permissions here — `billing_rate.read`, `invoice.read` and
     // `cost_rate.read` were all bundled in and have been removed.
