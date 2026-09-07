@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ROLES } from '../constants/roles.js';
+import { SLACK_SELECT_OPTION_CAP } from '../constants/slack.js';
 
 const { findMock, buildFilterMock } = vi.hoisted(() => ({
     findMock: vi.fn(),
@@ -35,33 +36,46 @@ beforeEach(() => {
 describe('loadLogTimeProjects', () => {
     it('returns id + label options for the caller visible projects', async () => {
         const id = new Types.ObjectId();
-        findMock.mockReturnValue(queryStub([{ _id: id, name: 'Nordmark Fleet Dashboard' }]));
+        const query = queryStub([{ _id: id, name: 'Nordmark Fleet Dashboard' }]);
+        findMock.mockReturnValue(query);
 
         await expect(loadLogTimeProjects(caller)).resolves.toEqual([
             { id: id.toString(), label: 'Nordmark Fleet Dashboard' },
         ]);
+
+        expect(query.sort).toHaveBeenCalledWith({ name: 1 });
+        expect(query.limit).toHaveBeenCalledWith(SLACK_SELECT_OPTION_CAP);
     });
 
     it('scopes by the shared visibility filter rather than a local rule', async () => {
         // The whole point: an Employee must see exactly the projects every
         // other project read shows them. Re-deriving the rule here is the
         // drift this asserts against.
-        findMock.mockReturnValue(queryStub([]));
+        const query = queryStub([]);
+        findMock.mockReturnValue(query);
 
         await loadLogTimeProjects(caller);
 
         expect(buildFilterMock).toHaveBeenCalledWith(caller);
         expect(findMock).toHaveBeenCalledWith(expect.objectContaining({ member_ids: caller.id, is_archived: false }));
+        expect(query.sort).toHaveBeenCalledWith({ name: 1 });
+        expect(query.limit).toHaveBeenCalledWith(SLACK_SELECT_OPTION_CAP);
     });
 
     it('excludes archived projects', async () => {
-        findMock.mockReturnValue(queryStub([]));
+        const query = queryStub([]);
+        findMock.mockReturnValue(query);
         await loadLogTimeProjects(caller);
         expect(findMock.mock.calls[0]![0]).toMatchObject({ is_archived: false });
+        expect(query.sort).toHaveBeenCalledWith({ name: 1 });
+        expect(query.limit).toHaveBeenCalledWith(SLACK_SELECT_OPTION_CAP);
     });
 
     it('returns an empty list when the caller has no projects', async () => {
-        findMock.mockReturnValue(queryStub([]));
+        const query = queryStub([]);
+        findMock.mockReturnValue(query);
         await expect(loadLogTimeProjects(caller)).resolves.toEqual([]);
+        expect(query.sort).toHaveBeenCalledWith({ name: 1 });
+        expect(query.limit).toHaveBeenCalledWith(SLACK_SELECT_OPTION_CAP);
     });
 });
