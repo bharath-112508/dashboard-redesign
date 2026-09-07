@@ -19,16 +19,22 @@ vi.mock('./leave-request.service.js', () => ({
 }));
 vi.mock('./role.service.js', () => ({ resolvePermissionsForUser: vi.fn() }));
 vi.mock('./user.service.js', () => ({ getSlackAvatarUrlsByIds: vi.fn(async () => new Map()) }));
+vi.mock('./timesheet.service.js', () => ({
+    listMyDay: vi.fn(async () => ({ data: [], meta: { local_date: '2026-01-01', total_minutes: 0 } })),
+}));
 
 import { getTodayAttendanceSummary } from './attendance.service.js';
 import { listLeaves } from './leave-request.service.js';
 import { resolvePermissionsForUser } from './role.service.js';
 import { getSlackAvatarUrlsByIds } from './user.service.js';
+import { listMyDay } from './timesheet.service.js';
 import { buildHomeDashboardData } from './slack-home.service.js';
+import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 
 const employee = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Raj' } as never;
 const adminId = new Types.ObjectId();
 const admin = { _id: adminId, role: 'admin', full_name: 'Boss' } as never;
+const today = dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
 
 afterEach(() => vi.clearAllMocks());
 
@@ -92,6 +98,55 @@ describe('buildHomeDashboardData', () => {
         (listOwnBalances as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db down'));
         const data = await buildHomeDashboardData(employee);
         expect(data.my_balances).toBeNull();
+        expect(data.whos_out).toEqual([]);
+    });
+});
+
+describe('buildHomeDashboardData — my_time', () => {
+    it('caller with timesheet.write: fetches today, sums billable_total_minutes (not total_minutes) from rows', async () => {
+        (resolvePermissionsForUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+            permissions: ['timesheet.write'],
+        });
+        // Rows where the row-level total and the billable split differ, so
+        // summing the wrong field (or the wrong total) fails this test.
+        (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
+            data: [
+                { total_minutes: 120, billable_total_minutes: 90 },
+                { total_minutes: 90, billable_total_minutes: 60 },
+            ],
+            meta: { local_date: today, total_minutes: 210 },
+        });
+        const data = await buildHomeDashboardData(employee);
+        expect(listMyDay).toHaveBeenCalledWith(today, { id: data.user._id, role: data.user.role });
+        expect(data.can_log_time).toBe(true);
+        expect(data.my_time).toEqual({ total_minutes: 210, billable_minutes: 150 });
+    });
+
+    it('caller without timesheet.write: can_log_time is false and listMyDay is never called', async () => {
+        (resolvePermissionsForUser as ReturnType<typeof vi.fn>).mockResolvedValue({ permissions: [] });
+        const data = await buildHomeDashboardData(employee);
+        expect(data.can_log_time).toBe(false);
+        expect(data.my_time).toBeNull();
+        expect(listMyDay).not.toHaveBeenCalled();
+    });
+
+    it('caller with the system.admin wildcard: can_log_time is true', async () => {
+        (resolvePermissionsForUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+            permissions: ['system.admin'],
+        });
+        const data = await buildHomeDashboardData(admin);
+        expect(data.can_log_time).toBe(true);
+        expect(listMyDay).toHaveBeenCalled();
+    });
+
+    it('listMyDay throwing degrades my_time to null without breaking the rest of the Home data', async () => {
+        (resolvePermissionsForUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+            permissions: ['timesheet.write'],
+        });
+        (listMyDay as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db down'));
+        const data = await buildHomeDashboardData(employee);
+        expect(data.my_time).toBeNull();
+        expect(data.can_log_time).toBe(true);
         expect(data.whos_out).toEqual([]);
     });
 });

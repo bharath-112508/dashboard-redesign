@@ -315,27 +315,32 @@ describe('Your time section', () => {
     });
 
     it('offers the Log time button', () => {
-        const view = buildHomeDashboardView(baseData(), user);
-        expect(JSON.stringify(view.blocks)).toContain(SLACK_ACTION_LOG_TIME_OPEN);
+        const view = buildHomeDashboardView(baseData(), user) as { blocks: Array<Record<string, unknown>> };
+        expect(allActionIds(view)).toContain(SLACK_ACTION_LOG_TIME_OPEN);
     });
 
     it('is absent for a caller without timesheet.write', () => {
-        const view = buildHomeDashboardView(baseData({ can_log_time: false }), user);
-        expect(JSON.stringify(view.blocks)).not.toContain(SLACK_ACTION_LOG_TIME_OPEN);
+        const view = buildHomeDashboardView(baseData({ can_log_time: false }), user) as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        expect(allActionIds(view)).not.toContain(SLACK_ACTION_LOG_TIME_OPEN);
     });
 
     it('still offers the button when nothing is logged yet', () => {
-        const view = buildHomeDashboardView(baseData({ my_time: { total_minutes: 0, billable_minutes: 0 } }), user);
-        const text = JSON.stringify(view.blocks);
-        expect(text).toContain(SLACK_ACTION_LOG_TIME_OPEN);
-        expect(text).toContain('Nothing logged yet');
+        const view = buildHomeDashboardView(baseData({ my_time: { total_minutes: 0, billable_minutes: 0 } }), user) as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        expect(allActionIds(view)).toContain(SLACK_ACTION_LOG_TIME_OPEN);
+        expect(JSON.stringify(view.blocks)).toContain('Nothing logged yet');
     });
 
     it('degrades to the button alone when the timesheet lookup failed', () => {
         // `safe()` returns null on error — the section must still render
         // rather than take the whole Home tab down with it.
-        const view = buildHomeDashboardView(baseData({ my_time: null }), user);
-        expect(JSON.stringify(view.blocks)).toContain(SLACK_ACTION_LOG_TIME_OPEN);
+        const view = buildHomeDashboardView(baseData({ my_time: null }), user) as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        expect(allActionIds(view)).toContain(SLACK_ACTION_LOG_TIME_OPEN);
     });
 
     it('never exceeds Slack’s 100-block view ceiling', () => {

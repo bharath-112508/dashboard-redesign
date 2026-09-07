@@ -95,7 +95,7 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
 
     const perms = (await safe('perms', () => resolvePermissionsForUser(user._id)))?.permissions ?? [];
     const canReadTeamAttendance = callerCan(perms, PERMISSIONS.ATTENDANCE_READ_TEAM);
-    const canLogTime = perms.includes(PERMISSIONS.SYSTEM_ADMIN) || perms.includes(PERMISSIONS.TIMESHEET_WRITE);
+    const canLogTime = callerCan(perms, PERMISSIONS.TIMESHEET_WRITE);
 
     // Reuses the same query the web "my day" view uses — no new aggregate.
     // Wrapped in `safe()` like every other section: a timesheet failure must
