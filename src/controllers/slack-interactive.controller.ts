@@ -12,8 +12,11 @@ import {
     SLACK_ACTION_BREAK_END,
     SLACK_ACTION_APPLY_LEAVE_OPEN,
     SLACK_CALLBACK_APPLY_LEAVE,
+    SLACK_ACTION_LOG_TIME_OPEN,
+    SLACK_CALLBACK_LOG_TIME,
 } from '../constants/slack.js';
 import { approveLeave, rejectLeave, applyLeave } from '../services/leave-request.service.js';
+import { handleLogTimeSubmission, openLogTimeModal } from './slack-log-time.controller.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
 import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
@@ -276,6 +279,10 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             await handleApplyLeaveSubmission(req, res, () => undefined);
             return;
         }
+        if (payload.view?.callback_id === SLACK_CALLBACK_LOG_TIME) {
+            await handleLogTimeSubmission(req, res, () => undefined);
+            return;
+        }
         res.status(200).json({});
         return;
     }
@@ -415,6 +422,20 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             return;
         }
         const err = await openApplyLeaveModal(payload.trigger_id, user);
+        if (err) respond(err);
+        else res.status(200).json({});
+        return;
+    }
+
+    if (action.action_id === SLACK_ACTION_LOG_TIME_OPEN) {
+        const user = await resolveCaller(payload.user.id);
+        if (!user) {
+            respond(
+                "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin."
+            );
+            return;
+        }
+        const err = await openLogTimeModal(payload.trigger_id ?? '', user);
         if (err) respond(err);
         else res.status(200).json({});
         return;
