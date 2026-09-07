@@ -73,16 +73,23 @@ const EMPLOYEE_BASE: readonly Permission[] = [
     // this line is safe.
     PERMISSIONS.PROJECT_WRITE,
     PERMISSIONS.PROJECT_MEMBERS_WRITE,
+    // Delete, same creator scope — `assertCallerCanWrite` gates this bit too,
+    // so an Employee can only delete a project they started. Safe only
+    // because `deleteProject` refuses any project with tasks, epics, sprints
+    // OR logged timesheet hours; the timesheet count is what makes it safe
+    // now that time can be logged without a task. Don't grant this without
+    // that check in place.
+    PERMISSIONS.PROJECT_ARCHIVE,
     // A project can belong to a client company, and anyone who may start a
     // project needs to be able to name that client — otherwise every
     // employee-created project is forced to be internal.
     //
-    // `company.write` here grants CREATE and nothing more. Renaming and
-    // archiving go through `company.service:assertCallerOwnsCompany`, which
-    // passes only an admin or a caller whose own `company_id` matches —
-    // internal staff carry no `company_id`, so those two verbs still 403 for
-    // them. That guard was written for exactly this moment; its comment says
-    // "for the day someone grants company.write to a custom role".
+    // `company.write` grants CREATE plus RENAME-YOUR-OWN. Archiving stays
+    // admin-only: `company.service:assertCallerCanWriteCompany` lets the
+    // creator through on a name change, while `archiveCompany` and any
+    // `status` change keep the strict admin-or-own-company bar — retiring a
+    // company pulls it out of everyone's pickers, so it isn't the creator's
+    // call once other people are building on it.
     PERMISSIONS.COMPANY_READ,
     PERMISSIONS.COMPANY_WRITE,
     // Plan the work on any project you're ON, not just ones you created.
@@ -120,10 +127,8 @@ const TEAM_LEAD_ADDITIONS: readonly Permission[] = [
     PERMISSIONS.ATTENDANCE_READ_TEAM,
     PERMISSIONS.ATTENDANCE_CORRECTION_APPROVE,
     PERMISSIONS.TIMESHEET_READ,
-    // PROJECT_WRITE + PROJECT_MEMBERS_WRITE moved to EMPLOYEE_BASE. Team Lead
-    // still gets them through that bundle; what's added here is the archive
-    // (delete) bit, which employees deliberately do NOT get.
-    PERMISSIONS.PROJECT_ARCHIVE,
+    // PROJECT_WRITE + PROJECT_MEMBERS_WRITE + PROJECT_ARCHIVE all moved to
+    // EMPLOYEE_BASE. Team Lead still gets them through that bundle.
     PERMISSIONS.TASK_TEMPLATE_WRITE,
     PERMISSIONS.SHARE_LINK_WRITE,
     PERMISSIONS.DASHBOARD_MANAGER,

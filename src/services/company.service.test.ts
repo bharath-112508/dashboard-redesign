@@ -97,6 +97,10 @@ const companyId = new Types.ObjectId();
 
 const makeCompany = (overrides: Record<string, unknown> = {}) => ({
     _id: companyId,
+    // Deliberately unset by default — companies created before `created_by`
+    // existed have no author, and `caller.id.equals(undefined)` must be false
+    // rather than throwing, or every legacy row becomes editable by anyone.
+    created_by: undefined as Types.ObjectId | undefined,
     name: 'Alnarp Holding AB',
     status: 'active',
     save: vi.fn(),
@@ -505,13 +509,19 @@ describe('removeRepresentative', () => {
  * this guard is the only thing standing between them and renaming or
  * archiving any client company in the system.
  *
- * It holds because it demands one of two things: `isAdminLike`, or a
- * `company_id` on the caller that matches the target. Internal staff carry no
- * `company_id` at all, so they fail both and get a 403 — create is granted,
- * edit and archive are not.
+ * Rename and archive answer to DIFFERENT bars, and the split is the point:
  *
- * Do NOT relax this to "any internal role" to make the write bit feel
- * complete. The grant is deliberately create-only.
+ *   - **Rename** — `assertCallerCanWriteCompany`: admin, the caller's own
+ *     company, or the person who created the row. Without the last clause the
+ *     write bit was create-only in the worst way: you could add a company and
+ *     then not fix a typo in its name.
+ *   - **Archive** (and any `status` change through patch) —
+ *     `assertCallerOwnsCompany`, unchanged. Archiving pulls a customer out of
+ *     everyone's pickers, so it is not the creator's call once other people
+ *     are building projects on it.
+ *
+ * Do NOT relax either to "any internal role" to make the write bit feel
+ * complete. A staff caller who did not create the row still gets a 403.
  */
 describe('patchCompany / archiveCompany — ownership guard', () => {
     it('patch: a client of ANOTHER company is refused', async () => {
@@ -530,7 +540,37 @@ describe('patchCompany / archiveCompany — ownership guard', () => {
         });
     });
 
-    it('patch: an EMPLOYEE is refused, even though they now hold company.write', async () => {
+    it('patch: an EMPLOYEE who did not create the company is refused', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany({ created_by: new Types.ObjectId() }));
+
+        await expect(svc.patchCompany(companyId, { name: 'Renamed' }, employeeCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+
+    it('patch: an EMPLOYEE may rename a company they created', async () => {
+        const me = employeeCaller();
+        const doc = makeCompany({ created_by: me.id });
+        companyFindByIdMock.mockResolvedValueOnce(doc);
+
+        await expect(svc.patchCompany(companyId, { name: 'Renamed' }, me)).resolves.toBeDefined();
+        expect(doc.save).toHaveBeenCalled();
+    });
+
+    it('patch: the creator may NOT archive through the status field', async () => {
+        // Otherwise `PATCH { status: 'archived' }` would be a way around
+        // `archiveCompany`'s stricter guard — same effect, softer gate.
+        const me = employeeCaller();
+        const doc = makeCompany({ created_by: me.id });
+        companyFindByIdMock.mockResolvedValueOnce(doc);
+
+        await expect(svc.patchCompany(companyId, { status: 'archived' }, me)).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+        expect(doc.save).not.toHaveBeenCalled();
+    });
+
+    it('patch: a legacy company with no created_by is not editable by staff', async () => {
         companyFindByIdMock.mockResolvedValueOnce(makeCompany());
 
         await expect(svc.patchCompany(companyId, { name: 'Renamed' }, employeeCaller())).rejects.toMatchObject({
@@ -538,10 +578,11 @@ describe('patchCompany / archiveCompany — ownership guard', () => {
         });
     });
 
-    it('archive: an EMPLOYEE is refused, even though they now hold company.write', async () => {
-        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+    it('archive: an EMPLOYEE is refused even for a company they created', async () => {
+        const me = employeeCaller();
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany({ created_by: me.id }));
 
-        await expect(svc.archiveCompany(companyId, employeeCaller())).rejects.toMatchObject({
+        await expect(svc.archiveCompany(companyId, me)).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
         });
     });

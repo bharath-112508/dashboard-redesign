@@ -94,6 +94,26 @@ const assertCallerOwnsCompany = (companyId: Types.ObjectId, caller: CompanyCalle
 };
 
 /**
+ * Write scope for the company record itself — the counterpart to
+ * `project.service:assertCallerCanWrite`, and deliberately the same shape.
+ *
+ * Employees hold `company.write` so anyone can add the client a new project
+ * belongs to. Without this, that bit was create-only: you could add a company
+ * and then not fix a typo in its name. The creator now may.
+ *
+ * **Rename only.** `status` is excluded (see `patchCompany`) and
+ * `archiveCompany` still uses the strict guard above, because archiving pulls
+ * a customer out of everyone's pickers — a company stops being "yours" the
+ * moment a second person builds work on it, so retiring it is an admin call.
+ */
+const assertCallerCanWriteCompany = (doc: CompanyDocument, caller: CompanyCaller): void => {
+    if (isAdminLike(caller)) return;
+    if (caller.company_id && caller.company_id.equals(doc._id)) return;
+    if (caller.id.equals(doc.created_by)) return;
+    throw AppError.forbidden('You can only change companies you created.', ERROR_CODES.FORBIDDEN);
+};
+
+/**
  * Read-path scoping. Same rule as `listCompanies` uses for its filter, so a
  * list and a detail read agree about what a caller may see.
  *
@@ -207,11 +227,12 @@ export const patchCompany = async (
     caller: CompanyCaller
 ): Promise<Record<string, unknown>> => {
     const doc = await loadCompanyOrThrow(id);
-    // Defence in depth. `company.write` is in NO role bundle today, so only
-    // the `system.admin` wildcard reaches here and this never fires. It exists
-    // for the day someone grants `company.write` to a custom role: without it,
-    // that role could rename or archive ANY company, not just its own.
-    assertCallerOwnsCompany(id, caller);
+    assertCallerCanWriteCompany(doc, caller);
+    // A creator may rename, not retire. `status` reaches the same admin-only
+    // bar as `archiveCompany`, so the two paths to 'archived' agree.
+    if (body.status !== undefined && body.status !== doc.status && !isAdminLike(caller)) {
+        throw AppError.forbidden("Only an admin can change a company's status.", ERROR_CODES.FORBIDDEN);
+    }
     const before = { name: doc.name, status: doc.status };
 
     if (body.name !== undefined) doc.name = body.name;

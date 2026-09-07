@@ -34,6 +34,7 @@ const {
     sprintCountDocumentsMock,
     storyCountDocumentsMock,
     taskCountDocumentsMock,
+    timesheetCountDocumentsMock,
     taskAggregateMock,
     projectUpdateOneMock,
     companyFindMock,
@@ -48,6 +49,7 @@ const {
     sprintCountDocumentsMock: vi.fn(),
     storyCountDocumentsMock: vi.fn(),
     taskCountDocumentsMock: vi.fn(),
+    timesheetCountDocumentsMock: vi.fn(),
     taskAggregateMock: vi.fn(),
     projectUpdateOneMock: vi.fn(),
     companyFindMock: vi.fn(),
@@ -83,6 +85,10 @@ vi.mock('../models/story.model.js', () => ({
 }));
 vi.mock('../models/task.model.js', () => ({
     Task: { countDocuments: taskCountDocumentsMock, aggregate: taskAggregateMock },
+}));
+
+vi.mock('../models/timesheet-entry.model.js', () => ({
+    TimesheetEntry: { countDocuments: timesheetCountDocumentsMock },
 }));
 
 vi.mock('./audit.service.js', () => ({
@@ -240,6 +246,7 @@ beforeEach(() => {
     sprintCountDocumentsMock.mockResolvedValue(0);
     storyCountDocumentsMock.mockResolvedValue(0);
     taskCountDocumentsMock.mockResolvedValue(0);
+    timesheetCountDocumentsMock.mockResolvedValue(0);
     // Task.aggregate used by listProjects rollup — default to empty (no tasks).
     taskAggregateMock.mockResolvedValue([]);
     // Company.find backs the `company_id` → `{id, name}` resolution on
@@ -1194,7 +1201,22 @@ describe('deleteProject', () => {
 
         await expect(svc.deleteProject(proj._id, adminCaller())).rejects.toMatchObject({
             code: ERROR_CODES.RESOURCE_HAS_DEPENDENTS,
-            details: { tasks: 2, stories: 1, sprints: 0 },
+            details: { tasks: 2, stories: 1, sprints: 0, timesheets: 0 },
+        });
+        expect(proj.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('refuses when only timesheet hours exist — a task-less project can still hold work', async () => {
+        // Logging time no longer requires a task, so the task count alone
+        // stopped covering this: the delete used to succeed and orphan the
+        // entries onto an id that resolves to nothing.
+        const proj = makeProject();
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        timesheetCountDocumentsMock.mockResolvedValueOnce(3);
+
+        await expect(svc.deleteProject(proj._id, adminCaller())).rejects.toMatchObject({
+            code: ERROR_CODES.RESOURCE_HAS_DEPENDENTS,
+            details: { tasks: 0, stories: 0, sprints: 0, timesheets: 3 },
         });
         expect(proj.deleteOne).not.toHaveBeenCalled();
     });
@@ -1250,13 +1272,22 @@ describe('project writes — per-row authorization', () => {
             );
         });
 
-        it('may NOT delete a project they created — archive is a separate bit', async () => {
+        it('may delete a project they created', async () => {
             const me = new Types.ObjectId();
             const proj = makeProject({ created_by: me });
             projectFindByIdMock.mockResolvedValueOnce(proj);
-            // The route gate (project.archive) is what stops them; the service
-            // lets the creator through, so deletion stays route-gated only.
-            await expect(svc.deleteProject(proj._id, employeeCaller(me))).resolves.not.toThrow();
+
+            await svc.deleteProject(proj._id, employeeCaller(me));
+            expect(proj.deleteOne).toHaveBeenCalled();
+        });
+
+        it('may NOT delete a project they were merely added to', async () => {
+            const me = new Types.ObjectId();
+            const proj = makeProject({ created_by: new Types.ObjectId(), member_ids: [me] });
+            projectFindByIdMock.mockResolvedValueOnce(proj);
+
+            await expectForbidden(svc.deleteProject(proj._id, employeeCaller(me)));
+            expect(proj.deleteOne).not.toHaveBeenCalled();
         });
     });
 

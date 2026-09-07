@@ -5,6 +5,7 @@ import { Project, type ProjectDocument, type CustomTaskStatus } from '../models/
 import { Sprint } from '../models/sprint.model.js';
 import { Story } from '../models/story.model.js';
 import { Task } from '../models/task.model.js';
+import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
@@ -1422,16 +1423,22 @@ export const deleteProject = async (id: Types.ObjectId, caller: ProjectCaller): 
     if (!doc) throw AppError.notFound('Project not found', ERROR_CODES.PROJECT_NOT_FOUND);
     assertCallerCanWrite(doc, caller);
 
-    const [taskCount, storyCount, sprintCount] = await Promise.all([
+    // `timesheets` is here because logging time no longer requires a task.
+    // While it did, the task count blocked this transitively; task-less
+    // general entries broke that coupling, and deleting the project left
+    // entries pointing at an id that no longer resolves — the hours stayed
+    // on the team timesheet with a blank project name and no way back.
+    const [taskCount, storyCount, sprintCount, timesheetCount] = await Promise.all([
         Task.countDocuments({ project_id: id }),
         Story.countDocuments({ project_id: id }),
         Sprint.countDocuments({ project_id: id }),
+        TimesheetEntry.countDocuments({ project_id: id }),
     ]);
-    if (taskCount > 0 || storyCount > 0 || sprintCount > 0) {
+    if (taskCount > 0 || storyCount > 0 || sprintCount > 0 || timesheetCount > 0) {
         throw AppError.conflict(
             'Project has dependants; archive it (or reassign the items) before deleting.',
             ERROR_CODES.RESOURCE_HAS_DEPENDENTS,
-            { tasks: taskCount, stories: storyCount, sprints: sprintCount }
+            { tasks: taskCount, stories: storyCount, sprints: sprintCount, timesheets: timesheetCount }
         );
     }
 
