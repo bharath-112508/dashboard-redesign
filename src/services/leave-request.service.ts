@@ -11,6 +11,9 @@ import { User } from '../models/user.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { SlMonthlyForfeiture } from '../models/sl-monthly-forfeiture.model.js';
 import { AppError } from '../utils/app-error.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import { callerCan } from '../utils/caller-permissions.js';
+import { resolvePermissionsForUser } from './role.service.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import {
     COMP_OFF_SOURCES,
@@ -97,8 +100,34 @@ const ensureCanReadRequest = (req: LeaveRequestDocument, caller: { id: Types.Obj
     throw AppError.forbidden();
 };
 
-const ensureCanReviewRequest = (req: LeaveRequestDocument, caller: { id: Types.ObjectId; role: RoleType }) => {
-    if (!isReviewer(caller.role)) {
+/**
+ * Effective permissions for a caller, by id.
+ *
+ * The WRITE paths below ask this rather than reading `caller.role`, because
+ * that legacy field goes stale: `role.service:assignRolesToUser` computes it
+ * from SYSTEM role keys only, so assigning a user ONLY custom roles leaves
+ * `set.role` unwritten and the old value in place. A team lead narrowed to a
+ * custom role WITHOUT `leave_request.approve` therefore still reads as
+ * `'team_lead'` — denied by `requirePermission` on the HTTP route, but waved
+ * through by any check that trusts the string. The Slack path had exactly
+ * that hole, and this guard was the second copy of it, so there was no
+ * defence in depth behind the route.
+ *
+ * The READ paths (`ensureCanReadRequest`, `listLeaves`) still use
+ * `isReviewer` — narrowing those changes which queue people see and is a
+ * separate decision from who may mutate another person's request.
+ */
+const permissionsOf = async (callerId: Types.ObjectId): Promise<readonly string[]> => {
+    const { permissions } = await resolvePermissionsForUser(callerId);
+    return permissions;
+};
+
+const ensureCanReviewRequest = (
+    req: LeaveRequestDocument,
+    caller: { id: Types.ObjectId; role: RoleType },
+    permissions: readonly string[]
+) => {
+    if (!callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
         throw AppError.forbidden('Only managers or admins can review leave requests');
     }
     if (caller.id.equals(req.user_id)) {
@@ -115,8 +144,11 @@ const assertCanReviewScoped = async (
     req: LeaveRequestDocument,
     caller: { id: Types.ObjectId; role: RoleType }
 ): Promise<void> => {
-    ensureCanReviewRequest(req, caller);
-    if (caller.role === ROLES.ADMIN) return;
+    const permissions = await permissionsOf(caller.id);
+    ensureCanReviewRequest(req, caller, permissions);
+    // `system.admin` rather than `role === 'admin'` — same staleness applies
+    // to the scoping bypass as to the gate above.
+    if (callerCan(permissions, PERMISSIONS.SYSTEM_ADMIN)) return;
     if (!(await isDirectReportOf(req.user_id, caller.id))) {
         throw AppError.forbidden('You can only review leave requests from your direct reports');
     }
@@ -1103,9 +1135,14 @@ export const cancelLeave = async (
     const existing = await LeaveRequest.findById(id);
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
 
-    // Self can cancel own; reviewers can cancel anyone's.
-    if (!caller.id.equals(existing.user_id) && !isReviewer(caller.role)) {
-        throw AppError.forbidden("You cannot cancel another user's leave request");
+    // Self can cancel own; reviewers can cancel anyone's. Cancelling someone
+    // else's request is a write on their data, so it asks the permission
+    // rather than the stale `caller.role` — see `permissionsOf` above.
+    if (!caller.id.equals(existing.user_id)) {
+        const permissions = await permissionsOf(caller.id);
+        if (!callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
+            throw AppError.forbidden("You cannot cancel another user's leave request");
+        }
     }
 
     if (existing.status === LEAVE_REQUEST_STATUSES.CANCELLED) {

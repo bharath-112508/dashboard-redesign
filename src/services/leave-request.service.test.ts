@@ -1,3 +1,5 @@
+import { resolvePermissionsForUser } from './role.service.js';
+
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { Types } from 'mongoose';
 
@@ -125,6 +127,16 @@ vi.mock('./notification-dispatcher.service.js', () => ({
     notifyLeaveSubmitted: vi.fn(),
 }));
 
+// The approve/reject/cancel guards now ask for effective PERMISSIONS rather
+// than reading the stale `caller.role` field, so this module is on the write
+// path. Default: the caller holds the reviewer permission; individual tests
+// override it to assert a refusal.
+vi.mock('./role.service.js', () => ({
+    resolvePermissionsForUser: vi.fn(async () => ({
+        permissions: ['leave_request.approve', 'system.admin'],
+    })),
+}));
+
 vi.mock('./audit.service.js', () => ({
     recordAudit: recordAuditMock,
 }));
@@ -211,6 +223,11 @@ describe('approveLeave', () => {
 
     it('MANAGER: cannot approve a request from a NON-report (forbidden)', async () => {
         const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        // Reviewer permission WITHOUT the admin wildcard, so the
+        // direct-report scoping below is the thing under test.
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({
+            permissions: ['leave_request.approve'],
+        } as never);
         const r = baseRequest();
         leaveRequestFindByIdMock.mockResolvedValueOnce(r);
         stubReportingManager(new Types.ObjectId()); // requester reports to someone else
@@ -222,6 +239,11 @@ describe('approveLeave', () => {
 
     it('MANAGER: CAN review a direct report (passes the scope guard)', async () => {
         const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        // Reviewer permission WITHOUT the admin wildcard, so the
+        // direct-report scoping below is the thing under test.
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({
+            permissions: ['leave_request.approve'],
+        } as never);
         const r = baseRequest();
         leaveRequestFindByIdMock.mockResolvedValueOnce(r);
         stubReportingManager(manager.id); // requester reports to THIS manager
@@ -280,6 +302,25 @@ describe('approveLeave', () => {
         expect(notifyDecidedMock).toHaveBeenCalledWith(
             expect.objectContaining({ decision: 'approved', request_id: r._id })
         );
+    });
+
+    it('refuses a reviewer whose legacy role is stale but whose permissions were narrowed', async () => {
+        // The bug this guards: `role.service:assignRolesToUser` writes the
+        // legacy `User.role` from SYSTEM role keys only, so assigning a user
+        // ONLY custom roles leaves the old string in place. A team lead moved
+        // to a custom role WITHOUT `leave_request.approve` still reads as
+        // 'team_lead'. The HTTP route refused them via requirePermission; this
+        // service guard used to wave them through on the role string, giving
+        // no defence in depth — they could approve someone else's leave and
+        // move that person's balance.
+        const staleTeamLead = { id: new Types.ObjectId(), role: ROLES.TEAM_LEAD };
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: [] } as never);
+        const r = baseRequest({ user_id: new Types.ObjectId() });
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+
+        await expect(svc.approveLeave(r._id, {} as never, staleTeamLead as never)).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
     });
 
     it('rejects an employee trying to approve their own leave', async () => {
@@ -393,6 +434,11 @@ describe('cancelLeave', () => {
     it("forbids cancelling another user's request when caller is an employee", async () => {
         const r = baseRequest({ user_id: new Types.ObjectId() });
         leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        // An employee holds no reviewer permission. This is the assertion the
+        // stale-`role` version could not make honestly: it refused on the role
+        // string, so a demoted reviewer whose legacy role still said
+        // 'team_lead' would have passed.
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: [] } as never);
 
         await expect(svc.cancelLeave(r._id, { cancellation_reason: 'no' }, employee)).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,
