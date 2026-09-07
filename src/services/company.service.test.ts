@@ -523,6 +523,49 @@ describe('removeRepresentative', () => {
  * Do NOT relax either to "any internal role" to make the write bit feel
  * complete. A staff caller who did not create the row still gets a 403.
  */
+describe('can_write / can_archive on company reads', () => {
+    // Twin of `project.service`'s can_write tests. Two flags, not one,
+    // because rename and archive answer to different bars — a UI that
+    // collapsed them would show the creator an Archive button that 403s.
+    it('the creator gets can_write but NOT can_archive', async () => {
+        const me = employeeCaller();
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany({ created_by: me.id }));
+
+        expect(await svc.getCompany(companyId, me)).toMatchObject({ can_write: true, can_archive: false });
+    });
+
+    it('a staff caller who did not create it gets neither', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany({ created_by: new Types.ObjectId() }));
+
+        expect(await svc.getCompany(companyId, employeeCaller())).toMatchObject({
+            can_write: false,
+            can_archive: false,
+        });
+    });
+
+    it('an admin gets both', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        expect(await svc.getCompany(companyId, adminCaller())).toMatchObject({
+            can_write: true,
+            can_archive: true,
+        });
+    });
+
+    it('agrees with the guards — a false flag means the write really is refused', async () => {
+        const outsider = employeeCaller();
+        const row = () => makeCompany({ created_by: new Types.ObjectId() });
+
+        companyFindByIdMock.mockResolvedValueOnce(row());
+        expect(await svc.getCompany(companyId, outsider)).toMatchObject({ can_write: false });
+
+        companyFindByIdMock.mockResolvedValueOnce(row());
+        await expect(svc.patchCompany(companyId, { name: 'Renamed' }, outsider)).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+});
+
 describe('patchCompany / archiveCompany — ownership guard', () => {
     it('patch: a client of ANOTHER company is refused', async () => {
         companyFindByIdMock.mockResolvedValueOnce(makeCompany());

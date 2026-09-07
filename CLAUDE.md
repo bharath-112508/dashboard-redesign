@@ -166,6 +166,7 @@ The ledger is append-only and **lot-based**. Every `earned` row IS a lot: `remai
 
 - **Purpose** — The client organisation. **"Client" IS the company**; a **"Representative"** is that company's project-scoped person. The company has **no login** — people hold the roles.
 - **Permissions** — `COMPANY_READ` + `COMPANY_WRITE` (Employee upward — create any, rename your own), `REPRESENTATIVE_WRITE` (admin **and** a company's own `client`s). Archive stays admin-only, enforced in the service rather than by a separate permission.
+- **Per-row verdicts on the wire** — every company response carries `can_write` (from `callerCanWriteCompany`) and `can_archive` (the stricter admin-or-own-company bar), so the frontend can hide a Rename/Archive button that would 403 without re-deriving the rules. Twin of `project.service`'s `can_write`; display hints only, every write still asserts. Two flags deliberately, because rename and archive answer to different bars.
 - **Routes** — [`routes/company.routes.ts`](src/routes/company.routes.ts). `GET|POST /companies`, `GET|PATCH /companies/:id`, `POST /companies/:id/archive`, `GET|POST /companies/:id/representatives` (list is **paginated**), `GET|DELETE /companies/:id/representatives/:user_id`, `POST /companies/:id/representatives/:user_id/restore`
 - **Service** — [`services/company.service.ts`](src/services/company.service.ts) · **Model** — [`models/company.model.ts`](src/models/company.model.ts) · **Validator** — [`validators/company.validator.ts`](src/validators/company.validator.ts)
 - **Gotchas**:

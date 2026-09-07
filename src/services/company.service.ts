@@ -106,12 +106,35 @@ const assertCallerOwnsCompany = (companyId: Types.ObjectId, caller: CompanyCalle
  * a customer out of everyone's pickers — a company stops being "yours" the
  * moment a second person builds work on it, so retiring it is an admin call.
  */
+const callerCanWriteCompany = (doc: CompanyDocument, caller: CompanyCaller): boolean => {
+    if (isAdminLike(caller)) return true;
+    if (caller.company_id && caller.company_id.equals(doc._id)) return true;
+    return caller.id.equals(doc.created_by);
+};
+
 const assertCallerCanWriteCompany = (doc: CompanyDocument, caller: CompanyCaller): void => {
-    if (isAdminLike(caller)) return;
-    if (caller.company_id && caller.company_id.equals(doc._id)) return;
-    if (caller.id.equals(doc.created_by)) return;
+    if (callerCanWriteCompany(doc, caller)) return;
     throw AppError.forbidden('You can only change companies you created.', ERROR_CODES.FORBIDDEN);
 };
+
+/**
+ * `toPublic` plus the per-row verdicts for THIS caller. Twin of
+ * `project.service:toPublicFor`, and the same reasoning: the frontend cannot
+ * evaluate a per-row rule from a permission bit, so the server ships its own
+ * answer rather than letting a second copy of the rule drift.
+ *
+ * Two flags, not one, because rename and archive answer to different bars —
+ * a creator may rename, only an admin (or a client of the company) may
+ * retire. Collapsing them would put an Archive button in front of the
+ * creator that 403s on click.
+ *
+ * Display hints, never authorization: every write still asserts.
+ */
+const toPublicFor = (doc: CompanyDocument, caller: CompanyCaller): Record<string, unknown> => ({
+    ...toPublic(doc),
+    can_write: callerCanWriteCompany(doc, caller),
+    can_archive: isAdminLike(caller) || Boolean(caller.company_id?.equals(doc._id)),
+});
 
 /**
  * Read-path scoping. Same rule as `listCompanies` uses for its filter, so a
@@ -161,7 +184,7 @@ export const createCompany = async (
             after: { name: created.name, status: created.status },
         });
     }
-    return toPublic(created);
+    return toPublicFor(created, caller);
 };
 
 // ─── GET /companies ──────────────────────────────────────────────────────
@@ -197,7 +220,7 @@ export const listCompanies = async (
     ]);
 
     return {
-        data: rows.map(toPublic),
+        data: rows.map((r) => toPublicFor(r, caller)),
         meta: {
             page: query.page,
             limit: query.limit,
@@ -216,7 +239,7 @@ export const listCompanies = async (
 export const getCompany = async (id: Types.ObjectId, caller: CompanyCaller): Promise<Record<string, unknown>> => {
     const doc = await loadCompanyOrThrow(id);
     assertCanReadCompany(doc._id, caller);
-    return toPublic(doc);
+    return toPublicFor(doc, caller);
 };
 
 // ─── PATCH /companies/:id ────────────────────────────────────────────────
@@ -257,7 +280,7 @@ export const patchCompany = async (
             after: { name: doc.name, status: doc.status },
         });
     }
-    return toPublic(doc);
+    return toPublicFor(doc, caller);
 };
 
 // ─── POST /companies/:id/archive ─────────────────────────────────────────
@@ -268,7 +291,7 @@ export const archiveCompany = async (id: Types.ObjectId, caller: CompanyCaller):
     // early return so an unauthorised caller cannot use the 200-vs-403
     // difference to probe whether a company is already archived.
     assertCallerOwnsCompany(id, caller);
-    if (doc.status === 'archived') return toPublic(doc);
+    if (doc.status === 'archived') return toPublicFor(doc, caller);
 
     doc.status = 'archived';
     await doc.save();
@@ -281,7 +304,7 @@ export const archiveCompany = async (id: Types.ObjectId, caller: CompanyCaller):
             after: { status: 'archived' },
         });
     }
-    return toPublic(doc);
+    return toPublicFor(doc, caller);
 };
 
 // ─── GET /companies/:id/representatives ──────────────────────────────────
