@@ -204,6 +204,16 @@ The full surface — projects + members + clients + custom statuses + sprints + 
   - Timeline — [`routes/timeline.routes.ts`](src/routes/timeline.routes.ts).
   - Client-side roster — `GET|POST /projects/:id/representatives`, `DELETE /projects/:id/representatives/:user_id` (was `/clients`).
 - **Gotchas** (per-area summary; full table in the module doc):
+  - 🔴 **`can_write` on every project response** (`toPublicFor`) is the server's
+    own per-row verdict for the requesting caller, derived from the same
+    predicate `assertCallerCanWrite` throws on. It exists so the frontend can
+    hide an Edit/Delete/Archive button that would 403 without re-deriving the
+    tier ladder — which it had already done, and already got wrong (the old FE
+    helper waved through every non-Employee, missing the Team Lead membership
+    test). It is a **display hint, never authorization**: every write still
+    asserts, so a forged `can_write` changes nothing. Audit `before`/`after`
+    snapshots deliberately use bare `toPublic` — whose token fetched a row is
+    not part of the row.
   - **G1** — `PROJECT_MEMBERS_WRITE` vs. `PROJECT_REPRESENTATIVES_WRITE` are split (Team Lead can manage members; Manager+ and a company's own `client`s manage the client-side roster). `PROJECT_ARCHIVE` (not `PROJECT_WRITE`) gates `DELETE /projects/:id` — Employee+ holds it, scoped by `assertCallerCanWrite` to projects they created.
   - **`company_id` is authoritative for a `client`'s access, not `representative_ids`.** Clients are *also* listed on the roster so it's one explicit field, but that entry is **denormalised** — if it drifts, a client still sees the project. Drift costs display accuracy, never access.
   - **Roster invariant** — every `representative_id` must be an active client-side user of THIS project's company. The company half is what stops company B's person being rostered onto company A's project. Changing `company_id` **resets** the roster.

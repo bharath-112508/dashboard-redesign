@@ -1232,6 +1232,54 @@ describe('deleteProject', () => {
     });
 });
 
+// ─── can_write — the per-row verdict shipped to the frontend ────────────
+
+/**
+ * `can_write` is what lets the FE hide an edit/delete button that would 403.
+ * It MUST come from the same predicate the guard uses — a second copy of the
+ * tier ladder is exactly the drift this field exists to prevent — so these
+ * tests assert the flag agrees with `assertCallerCanWrite` row by row.
+ *
+ * It is a display hint, never authorization. See `toPublicFor`.
+ */
+describe('can_write on project reads', () => {
+    it('is true for the employee who created the project, false for a mere member', async () => {
+        const author = new Types.ObjectId();
+        const member = new Types.ObjectId();
+        const proj = makeProject({ created_by: author, member_ids: [author, member] });
+
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        expect(await svc.getProject(proj._id, employeeCaller(author))).toMatchObject({ can_write: true });
+
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        expect(await svc.getProject(proj._id, employeeCaller(member))).toMatchObject({ can_write: false });
+    });
+
+    it('is true for an admin on a project they had nothing to do with', async () => {
+        const proj = makeProject();
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        expect(await svc.getProject(proj._id, adminCaller())).toMatchObject({ can_write: true });
+    });
+
+    it('agrees with assertCallerCanWrite — a false flag means the write really is refused', async () => {
+        // The only caller who can see `can_write: false` is one who can READ
+        // the row but not write it: a member of someone else's project.
+        // A true outsider never gets a payload at all.
+        const member = new Types.ObjectId();
+        const proj = makeProject({ created_by: new Types.ObjectId(), member_ids: [member] });
+        const caller = employeeCaller(member);
+
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        expect(await svc.getProject(proj._id, caller)).toMatchObject({ can_write: false });
+
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+        await expect(svc.updateProject(proj._id, { name: 'Renamed' }, caller)).rejects.toMatchObject({
+            code: ERROR_CODES.PROJECT_WRITE_FORBIDDEN,
+        });
+    });
+});
+
 // ─── assertCallerCanWrite — per-row authorization on project writes ──────
 
 describe('project writes — per-row authorization', () => {

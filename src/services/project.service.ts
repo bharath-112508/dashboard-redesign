@@ -212,10 +212,15 @@ const assertCallerCanRead = (project: ProjectDocument, caller: ProjectCaller): v
  * their scope is `company_id`, which `assertCallerCanRead` already enforces
  * there alongside the roster invariant.
  */
+const callerCanWrite = (project: ProjectDocument, caller: ProjectCaller): boolean => {
+    if (caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER) return true;
+    if (caller.role === ROLES.TEAM_LEAD && project.member_ids.some((u) => u.equals(caller.id))) return true;
+    if (caller.role === ROLES.EMPLOYEE && project.created_by.equals(caller.id)) return true;
+    return false;
+};
+
 const assertCallerCanWrite = (project: ProjectDocument, caller: ProjectCaller): void => {
-    if (caller.role === ROLES.ADMIN || caller.role === ROLES.MANAGER) return;
-    if (caller.role === ROLES.TEAM_LEAD && project.member_ids.some((u) => u.equals(caller.id))) return;
-    if (caller.role === ROLES.EMPLOYEE && project.created_by.equals(caller.id)) return;
+    if (callerCanWrite(project, caller)) return;
     throw AppError.forbidden('You can only change projects you created or lead.', ERROR_CODES.PROJECT_WRITE_FORBIDDEN);
 };
 
@@ -236,6 +241,30 @@ const assertCallerCanWrite = (project: ProjectDocument, caller: ProjectCaller): 
 const toPublic = (doc: ProjectDocument): Record<string, unknown> => ({
     ...(doc.toJSON() as Record<string, unknown>),
     completed_on: doc.completed_at ? dayjs(doc.completed_at).tz(DEFAULT_TIMEZONE).format(DATE_FORMAT) : null,
+});
+
+/**
+ * `toPublic` plus `can_write` — the answer `assertCallerCanWrite` would give
+ * for THIS caller on THIS row, shipped on every project response.
+ *
+ * It exists because the rule is per-row and tiered (admin/manager: any;
+ * team lead: rostered; employee: authored), and the frontend cannot evaluate
+ * it: the permission bit alone says nothing about which rows it applies to.
+ * Without this the FE had two bad options — render edit/delete for everyone
+ * holding `project.write` and let disallowed ones 403, or re-implement the
+ * tier ladder client-side and drift from it. Deriving it from the same
+ * predicate the guard uses means there is only one rule to keep correct.
+ *
+ * It is a display hint, never authorization: the service still asserts on
+ * every write. A caller who forges `can_write: true` gets a 403 exactly as
+ * before.
+ *
+ * NOT used for audit snapshots — `before`/`after` describe the row, and
+ * whose token happened to fetch it is not part of the row.
+ */
+const toPublicFor = (doc: ProjectDocument, caller: ProjectCaller): Record<string, unknown> => ({
+    ...toPublic(doc),
+    can_write: callerCanWrite(doc, caller),
 });
 
 /**
@@ -546,7 +575,7 @@ export const createProject = async (
         });
     }
 
-    return toPublic(created);
+    return toPublicFor(created, caller);
 };
 
 // ─── GET /projects ───────────────────────────────────────────────────────
@@ -761,7 +790,7 @@ export const listProjects = async (
 
     return {
         data: rows.map((r) => ({
-            ...toPublic(r),
+            ...toPublicFor(r, caller),
             company: companyOf(r, companyById),
             ...(rollupById.get(r._id.toString()) ?? emptyRollup()),
         })),
@@ -784,7 +813,7 @@ export const getProject = async (id: Types.ObjectId, caller: ProjectCaller): Pro
     // response but vanishes on the detail one — that asymmetry is the kind
     // of thing a consumer only discovers at runtime.
     const companyById = await attachCompanies([doc]);
-    return { ...toPublic(doc), company: companyOf(doc, companyById) };
+    return { ...toPublicFor(doc, caller), company: companyOf(doc, companyById) };
 };
 
 /**
@@ -884,7 +913,7 @@ export const updateProject = async (
         });
     }
 
-    return toPublic(doc);
+    return toPublicFor(doc, caller);
 };
 
 // ─── POST /projects/:id/members  (bulk) ──────────────────────────────────
@@ -969,7 +998,7 @@ export const updateProjectMembers = async (
         });
     }
 
-    return toPublic(updated);
+    return toPublicFor(updated, caller);
 };
 
 // ─── GET /projects/:id/members ───────────────────────────────────────────
@@ -1076,7 +1105,7 @@ export const updateProjectRepresentatives = async (
         });
     }
 
-    return toPublic(updated);
+    return toPublicFor(updated, caller);
 };
 
 export const listProjectRepresentatives = async (
