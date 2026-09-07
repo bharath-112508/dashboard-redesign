@@ -5,6 +5,7 @@ import { listOwnBalances } from './leave-balance.service.js';
 import { listLeaves, calendarLeaves } from './leave-request.service.js';
 import { visibleUserIdsForReviewer } from './reporting-scope.service.js';
 import { resolvePermissionsForUser } from './role.service.js';
+import { listMyDay } from './timesheet.service.js';
 import { getSlackAvatarUrlsByIds } from './user.service.js';
 import { callerCan } from '../utils/caller-permissions.js';
 import { PERMISSIONS } from '../constants/permissions.js';
@@ -35,6 +36,12 @@ export interface HomeDashboardData {
     /** True total pending count (the fetched list is capped at PENDING_CAP+1
      *  for overflow detection, so the builder uses this for the header + "+N more"). */
     pending_total: number | null;
+    /** Today's logged time. `null` when the lookup failed — the section still
+     *  renders its button so Slack never becomes a dead end. */
+    my_time: { total_minutes: number; billable_minutes: number } | null;
+    /** Whether the caller holds `timesheet.write`. Clients and Representatives
+     *  don't, and must not see a button that would refuse them. */
+    can_log_time: boolean;
 }
 
 /** Per-list caps (Block Kit 100-block ceiling). */
@@ -88,6 +95,22 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
 
     const perms = (await safe('perms', () => resolvePermissionsForUser(user._id)))?.permissions ?? [];
     const canReadTeamAttendance = callerCan(perms, PERMISSIONS.ATTENDANCE_READ_TEAM);
+    const canLogTime = perms.includes(PERMISSIONS.SYSTEM_ADMIN) || perms.includes(PERMISSIONS.TIMESHEET_WRITE);
+
+    // Reuses the same query the web "my day" view uses — no new aggregate.
+    // Wrapped in `safe()` like every other section: a timesheet failure must
+    // degrade this one card, not the whole Home tab. `today` (DATE_FORMAT =
+    // YYYY-MM-DD) is the same local-date string `listMyDay` expects.
+    const my_time = canLogTime
+        ? await safe('my_time', async () => {
+              const day = await listMyDay(today, { id: user._id, role: user.role });
+              const billable = (day.data as Array<{ billable_total_minutes?: number }>).reduce(
+                  (acc, r) => acc + (r.billable_total_minutes ?? 0),
+                  0
+              );
+              return { total_minutes: day.meta.total_minutes, billable_minutes: billable };
+          })
+        : null;
     // Reporting-chain scope for the team-attendance summary — Admin sees the
     // whole workforce; a Manager/Team-Lead sees only their direct reports
     // (matches the /admin/attendance and pending-approvals scoping).
@@ -148,5 +171,7 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
         team_attendance,
         pending_leaves,
         pending_total,
+        my_time,
+        can_log_time: canLogTime,
     };
 };

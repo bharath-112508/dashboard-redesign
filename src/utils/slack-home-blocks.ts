@@ -1,7 +1,7 @@
 import { APP_BASE_URL } from '../config/server.config.js';
 import { attendanceHeaderBlocks } from './slack-attendance-blocks.js';
 import dayjs, { DEFAULT_TIMEZONE } from './date.js';
-import { SLACK_ACTION_APPLY_LEAVE_OPEN } from '../constants/slack.js';
+import { SLACK_ACTION_APPLY_LEAVE_OPEN, SLACK_ACTION_LOG_TIME_OPEN } from '../constants/slack.js';
 import {
     ATT_ROSTER_CAP,
     PENDING_CAP,
@@ -213,6 +213,44 @@ const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, un
     return blocks;
 };
 
+/** "3h 30m", "45m", "0m" — Slack-friendly duration. */
+const hm = (minutes: number): string => {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h && m) return `${h}h ${m}m`;
+    if (h) return `${h}h`;
+    return `${m}m`;
+};
+
+/**
+ * Today's logged time + the Log-time button.
+ *
+ * Fixed size — one line and one button — so unlike the capped list sections
+ * it can't contribute to blowing the 100-block view ceiling.
+ */
+const myTimeBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
+    if (!data.can_log_time) return [];
+
+    const blocks: Array<Record<string, unknown>> = [divider(), header('Your time')];
+
+    if (!data.my_time) {
+        // The lookup failed. Say nothing about totals rather than imply zero.
+        blocks.push(context("Couldn't load today's total."));
+    } else if (data.my_time.total_minutes === 0) {
+        blocks.push(section('Nothing logged yet today.'));
+    } else {
+        const nonBillable = data.my_time.total_minutes - data.my_time.billable_minutes;
+        blocks.push(
+            section(
+                `Today: *${hm(data.my_time.total_minutes)}*  (${hm(data.my_time.billable_minutes)} billable · ${hm(nonBillable)} non-billable)`
+            )
+        );
+    }
+
+    blocks.push(actionButton('➕ Log time', SLACK_ACTION_LOG_TIME_OPEN, 'primary'));
+    return blocks;
+};
+
 /**
  * Compose the full role-scoped Home dashboard. The aggregator only populates
  * team_attendance / pending_leaves for authorized viewers, so the builder
@@ -228,6 +266,7 @@ export const buildHomeDashboardView = (data: HomeDashboardData, user: DashboardU
         divider(),
         ...whosOutBlocks(data),
         ...pendingApprovalBlocks(data),
+        ...myTimeBlocks(data),
         ...footerBlocks(),
     ];
     return { type: 'home', blocks: blocks.slice(0, 100) };

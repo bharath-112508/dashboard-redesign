@@ -9,7 +9,7 @@ vi.mock('../config/server.config.js', async (orig) => ({
 
 import { buildHomeDashboardView } from './slack-home-blocks.js';
 import type { DashboardUser, HomeDashboardData } from '../services/slack-home.service.js';
-import { SLACK_ACTION_APPLY_LEAVE_OPEN } from '../constants/slack.js';
+import { SLACK_ACTION_APPLY_LEAVE_OPEN, SLACK_ACTION_LOG_TIME_OPEN } from '../constants/slack.js';
 
 const base = (over: Partial<HomeDashboardData>): HomeDashboardData => ({
     user: { _id: new Types.ObjectId(), role: 'employee', full_name: 'Raj' },
@@ -20,6 +20,8 @@ const base = (over: Partial<HomeDashboardData>): HomeDashboardData => ({
     team_attendance: null,
     pending_leaves: null,
     pending_total: null,
+    my_time: null,
+    can_log_time: false,
     ...over,
 });
 
@@ -282,5 +284,62 @@ describe('App Home — apply for leave', () => {
         ) as { blocks: Array<Record<string, unknown>> };
         const actionIds = allActionIds(view);
         expect(actionIds).toContain(SLACK_ACTION_APPLY_LEAVE_OPEN);
+    });
+});
+
+describe('Your time section', () => {
+    /** Minimal HomeDashboardData — every other section tolerates nulls. */
+    const baseData = (over: Record<string, unknown> = {}) =>
+        ({
+            user: { _id: new Types.ObjectId(), role: 'employee', full_name: 'Ananya Krishnan' },
+            my_today: null,
+            my_balances: null,
+            my_pending: null,
+            whos_out: null,
+            team_attendance: null,
+            pending_leaves: null,
+            pending_total: null,
+            my_time: { total_minutes: 210, billable_minutes: 180 },
+            can_log_time: true,
+            ...over,
+        }) as never;
+
+    const user = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Ananya Krishnan' } as never;
+
+    it('renders today’s total with the billable split', () => {
+        const view = buildHomeDashboardView(baseData(), user);
+        const text = JSON.stringify(view.blocks);
+        expect(text).toContain('3h 30m');
+        expect(text).toContain('3h billable');
+        expect(text).toContain('30m non-billable');
+    });
+
+    it('offers the Log time button', () => {
+        const view = buildHomeDashboardView(baseData(), user);
+        expect(JSON.stringify(view.blocks)).toContain(SLACK_ACTION_LOG_TIME_OPEN);
+    });
+
+    it('is absent for a caller without timesheet.write', () => {
+        const view = buildHomeDashboardView(baseData({ can_log_time: false }), user);
+        expect(JSON.stringify(view.blocks)).not.toContain(SLACK_ACTION_LOG_TIME_OPEN);
+    });
+
+    it('still offers the button when nothing is logged yet', () => {
+        const view = buildHomeDashboardView(baseData({ my_time: { total_minutes: 0, billable_minutes: 0 } }), user);
+        const text = JSON.stringify(view.blocks);
+        expect(text).toContain(SLACK_ACTION_LOG_TIME_OPEN);
+        expect(text).toContain('Nothing logged yet');
+    });
+
+    it('degrades to the button alone when the timesheet lookup failed', () => {
+        // `safe()` returns null on error — the section must still render
+        // rather than take the whole Home tab down with it.
+        const view = buildHomeDashboardView(baseData({ my_time: null }), user);
+        expect(JSON.stringify(view.blocks)).toContain(SLACK_ACTION_LOG_TIME_OPEN);
+    });
+
+    it('never exceeds Slack’s 100-block view ceiling', () => {
+        const view = buildHomeDashboardView(baseData(), user);
+        expect((view.blocks as unknown[]).length).toBeLessThanOrEqual(100);
     });
 });
