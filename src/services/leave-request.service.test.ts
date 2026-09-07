@@ -445,6 +445,41 @@ describe('cancelLeave', () => {
         });
     });
 
+    it('refuses a reviewer cancelling a NON-report', async () => {
+        // Cancel used to require the permission but NO reporting-chain
+        // scoping, so a manager could cancel a request they were not allowed
+        // to approve. It now shares approve/reject's guard.
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({
+            permissions: ['leave_request.approve'],
+        } as never);
+        stubReportingManager(new Types.ObjectId()); // reports to someone else
+        const r = baseRequest({ user_id: new Types.ObjectId() });
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+
+        await expect(svc.cancelLeave(r._id, { cancellation_reason: 'no' }, manager as never)).rejects.toMatchObject({
+            code: ERROR_CODES.FORBIDDEN,
+        });
+    });
+
+    it("allows a reviewer to cancel their OWN direct report's request", async () => {
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({
+            permissions: ['leave_request.approve'],
+        } as never);
+        stubReportingManager(manager.id); // reports to THIS manager
+        const r = baseRequest({ user_id: new Types.ObjectId() });
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        leaveRequestFindOneAndUpdateMock.mockResolvedValueOnce(null); // race → proves auth passed
+
+        await expect(svc.cancelLeave(r._id, { cancellation_reason: 'ok' }, manager as never)).rejects.toMatchObject({
+            statusCode: 409,
+        });
+        // Reaching the CAS at all is the point: authorization let them
+        // through, unlike the NON-report case above which never gets here.
+        expect(leaveRequestFindOneAndUpdateMock).toHaveBeenCalled();
+    });
+
     it('returns the request unchanged when already cancelled (idempotent)', async () => {
         const r = baseRequest({ user_id: employee.id, status: LEAVE_REQUEST_STATUSES.CANCELLED });
         leaveRequestFindByIdMock.mockResolvedValueOnce(r);

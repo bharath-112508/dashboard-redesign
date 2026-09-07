@@ -1135,14 +1135,21 @@ export const cancelLeave = async (
     const existing = await LeaveRequest.findById(id);
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
 
-    // Self can cancel own; reviewers can cancel anyone's. Cancelling someone
-    // else's request is a write on their data, so it asks the permission
-    // rather than the stale `caller.role` — see `permissionsOf` above.
+    // Self can cancel own — always, no permission needed, or nobody could
+    // withdraw their own request.
+    //
+    // Cancelling SOMEONE ELSE's goes through the same guard as approve and
+    // reject: `leave_request.approve` plus reporting-chain scoping, with
+    // `system.admin` bypassing the scope. Deliberately the SAME function
+    // rather than a second copy of the rule — cancel used to require the
+    // permission but no scoping, so a reviewer could cancel a request they
+    // were not allowed to approve. Reusing the guard also means cancel can
+    // never drift from review again.
+    //
+    // The self-review check inside it cannot fire here: this branch only runs
+    // when the caller is NOT the owner.
     if (!caller.id.equals(existing.user_id)) {
-        const permissions = await permissionsOf(caller.id);
-        if (!callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
-            throw AppError.forbidden("You cannot cancel another user's leave request");
-        }
+        await assertCanReviewScoped(existing, caller);
     }
 
     if (existing.status === LEAVE_REQUEST_STATUSES.CANCELLED) {
