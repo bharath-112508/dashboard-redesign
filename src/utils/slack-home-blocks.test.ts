@@ -299,19 +299,27 @@ describe('Your time section', () => {
             team_attendance: null,
             pending_leaves: null,
             pending_total: null,
-            my_time: { total_minutes: 210, billable_minutes: 180 },
+            // Billable, non-billable and idle are all DIFFERENT, and idle
+            // (30m) is folded into total_minutes but is neither billable nor
+            // non-billable — so a wrong field, or deriving non-billable via
+            // `total - billable` (which would call the idle 30m
+            // "non-billable"), fails the assertions below.
+            my_time: { total_minutes: 210, billable_minutes: 120, non_billable_minutes: 60 },
             can_log_time: true,
             ...over,
         }) as never;
 
     const user = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Ananya Krishnan' } as never;
 
-    it('renders today’s total with the billable split', () => {
+    it('renders today’s total with the billable split, using non_billable_minutes directly (not total - billable)', () => {
         const view = buildHomeDashboardView(baseData(), user);
         const text = JSON.stringify(view.blocks);
         expect(text).toContain('3h 30m');
-        expect(text).toContain('3h billable');
-        expect(text).toContain('30m non-billable');
+        expect(text).toContain('2h billable');
+        expect(text).toContain('1h non-billable');
+        // The 30m of idle time must not appear as "non-billable".
+        expect(text).not.toContain('90m non-billable');
+        expect(text).not.toContain('1h 30m non-billable');
     });
 
     it('offers the Log time button', () => {
@@ -327,7 +335,10 @@ describe('Your time section', () => {
     });
 
     it('still offers the button when nothing is logged yet', () => {
-        const view = buildHomeDashboardView(baseData({ my_time: { total_minutes: 0, billable_minutes: 0 } }), user) as {
+        const view = buildHomeDashboardView(
+            baseData({ my_time: { total_minutes: 0, billable_minutes: 0, non_billable_minutes: 0 } }),
+            user
+        ) as {
             blocks: Array<Record<string, unknown>>;
         };
         expect(allActionIds(view)).toContain(SLACK_ACTION_LOG_TIME_OPEN);

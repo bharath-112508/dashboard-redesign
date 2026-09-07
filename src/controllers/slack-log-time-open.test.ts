@@ -30,6 +30,7 @@ vi.mock('../services/slack-timesheet.service.js', () => ({
     callerCanLogTime: (...args: unknown[]) => callerCanLogTimeMock(...args),
 }));
 
+import { getOrInitSettings } from '../services/settings.service.js';
 import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { handleInteractive as handleInteractiveRaw } from './slack-interactive.controller.js';
 
@@ -184,5 +185,47 @@ describe('log-time routing', () => {
                 text: "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin.",
             })
         );
+    });
+
+    // Finding 2 — Slack sends no `response_url` for App Home interactions,
+    // and the HTTP body's ephemeral is ignored for `block_actions`, so every
+    // open-path failure from the Home tab (the ONLY entry point to log-time —
+    // there's no /logtime slash command) previously reached nobody. Prove
+    // the Home-tab case now delivers via a DM instead of a silent no-op.
+    it('DMs the failure instead of a silent no-op when the open attempt came from the Home tab', async () => {
+        vi.mocked(resolveSlackCaller).mockResolvedValue(null);
+        vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'xoxb' } } as never);
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({ ok: true, ts: '1.1', channel: 'U1' }), {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+            })
+        );
+
+        const req = {
+            body: {
+                payload: JSON.stringify({
+                    type: 'block_actions',
+                    user: { id: 'U1' },
+                    trigger_id: 'trigger-1',
+                    actions: [{ action_id: 'log_time_open' }],
+                    view: { type: 'home' },
+                }),
+            },
+        };
+        const res = makeRes();
+        await handleInteractive(req as never, res as never);
+        // The DM dispatch is fire-and-forget after the ack — flush microtasks.
+        await new Promise((r) => setImmediate(r));
+
+        expect(openLogTimeModalMock).not.toHaveBeenCalled();
+        expect(fetchSpy).toHaveBeenCalled();
+        const [url, init] = fetchSpy.mock.calls[0]!;
+        expect(String(url)).toContain('chat.postMessage');
+        const body = JSON.parse((init as RequestInit).body as string);
+        expect(body.channel).toBe('U1');
+        expect(body.text).toMatch(/couldn't identify/i);
+
+        fetchSpy.mockRestore();
     });
 });

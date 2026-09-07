@@ -239,10 +239,14 @@ const myTimeBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> =
     } else if (data.my_time.total_minutes === 0) {
         blocks.push(section('Nothing logged yet today.'));
     } else {
-        const nonBillable = data.my_time.total_minutes - data.my_time.billable_minutes;
+        // `non_billable_minutes` is summed off the rows the same way
+        // `billable_minutes` is (see slack-home.service.ts) — NOT derived as
+        // `total - billable`. `total_minutes` also includes idle time, which
+        // is neither billable nor non-billable; subtracting would have
+        // mislabelled it as non-billable.
         blocks.push(
             section(
-                `Today: *${hm(data.my_time.total_minutes)}*  (${hm(data.my_time.billable_minutes)} billable · ${hm(nonBillable)} non-billable)`
+                `Today: *${hm(data.my_time.total_minutes)}*  (${hm(data.my_time.billable_minutes)} billable · ${hm(data.my_time.non_billable_minutes)} non-billable)`
             )
         );
     }

@@ -7,6 +7,7 @@ import {
     SLACK_BLOCK_TS_PROJECT,
     SLACK_CALLBACK_LOG_TIME,
     SLACK_SELECT_OPTION_CAP,
+    SLACK_SELECT_OPTION_LABEL_MAX,
 } from '../../constants/slack.js';
 
 /**
@@ -27,6 +28,18 @@ export interface LogTimeProjectOption {
 }
 
 const plain = (text: string) => ({ type: 'plain_text' as const, text, emoji: true });
+
+/**
+ * Truncate a `static_select` option label to Slack's hard 75-char limit
+ * (`SLACK_SELECT_OPTION_LABEL_MAX`). Applied here in the builder — the last
+ * line of defence — the same place the option-COUNT cap
+ * (`SLACK_SELECT_OPTION_CAP`) is already enforced, so a caller can't bypass
+ * it by constructing options some other way. Only the display label is
+ * truncated; the option `value` (the project id) is untouched, so submission
+ * still resolves the real project.
+ */
+const truncateOptionLabel = (name: string): string =>
+    name.length > SLACK_SELECT_OPTION_LABEL_MAX ? `${name.slice(0, SLACK_SELECT_OPTION_LABEL_MAX - 1)}…` : name;
 
 export const buildLogTimeModal = (projects: LogTimeProjectOption[], todayIso: string): Record<string, unknown> => {
     const blocks: Array<Record<string, unknown>> = [
@@ -64,7 +77,7 @@ export const buildLogTimeModal = (projects: LogTimeProjectOption[], todayIso: st
                 action_id: SLACK_BLOCK_TS_PROJECT,
                 placeholder: plain('Pick a project'),
                 options: projects.slice(0, SLACK_SELECT_OPTION_CAP).map((p) => ({
-                    text: plain(p.label),
+                    text: plain(truncateOptionLabel(p.label)),
                     value: p.id,
                 })),
             },

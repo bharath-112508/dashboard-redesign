@@ -132,7 +132,7 @@ const openApplyLeaveModal = async (
     if (types.length === 0) return 'No leave types are available to apply for.';
     const today = dayjs().tz(DEFAULT_TIMEZONE).format('YYYY-MM-DD');
     const view = buildApplyLeaveModal(types, today);
-    const opened = await openSlackModal(ctx, triggerId, view);
+    const opened = await openSlackModal(ctx, triggerId, view, 'apply-leave-modal-open');
     return opened ? null : 'Could not open the leave form — please try again.';
 };
 
@@ -429,19 +429,44 @@ export const handleInteractive: RequestHandler = async (req, res) => {
     }
 
     if (action.action_id === SLACK_ACTION_LOG_TIME_OPEN) {
+        // The Home tab is log-time's ONLY entry point (no /logtime slash
+        // command). Slack sends no `response_url` for App Home interactions,
+        // and ignores the HTTP ack body for `block_actions` — so `respond()`
+        // reaches nobody from there. DM the failure instead, the same
+        // fromHome detection the attendance/break branches above use.
+        const fromHome = payload.view?.type === 'home';
+        const deliverLogTimeOpenFailure = (text: string): void => {
+            if (!fromHome) {
+                respond(text);
+                return;
+            }
+            res.status(200).json({});
+            void (async () => {
+                const settings = await getOrInitSettings();
+                const ctx = slackContextFrom(settings.slack);
+                if (ctx) {
+                    void postSlackMessage(ctx, {
+                        channel: payload.user.id,
+                        text,
+                        context: 'log-time-open-failed-dm',
+                    });
+                }
+            })();
+        };
+
         const user = await resolveCaller(payload.user.id);
         if (!user) {
-            respond(
+            deliverLogTimeOpenFailure(
                 "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin."
             );
             return;
         }
         if (!(await callerCanLogTime(user._id))) {
-            respond("Your role can't log time in Slack.");
+            deliverLogTimeOpenFailure("Your role can't log time in Slack.");
             return;
         }
         const err = await openLogTimeModal(payload.trigger_id, user);
-        if (err) respond(err);
+        if (err) deliverLogTimeOpenFailure(err);
         else res.status(200).json({});
         return;
     }

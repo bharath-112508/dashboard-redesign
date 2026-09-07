@@ -148,3 +148,15 @@ export const SLACK_BLOCK_TS_DESCRIPTION = 'ts_description';
 
 /** Slack rejects a `static_select` with more than 100 options. */
 export const SLACK_SELECT_OPTION_CAP = 100;
+
+/**
+ * Slack hard limit: a `static_select` option's `text.text` (plain_text)
+ * cannot exceed 75 characters — this is a Slack API constraint, not a style
+ * choice. A single over-length option doesn't just get clipped by Slack; it
+ * makes `views.open`/`views.publish` reject the ENTIRE view with
+ * `invalid_blocks`, which is worse than truncating: it takes the whole modal
+ * down. Project names are free text up to `PROJECT_NAME_MAX` (200,
+ * `constants/project.ts`), so this must be enforced wherever a project name
+ * becomes an option label.
+ */
+export const SLACK_SELECT_OPTION_LABEL_MAX = 75;

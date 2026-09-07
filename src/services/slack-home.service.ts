@@ -37,8 +37,15 @@ export interface HomeDashboardData {
      *  for overflow detection, so the builder uses this for the header + "+N more"). */
     pending_total: number | null;
     /** Today's logged time. `null` when the lookup failed — the section still
-     *  renders its button so Slack never becomes a dead end. */
-    my_time: { total_minutes: number; billable_minutes: number } | null;
+     *  renders its button so Slack never becomes a dead end.
+     *
+     *  `total_minutes` mirrors `TimesheetEntry.total_minutes`, which INCLUDES
+     *  idle time (`billable + non_billable + idle`), so it does not equal
+     *  `billable_minutes + non_billable_minutes` on a day with any idle
+     *  logged — deliberate: the headline stays "everything logged today",
+     *  and idle simply isn't billable or non-billable, so it's not counted
+     *  as either in the breakdown. */
+    my_time: { total_minutes: number; billable_minutes: number; non_billable_minutes: number } | null;
     /** Whether the caller holds `timesheet.write`. Clients and Representatives
      *  don't, and must not see a button that would refuse them. */
     can_log_time: boolean;
@@ -104,11 +111,21 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
     const my_time = canLogTime
         ? await safe('my_time', async () => {
               const day = await listMyDay(today, { id: user._id, role: user.role });
-              const billable = (day.data as Array<{ billable_total_minutes?: number }>).reduce(
-                  (acc, r) => acc + (r.billable_total_minutes ?? 0),
-                  0
-              );
-              return { total_minutes: day.meta.total_minutes, billable_minutes: billable };
+              const rows = day.data as Array<{
+                  billable_total_minutes?: number;
+                  non_billable_total_minutes?: number;
+              }>;
+              const billable = rows.reduce((acc, r) => acc + (r.billable_total_minutes ?? 0), 0);
+              // Summed off the rows the same way `billable` is, NOT derived as
+              // `total - billable` — that subtraction folds idle_total_minutes
+              // (part of `total_minutes` but neither billable nor non-billable)
+              // into "non-billable", which is wrong.
+              const nonBillable = rows.reduce((acc, r) => acc + (r.non_billable_total_minutes ?? 0), 0);
+              return {
+                  total_minutes: day.meta.total_minutes,
+                  billable_minutes: billable,
+                  non_billable_minutes: nonBillable,
+              };
           })
         : null;
     // Reporting-chain scope for the team-attendance summary — Admin sees the

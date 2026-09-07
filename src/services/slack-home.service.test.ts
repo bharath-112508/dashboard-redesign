@@ -103,23 +103,28 @@ describe('buildHomeDashboardData', () => {
 });
 
 describe('buildHomeDashboardData — my_time', () => {
-    it('caller with timesheet.write: fetches today, sums billable_total_minutes (not total_minutes) from rows', async () => {
+    it('caller with timesheet.write: fetches today, sums billable_total_minutes AND non_billable_total_minutes (not total_minutes, not a subtraction) from rows', async () => {
         (resolvePermissionsForUser as ReturnType<typeof vi.fn>).mockResolvedValue({
             permissions: ['timesheet.write'],
         });
-        // Rows where the row-level total and the billable split differ, so
-        // summing the wrong field (or the wrong total) fails this test.
+        // Billable, non-billable and idle are all DIFFERENT and idle is
+        // baked into total_minutes but excluded from both the billable and
+        // non-billable sums — summing the wrong field, or deriving
+        // non-billable by subtracting billable from total (which would fold
+        // idle into "non-billable"), fails this test.
+        // Row 1: billable 60, non-billable 20, idle 10 -> total 90.
+        // Row 2: billable 30, non-billable 40, idle 5  -> total 75.
         (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
             data: [
-                { total_minutes: 120, billable_total_minutes: 90 },
-                { total_minutes: 90, billable_total_minutes: 60 },
+                { total_minutes: 90, billable_total_minutes: 60, non_billable_total_minutes: 20 },
+                { total_minutes: 75, billable_total_minutes: 30, non_billable_total_minutes: 40 },
             ],
-            meta: { local_date: today, total_minutes: 210 },
+            meta: { local_date: today, total_minutes: 165 },
         });
         const data = await buildHomeDashboardData(employee);
         expect(listMyDay).toHaveBeenCalledWith(today, { id: data.user._id, role: data.user.role });
         expect(data.can_log_time).toBe(true);
-        expect(data.my_time).toEqual({ total_minutes: 210, billable_minutes: 150 });
+        expect(data.my_time).toEqual({ total_minutes: 165, billable_minutes: 90, non_billable_minutes: 60 });
     });
 
     it('caller without timesheet.write: can_log_time is false and listMyDay is never called', async () => {

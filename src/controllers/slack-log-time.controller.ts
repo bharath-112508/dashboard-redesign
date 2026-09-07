@@ -8,6 +8,7 @@ import { getOrInitSettings } from '../services/settings.service.js';
 import { callerCanLogTime, loadLogTimeProjects } from '../services/slack-timesheet.service.js';
 import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { createEntry } from '../services/timesheet.service.js';
+import { AppError } from '../utils/app-error.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import logger from '../utils/logger.js';
@@ -64,7 +65,7 @@ export const openLogTimeModal = async (triggerId: string | undefined, user: Slac
     if (!ctx) return 'Slack is not configured.';
 
     const projects = await loadLogTimeProjects({ id: user._id, role: user.role });
-    const opened = await openSlackModal(ctx, triggerId, buildLogTimeModal(projects, todayIso()));
+    const opened = await openSlackModal(ctx, triggerId, buildLogTimeModal(projects, todayIso()), 'log-time-modal-open');
     return opened ? null : "Couldn't open the log-time form. Please try again.";
 };
 
@@ -171,9 +172,19 @@ export const handleLogTimeSubmission: RequestHandler = async (req, res) => {
         const result = await createEntry(parsed.data, { id: user._id, role: user.role, audit });
         warnings = result.warnings;
     } catch (err: unknown) {
-        const code = (err as { code?: string })?.code;
-        const message = (err as { message?: string })?.message ?? 'Could not log your time.';
-        logger.warn({ err, code, reason: 'log_time_submit_failed' }, 'Slack log-time submission rejected');
+        // Only an AppError is a known, user-safe application failure — its
+        // `code`/`message` are meant to be shown. Anything else (a raw Mongo
+        // driver error, a network blip, a bug) must not leak its message to
+        // the modal, and is the unexpected case: log it at error, not warn.
+        const isAppError = err instanceof AppError;
+        const code = isAppError ? err.code : undefined;
+        const message = isAppError ? err.message : 'Could not log your time. Please try again.';
+        const logPayload = { err, code, reason: 'log_time_submit_failed' };
+        if (isAppError) {
+            logger.warn(logPayload, 'Slack log-time submission rejected');
+        } else {
+            logger.error(logPayload, 'Slack log-time submission rejected');
+        }
         res.status(200).json({
             response_action: 'errors',
             errors: timesheetAppErrorToModalErrors(code, message, payload.view),

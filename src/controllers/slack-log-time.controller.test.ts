@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
+import { AppError } from '../utils/app-error.js';
 import {
     SLACK_BLOCK_TS_BILLABLE,
     SLACK_BLOCK_TS_DATE,
@@ -18,6 +19,8 @@ const {
     publishHomeMock,
     openModalMock,
     callerCanLogTimeMock,
+    loggerWarnMock,
+    loggerErrorMock,
 } = vi.hoisted(() => ({
     createEntryMock: vi.fn(),
     resolveSlackUserMock: vi.fn(),
@@ -26,8 +29,13 @@ const {
     publishHomeMock: vi.fn(),
     openModalMock: vi.fn(),
     callerCanLogTimeMock: vi.fn(),
+    loggerWarnMock: vi.fn(),
+    loggerErrorMock: vi.fn(),
 }));
 
+vi.mock('../utils/logger.js', () => ({
+    default: { warn: loggerWarnMock, error: loggerErrorMock, info: vi.fn() },
+}));
 vi.mock('../services/timesheet.service.js', () => ({ createEntry: createEntryMock }));
 vi.mock('../services/slack-user-mapping.service.js', () => ({ resolveSlackCaller: resolveSlackUserMock }));
 vi.mock('../services/slack-timesheet.service.js', () => ({
@@ -154,10 +162,13 @@ describe('handleLogTimeSubmission', () => {
     });
 
     it('shows a future date as an inline error on the date block', async () => {
-        createEntryMock.mockRejectedValue({
-            code: ERROR_CODES.TIMESHEET_FUTURE_DATE,
-            message: "You can't log time for a future date.",
-        });
+        createEntryMock.mockRejectedValue(
+            new AppError({
+                statusCode: 422,
+                code: ERROR_CODES.TIMESHEET_FUTURE_DATE,
+                message: "You can't log time for a future date.",
+            })
+        );
         const res = resStub();
         await handleLogTimeSubmission(submission() as never, res, vi.fn());
 
@@ -167,6 +178,47 @@ describe('handleLogTimeSubmission', () => {
                 errors: expect.objectContaining({ [SLACK_BLOCK_TS_DATE]: expect.any(String) }),
             })
         );
+    });
+
+    // Finding 4 — a raw driver error (Mongo, network, anything not an
+    // AppError) must not leak its message to the user, and must be logged
+    // as the unexpected failure it is (error, not warn).
+    it('shows a generic message (not the raw driver error) when createEntry throws something other than AppError', async () => {
+        createEntryMock.mockRejectedValue(new Error('E11000 duplicate key error collection: timesheet_entries'));
+        const res = resStub();
+        await handleLogTimeSubmission(submission() as never, res, vi.fn());
+
+        const arg = res.json.mock.calls[0]![0];
+        expect(arg.response_action).toBe('errors');
+        const shown = Object.values(arg.errors as Record<string, string>).join(' ');
+        expect(shown).not.toMatch(/E11000|duplicate key|collection/i);
+        expect(shown.length).toBeGreaterThan(0);
+    });
+
+    it('logs an unexpected (non-AppError) createEntry failure at error, not warn', async () => {
+        createEntryMock.mockRejectedValue(new Error('ECONNRESET'));
+        const res = resStub();
+        await handleLogTimeSubmission(submission() as never, res, vi.fn());
+
+        expect(loggerErrorMock).toHaveBeenCalledTimes(1);
+        expect(loggerWarnMock).not.toHaveBeenCalled();
+    });
+
+    it('still logs a known AppError rejection at warn (not error) and shows its real message', async () => {
+        createEntryMock.mockRejectedValue(
+            new AppError({
+                statusCode: 422,
+                code: ERROR_CODES.TIMESHEET_ZERO_DURATION,
+                message: 'Log at least some time.',
+            })
+        );
+        const res = resStub();
+        await handleLogTimeSubmission(submission() as never, res, vi.fn());
+
+        expect(loggerWarnMock).toHaveBeenCalledTimes(1);
+        expect(loggerErrorMock).not.toHaveBeenCalled();
+        const arg = res.json.mock.calls[0]![0];
+        expect(JSON.stringify(arg.errors)).toContain('Log at least some time.');
     });
 
     it('rejects an empty description inline without calling the service', async () => {

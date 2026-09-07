@@ -412,16 +412,25 @@ export const postOrUpdateSlackMessage = async (
 
 /**
  * Open an interactive modal via `views.open`. Used by the Apply-for-leave
- * flow (App Home button + `/applyleave`). Non-throwing, same dispatch policy
- * as `publishHomeView`: logs `SLACK_DISPATCH_FAILED` at warn and returns a
- * boolean.
+ * flow (App Home button + `/applyleave`) and the Log-time flow (App Home
+ * button). Non-throwing, same dispatch policy as `publishHomeView`: logs
+ * `SLACK_DISPATCH_FAILED` at warn and returns a boolean.
+ *
+ * `context` (same idea as `publishHomeView`'s `context` param) tags the
+ * failure log with the caller's dispatch event — there are now two callers,
+ * so a hard-coded label here would mislabel one of them.
  *
  * The common failure is `expired_trigger_id` — Slack `trigger_id`s are valid
  * for ~3s, so the caller must reach this with minimal upstream work. A false
  * return means the modal never opened; the caller falls back to an ephemeral
  * "please try again".
  */
-export const openSlackModal = async (ctx: SlackContext, triggerId: string, view: unknown): Promise<boolean> => {
+export const openSlackModal = async (
+    ctx: SlackContext,
+    triggerId: string,
+    view: unknown,
+    context: string
+): Promise<boolean> => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
     try {
@@ -438,7 +447,7 @@ export const openSlackModal = async (ctx: SlackContext, triggerId: string, view:
             logger.warn(
                 {
                     code: ERROR_CODES.SLACK_DISPATCH_FAILED,
-                    dispatch_event: 'apply-leave-modal-open',
+                    dispatch_event: context,
                     http_status: response.status,
                 },
                 'Slack views.open returned a non-2xx status'
@@ -450,7 +459,7 @@ export const openSlackModal = async (ctx: SlackContext, triggerId: string, view:
             logger.warn(
                 {
                     code: ERROR_CODES.SLACK_DISPATCH_FAILED,
-                    dispatch_event: 'apply-leave-modal-open',
+                    dispatch_event: context,
                     slack_error: body.error,
                 },
                 'Slack views.open rejected the request'
@@ -464,7 +473,7 @@ export const openSlackModal = async (ctx: SlackContext, triggerId: string, view:
             {
                 err,
                 code: ERROR_CODES.SLACK_DISPATCH_FAILED,
-                dispatch_event: 'apply-leave-modal-open',
+                dispatch_event: context,
                 timed_out: isAbort,
             },
             isAbort ? 'Slack views.open timed out' : 'Slack views.open threw'

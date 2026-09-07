@@ -73,6 +73,29 @@ describe('buildLogTimeModal', () => {
         expect(project.element.options).toHaveLength(100);
     });
 
+    it("truncates an option label over Slack's 75-char text limit, leaving the value (project id) untouched", () => {
+        // 81 chars — Slack rejects the ENTIRE view with invalid_blocks if any
+        // option's plain_text exceeds 75 chars, not just clips the label.
+        const longName = 'Nordmark Fleet Telematics — Depot Routing & Driver Compliance Programme, Phase 2';
+        expect(longName.length).toBeGreaterThan(75);
+        const projects = [{ id: 'proj-1', label: longName }];
+        const view = buildLogTimeModal(projects, '2026-09-07');
+        const blocks = view.blocks as Array<Record<string, any>>;
+        const project = blocks.find((b) => b.block_id === SLACK_BLOCK_TS_PROJECT)!;
+        const option = project.element.options[0];
+        expect(option.text.text.length).toBeLessThanOrEqual(75);
+        expect(option.text.text.endsWith('…')).toBe(true);
+        // The id used to look up the project on submit must be untouched.
+        expect(option.value).toBe('proj-1');
+    });
+
+    it('leaves an option label at or under the limit unchanged', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-07');
+        const blocks = view.blocks as Array<Record<string, any>>;
+        const project = blocks.find((b) => b.block_id === SLACK_BLOCK_TS_PROJECT)!;
+        expect(project.element.options[0].text.text).toBe('Nordmark Fleet Dashboard');
+    });
+
     it('renders no project select when the caller has no projects', () => {
         const view = buildLogTimeModal([], '2026-09-07');
         const blocks = view.blocks as Array<Record<string, any>>;
