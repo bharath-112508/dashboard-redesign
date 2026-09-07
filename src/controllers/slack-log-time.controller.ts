@@ -5,13 +5,12 @@ import { TIMESHEET_ENTRY_TYPES } from '../constants/timesheet.js';
 import type { RoleType } from '../constants/roles.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { getOrInitSettings } from '../services/settings.service.js';
-import { loadLogTimeProjects } from '../services/slack-timesheet.service.js';
+import { callerCanLogTime, loadLogTimeProjects } from '../services/slack-timesheet.service.js';
 import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { createEntry } from '../services/timesheet.service.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import logger from '../utils/logger.js';
-import { canLogTime } from '../utils/role-check.js';
 import { buildHomeDashboardView } from '../utils/slack-home-blocks.js';
 import {
     buildLogTimeModal,
@@ -124,12 +123,12 @@ export const handleLogTimeSubmission: RequestHandler = async (req, res) => {
         return;
     }
 
-    // The open branch already refuses client-side roles before the modal
-    // ever renders, but that's UI-layer only — a forged `view_submission`
-    // (crafted `state.values`, `callback_id: 'log_time_submit'`) can reach
-    // this handler directly, and `createEntry` below has no role check of
-    // its own. This is the real gate.
-    if (!canLogTime(user.role)) {
+    // The open branch already refuses a caller without `timesheet.write`
+    // before the modal ever renders, but that's UI-layer only — a forged
+    // `view_submission` (crafted `state.values`, `callback_id:
+    // 'log_time_submit'`) can reach this handler directly, and `createEntry`
+    // below has no permission check of its own. This is the real gate.
+    if (!(await callerCanLogTime(user._id))) {
         res.status(200).json({
             response_action: 'errors',
             errors: { [SLACK_BLOCK_TS_DESCRIPTION]: NO_TIMESHEET_ACCESS },

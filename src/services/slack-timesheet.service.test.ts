@@ -1,12 +1,14 @@
 import { Types } from 'mongoose';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES } from '../constants/roles.js';
 import { SLACK_SELECT_OPTION_CAP } from '../constants/slack.js';
 
-const { findMock, buildFilterMock } = vi.hoisted(() => ({
+const { findMock, buildFilterMock, resolvePermissionsMock } = vi.hoisted(() => ({
     findMock: vi.fn(),
     buildFilterMock: vi.fn(),
+    resolvePermissionsMock: vi.fn(),
 }));
 
 vi.mock('../models/project.model.js', () => ({
@@ -17,7 +19,11 @@ vi.mock('./project.service.js', () => ({
     buildProjectVisibilityFilter: buildFilterMock,
 }));
 
-const { loadLogTimeProjects } = await import('./slack-timesheet.service.js');
+vi.mock('./role.service.js', () => ({
+    resolvePermissionsForUser: resolvePermissionsMock,
+}));
+
+const { loadLogTimeProjects, callerCanLogTime } = await import('./slack-timesheet.service.js');
 
 /** `Project.find()` returns a chainable query — mirror just the links used. */
 const queryStub = (rows: unknown[]) => ({
@@ -77,5 +83,37 @@ describe('loadLogTimeProjects', () => {
         await expect(loadLogTimeProjects(caller)).resolves.toEqual([]);
         expect(query.sort).toHaveBeenCalledWith({ name: 1 });
         expect(query.limit).toHaveBeenCalledWith(SLACK_SELECT_OPTION_CAP);
+    });
+});
+
+/**
+ * Pins `callerCanLogTime`'s contract — it must ask the SAME question
+ * `slack-home.service.ts` asks to decide whether to render the Log Time
+ * button (`callerCan(perms, PERMISSIONS.TIMESHEET_WRITE)`), not a role
+ * check. A role check fails open for a caller assigned only a restricted
+ * custom role (see this function's doc comment in `slack-timesheet.service.ts`).
+ */
+describe('callerCanLogTime', () => {
+    it('allows a caller whose resolved permissions include timesheet.write', async () => {
+        resolvePermissionsMock.mockResolvedValue({ permissions: [PERMISSIONS.TIMESHEET_WRITE] });
+        await expect(callerCanLogTime(caller.id)).resolves.toBe(true);
+    });
+
+    it('allows a caller via the system.admin wildcard', async () => {
+        resolvePermissionsMock.mockResolvedValue({ permissions: [PERMISSIONS.SYSTEM_ADMIN] });
+        await expect(callerCanLogTime(caller.id)).resolves.toBe(true);
+    });
+
+    it('refuses a caller without timesheet.write, regardless of their legacy role', async () => {
+        // The headline round-3 case: a caller assigned ONLY a restricted
+        // custom role that excludes timesheet.write — their legacy `role`
+        // field is irrelevant here because this function never reads it.
+        resolvePermissionsMock.mockResolvedValue({ permissions: [PERMISSIONS.PROJECT_READ] });
+        await expect(callerCanLogTime(caller.id)).resolves.toBe(false);
+    });
+
+    it('refuses a caller with no resolved permissions at all', async () => {
+        resolvePermissionsMock.mockResolvedValue({ permissions: [] });
+        await expect(callerCanLogTime(caller.id)).resolves.toBe(false);
     });
 });

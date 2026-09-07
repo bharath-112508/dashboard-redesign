@@ -10,19 +10,30 @@ import {
     SLACK_BLOCK_TS_PROJECT,
 } from '../constants/slack.js';
 
-const { createEntryMock, resolveSlackUserMock, loadProjectsMock, postMessageMock, publishHomeMock, openModalMock } =
-    vi.hoisted(() => ({
-        createEntryMock: vi.fn(),
-        resolveSlackUserMock: vi.fn(),
-        loadProjectsMock: vi.fn(),
-        postMessageMock: vi.fn(),
-        publishHomeMock: vi.fn(),
-        openModalMock: vi.fn(),
-    }));
+const {
+    createEntryMock,
+    resolveSlackUserMock,
+    loadProjectsMock,
+    postMessageMock,
+    publishHomeMock,
+    openModalMock,
+    callerCanLogTimeMock,
+} = vi.hoisted(() => ({
+    createEntryMock: vi.fn(),
+    resolveSlackUserMock: vi.fn(),
+    loadProjectsMock: vi.fn(),
+    postMessageMock: vi.fn(),
+    publishHomeMock: vi.fn(),
+    openModalMock: vi.fn(),
+    callerCanLogTimeMock: vi.fn(),
+}));
 
 vi.mock('../services/timesheet.service.js', () => ({ createEntry: createEntryMock }));
 vi.mock('../services/slack-user-mapping.service.js', () => ({ resolveSlackCaller: resolveSlackUserMock }));
-vi.mock('../services/slack-timesheet.service.js', () => ({ loadLogTimeProjects: loadProjectsMock }));
+vi.mock('../services/slack-timesheet.service.js', () => ({
+    loadLogTimeProjects: loadProjectsMock,
+    callerCanLogTime: callerCanLogTimeMock,
+}));
 vi.mock('../services/settings.service.js', () => ({ getOrInitSettings: vi.fn().mockResolvedValue({ slack: {} }) }));
 vi.mock('../services/slack-home.service.js', () => ({ buildHomeDashboardData: vi.fn().mockResolvedValue({}) }));
 vi.mock('../utils/slack-home-blocks.js', () => ({
@@ -83,6 +94,7 @@ beforeEach(() => {
     });
     openModalMock.mockResolvedValue(true);
     loadProjectsMock.mockResolvedValue([{ id: PROJECT_ID, label: 'Nordmark Fleet Dashboard' }]);
+    callerCanLogTimeMock.mockResolvedValue(true);
 });
 
 describe('handleLogTimeSubmission', () => {
@@ -174,8 +186,9 @@ describe('handleLogTimeSubmission', () => {
         );
     });
 
-    it('refuses a Client role and never calls createEntry', async () => {
+    it('refuses a Client role (no timesheet.write) and never calls createEntry', async () => {
         resolveSlackUserMock.mockResolvedValue({ ...USER, role: ROLES.CLIENT });
+        callerCanLogTimeMock.mockResolvedValue(false);
         const res = resStub();
         await handleLogTimeSubmission(submission() as never, res, vi.fn());
 
@@ -185,12 +198,35 @@ describe('handleLogTimeSubmission', () => {
         expect(JSON.stringify(arg.errors)).toMatch(/your role can't log time/i);
     });
 
-    it('refuses a Representative role and never calls createEntry', async () => {
+    it('refuses a Representative role (no timesheet.write) and never calls createEntry', async () => {
         resolveSlackUserMock.mockResolvedValue({ ...USER, role: ROLES.REPRESENTATIVE });
+        callerCanLogTimeMock.mockResolvedValue(false);
         const res = resStub();
         await handleLogTimeSubmission(submission() as never, res, vi.fn());
 
         expect(createEntryMock).not.toHaveBeenCalled();
+    });
+
+    // Round-3 finding: the old enforcement gate was role-based
+    // (`!CLIENT_SIDE_ROLES.includes(role)`), which fails OPEN for a
+    // supported RBAC configuration — `assignRolesToUser` (role.service.ts)
+    // leaves the legacy `User.role` field unchanged (typically 'employee')
+    // when an admin assigns a user ONLY custom roles, so a caller whose
+    // custom role deliberately excludes `timesheet.write` still carried a
+    // non-client-side `role` and would have PASSED the old check. This test
+    // pins USER's real role (employee — not client-side at all) while the
+    // permission resolver says NO timesheet.write, proving the gate now
+    // asks the permission question that `slack-home.service.ts` also asks
+    // for rendering, not the legacy role field.
+    it('refuses a caller whose role is not client-side but who lacks timesheet.write (restricted custom role)', async () => {
+        callerCanLogTimeMock.mockResolvedValue(false);
+        const res = resStub();
+        await handleLogTimeSubmission(submission() as never, res, vi.fn());
+
+        expect(createEntryMock).not.toHaveBeenCalled();
+        const arg = res.json.mock.calls[0]![0];
+        expect(arg.response_action).toBe('errors');
+        expect(JSON.stringify(arg.errors)).toMatch(/your role can't log time/i);
     });
 
     it('tells an unrecognised Slack user what to do', async () => {

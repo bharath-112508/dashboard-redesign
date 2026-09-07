@@ -17,7 +17,7 @@ import {
 } from '../constants/slack.js';
 import { approveLeave, rejectLeave, applyLeave } from '../services/leave-request.service.js';
 import { handleLogTimeSubmission, openLogTimeModal } from './slack-log-time.controller.js';
-import { canLogTime } from '../utils/role-check.js';
+import { callerCanLogTime } from '../services/slack-timesheet.service.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
 import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
@@ -436,7 +436,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             );
             return;
         }
-        if (!canLogTime(user.role as RoleType)) {
+        if (!(await callerCanLogTime(user._id))) {
             respond("Your role can't log time in Slack.");
             return;
         }
