@@ -5,7 +5,7 @@ import { AppError } from '../utils/app-error.js';
 
 vi.mock('../services/settings.service.js', () => ({ getOrInitSettings: vi.fn() }));
 vi.mock('../services/slack-user-mapping.service.js', () => ({
-    resolveSlackUser: vi.fn(),
+    resolveSlackCaller: vi.fn(),
     fetchSlackUserInfo: vi.fn(),
 }));
 vi.mock('../services/leave-request.service.js', () => ({
@@ -28,7 +28,7 @@ vi.mock('../utils/slack.js', async (orig) => ({
 }));
 
 import { getOrInitSettings } from '../services/settings.service.js';
-import { resolveSlackUser } from '../services/slack-user-mapping.service.js';
+import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { applyLeave } from '../services/leave-request.service.js';
 import { postSlackMessage } from '../utils/slack.js';
 import { handleInteractive } from './slack-interactive.controller.js';
@@ -63,7 +63,7 @@ describe('apply-leave view_submission', () => {
     it('acks the modal immediately, then applies async and DMs success', async () => {
         const submitUser = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Asha' };
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
-        vi.mocked(resolveSlackUser).mockResolvedValue(submitUser as never);
+        vi.mocked(resolveSlackCaller).mockResolvedValue(submitUser as never);
         vi.mocked(applyLeave).mockResolvedValue({ id: 'leave1' } as never);
 
         const req = { body: { payload: JSON.stringify(submissionPayload()) }, headers: {} };
@@ -98,7 +98,7 @@ describe('apply-leave view_submission', () => {
 
     it('acks the modal and DMs the error when applyLeave throws a business error', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
-        vi.mocked(resolveSlackUser).mockResolvedValue({ _id: new Types.ObjectId(), role: 'employee' } as never);
+        vi.mocked(resolveSlackCaller).mockResolvedValue({ _id: new Types.ObjectId(), role: 'employee' } as never);
         vi.mocked(applyLeave).mockRejectedValue(
             AppError.conflict('overlaps with an existing leave', ERROR_CODES.LEAVE_OVERLAP)
         );
@@ -124,7 +124,7 @@ describe('apply-leave view_submission', () => {
 
     it('returns inline field errors (no ack-close) when Zod validation fails — never calls applyLeave', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
-        vi.mocked(resolveSlackUser).mockResolvedValue({ _id: new Types.ObjectId(), role: 'employee' } as never);
+        vi.mocked(resolveSlackCaller).mockResolvedValue({ _id: new Types.ObjectId(), role: 'employee' } as never);
 
         // start_date after end_date — Zod (instant) rejects before any ack.
         const bad = submissionPayload();

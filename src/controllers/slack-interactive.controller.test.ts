@@ -30,9 +30,9 @@ vi.mock('../services/attendance.service.js', () => ({
     endBreak: (...args: unknown[]) => endBreakMock(...args),
 }));
 
-const resolveSlackUserMock = vi.fn();
+const resolveSlackCallerMock = vi.fn();
 vi.mock('../services/slack-user-mapping.service.js', () => ({
-    resolveSlackUser: (...args: unknown[]) => resolveSlackUserMock(...args),
+    resolveSlackCaller: (...args: unknown[]) => resolveSlackCallerMock(...args),
     fetchSlackUserInfo: vi.fn(),
 }));
 
@@ -103,14 +103,14 @@ describe('handleSlashCommand — skeleton', () => {
         // Pre-Task-17 every command was a skeleton; now /checkin (Task 17)
         // does real work. Use a still-unimplemented command name to keep
         // the skeleton contract under test.
-        resolveSlackUserMock.mockReset();
+        resolveSlackCallerMock.mockReset();
         getOrInitSettingsMock.mockReset();
         slackContextFromMock.mockReset();
         getOrInitSettingsMock.mockResolvedValue({
             slack: { enabled: true, bot_token: 'xoxb', channels: { leaves: '#leaves' } },
         });
         slackContextFromMock.mockReturnValue({ enabled: true, botToken: 'xoxb' });
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: new Types.ObjectId(),
             role: 'employee',
         });
@@ -128,7 +128,7 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
     beforeEach(() => {
         approveLeaveMock.mockReset();
         rejectLeaveMock.mockReset();
-        resolveSlackUserMock.mockReset();
+        resolveSlackCallerMock.mockReset();
         getOrInitSettingsMock.mockReset();
         slackContextFromMock.mockReset();
         getOrInitSettingsMock.mockResolvedValue({
@@ -143,8 +143,8 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
         actions: [{ action_id: `approve_leave_${leaveId}` }],
     });
 
-    it('responds ephemeral when resolveSlackUser returns null', async () => {
-        resolveSlackUserMock.mockResolvedValueOnce(null);
+    it('responds ephemeral when resolveSlackCaller returns null', async () => {
+        resolveSlackCallerMock.mockResolvedValueOnce(null);
         const res = await request(buildApp())
             .post('/slack/interactive')
             .send({ payload: JSON.stringify(approvePayload('L1')) });
@@ -154,7 +154,7 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
 
     it('rejects ephemeral 403 when caller is an employee (non-reviewer role)', async () => {
         const callerId = new Types.ObjectId();
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: callerId,
             role: 'employee',
         });
@@ -168,7 +168,7 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
     it('calls approveLeave with parsed leave id when caller is a manager', async () => {
         const callerId = new Types.ObjectId();
         const leaveId = new Types.ObjectId().toString();
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: callerId,
             role: 'manager',
         });
@@ -187,7 +187,7 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
     it('responds ephemeral on CORRECTION_REQUEST_NOT_PENDING (idempotent re-approval / Slack retry)', async () => {
         const callerId = new Types.ObjectId();
         const leaveId = new Types.ObjectId().toString();
-        resolveSlackUserMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
         // The leave service reuses CORRECTION_REQUEST_NOT_PENDING for
         // "leave is no longer pending" — historical naming.
         approveLeaveMock.mockRejectedValueOnce({ code: 'CORRECTION_REQUEST_NOT_PENDING' });
@@ -201,7 +201,7 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
     it('reject_leave_<id> calls rejectLeave', async () => {
         const callerId = new Types.ObjectId();
         const leaveId = new Types.ObjectId().toString();
-        resolveSlackUserMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
         rejectLeaveMock.mockResolvedValueOnce({ status: 'rejected' });
         const res = await request(buildApp())
             .post('/slack/interactive')
@@ -221,7 +221,7 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
     it('responds with a self-review message when the service throws FORBIDDEN (author clicked their own request)', async () => {
         const callerId = new Types.ObjectId();
         const leaveId = new Types.ObjectId().toString();
-        resolveSlackUserMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
         // ensureCanReviewRequest throws FORBIDDEN when caller === author;
         // the role gate already passed, so FORBIDDEN here means self-review.
         rejectLeaveMock.mockRejectedValueOnce({ code: 'FORBIDDEN' });
@@ -243,7 +243,7 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
         try {
             const callerId = new Types.ObjectId();
             const leaveId = new Types.ObjectId().toString();
-            resolveSlackUserMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
+            resolveSlackCallerMock.mockResolvedValueOnce({ _id: callerId, role: 'admin' });
             rejectLeaveMock.mockRejectedValueOnce({ code: 'FORBIDDEN' });
             await request(buildApp())
                 .post('/slack/interactive')
@@ -272,7 +272,7 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
 
 describe('handleSlashCommand — Phase 2', () => {
     beforeEach(() => {
-        resolveSlackUserMock.mockReset();
+        resolveSlackCallerMock.mockReset();
         getOrInitSettingsMock.mockReset();
         slackContextFromMock.mockReset();
         checkInMock.mockReset();
@@ -285,7 +285,7 @@ describe('handleSlashCommand — Phase 2', () => {
     });
 
     it('/checkin: rejects ephemeral when caller is unidentified', async () => {
-        resolveSlackUserMock.mockResolvedValueOnce(null);
+        resolveSlackCallerMock.mockResolvedValueOnce(null);
         const res = await request(buildApp()).post('/slack/commands/checkin').send('user_id=U_TEST');
         expect(res.body.response_type).toBe('ephemeral');
         expect(res.body.text).toMatch(/identify your Viljetech account/i);
@@ -294,7 +294,7 @@ describe('handleSlashCommand — Phase 2', () => {
 
     it('/checkin: checks in + reports the time on success', async () => {
         const userId = new Types.ObjectId();
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: userId,
             role: 'employee',
         });
@@ -312,7 +312,7 @@ describe('handleSlashCommand — Phase 2', () => {
     });
 
     it('/checkin: ALREADY_CHECKED_IN → ephemeral "already checked in"', async () => {
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: new Types.ObjectId(),
             role: 'employee',
         });
@@ -323,7 +323,7 @@ describe('handleSlashCommand — Phase 2', () => {
 
     it('/checkout: checks out + reports worked time', async () => {
         const userId = new Types.ObjectId();
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: userId,
             role: 'employee',
         });
@@ -346,7 +346,7 @@ describe('handleSlashCommand — Phase 2', () => {
     });
 
     it('/checkout: NOT_CHECKED_IN → ephemeral hint to /checkin first', async () => {
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: new Types.ObjectId(),
             role: 'employee',
         });
@@ -356,7 +356,7 @@ describe('handleSlashCommand — Phase 2', () => {
     });
 
     it("/status: lists today's segments + total worked", async () => {
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: new Types.ObjectId(),
             role: 'employee',
         });
@@ -383,7 +383,7 @@ describe('handleSlashCommand — Phase 2', () => {
     });
 
     it('/status: no record today → ephemeral "No segments today"', async () => {
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: new Types.ObjectId(),
             role: 'employee',
         });
@@ -393,7 +393,7 @@ describe('handleSlashCommand — Phase 2', () => {
     });
 
     it('/mystatus: aliases /status (Slack reserves /status)', async () => {
-        resolveSlackUserMock.mockResolvedValueOnce({
+        resolveSlackCallerMock.mockResolvedValueOnce({
             _id: new Types.ObjectId(),
             role: 'employee',
         });
@@ -419,7 +419,7 @@ describe('handleInteractive — break actions', () => {
     beforeEach(() => {
         startBreakMock.mockReset();
         endBreakMock.mockReset();
-        resolveSlackUserMock.mockReset();
+        resolveSlackCallerMock.mockReset();
         getOrInitSettingsMock.mockReset();
         slackContextFromMock.mockReset();
         getOrInitSettingsMock.mockResolvedValue({
@@ -437,7 +437,7 @@ describe('handleInteractive — break actions', () => {
 
     it('break_start_lunch from home calls startBreak(user._id, "lunch", "slack")', async () => {
         const userId = new Types.ObjectId();
-        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
         startBreakMock.mockResolvedValueOnce({});
         const res = await request(buildApp())
             .post('/slack/interactive')
@@ -452,7 +452,7 @@ describe('handleInteractive — break actions', () => {
 
     it('break_end from home calls endBreak(user._id, "slack")', async () => {
         const userId = new Types.ObjectId();
-        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
         endBreakMock.mockResolvedValueOnce({});
         const res = await request(buildApp())
             .post('/slack/interactive')
@@ -466,7 +466,7 @@ describe('handleInteractive — break actions', () => {
 
     it('break_start_tea: ALREADY_ON_BREAK → ephemeral "already on a break"', async () => {
         const userId = new Types.ObjectId();
-        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
         startBreakMock.mockRejectedValueOnce({ code: 'ALREADY_ON_BREAK' });
         const res = await request(buildApp())
             .post('/slack/interactive')
@@ -477,7 +477,7 @@ describe('handleInteractive — break actions', () => {
 
     it('break_start_other: NOT_CHECKED_IN → ephemeral hint', async () => {
         const userId = new Types.ObjectId();
-        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
         startBreakMock.mockRejectedValueOnce({ code: 'NOT_CHECKED_IN' });
         const res = await request(buildApp())
             .post('/slack/interactive')
@@ -488,7 +488,7 @@ describe('handleInteractive — break actions', () => {
 
     it('break_end: NOT_ON_BREAK → ephemeral hint', async () => {
         const userId = new Types.ObjectId();
-        resolveSlackUserMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
         endBreakMock.mockRejectedValueOnce({ code: 'NOT_ON_BREAK' });
         const res = await request(buildApp())
             .post('/slack/interactive')
@@ -498,7 +498,7 @@ describe('handleInteractive — break actions', () => {
     });
 
     it('break_start_lunch: unidentified caller → ephemeral error', async () => {
-        resolveSlackUserMock.mockResolvedValueOnce(null);
+        resolveSlackCallerMock.mockResolvedValueOnce(null);
         const res = await request(buildApp())
             .post('/slack/interactive')
             .send({ payload: JSON.stringify(breakPayload('break_start_lunch')) });

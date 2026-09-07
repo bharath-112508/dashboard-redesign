@@ -20,7 +20,7 @@ vi.mock('../utils/slack-home-blocks.js', () => ({
 }));
 vi.mock('../services/settings.service.js', () => ({ getOrInitSettings: vi.fn() }));
 vi.mock('../services/slack-user-mapping.service.js', () => ({
-    resolveSlackUser: vi.fn(),
+    resolveSlackCaller: vi.fn(),
     fetchSlackUserInfo: vi.fn(),
 }));
 vi.mock('../utils/slack.js', async (orig) => ({
@@ -34,7 +34,7 @@ vi.mock('../services/realtime.service.js', () => ({ publish: (t: string[]) => pu
 import { REALTIME_TOPICS } from '../constants/realtime.js';
 import { checkIn, getMyToday } from '../services/attendance.service.js';
 import { getOrInitSettings } from '../services/settings.service.js';
-import { resolveSlackUser } from '../services/slack-user-mapping.service.js';
+import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { publishHomeView } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView } from '../utils/slack-home-blocks.js';
@@ -77,7 +77,7 @@ describe('handleSlackEvents', () => {
 
     it('acks 200 and publishes the Home view on app_home_opened', async () => {
         (getOrInitSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ slack: {} });
-        (resolveSlackUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+        (resolveSlackCaller as ReturnType<typeof vi.fn>).mockResolvedValue({
             _id: new Types.ObjectId(),
             full_name: 'Raj',
         });
@@ -119,7 +119,7 @@ describe('handleInteractive — attendance actions', () => {
 
     it('checks in from the Home tab and re-publishes the view', async () => {
         (getOrInitSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ slack: {} });
-        (resolveSlackUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+        (resolveSlackCaller as ReturnType<typeof vi.fn>).mockResolvedValue({
             _id: new Types.ObjectId(),
             full_name: 'Raj',
         });
@@ -134,7 +134,7 @@ describe('handleInteractive — attendance actions', () => {
 
     it('publishes an attendance realtime event after a Slack check-in', async () => {
         (getOrInitSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ slack: {} });
-        (resolveSlackUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+        (resolveSlackCaller as ReturnType<typeof vi.fn>).mockResolvedValue({
             _id: new Types.ObjectId(),
             full_name: 'Raj',
             role: 'employee',
@@ -152,7 +152,7 @@ describe('handleInteractive — attendance actions', () => {
 describe('Home dashboard wiring', () => {
     it('app_home_opened publishes the DASHBOARD view', async () => {
         (getOrInitSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ slack: {} });
-        (resolveSlackUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+        (resolveSlackCaller as ReturnType<typeof vi.fn>).mockResolvedValue({
             _id: new Types.ObjectId(),
             role: 'employee',
             full_name: 'Raj',
@@ -170,7 +170,7 @@ describe('Home dashboard wiring', () => {
 
     it('home_refresh action re-publishes the dashboard', async () => {
         (getOrInitSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ slack: {} });
-        (resolveSlackUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+        (resolveSlackCaller as ReturnType<typeof vi.fn>).mockResolvedValue({
             _id: new Types.ObjectId(),
             role: 'employee',
             full_name: 'Raj',

@@ -16,7 +16,7 @@ import {
 import { approveLeave, rejectLeave, applyLeave } from '../services/leave-request.service.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
-import { fetchSlackUserInfo, resolveSlackUser } from '../services/slack-user-mapping.service.js';
+import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { slackContextFrom, publishHomeView, openSlackModal, postSlackMessage } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
@@ -99,23 +99,12 @@ const isReviewer = (role: RoleType): boolean =>
     role === ROLES.ADMIN || role === ROLES.MANAGER || role === ROLES.TEAM_LEAD;
 
 /**
- * Resolve the Slack-user → Viljetech-user via the shared mapping
- * service. Returns null when the clicker has no matching account —
- * caller responds ephemeral.
- *
- * Loads Slack settings as a side-effect (the resolver needs a bot
- * token to call `users.info` on email fallback). Returns null when
- * Slack is unconfigured too.
+ * Resolve the Slack-user → Viljetech-user. Promoted to
+ * `slack-user-mapping.service.ts` as `resolveSlackCaller` so
+ * `slack-log-time.controller.ts` can use it too without a circular import
+ * (that controller is imported back into this one for routing).
  */
-const resolveCaller = async (slackUserId: string) => {
-    const settings = await getOrInitSettings();
-    const ctx = slackContextFrom(settings.slack);
-    if (!ctx) return null;
-    return resolveSlackUser(slackUserId, {
-        botToken: ctx.botToken!,
-        fetchUserInfo: fetchSlackUserInfo,
-    });
-};
+const resolveCaller = resolveSlackCaller;
 
 /** Every role except `client` holds `leave_request.write`. The Slack path
  *  bypasses Express `requirePermission`, so gate here the same way. */

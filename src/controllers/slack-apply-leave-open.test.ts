@@ -4,7 +4,7 @@ import type { Request, Response } from 'express';
 
 vi.mock('../services/settings.service.js', () => ({ getOrInitSettings: vi.fn() }));
 vi.mock('../services/slack-user-mapping.service.js', () => ({
-    resolveSlackUser: vi.fn(),
+    resolveSlackCaller: vi.fn(),
     fetchSlackUserInfo: vi.fn(),
 }));
 vi.mock('../services/slack-leave.service.js', () => ({ loadApplyLeaveModalTypes: vi.fn() }));
@@ -15,7 +15,7 @@ vi.mock('../utils/slack.js', async (orig) => ({
 }));
 
 import { getOrInitSettings } from '../services/settings.service.js';
-import { resolveSlackUser } from '../services/slack-user-mapping.service.js';
+import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { loadApplyLeaveModalTypes } from '../services/slack-leave.service.js';
 import { openSlackModal } from '../utils/slack.js';
 import {
@@ -40,7 +40,7 @@ afterEach(() => vi.clearAllMocks());
 describe('apply-leave modal open', () => {
     it('button click opens the modal with the built view', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
-        vi.mocked(resolveSlackUser).mockResolvedValue(employee as never);
+        vi.mocked(resolveSlackCaller).mockResolvedValue(employee as never);
         vi.mocked(loadApplyLeaveModalTypes).mockResolvedValue([{ id: 't1', code: 'CL', name: 'Casual', available: 8 }]);
 
         const req = {
@@ -65,7 +65,7 @@ describe('apply-leave modal open', () => {
 
     it('/applyleave slash command opens the modal', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
-        vi.mocked(resolveSlackUser).mockResolvedValue(employee as never);
+        vi.mocked(resolveSlackCaller).mockResolvedValue(employee as never);
         vi.mocked(loadApplyLeaveModalTypes).mockResolvedValue([{ id: 't1', code: 'CL', name: 'Casual', available: 8 }]);
 
         const req = { params: { command: 'applyleave' }, body: { user_id: 'U1', trigger_id: 'trig-2' } };
@@ -78,7 +78,7 @@ describe('apply-leave modal open', () => {
 
     it('refuses a client role with an ephemeral and never opens a modal', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
-        vi.mocked(resolveSlackUser).mockResolvedValue({ ...employee, role: 'client' } as never);
+        vi.mocked(resolveSlackCaller).mockResolvedValue({ ...employee, role: 'client' } as never);
 
         const req = { params: { command: 'applyleave' }, body: { user_id: 'U1', trigger_id: 'trig-3' } };
         const res = makeRes();
@@ -90,7 +90,7 @@ describe('apply-leave modal open', () => {
 
     it('button click refuses a client role with an ephemeral and never opens the modal', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
-        vi.mocked(resolveSlackUser).mockResolvedValue({
+        vi.mocked(resolveSlackCaller).mockResolvedValue({
             _id: new Types.ObjectId(),
             role: 'client',
             full_name: 'Cli',

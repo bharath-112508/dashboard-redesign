@@ -1,6 +1,8 @@
 import { User } from '../models/user.model.js';
 import { SLACK_API_LOOKUP_BY_EMAIL, SLACK_REQUEST_TIMEOUT_MS } from '../constants/slack.js';
 import logger from '../utils/logger.js';
+import { getOrInitSettings } from './settings.service.js';
+import { slackContextFrom } from '../utils/slack.js';
 
 /**
  * Phase 0 — map a Slack user → Viljetech user for interactive
@@ -73,6 +75,25 @@ export const resolveSlackUser = async (slackUserId: string, ctx: ResolverContext
         ...(info.avatar_url ? { slack_avatar_url: info.avatar_url } : {}),
     });
     return byEmail;
+};
+
+/**
+ * Slack user id → platform user, with the bot token and fetch hook supplied
+ * from settings.
+ *
+ * Lifted out of `slack-interactive.controller.ts`, where it was a private
+ * const. Two controllers need it now, and having the second import it from
+ * the first would be circular — that controller imports the second one to
+ * route to it.
+ */
+export const resolveSlackCaller = async (slackUserId: string) => {
+    const settings = await getOrInitSettings();
+    const ctx = slackContextFrom(settings.slack);
+    if (!ctx) return null;
+    return resolveSlackUser(slackUserId, {
+        botToken: ctx.botToken!,
+        fetchUserInfo: fetchSlackUserInfo,
+    });
 };
 
 /**
