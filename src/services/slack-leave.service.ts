@@ -1,6 +1,9 @@
 import type { Types } from 'mongoose';
 
+import { PERMISSIONS } from '../constants/permissions.js';
+import { callerCan } from '../utils/caller-permissions.js';
 import { listLeaveTypes } from './leave-type.service.js';
+import { resolvePermissionsForUser } from './role.service.js';
 import { listOwnBalances } from './leave-balance.service.js';
 import type { ApplyLeaveModalType } from '../utils/slack-leave-blocks.js';
 
@@ -32,4 +35,26 @@ export const loadApplyLeaveModalTypes = async (userId: Types.ObjectId): Promise<
             available: availableByCode.has(code) ? availableByCode.get(code)! : null,
         };
     });
+};
+
+/**
+ * May this caller apply for leave from Slack?
+ *
+ * Keyed on `leave_request.write` — the SAME permission
+ * `requirePermission` enforces on `POST /leaves` — because the Slack
+ * inbound path bypasses Express middleware entirely and `applyLeave` has
+ * no permission check of its own. This is the only gate on that write.
+ *
+ * It replaced `role !== ROLES.CLIENT`, which was wrong twice over. It let a
+ * **representative** through — a client-side role that holds no
+ * `leave_request.write` and has no business applying for leave — and being
+ * exclusion-based it also failed open for anyone assigned only custom
+ * roles, whose legacy `role` field stays at its previous value (see
+ * `role.service:assignRolesToUser`). Asking the permission closes both:
+ * client-side bundles don't carry it, and a scoped-down custom role that
+ * drops it is refused rather than waved past.
+ */
+export const callerCanApplyLeave = async (userId: Types.ObjectId): Promise<boolean> => {
+    const { permissions } = await resolvePermissionsForUser(userId);
+    return callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_WRITE);
 };

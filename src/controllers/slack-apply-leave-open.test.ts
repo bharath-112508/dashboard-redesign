@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 import type { Request, Response } from 'express';
 
@@ -7,7 +7,10 @@ vi.mock('../services/slack-user-mapping.service.js', () => ({
     resolveSlackCaller: vi.fn(),
     fetchSlackUserInfo: vi.fn(),
 }));
-vi.mock('../services/slack-leave.service.js', () => ({ loadApplyLeaveModalTypes: vi.fn() }));
+vi.mock('../services/slack-leave.service.js', () => ({
+    loadApplyLeaveModalTypes: vi.fn(),
+    callerCanApplyLeave: vi.fn(),
+}));
 vi.mock('../utils/slack.js', async (orig) => ({
     ...(await orig<typeof import('../utils/slack.js')>()),
     slackContextFrom: vi.fn(() => ({ enabled: true, botToken: 'xoxb' })),
@@ -16,7 +19,7 @@ vi.mock('../utils/slack.js', async (orig) => ({
 
 import { getOrInitSettings } from '../services/settings.service.js';
 import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
-import { loadApplyLeaveModalTypes } from '../services/slack-leave.service.js';
+import { callerCanApplyLeave, loadApplyLeaveModalTypes } from '../services/slack-leave.service.js';
 import { openSlackModal } from '../utils/slack.js';
 import {
     handleInteractive as handleInteractiveRaw,
@@ -35,6 +38,7 @@ const makeRes = () => {
 
 const employee = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Asha' };
 
+beforeEach(() => vi.mocked(callerCanApplyLeave).mockResolvedValue(true));
 afterEach(() => vi.clearAllMocks());
 
 describe('apply-leave modal open', () => {
@@ -79,8 +83,26 @@ describe('apply-leave modal open', () => {
     it('refuses a client role with an ephemeral and never opens a modal', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
         vi.mocked(resolveSlackCaller).mockResolvedValue({ ...employee, role: 'client' } as never);
+        vi.mocked(callerCanApplyLeave).mockResolvedValue(false);
 
         const req = { params: { command: 'applyleave' }, body: { user_id: 'U1', trigger_id: 'trig-3' } };
+        const res = makeRes();
+        await handleSlashCommand(req as never, res as never);
+
+        expect(vi.mocked(openSlackModal)).not.toHaveBeenCalled();
+        expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ response_type: 'ephemeral' }));
+    });
+
+    it('refuses a REPRESENTATIVE — the role-based gate used to let them through', async () => {
+        // `canApplyLeave` was `role !== ROLES.CLIENT`, so a representative —
+        // a client-side role holding no `leave_request.write` — could apply
+        // for leave from Slack. The web route always refused them; only the
+        // Slack path, which bypasses `requirePermission`, was open.
+        vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
+        vi.mocked(resolveSlackCaller).mockResolvedValue({ ...employee, role: 'representative' } as never);
+        vi.mocked(callerCanApplyLeave).mockResolvedValue(false);
+
+        const req = { params: { command: 'applyleave' }, body: { user_id: 'U1', trigger_id: 'trig-rep' } };
         const res = makeRes();
         await handleSlashCommand(req as never, res as never);
 
@@ -95,6 +117,7 @@ describe('apply-leave modal open', () => {
             role: 'client',
             full_name: 'Cli',
         } as never);
+        vi.mocked(callerCanApplyLeave).mockResolvedValue(false);
 
         const req = {
             body: {

@@ -24,7 +24,7 @@ import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { slackContextFrom, publishHomeView, openSlackModal, postSlackMessage } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
-import { loadApplyLeaveModalTypes } from '../services/slack-leave.service.js';
+import { callerCanApplyLeave, loadApplyLeaveModalTypes } from '../services/slack-leave.service.js';
 import { buildApplyLeaveModal, parseApplyLeaveSubmission } from '../utils/slack-leave-blocks.js';
 import { applyLeaveBodySchema } from '../validators/leave-request.validator.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
@@ -110,10 +110,6 @@ const isReviewer = (role: RoleType): boolean =>
  */
 const resolveCaller = resolveSlackCaller;
 
-/** Every role except `client` holds `leave_request.write`. The Slack path
- *  bypasses Express `requirePermission`, so gate here the same way. */
-const canApplyLeave = (role: RoleType): boolean => role !== ROLES.CLIENT;
-
 /**
  * Open the Apply-for-leave modal. Shared by the App Home button and the
  * `/applyleave` slash command. Returns an ephemeral text on any pre-open
@@ -181,7 +177,7 @@ const handleApplyLeaveSubmission: RequestHandler = async (req, res) => {
         });
         return;
     }
-    if (!canApplyLeave(user.role as RoleType)) {
+    if (!(await callerCanApplyLeave(user._id))) {
         res.status(200).json({ response_action: 'errors', errors: { reason: "Your role can't apply for leave." } });
         return;
     }
@@ -418,7 +414,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             );
             return;
         }
-        if (!canApplyLeave(user.role as RoleType)) {
+        if (!(await callerCanApplyLeave(user._id))) {
             respond("Your role can't apply for leave.");
             return;
         }
@@ -624,7 +620,7 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
 
     try {
         if (command === 'applyleave') {
-            if (!canApplyLeave(user.role as RoleType)) {
+            if (!(await callerCanApplyLeave(user._id))) {
                 res.status(200).json(ephemeral("Your role can't apply for leave."));
                 return;
             }

@@ -1,8 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
+import { callerCanApplyLeave } from '../services/slack-leave.service.js';
 
+vi.mock('../services/slack-leave.service.js', () => ({
+    loadApplyLeaveModalTypes: vi.fn(),
+    callerCanApplyLeave: vi.fn(),
+}));
 vi.mock('../services/settings.service.js', () => ({ getOrInitSettings: vi.fn() }));
 vi.mock('../services/slack-user-mapping.service.js', () => ({
     resolveSlackCaller: vi.fn(),
@@ -57,6 +62,7 @@ const submissionPayload = () => ({
     },
 });
 
+beforeEach(() => vi.mocked(callerCanApplyLeave).mockResolvedValue(true));
 afterEach(() => vi.clearAllMocks());
 
 describe('apply-leave view_submission', () => {
