@@ -1,5 +1,6 @@
 import { User } from '../models/user.model.js';
 import { SLACK_API_LOOKUP_BY_EMAIL, SLACK_REQUEST_TIMEOUT_MS } from '../constants/slack.js';
+import { USER_STATUSES } from '../constants/user-statuses.js';
 import logger from '../utils/logger.js';
 import { getOrInitSettings } from './settings.service.js';
 import { slackContextFrom } from '../utils/slack.js';
@@ -33,8 +34,14 @@ export interface ResolverContext {
 }
 
 export const resolveSlackUser = async (slackUserId: string, ctx: ResolverContext) => {
-    // 1. Fast path — already mapped.
-    const byMapped = await User.findOne({ slack_user_id: slackUserId });
+    // 1. Fast path — already mapped. Filtered to `active` — mirrors the T1
+    // gate in `middlewares/auth.middleware.ts` ("deactivated → 403
+    // ACCOUNT_DEACTIVATED. Closes the JWT-outlives-deactivate window").
+    // Slack has no token to expire, so without this a deactivated user
+    // keeps every Slack write (approve leave, check in/out, log time)
+    // indefinitely — this one filter closes that for every caller path at
+    // once, since both lookups below funnel through it.
+    const byMapped = await User.findOne({ slack_user_id: slackUserId, status: USER_STATUSES.ACTIVE });
     if (byMapped) return byMapped;
 
     // 2. Fall back to Slack — never throw to the caller, log + return null.
@@ -47,7 +54,7 @@ export const resolveSlackUser = async (slackUserId: string, ctx: ResolverContext
     });
     if (!info?.email) return null;
 
-    const byEmail = await User.findOne({ email: info.email.toLowerCase() });
+    const byEmail = await User.findOne({ email: info.email.toLowerCase(), status: USER_STATUSES.ACTIVE });
     if (!byEmail) {
         logger.warn(
             {

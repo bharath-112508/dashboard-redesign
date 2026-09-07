@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import { Types } from 'mongoose';
 import request from 'supertest';
 
+import { PERMISSIONS } from '../constants/permissions.js';
+
 /**
  * Integration — Slack interactive → approveLeave round-trip.
  *
@@ -11,12 +13,17 @@ import request from 'supertest';
  *   2. raw-body capture + HMAC-SHA256 signature verify
  *   3. controller payload parse + action_id dispatch
  *   4. user resolver (slack_user_id → Viljetech user)
- *   5. role gate (reviewer-only)
+ *   5. permission gate (`leave_request.approve`, see `callerCanApproveLeave`)
  *   6. leave-request service call
  *
- * Mocks the leaf services (`approveLeave`, `User.findOne`, settings)
- * so the test runs in-process without a Mongo connection — matches
- * the existing integration-test posture (see `leaves-apply.integration.test.ts`).
+ * Mocks the leaf services (`approveLeave`, `User.findOne`/`findById`,
+ * settings) so the test runs in-process without a Mongo connection —
+ * matches the existing integration-test posture (see
+ * `leaves-apply.integration.test.ts`). `User.findById` backs
+ * `resolvePermissionsForUser` (role.service.js), which `callerCanApproveLeave`
+ * calls — it's stubbed here to resolve straight from `extra_permissions`
+ * (skipping the `role_ids` → `Role.find` join) so the test doesn't also need
+ * to mock the Role model.
  */
 
 const SIGNING_SECRET = 'test_slack_signing_secret_int';
@@ -26,15 +33,21 @@ vi.mock('../config/server.config.js', async (orig) => {
     return { ...real, SLACK_SIGNING_SECRET: SIGNING_SECRET };
 });
 
-const { approveLeaveMock, rejectLeaveMock, findOneUserMock, findByIdAndUpdateUserMock, settingsMock } = vi.hoisted(
-    () => ({
-        approveLeaveMock: vi.fn(),
-        rejectLeaveMock: vi.fn(),
-        findOneUserMock: vi.fn(),
-        findByIdAndUpdateUserMock: vi.fn(),
-        settingsMock: vi.fn(),
-    })
-);
+const {
+    approveLeaveMock,
+    rejectLeaveMock,
+    findOneUserMock,
+    findByIdUserMock,
+    findByIdAndUpdateUserMock,
+    settingsMock,
+} = vi.hoisted(() => ({
+    approveLeaveMock: vi.fn(),
+    rejectLeaveMock: vi.fn(),
+    findOneUserMock: vi.fn(),
+    findByIdUserMock: vi.fn(),
+    findByIdAndUpdateUserMock: vi.fn(),
+    settingsMock: vi.fn(),
+}));
 
 vi.mock('../services/leave-request.service.js', () => ({
     approveLeave: approveLeaveMock,
@@ -44,6 +57,7 @@ vi.mock('../services/leave-request.service.js', () => ({
 vi.mock('../models/user.model.js', () => ({
     User: {
         findOne: findOneUserMock,
+        findById: findByIdUserMock,
         findByIdAndUpdate: findByIdAndUpdateUserMock,
     },
 }));
@@ -58,6 +72,14 @@ vi.mock('../services/settings.service.js', () => ({
 
 const { buildTestApp } = await import('./_helpers/build-app.js');
 
+/** `User.findById(...).select(...).lean()` — mirrors `resolvePermissionsForUser`'s
+ *  chain. `role_ids: []` skips the `Role.find` join, so the resolved
+ *  permission set is exactly `extraPermissions`. */
+const permsQueryStub = (extraPermissions: string[]) => ({
+    select: vi.fn().mockReturnThis(),
+    lean: vi.fn().mockResolvedValue({ role_ids: [], extra_permissions: extraPermissions }),
+});
+
 const signed = (body: string) => {
     const ts = Math.floor(Date.now() / 1000).toString();
     const sig = `v0=${crypto.createHmac('sha256', SIGNING_SECRET).update(`v0:${ts}:${body}`).digest('hex')}`;
@@ -71,10 +93,13 @@ describe('Slack interactive → leave round-trip', () => {
         approveLeaveMock.mockReset();
         rejectLeaveMock.mockReset();
         findOneUserMock.mockReset();
+        findByIdUserMock.mockReset();
         findByIdAndUpdateUserMock.mockReset();
         settingsMock.mockReset();
 
         managerId = new Types.ObjectId();
+        // Default caller (`manager`, below) holds `leave_request.approve`.
+        findByIdUserMock.mockReturnValue(permsQueryStub([PERMISSIONS.LEAVE_REQUEST_APPROVE]));
         settingsMock.mockResolvedValue({
             slack: {
                 enabled: true,
@@ -165,6 +190,8 @@ describe('Slack interactive → leave round-trip', () => {
             role: 'employee',
             slack_user_id: 'U_EMPLOYEE',
         });
+        // Employee's resolved permissions don't include leave_request.approve.
+        findByIdUserMock.mockReturnValue(permsQueryStub([]));
 
         const app = buildTestApp();
         const leaveId = new Types.ObjectId().toString();

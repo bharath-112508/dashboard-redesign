@@ -126,6 +126,34 @@ describe('resolveSlackUser', () => {
         const result = await resolveSlackUser('U999NEW', { botToken: 'xoxb', fetchUserInfo });
         expect(result).toBeNull();
     });
+
+    // Mirrors the T1 HTTP gate (`middlewares/auth.middleware.ts`): a
+    // deactivated account must not keep working over Slack, which has no
+    // token to expire the way the JWT does.
+    it('filters the fast-path lookup to active users (deactivated slack_user_id match is not returned)', async () => {
+        findOneMock.mockResolvedValueOnce(null); // status: active filter excludes the deactivated row
+        findOneMock.mockResolvedValueOnce(null); // no email fallback match either
+        const fetchUserInfo = vi.fn().mockResolvedValueOnce(null);
+
+        const result = await resolveSlackUser('U123ABC', { botToken: 'xoxb', fetchUserInfo });
+
+        expect(result).toBeNull();
+        // The fast-path query itself must scope to active — proves the fix
+        // isn't just "no row exists", but that the filter is actually applied.
+        expect(findOneMock).toHaveBeenNthCalledWith(1, { slack_user_id: 'U123ABC', status: 'active' });
+    });
+
+    it('filters the email fallback lookup to active users (deactivated user is not resolved)', async () => {
+        findOneMock.mockResolvedValueOnce(null); // no fast-path mapping
+        findOneMock.mockResolvedValueOnce(null); // email lookup scoped to active finds nothing
+        const fetchUserInfo = vi.fn().mockResolvedValueOnce({ email: 'deactivated@example.com' });
+
+        const result = await resolveSlackUser('U999NEW', { botToken: 'xoxb', fetchUserInfo });
+
+        expect(result).toBeNull();
+        expect(findByIdAndUpdateMock).not.toHaveBeenCalled();
+        expect(findOneMock).toHaveBeenNthCalledWith(2, { email: 'deactivated@example.com', status: 'active' });
+    });
 });
 
 afterEach(() => vi.restoreAllMocks());

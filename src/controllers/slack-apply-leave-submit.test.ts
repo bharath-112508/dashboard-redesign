@@ -128,6 +128,36 @@ describe('apply-leave view_submission', () => {
         );
     });
 
+    it('DMs a generic fallback (not the raw error message) when applyLeave throws a non-AppError', async () => {
+        vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
+        vi.mocked(resolveSlackCaller).mockResolvedValue({ _id: new Types.ObjectId(), role: 'employee' } as never);
+        // A raw driver/unexpected error — NOT an AppError — must never reach
+        // the user verbatim (finding: apply-leave failure DM echoed
+        // `err.message` unconditionally).
+        vi.mocked(applyLeave).mockRejectedValue(new Error('E11000 duplicate key error collection: leave_requests'));
+
+        const req = { body: { payload: JSON.stringify(submissionPayload()) }, headers: {} };
+        const res = makeRes();
+        await handleInteractive(req as never, res as never, () => undefined);
+
+        expect(res.json).toHaveBeenCalledWith({});
+
+        await vi.waitFor(() =>
+            expect(vi.mocked(postSlackMessage)).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({
+                    channel: 'U1',
+                    context: 'apply-leave-error-dm',
+                    text: expect.stringContaining('Could not submit your leave'),
+                })
+            )
+        );
+        const call = vi
+            .mocked(postSlackMessage)
+            .mock.calls.find((c) => (c[1] as { context?: string }).context === 'apply-leave-error-dm')!;
+        expect((call[1] as { text: string }).text).not.toContain('E11000');
+    });
+
     it('returns inline field errors (no ack-close) when Zod validation fails — never calls applyLeave', async () => {
         vi.mocked(getOrInitSettings).mockResolvedValue({ slack: { enabled: true, bot_token: 'x' } } as never);
         vi.mocked(resolveSlackCaller).mockResolvedValue({ _id: new Types.ObjectId(), role: 'employee' } as never);

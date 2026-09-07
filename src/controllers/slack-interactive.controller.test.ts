@@ -30,6 +30,23 @@ vi.mock('../services/attendance.service.js', () => ({
     endBreak: (...args: unknown[]) => endBreakMock(...args),
 }));
 
+// `callerCanApproveLeave` / `callerCanCheckInOut` resolve the caller's real
+// permissions (role.service.js → User.findById) — mocked here so these
+// routing tests don't touch Mongo. Both default to `true`; individual tests
+// override to prove the refusal path (findings 1 + 2 of the Slack security
+// audit).
+const callerCanApproveLeaveMock = vi.fn();
+vi.mock('../services/slack-leave.service.js', () => ({
+    callerCanApplyLeave: vi.fn(),
+    loadApplyLeaveModalTypes: vi.fn(),
+    callerCanApproveLeave: (...args: unknown[]) => callerCanApproveLeaveMock(...args),
+}));
+
+const callerCanCheckInOutMock = vi.fn();
+vi.mock('../services/slack-attendance.service.js', () => ({
+    callerCanCheckInOut: (...args: unknown[]) => callerCanCheckInOutMock(...args),
+}));
+
 const resolveSlackCallerMock = vi.fn();
 vi.mock('../services/slack-user-mapping.service.js', () => ({
     resolveSlackCaller: (...args: unknown[]) => resolveSlackCallerMock(...args),
@@ -131,6 +148,8 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
         resolveSlackCallerMock.mockReset();
         getOrInitSettingsMock.mockReset();
         slackContextFromMock.mockReset();
+        callerCanApproveLeaveMock.mockReset();
+        callerCanApproveLeaveMock.mockResolvedValue(true);
         getOrInitSettingsMock.mockResolvedValue({
             slack: { enabled: true, bot_token: 'xoxb', channels: { leaves: '#leaves' } },
         });
@@ -152,17 +171,41 @@ describe('handleInteractive — Phase 1 leave handlers', () => {
         expect(approveLeaveMock).not.toHaveBeenCalled();
     });
 
-    it('rejects ephemeral 403 when caller is an employee (non-reviewer role)', async () => {
+    it('rejects ephemeral 403 when the caller lacks leave_request.approve', async () => {
         const callerId = new Types.ObjectId();
         resolveSlackCallerMock.mockResolvedValueOnce({
             _id: callerId,
             role: 'employee',
         });
+        callerCanApproveLeaveMock.mockResolvedValueOnce(false);
         const res = await request(buildApp())
             .post('/slack/interactive')
             .send({ payload: JSON.stringify(approvePayload('L1')) });
         expect(res.body.text).toMatch(/permission/i);
         expect(approveLeaveMock).not.toHaveBeenCalled();
+    });
+
+    // Finding 1 (Slack security audit): a Team Lead narrowed to a custom
+    // role that OMITS `leave_request.approve` keeps the legacy `User.role`
+    // at `'team_lead'` (`assignRolesToUser` never rewrites it for a
+    // custom-role-only assignment) — so a role-based gate (the old
+    // `isReviewer(user.role)`) waves them through while the equivalent HTTP
+    // route (`requirePermission(LEAVE_REQUEST_APPROVE)` against JWT
+    // permissions) correctly refuses them. The permission-based gate must
+    // refuse here regardless of the stale legacy role.
+    it('rejects a Team Lead whose real permissions exclude leave_request.approve, despite the stale legacy role', async () => {
+        const callerId = new Types.ObjectId();
+        resolveSlackCallerMock.mockResolvedValueOnce({
+            _id: callerId,
+            role: 'team_lead', // stale legacy field — the custom-role assignment never rewrote it
+        });
+        callerCanApproveLeaveMock.mockResolvedValueOnce(false); // real resolved perms exclude leave_request.approve
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(approvePayload('L1')) });
+        expect(res.body.text).toMatch(/permission/i);
+        expect(approveLeaveMock).not.toHaveBeenCalled();
+        expect(callerCanApproveLeaveMock).toHaveBeenCalledWith(callerId);
     });
 
     it('calls approveLeave with parsed leave id when caller is a manager', async () => {
@@ -278,6 +321,8 @@ describe('handleSlashCommand — Phase 2', () => {
         checkInMock.mockReset();
         checkOutMock.mockReset();
         getMyTodayMock.mockReset();
+        callerCanCheckInOutMock.mockReset();
+        callerCanCheckInOutMock.mockResolvedValue(true);
         getOrInitSettingsMock.mockResolvedValue({
             slack: { enabled: true, bot_token: 'xoxb', channels: { leaves: '#leaves' } },
         });
@@ -290,6 +335,29 @@ describe('handleSlashCommand — Phase 2', () => {
         expect(res.body.response_type).toBe('ephemeral');
         expect(res.body.text).toMatch(/identify your Viljetech account/i);
         expect(checkInMock).not.toHaveBeenCalled();
+    });
+
+    // Finding 2 (Slack security audit): `/checkin` and `/checkout` had NO
+    // permission gate at all — a client-side caller (client/representative,
+    // neither holds `attendance.check_in_out`) whose Slack email matches
+    // their platform account could create/mutate their own attendance
+    // record purely from Slack, a surface the web app never exposes.
+    it("/checkin: refuses a caller without attendance.check_in_out ('Your role can't check in or out from Slack.')", async () => {
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), role: 'client' });
+        callerCanCheckInOutMock.mockResolvedValueOnce(false);
+        const res = await request(buildApp()).post('/slack/commands/checkin').send('user_id=U_TEST');
+        expect(res.body.response_type).toBe('ephemeral');
+        expect(res.body.text).toMatch(/can't check in or out/i);
+        expect(checkInMock).not.toHaveBeenCalled();
+    });
+
+    it('/checkout: refuses a caller without attendance.check_in_out', async () => {
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), role: 'representative' });
+        callerCanCheckInOutMock.mockResolvedValueOnce(false);
+        const res = await request(buildApp()).post('/slack/commands/checkout').send('user_id=U_TEST');
+        expect(res.body.response_type).toBe('ephemeral');
+        expect(res.body.text).toMatch(/can't check in or out/i);
+        expect(checkOutMock).not.toHaveBeenCalled();
     });
 
     it('/checkin: checks in + reports the time on success', async () => {
@@ -422,6 +490,8 @@ describe('handleInteractive — break actions', () => {
         resolveSlackCallerMock.mockReset();
         getOrInitSettingsMock.mockReset();
         slackContextFromMock.mockReset();
+        callerCanCheckInOutMock.mockReset();
+        callerCanCheckInOutMock.mockResolvedValue(true);
         getOrInitSettingsMock.mockResolvedValue({
             slack: { enabled: true, bot_token: 'xoxb', channels: {} },
         });
@@ -505,5 +575,93 @@ describe('handleInteractive — break actions', () => {
         expect(res.status).toBe(200);
         expect(res.body.text).toMatch(/identify your Viljetech account/i);
         expect(startBreakMock).not.toHaveBeenCalled();
+    });
+
+    // Finding 2 (Slack security audit): break start/end had NO permission
+    // gate — a caller without `attendance.check_in_out` (e.g. a client-side
+    // client/representative) could start/end breaks on their own attendance
+    // record purely from Slack.
+    it('break_start_lunch: refuses a caller without attendance.check_in_out', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'client' });
+        callerCanCheckInOutMock.mockResolvedValueOnce(false);
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(breakPayload('break_start_lunch')) });
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/can't check in or out/i);
+        expect(startBreakMock).not.toHaveBeenCalled();
+    });
+
+    it('break_end: refuses a caller without attendance.check_in_out', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'representative' });
+        callerCanCheckInOutMock.mockResolvedValueOnce(false);
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(breakPayload('break_end')) });
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/can't check in or out/i);
+        expect(endBreakMock).not.toHaveBeenCalled();
+    });
+});
+
+// ─── Finding 2 (Slack security audit): attendance check-in/out buttons ──
+
+describe('handleInteractive — attendance check-in/out button gate', () => {
+    beforeEach(() => {
+        checkInMock.mockReset();
+        checkOutMock.mockReset();
+        resolveSlackCallerMock.mockReset();
+        getOrInitSettingsMock.mockReset();
+        slackContextFromMock.mockReset();
+        callerCanCheckInOutMock.mockReset();
+        callerCanCheckInOutMock.mockResolvedValue(true);
+        getOrInitSettingsMock.mockResolvedValue({
+            slack: { enabled: true, bot_token: 'xoxb', channels: {} },
+        });
+        slackContextFromMock.mockReturnValue({ enabled: true, botToken: 'xoxb' });
+    });
+
+    const attendancePayload = (action_id: string) => ({
+        type: 'block_actions',
+        user: { id: 'U_CLIENT' },
+        actions: [{ action_id }],
+    });
+
+    it("attendance_check_in: refuses a caller without attendance.check_in_out ('Your role can't check in or out from Slack.')", async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'client' });
+        callerCanCheckInOutMock.mockResolvedValueOnce(false);
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(attendancePayload('attendance_check_in')) });
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/can't check in or out/i);
+        expect(checkInMock).not.toHaveBeenCalled();
+        expect(callerCanCheckInOutMock).toHaveBeenCalledWith(userId);
+    });
+
+    it('attendance_check_out: refuses a caller without attendance.check_in_out', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'representative' });
+        callerCanCheckInOutMock.mockResolvedValueOnce(false);
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(attendancePayload('attendance_check_out')) });
+        expect(res.status).toBe(200);
+        expect(res.body.text).toMatch(/can't check in or out/i);
+        expect(checkOutMock).not.toHaveBeenCalled();
+    });
+
+    it('attendance_check_in: allows a caller who holds attendance.check_in_out', async () => {
+        const userId = new Types.ObjectId();
+        resolveSlackCallerMock.mockResolvedValueOnce({ _id: userId, role: 'employee' });
+        checkInMock.mockResolvedValueOnce({});
+        const res = await request(buildApp())
+            .post('/slack/interactive')
+            .send({ payload: JSON.stringify(attendancePayload('attendance_check_in')) });
+        expect(res.status).toBe(200);
+        expect(checkInMock).toHaveBeenCalledTimes(1);
     });
 });

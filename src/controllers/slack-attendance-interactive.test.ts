@@ -23,6 +23,12 @@ vi.mock('../services/slack-user-mapping.service.js', () => ({
     resolveSlackCaller: vi.fn(),
     fetchSlackUserInfo: vi.fn(),
 }));
+// `callerCanCheckInOut` resolves the caller's real permissions
+// (role.service.js → User.findById) — mocked here so these routing tests
+// don't touch Mongo. Defaults to `true`.
+vi.mock('../services/slack-attendance.service.js', () => ({
+    callerCanCheckInOut: vi.fn(async () => true),
+}));
 vi.mock('../utils/slack.js', async (orig) => ({
     ...(await orig<typeof import('../utils/slack.js')>()),
     slackContextFrom: vi.fn(() => ({ enabled: true, botToken: 'xoxb-x' })),

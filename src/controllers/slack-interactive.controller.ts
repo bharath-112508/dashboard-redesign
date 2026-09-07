@@ -2,7 +2,8 @@ import type { RequestHandler } from 'express';
 import { Types } from 'mongoose';
 
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { ROLES, type RoleType } from '../constants/roles.js';
+import type { RoleType } from '../constants/roles.js';
+import { AppError } from '../utils/app-error.js';
 import {
     SLACK_ACTION_ATTENDANCE_CHECK_IN,
     SLACK_ACTION_ATTENDANCE_CHECK_OUT,
@@ -18,13 +19,18 @@ import {
 import { approveLeave, rejectLeave, applyLeave } from '../services/leave-request.service.js';
 import { handleLogTimeSubmission, openLogTimeModal } from './slack-log-time.controller.js';
 import { callerCanLogTime } from '../services/slack-timesheet.service.js';
+import { callerCanCheckInOut } from '../services/slack-attendance.service.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
 import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { slackContextFrom, publishHomeView, openSlackModal, postSlackMessage } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
-import { callerCanApplyLeave, loadApplyLeaveModalTypes } from '../services/slack-leave.service.js';
+import {
+    callerCanApplyLeave,
+    callerCanApproveLeave,
+    loadApplyLeaveModalTypes,
+} from '../services/slack-leave.service.js';
 import { buildApplyLeaveModal, parseApplyLeaveSubmission } from '../utils/slack-leave-blocks.js';
 import { applyLeaveBodySchema } from '../validators/leave-request.validator.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
@@ -94,13 +100,6 @@ const postEphemeralToResponseUrl = (responseUrl: string | undefined, text: strin
         logger.warn({ err }, 'Slack response_url ephemeral dispatch failed');
     });
 };
-
-// Reviewer roles can approve / reject — matches `isReviewer` in
-// leave-request.service.ts. Phase 1 reuses that gate so Slack
-// approvals follow the same auth model as the web app's
-// /leaves/:id/approve endpoint.
-const isReviewer = (role: RoleType): boolean =>
-    role === ROLES.ADMIN || role === ROLES.MANAGER || role === ROLES.TEAM_LEAD;
 
 /**
  * Resolve the Slack-user → Viljetech-user. Promoted to
@@ -221,9 +220,20 @@ const handleApplyLeaveSubmission: RequestHandler = async (req, res) => {
         try {
             await applyLeave(parsed.data, { id: user._id, role: user.role as RoleType, audit });
         } catch (err: unknown) {
-            const code = (err as { code?: string })?.code;
-            const message = (err as { message?: string })?.message ?? 'Could not submit your leave.';
-            logger.warn({ err, code, reason: 'apply_leave_submit_failed' }, 'Slack apply-leave submission rejected');
+            // Only an AppError is a known, user-safe application failure — its
+            // `code`/`message` are meant to be shown. Anything else (a raw
+            // Mongo driver error, a network blip, a bug) must not leak its
+            // message into the DM; fall back to a generic string instead.
+            // Mirrors the narrowing in `slack-log-time.controller.ts`.
+            const isAppError = err instanceof AppError;
+            const code = isAppError ? err.code : undefined;
+            const message = isAppError ? err.message : 'Could not submit your leave.';
+            const logPayload = { err, code, reason: 'apply_leave_submit_failed' };
+            if (isAppError) {
+                logger.warn(logPayload, 'Slack apply-leave submission rejected');
+            } else {
+                logger.error(logPayload, 'Slack apply-leave submission rejected');
+            }
             if (ctx) {
                 void postSlackMessage(ctx, {
                     channel: slackUserId,
@@ -315,6 +325,11 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             respond("Couldn't identify your Viljetech account.");
             return;
         }
+        if (!(await callerCanCheckInOut(user._id))) {
+            respond("Your role can't check in or out from Slack.");
+            if (fromHome) void renderAttendanceHome(payload.user.id, user);
+            return;
+        }
         try {
             if (isBreakStart) {
                 await startBreak(user._id, BREAK_START_BY_ACTION[action.action_id]!, 'slack');
@@ -354,6 +369,11 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             respond(
                 "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin."
             );
+            return;
+        }
+        if (!(await callerCanCheckInOut(user._id))) {
+            respond("Your role can't check in or out from Slack.");
+            if (fromHome) void renderAttendanceHome(payload.user.id, user);
             return;
         }
         try {
@@ -475,7 +495,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
             );
             return;
         }
-        if (!isReviewer(user.role as RoleType)) {
+        if (!(await callerCanApproveLeave(user._id))) {
             logger.warn(
                 {
                     code: ERROR_CODES.SLACK_INTERACTIVE_REJECTED,
@@ -484,7 +504,7 @@ export const handleInteractive: RequestHandler = async (req, res) => {
                     role: user.role,
                     action_id: action.action_id,
                 },
-                'Slack interactive: caller lacks reviewer role'
+                'Slack interactive: caller lacks leave_request.approve'
             );
             respond("You don't have permission to review leave requests.");
             return;
@@ -629,6 +649,10 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
             return;
         }
         if (command === 'checkin') {
+            if (!(await callerCanCheckInOut(user._id))) {
+                res.status(200).json(ephemeral("Your role can't check in or out from Slack."));
+                return;
+            }
             // Slack has no QR / no geolocation — record as a manual
             // check-in. The attendance service still respects
             // org-level geofence policies (which may reject) but for
@@ -647,6 +671,10 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
             return;
         }
         if (command === 'checkout') {
+            if (!(await callerCanCheckInOut(user._id))) {
+                res.status(200).json(ephemeral("Your role can't check in or out from Slack."));
+                return;
+            }
             // Same manual-method posture as `/checkin`.
             const result = (await checkOut({ method: 'manual' }, user._id, '')) as {
                 segments?: Array<{ check_out?: { time?: Date | string } | null }>;

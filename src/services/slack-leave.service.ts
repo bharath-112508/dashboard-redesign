@@ -58,3 +58,27 @@ export const callerCanApplyLeave = async (userId: Types.ObjectId): Promise<boole
     const { permissions } = await resolvePermissionsForUser(userId);
     return callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_WRITE);
 };
+
+/**
+ * May this caller approve/reject leave from Slack?
+ *
+ * Keyed on `leave_request.approve` — the SAME permission `requirePermission`
+ * enforces on `POST /leaves/:id/approve|reject` — for the same reason
+ * `callerCanApplyLeave` exists: the Slack inbound path bypasses Express
+ * middleware entirely, so this IS the authorization boundary for the
+ * approve/reject buttons, not a UI nicety.
+ *
+ * It replaces `isReviewer(user.role)` (`role === admin || manager ||
+ * team_lead`), which reads the legacy `User.role` field and fails open for
+ * exactly the case `callerCanApplyLeave`'s doc comment describes: a Team
+ * Lead narrowed to a custom role that omits `leave_request.approve` keeps
+ * `User.role === 'team_lead'` (`assignRolesToUser` never rewrites it for a
+ * custom-role-only assignment), so the old check waved them through to
+ * approve/reject ANY user's leave while the equivalent HTTP route correctly
+ * refused them. `ensureCanReviewRequest` (leave-request.service.ts) reads
+ * the same stale field and is a separate, wider fix — not touched here.
+ */
+export const callerCanApproveLeave = async (userId: Types.ObjectId): Promise<boolean> => {
+    const { permissions } = await resolvePermissionsForUser(userId);
+    return callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_APPROVE);
+};
