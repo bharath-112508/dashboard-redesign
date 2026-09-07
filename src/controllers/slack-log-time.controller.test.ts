@@ -174,6 +174,25 @@ describe('handleLogTimeSubmission', () => {
         );
     });
 
+    it('refuses a Client role and never calls createEntry', async () => {
+        resolveSlackUserMock.mockResolvedValue({ ...USER, role: ROLES.CLIENT });
+        const res = resStub();
+        await handleLogTimeSubmission(submission() as never, res, vi.fn());
+
+        expect(createEntryMock).not.toHaveBeenCalled();
+        const arg = res.json.mock.calls[0]![0];
+        expect(arg.response_action).toBe('errors');
+        expect(JSON.stringify(arg.errors)).toMatch(/your role can't log time/i);
+    });
+
+    it('refuses a Representative role and never calls createEntry', async () => {
+        resolveSlackUserMock.mockResolvedValue({ ...USER, role: ROLES.REPRESENTATIVE });
+        const res = resStub();
+        await handleLogTimeSubmission(submission() as never, res, vi.fn());
+
+        expect(createEntryMock).not.toHaveBeenCalled();
+    });
+
     it('tells an unrecognised Slack user what to do', async () => {
         resolveSlackUserMock.mockResolvedValue(null);
         const res = resStub();
@@ -244,5 +263,10 @@ describe('openLogTimeModal', () => {
     it('reports a message when Slack refuses to open the modal', async () => {
         openModalMock.mockResolvedValue(false);
         await expect(openLogTimeModal('trigger-1', USER as never)).resolves.toEqual(expect.any(String));
+    });
+
+    it('guards a missing trigger_id without hitting Slack', async () => {
+        await expect(openLogTimeModal(undefined, USER as never)).resolves.toEqual(expect.any(String));
+        expect(openModalMock).not.toHaveBeenCalled();
     });
 });

@@ -75,6 +75,47 @@ describe('log-time routing', () => {
         expect(handleLogTimeSubmissionMock).toHaveBeenCalledTimes(1);
     });
 
+    it('refuses a Client role and never opens the modal', async () => {
+        vi.mocked(resolveSlackCaller).mockResolvedValue({ ...employee, role: 'client' } as never);
+
+        const req = {
+            body: {
+                payload: JSON.stringify({
+                    type: 'block_actions',
+                    user: { id: 'U1' },
+                    trigger_id: 'trigger-1',
+                    actions: [{ action_id: 'log_time_open' }],
+                }),
+            },
+        };
+        const res = makeRes();
+        await handleInteractive(req as never, res as never);
+
+        expect(openLogTimeModalMock).not.toHaveBeenCalled();
+        expect(res.json).toHaveBeenCalledWith(
+            expect.objectContaining({ response_type: 'ephemeral', text: "Your role can't log time in Slack." })
+        );
+    });
+
+    it('refuses a Representative role and never opens the modal', async () => {
+        vi.mocked(resolveSlackCaller).mockResolvedValue({ ...employee, role: 'representative' } as never);
+
+        const req = {
+            body: {
+                payload: JSON.stringify({
+                    type: 'block_actions',
+                    user: { id: 'U1' },
+                    trigger_id: 'trigger-1',
+                    actions: [{ action_id: 'log_time_open' }],
+                }),
+            },
+        };
+        const res = makeRes();
+        await handleInteractive(req as never, res as never);
+
+        expect(openLogTimeModalMock).not.toHaveBeenCalled();
+    });
+
     it('tells an unrecognised Slack user to fix their profile, without opening the modal', async () => {
         vi.mocked(resolveSlackCaller).mockResolvedValue(null);
 
