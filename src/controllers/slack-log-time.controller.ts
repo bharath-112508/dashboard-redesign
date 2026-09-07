@@ -14,6 +14,7 @@ import logger from '../utils/logger.js';
 import { buildHomeDashboardView } from '../utils/slack-home-blocks.js';
 import {
     buildLogTimeModal,
+    guardModalErrors,
     parseLogTimeSubmission,
     timesheetAppErrorToModalErrors,
 } from '../utils/slack-block-kit/timesheet.js';
@@ -24,6 +25,7 @@ import {
     SLACK_BLOCK_TS_NON_BILLABLE,
     SLACK_BLOCK_TS_PROJECT,
 } from '../constants/slack.js';
+import type { SlackContext } from '../utils/slack.js';
 import { openSlackModal, postSlackMessage, publishHomeView, slackContextFrom } from '../utils/slack.js';
 import { createTimesheetBodySchema } from '../validators/timesheet.validator.js';
 
@@ -63,12 +65,12 @@ export const openLogTimeModal = async (triggerId: string, user: SlackCaller): Pr
     return opened ? null : "Couldn't open the log-time form. Please try again.";
 };
 
-/** Re-render the Home tab so the new total shows. Never throws. */
-const republishHome = async (slackUserId: string, user: SlackCaller): Promise<void> => {
+/** Re-render the Home tab so the new total shows. Never throws. Takes an
+ *  already-resolved `ctx` so the fire-and-forget tail below fetches Slack
+ *  settings once per submission instead of once per side-effect. */
+const republishHome = async (ctx: SlackContext | null, slackUserId: string, user: SlackCaller): Promise<void> => {
+    if (!ctx) return;
     try {
-        const settings = await getOrInitSettings();
-        const ctx = slackContextFrom(settings.slack);
-        if (!ctx) return;
         const data = await buildHomeDashboardData(user);
         await publishHomeView(ctx, slackUserId, buildHomeDashboardView(data, user), 'log_time');
     } catch (err) {
@@ -131,15 +133,16 @@ export const handleLogTimeSubmission: RequestHandler = async (req, res) => {
         const errors: Record<string, string> = {};
         for (const issue of parsed.error.issues) {
             const field = String(issue.path[0] ?? '');
-            // Slack drops errors keyed to a block that isn't in the view, so
-            // an unmapped field falls back to a block that always renders.
             const block = FIELD_TO_BLOCK[field] ?? SLACK_BLOCK_TS_DESCRIPTION;
             errors[block] = issue.message;
         }
         if (Object.keys(errors).length === 0) {
             errors[SLACK_BLOCK_TS_DESCRIPTION] = 'Please check the form and try again.';
         }
-        res.status(200).json({ response_action: 'errors', errors });
+        // Guard against a mapped block (e.g. SLACK_BLOCK_TS_PROJECT for a
+        // project-less caller) that isn't actually in this caller's view —
+        // Slack would otherwise drop that error with no visible feedback.
+        res.status(200).json({ response_action: 'errors', errors: guardModalErrors(errors, payload.view) });
         return;
     }
 
@@ -157,7 +160,7 @@ export const handleLogTimeSubmission: RequestHandler = async (req, res) => {
         logger.warn({ err, code, reason: 'log_time_submit_failed' }, 'Slack log-time submission rejected');
         res.status(200).json({
             response_action: 'errors',
-            errors: timesheetAppErrorToModalErrors(code, message),
+            errors: timesheetAppErrorToModalErrors(code, message, payload.view),
         });
         return;
     }
@@ -165,23 +168,32 @@ export const handleLogTimeSubmission: RequestHandler = async (req, res) => {
     // Written. Close the modal, then do the slow, non-blocking parts.
     res.status(200).json({});
 
+    // Settings/ctx are resolved once here and reused by both republishHome
+    // and the warning DM below (was two separate `getOrInitSettings` calls).
+    // The whole tail is wrapped in `.catch()` — it runs after the response is
+    // already sent, so an unhandled rejection here (e.g. settings lookup
+    // throwing) would otherwise be a silent unhandled-rejection with no
+    // caller left to see it.
     void (async () => {
-        await republishHome(slackUserId, user);
+        const ctx = await getOrInitSettings()
+            .then((settings) => slackContextFrom(settings.slack))
+            .catch(() => null);
+
+        await republishHome(ctx, slackUserId, user);
 
         const notes: string[] = [];
         if (warnings.exceeds_daily_threshold) notes.push("that's over the daily hours threshold");
         if (warnings.overlaps_approved_leave) notes.push('that day overlaps approved leave');
-        if (notes.length === 0) return;
+        if (notes.length === 0 || !ctx) return;
 
         // Success needs no DM — the updated Home total is the confirmation.
         // Warnings would otherwise vanish, so they get one.
-        const settings = await getOrInitSettings();
-        const ctx = slackContextFrom(settings.slack);
-        if (!ctx) return;
         void postSlackMessage(ctx, {
             channel: slackUserId,
             text: `⚠️ Time logged, but ${notes.join(' and ')}.`,
             context: 'log-time-warning-dm',
         });
-    })();
+    })().catch((err: unknown) => {
+        logger.warn({ err, reason: 'log_time_async_tail_failed' }, 'Slack log-time: post-submit async work failed');
+    });
 };

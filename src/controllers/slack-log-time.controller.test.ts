@@ -184,6 +184,51 @@ describe('handleLogTimeSubmission', () => {
         expect(arg.response_action).toBe('errors');
         expect(JSON.stringify(arg.errors)).toMatch(/identify your Viljetech account/i);
     });
+
+    it('surfaces a visible error on the description block for a project-less caller (no ts_project in their view)', async () => {
+        // buildLogTimeModal never renders SLACK_BLOCK_TS_PROJECT for a caller
+        // with no projects, so this handler always sends general_category:
+        // null for a general entry — a project-less caller's submission
+        // therefore always trips the schema's "pick a project or name a
+        // category" refine at path ['general_category'], which FIELD_TO_BLOCK
+        // maps to SLACK_BLOCK_TS_PROJECT. Without guardModalErrors that error
+        // targets a block absent from the view, and Slack drops it silently —
+        // the modal just sits there with no feedback. This is the case the
+        // guard exists to close.
+        const res = resStub();
+        const req = {
+            body: {
+                payload: JSON.stringify({
+                    type: 'view_submission',
+                    user: { id: 'U123' },
+                    view: {
+                        callback_id: 'log_time_submit',
+                        state: {
+                            values: {
+                                [SLACK_BLOCK_TS_DATE]: { [SLACK_BLOCK_TS_DATE]: { selected_date: '2026-09-07' } },
+                                [SLACK_BLOCK_TS_BILLABLE]: { [SLACK_BLOCK_TS_BILLABLE]: { value: '3.5' } },
+                                ts_non_billable: { ts_non_billable: { value: '0' } },
+                                [SLACK_BLOCK_TS_DESCRIPTION]: {
+                                    [SLACK_BLOCK_TS_DESCRIPTION]: { value: 'Depot routing bug' },
+                                },
+                                // No ts_project entry at all.
+                            },
+                        },
+                    },
+                }),
+            },
+            headers: {},
+        };
+
+        await handleLogTimeSubmission(req as never, res, vi.fn());
+
+        expect(createEntryMock).not.toHaveBeenCalled();
+        const arg = res.json.mock.calls[0]![0];
+        expect(arg.response_action).toBe('errors');
+        // Must land on the block that's actually present, not the absent
+        // project block — assert the exact key, not just "some error".
+        expect(Object.keys(arg.errors)).toEqual([SLACK_BLOCK_TS_DESCRIPTION]);
+    });
 });
 
 describe('openLogTimeModal', () => {

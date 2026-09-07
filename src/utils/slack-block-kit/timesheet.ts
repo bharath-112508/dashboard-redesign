@@ -166,24 +166,60 @@ export const parseLogTimeSubmission = (view: unknown): ParsedLogTimeSubmission =
 
 // ─── Error mapping ────────────────────────────────────────────────────────
 
+/** Block ids present in a submitted `view_submission` — `state.values` is
+ *  only keyed by blocks Slack actually rendered, so this doubles as "what
+ *  can an error safely target". */
+const presentBlockIds = (view: unknown): Set<string> =>
+    new Set(Object.keys(((view as { state?: { values?: StateValues } })?.state?.values ?? {}) as StateValues));
+
 /**
- * Map a thrown `AppError.code` onto a `response_action: errors` payload.
+ * Re-key any error whose target block is absent from the submitted view onto
+ * `SLACK_BLOCK_TS_DESCRIPTION`, which `buildLogTimeModal` always renders.
  *
- * Slack silently DROPS an error keyed to a block that isn't in the view, so
- * the fallback must be a block that always renders. The project block is
- * absent when the caller has no projects; the description block never is.
+ * Slack silently DROPS an error keyed to a block that isn't in the view — the
+ * project block is exactly this for a caller with no projects
+ * (`buildLogTimeModal` substitutes explanatory text instead of the select).
+ * Without this guard, that submission fails with no visible feedback at all:
+ * the modal just sits there. Both error-producing paths (Zod validation
+ * issues in the controller, and `timesheetAppErrorToModalErrors` below) route
+ * through this one guard so neither — nor a future one — can reintroduce the
+ * bug by mapping to a block that turns out to be conditional.
  */
-export const timesheetAppErrorToModalErrors = (code: string | undefined, message: string): Record<string, string> => {
-    switch (code) {
-        case ERROR_CODES.TIMESHEET_FUTURE_DATE:
-            return { [SLACK_BLOCK_TS_DATE]: message };
-        case ERROR_CODES.TIMESHEET_ZERO_DURATION:
-        case ERROR_CODES.TIMESHEET_DURATION_TOO_LARGE:
-            return { [SLACK_BLOCK_TS_BILLABLE]: message };
-        case ERROR_CODES.PROJECT_NOT_FOUND:
-        case ERROR_CODES.FORBIDDEN:
-            return { [SLACK_BLOCK_TS_PROJECT]: message };
-        default:
-            return { [SLACK_BLOCK_TS_DESCRIPTION]: message };
+export const guardModalErrors = (errors: Record<string, string>, view: unknown): Record<string, string> => {
+    const present = presentBlockIds(view);
+    const guarded: Record<string, string> = {};
+    for (const [block, message] of Object.entries(errors)) {
+        const target = present.has(block) ? block : SLACK_BLOCK_TS_DESCRIPTION;
+        // First write wins — don't let a re-keyed error clobber a real
+        // description-block error that was already there.
+        if (!(target in guarded)) guarded[target] = message;
     }
+    return guarded;
+};
+
+/**
+ * Map a thrown `AppError.code` onto a `response_action: errors` payload,
+ * guarded against targeting a block that isn't in the caller's view (see
+ * `guardModalErrors`).
+ */
+export const timesheetAppErrorToModalErrors = (
+    code: string | undefined,
+    message: string,
+    view: unknown
+): Record<string, string> => {
+    const errors = ((): Record<string, string> => {
+        switch (code) {
+            case ERROR_CODES.TIMESHEET_FUTURE_DATE:
+                return { [SLACK_BLOCK_TS_DATE]: message };
+            case ERROR_CODES.TIMESHEET_ZERO_DURATION:
+            case ERROR_CODES.TIMESHEET_DURATION_TOO_LARGE:
+                return { [SLACK_BLOCK_TS_BILLABLE]: message };
+            case ERROR_CODES.PROJECT_NOT_FOUND:
+            case ERROR_CODES.FORBIDDEN:
+                return { [SLACK_BLOCK_TS_PROJECT]: message };
+            default:
+                return { [SLACK_BLOCK_TS_DESCRIPTION]: message };
+        }
+    })();
+    return guardModalErrors(errors, view);
 };

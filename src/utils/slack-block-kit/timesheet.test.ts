@@ -9,7 +9,12 @@ import {
     SLACK_BLOCK_TS_PROJECT,
     SLACK_CALLBACK_LOG_TIME,
 } from '../../constants/slack.js';
-import { buildLogTimeModal, parseLogTimeSubmission, timesheetAppErrorToModalErrors } from './timesheet.js';
+import {
+    buildLogTimeModal,
+    guardModalErrors,
+    parseLogTimeSubmission,
+    timesheetAppErrorToModalErrors,
+} from './timesheet.js';
 
 const PROJECTS = [
     { id: '6a5dd789cb47f588a23516e7', label: 'Nordmark Fleet Dashboard' },
@@ -131,24 +136,32 @@ describe('parseLogTimeSubmission', () => {
     });
 });
 
+/** Same shape as `viewWith`, but omits the project block entirely — the
+ *  shape `buildLogTimeModal` produces for a caller with no projects. */
+const projectLessView = (over: Record<string, unknown> = {}) => {
+    const view = viewWith(over);
+    delete (view.state.values as Record<string, unknown>)[SLACK_BLOCK_TS_PROJECT];
+    return view;
+};
+
 describe('timesheetAppErrorToModalErrors', () => {
     it('puts a future-date refusal on the date block', () => {
-        const errors = timesheetAppErrorToModalErrors(ERROR_CODES.TIMESHEET_FUTURE_DATE, 'nope');
+        const errors = timesheetAppErrorToModalErrors(ERROR_CODES.TIMESHEET_FUTURE_DATE, 'nope', viewWith());
         expect(Object.keys(errors)).toEqual([SLACK_BLOCK_TS_DATE]);
     });
 
     it('puts a zero duration on the billable block', () => {
-        const errors = timesheetAppErrorToModalErrors(ERROR_CODES.TIMESHEET_ZERO_DURATION, 'nope');
+        const errors = timesheetAppErrorToModalErrors(ERROR_CODES.TIMESHEET_ZERO_DURATION, 'nope', viewWith());
         expect(Object.keys(errors)).toEqual([SLACK_BLOCK_TS_BILLABLE]);
     });
 
     it('puts an over-long duration on the billable block', () => {
-        const errors = timesheetAppErrorToModalErrors(ERROR_CODES.TIMESHEET_DURATION_TOO_LARGE, 'nope');
+        const errors = timesheetAppErrorToModalErrors(ERROR_CODES.TIMESHEET_DURATION_TOO_LARGE, 'nope', viewWith());
         expect(Object.keys(errors)).toEqual([SLACK_BLOCK_TS_BILLABLE]);
     });
 
     it('puts an unreachable project on the project block', () => {
-        const errors = timesheetAppErrorToModalErrors(ERROR_CODES.PROJECT_NOT_FOUND, 'nope');
+        const errors = timesheetAppErrorToModalErrors(ERROR_CODES.PROJECT_NOT_FOUND, 'nope', viewWith());
         expect(Object.keys(errors)).toEqual([SLACK_BLOCK_TS_PROJECT]);
     });
 
@@ -156,7 +169,43 @@ describe('timesheetAppErrorToModalErrors', () => {
         // Slack drops errors keyed to a block that isn't in the view, so an
         // unmapped code must land somewhere that always exists or the user
         // sees a silent no-op.
-        const errors = timesheetAppErrorToModalErrors('SOMETHING_NEW', 'Sorry, that failed.');
+        const errors = timesheetAppErrorToModalErrors('SOMETHING_NEW', 'Sorry, that failed.', viewWith());
         expect(errors[SLACK_BLOCK_TS_DESCRIPTION]).toBe('Sorry, that failed.');
+    });
+
+    it('re-keys PROJECT_NOT_FOUND onto the description block for a project-less caller', () => {
+        // buildLogTimeModal renders no project block when the caller has no
+        // projects, so an error keyed to it would be silently dropped by
+        // Slack — the exact failure this guard exists to close.
+        const errors = timesheetAppErrorToModalErrors(
+            ERROR_CODES.PROJECT_NOT_FOUND,
+            'Project not found.',
+            projectLessView()
+        );
+        expect(errors).toEqual({ [SLACK_BLOCK_TS_DESCRIPTION]: 'Project not found.' });
+    });
+});
+
+describe('guardModalErrors', () => {
+    it('leaves an error targeting a present block untouched', () => {
+        const errors = guardModalErrors({ [SLACK_BLOCK_TS_DATE]: 'bad date' }, viewWith());
+        expect(errors).toEqual({ [SLACK_BLOCK_TS_DATE]: 'bad date' });
+    });
+
+    it('re-keys an error targeting an absent block onto description', () => {
+        const errors = guardModalErrors({ [SLACK_BLOCK_TS_PROJECT]: 'pick one' }, projectLessView());
+        expect(errors).toEqual({ [SLACK_BLOCK_TS_DESCRIPTION]: 'pick one' });
+    });
+
+    it('does not let a re-keyed error clobber a real description error', () => {
+        const errors = guardModalErrors(
+            {
+                [SLACK_BLOCK_TS_DESCRIPTION]: 'add a note',
+                [SLACK_BLOCK_TS_PROJECT]: 'pick one',
+            },
+            projectLessView()
+        );
+        // First write wins — the real description error survives.
+        expect(errors).toEqual({ [SLACK_BLOCK_TS_DESCRIPTION]: 'add a note' });
     });
 });
