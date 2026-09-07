@@ -130,3 +130,21 @@ export const SLACK_BLOCK_START_DATE = 'start_date';
 export const SLACK_BLOCK_END_DATE = 'end_date';
 export const SLACK_BLOCK_HALF_DAY = 'half_day';
 export const SLACK_BLOCK_REASON = 'reason';
+
+// ─── Log-time modal ids ───────────────────────────────────────────────────
+//
+// Same convention as the apply-leave ids above: `log_time_open` is the App
+// Home button's action_id AND the open-modal branch's key; `log_time_submit`
+// is the modal callback_id the view_submission branch routes on. The block
+// ids are the `state.values` keys read back on submit — they MUST match the
+// ids the builder emits, so both sides import these constants.
+export const SLACK_ACTION_LOG_TIME_OPEN = 'log_time_open';
+export const SLACK_CALLBACK_LOG_TIME = 'log_time_submit';
+export const SLACK_BLOCK_TS_DATE = 'ts_date';
+export const SLACK_BLOCK_TS_PROJECT = 'ts_project';
+export const SLACK_BLOCK_TS_BILLABLE = 'ts_billable';
+export const SLACK_BLOCK_TS_NON_BILLABLE = 'ts_non_billable';
+export const SLACK_BLOCK_TS_DESCRIPTION = 'ts_description';
+
+/** Slack rejects a `static_select` with more than 100 options. */
+export const SLACK_SELECT_OPTION_CAP = 100;
