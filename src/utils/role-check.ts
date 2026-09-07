@@ -18,7 +18,7 @@
  * Service `Caller` types now optionally carry `role_keys?` (passed
  * down from `req.user.role_keys`); the helper accepts either shape.
  */
-import { ROLES } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES, ROLES, type RoleType } from '../constants/roles.js';
 import { SYSTEM_ROLE_KEYS } from '../constants/role-keys.js';
 
 export interface AdminCheckable {
@@ -87,3 +87,26 @@ export const isProjectWorkAuthor = (caller: AdminCheckable): boolean => {
     if (isProjectAuthor(caller)) return true;
     return caller.role === ROLES.EMPLOYEE || (caller.role_keys ?? []).includes(SYSTEM_ROLE_KEYS.EMPLOYEE);
 };
+
+/**
+ * True when `role` is NOT a client-side role (`client`, `representative`) —
+ * i.e. the caller is internal staff, which is exactly who the RBAC catalog
+ * gives `timesheet.write` to (Client/Representative get "No leave /
+ * attendance / timesheets / billing / reports" — see the backend
+ * `CLAUDE.md` §Roles & permissions).
+ *
+ * Lives here rather than as a local `const` in a controller because the
+ * Slack interactive path (`controllers/slack-interactive.controller.ts`'s
+ * `log_time_open` branch, and `controllers/slack-log-time.controller.ts`'s
+ * `handleLogTimeSubmission` — the actual write path) bypasses Express
+ * `requirePermission` entirely, so both need their own gate, and
+ * `slack-log-time.controller.ts` can't import from
+ * `slack-interactive.controller.ts` without a circular import (that file
+ * imports this one's controller for routing). A shared, cycle-free module
+ * both controllers already depend on (`utils/`) is the one-definition fix —
+ * a verbatim-duplicated security predicate is exactly the kind of thing
+ * that silently drifts when the rule changes and only one copy gets
+ * updated (see `isAdminLike`'s doc comment above for a real instance of
+ * that class of bug, at the Step-47 role_keys migration).
+ */
+export const canLogTime = (role: RoleType): boolean => !CLIENT_SIDE_ROLES.includes(role);

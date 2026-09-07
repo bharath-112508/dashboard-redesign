@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isAdminLike } from './role-check.js';
+import { canLogTime, isAdminLike } from './role-check.js';
 
 /**
  * Pins the contract for `isAdminLike` (BACKEND_AUDIT.md R4) — both
@@ -42,5 +42,25 @@ describe('isAdminLike', () => {
 
     it('treats empty role_keys as no signal', () => {
         expect(isAdminLike({ role: 'employee', role_keys: [] })).toBe(false);
+    });
+});
+
+/**
+ * Pins the single-definition contract for `canLogTime` — the Slack
+ * interactive path's defence-in-depth gate on `timesheet.write` (see this
+ * function's doc comment for why it can't just be Express
+ * `requirePermission`).
+ */
+describe('canLogTime', () => {
+    it('allows every internal-staff role', () => {
+        expect(canLogTime('admin')).toBe(true);
+        expect(canLogTime('manager')).toBe(true);
+        expect(canLogTime('team_lead')).toBe(true);
+        expect(canLogTime('employee')).toBe(true);
+    });
+
+    it('refuses both client-side roles', () => {
+        expect(canLogTime('client')).toBe(false);
+        expect(canLogTime('representative')).toBe(false);
     });
 });

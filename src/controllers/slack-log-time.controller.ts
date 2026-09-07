@@ -2,7 +2,7 @@ import type { RequestHandler } from 'express';
 import { Types } from 'mongoose';
 
 import { TIMESHEET_ENTRY_TYPES } from '../constants/timesheet.js';
-import { CLIENT_SIDE_ROLES, type RoleType } from '../constants/roles.js';
+import type { RoleType } from '../constants/roles.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { getOrInitSettings } from '../services/settings.service.js';
 import { loadLogTimeProjects } from '../services/slack-timesheet.service.js';
@@ -11,6 +11,7 @@ import { createEntry } from '../services/timesheet.service.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import logger from '../utils/logger.js';
+import { canLogTime } from '../utils/role-check.js';
 import { buildHomeDashboardView } from '../utils/slack-home-blocks.js';
 import {
     buildLogTimeModal,
@@ -53,20 +54,6 @@ const UNKNOWN_USER =
     "Couldn't identify your Viljetech account. Set your Slack email on your profile or contact an admin.";
 
 const NO_TIMESHEET_ACCESS = "Your role can't log time in Slack.";
-
-/**
- * Client-side roles (`client`, `representative`) hold no `timesheet.write`.
- * `createEntry` (`timesheet.service.ts`) has no role check of its own — it
- * only scopes project visibility via `loadProjectForCaller` /
- * `buildProjectVisibilityFilter`, which for a Client returns every project
- * of their company, not an empty list — and the Slack path bypasses Express
- * `requirePermission` entirely. So this predicate (checked in
- * `handleLogTimeSubmission` below) is the actual enforcement for a written
- * entry, not just a UI nicety on the open branch. Duplicated (not imported)
- * from the matching `canLogTime` in `slack-interactive.controller.ts` to
- * avoid a circular import — that file imports this one for routing.
- */
-const canLogTime = (role: RoleType): boolean => !CLIENT_SIDE_ROLES.includes(role);
 
 const todayIso = (): string => dayjs().tz(DEFAULT_TIMEZONE).format('YYYY-MM-DD');
 

@@ -2,7 +2,7 @@ import type { RequestHandler } from 'express';
 import { Types } from 'mongoose';
 
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { ROLES, CLIENT_SIDE_ROLES, type RoleType } from '../constants/roles.js';
+import { ROLES, type RoleType } from '../constants/roles.js';
 import {
     SLACK_ACTION_ATTENDANCE_CHECK_IN,
     SLACK_ACTION_ATTENDANCE_CHECK_OUT,
@@ -17,6 +17,7 @@ import {
 } from '../constants/slack.js';
 import { approveLeave, rejectLeave, applyLeave } from '../services/leave-request.service.js';
 import { handleLogTimeSubmission, openLogTimeModal } from './slack-log-time.controller.js';
+import { canLogTime } from '../utils/role-check.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
 import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
@@ -112,21 +113,6 @@ const resolveCaller = resolveSlackCaller;
 /** Every role except `client` holds `leave_request.write`. The Slack path
  *  bypasses Express `requirePermission`, so gate here the same way. */
 const canApplyLeave = (role: RoleType): boolean => role !== ROLES.CLIENT;
-
-/**
- * Client-side roles (`client`, `representative`) hold no `timesheet.write` —
- * the RBAC catalog gives them zero leave/attendance/timesheet access. The
- * Slack path bypasses Express `requirePermission` entirely, and
- * `createEntry` (`timesheet.service.ts`) has no role check of its own (it
- * only scopes project visibility via `loadProjectForCaller`/
- * `buildProjectVisibilityFilter`, which for a Client returns every project
- * of their company — not empty), so this predicate is the actual
- * enforcement point for the open branch below. Duplicated (not imported) in
- * `slack-log-time.controller.ts`'s `handleLogTimeSubmission` — that's the
- * real write path and needs its own gate — to avoid a circular import back
- * into this file (see the `resolveCaller` comment above).
- */
-const canLogTime = (role: RoleType): boolean => !CLIENT_SIDE_ROLES.includes(role);
 
 /**
  * Open the Apply-for-leave modal. Shared by the App Home button and the
