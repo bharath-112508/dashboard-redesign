@@ -238,6 +238,33 @@ const assertCallerCanWrite = (project: ProjectDocument, caller: ProjectCaller): 
  * completed after 18:30 UTC. The backend already owns IST anchoring; it stays
  * here.
  */
+/**
+ * Turn a user-supplied `completed_on` (`YYYY-MM-DD`, IST) into the instant
+ * stored in `completed_at`, or `null` to mean "use now".
+ *
+ * End-of-day in IST rather than midnight: `completed_on` is a calendar date,
+ * and `toPublic` renders `completed_at` back through the IST timezone. Taking
+ * midnight would be correct too, but end-of-day keeps a project completed on
+ * its own end_date reading as delivered ON that date rather than at its very
+ * first second — which matters only for display, and reads better.
+ *
+ * A future date is refused: the delivery verdict compares this against
+ * `end_date`, and letting someone claim a completion that has not happened
+ * yet would manufacture an "On time" badge for work still in flight.
+ */
+const resolveCompletedAt = (completedOn: string | null | undefined): Date | null => {
+    if (!completedOn) return null;
+    const day = dayjs.tz(completedOn, DEFAULT_TIMEZONE);
+    if (!day.isValid()) {
+        throw AppError.unprocessable('completed_on is not a valid date', ERROR_CODES.VALIDATION_ERROR);
+    }
+    const today = dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
+    if (completedOn > today) {
+        throw AppError.unprocessable("A project can't be completed on a future date.", ERROR_CODES.VALIDATION_ERROR);
+    }
+    return day.endOf('day').toDate();
+};
+
 const toPublic = (doc: ProjectDocument): Record<string, unknown> => ({
     ...(doc.toJSON() as Record<string, unknown>),
     completed_on: doc.completed_at ? dayjs(doc.completed_at).tz(DEFAULT_TIMEZONE).format(DATE_FORMAT) : null,
@@ -544,7 +571,16 @@ export const createProject = async (
                 // A project can legitimately be created already `completed`
                 // (back-filling finished work). Stamp the delivery moment here
                 // too, or such a row would be permanently verdict-less.
-                completed_at: input.status === PROJECT_STATUSES.COMPLETED ? new Date() : null,
+                //
+                // `completed_on` when the caller supplied it — back-filling a
+                // project that finished in May must not record delivery as
+                // TODAY, which is what produced `Late 120d` on freshly entered
+                // historical work. Absent, "now" is still the right default:
+                // the common case is completing something as it happens.
+                completed_at:
+                    input.status === PROJECT_STATUSES.COMPLETED
+                        ? (resolveCompletedAt(input.completed_on) ?? new Date())
+                        : null,
                 created_by: caller.id,
             });
             break;
@@ -896,10 +932,16 @@ export const updateProject = async (
     // Un-completing clears it, which also discards the delivery-scope freeze
     // and folds any post-delivery tasks back into ordinary scope. That is the
     // correct reading: the project is being declared not-delivered.
+    const suppliedCompletedAt = resolveCompletedAt(patch.completed_on);
     if (doc.status === PROJECT_STATUSES.COMPLETED && statusBefore !== PROJECT_STATUSES.COMPLETED) {
-        doc.completed_at = new Date();
+        doc.completed_at = suppliedCompletedAt ?? new Date();
     } else if (doc.status !== PROJECT_STATUSES.COMPLETED) {
         doc.completed_at = null;
+    } else if (suppliedCompletedAt) {
+        // Already completed and the caller is correcting the date — the one
+        // case where re-stamping an existing completion is intended, unlike
+        // the incidental re-saves the guard above protects against.
+        doc.completed_at = suppliedCompletedAt;
     }
 
     await doc.save();

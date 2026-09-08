@@ -1,4 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
+import { PROJECT_STATUSES } from '../constants/project.js';
 import { Types } from 'mongoose';
 
 /**
@@ -278,6 +280,93 @@ describe('createProject', () => {
                 adminCaller()
             )
         ).rejects.toMatchObject({ code: ERROR_CODES.PROJECT_CODE_TAKEN });
+    });
+
+    it('back-fills the delivery date from completed_on instead of stamping now', async () => {
+        // The bug: creating a project already `completed` stamped
+        // `completed_at = new Date()`, so entering work that finished in May
+        // during September produced a "Late 120d" badge. The arithmetic was
+        // right; the input was invented.
+        userFindMock.mockReturnValue(mkUserChain([]));
+        projectCreateMock.mockImplementationOnce(async (doc: Record<string, unknown>) => ({
+            ...doc,
+            _id: new Types.ObjectId(),
+            toJSON: () => ({}),
+        }));
+
+        await svc.createProject(
+            {
+                name: 'Backfilled',
+                code: 'BACK-1',
+                description: '',
+                status: PROJECT_STATUSES.COMPLETED,
+                start_date: '2026-04-22',
+                end_date: '2026-05-11',
+                completed_on: '2026-05-11',
+                member_ids: [],
+                representative_ids: [],
+                custom_task_statuses: [],
+            } as never,
+            adminCaller()
+        );
+
+        const persisted = projectCreateMock.mock.calls[0]![0] as { completed_at: Date };
+        // Stored as the supplied day in IST, NOT today.
+        expect(dayjs(persisted.completed_at).tz(DEFAULT_TIMEZONE).format('YYYY-MM-DD')).toBe('2026-05-11');
+    });
+
+    it('still stamps now when completed_on is omitted', async () => {
+        userFindMock.mockReturnValue(mkUserChain([]));
+        projectCreateMock.mockImplementationOnce(async (doc: Record<string, unknown>) => ({
+            ...doc,
+            _id: new Types.ObjectId(),
+            toJSON: () => ({}),
+        }));
+
+        await svc.createProject(
+            {
+                name: 'Finished today',
+                code: 'BACK-2',
+                description: '',
+                status: PROJECT_STATUSES.COMPLETED,
+                start_date: '2026-04-22',
+                end_date: '2026-05-11',
+                member_ids: [],
+                representative_ids: [],
+                custom_task_statuses: [],
+            } as never,
+            adminCaller()
+        );
+
+        const persisted = projectCreateMock.mock.calls[0]![0] as { completed_at: Date };
+        const today = dayjs().tz(DEFAULT_TIMEZONE).format('YYYY-MM-DD');
+        expect(dayjs(persisted.completed_at).tz(DEFAULT_TIMEZONE).format('YYYY-MM-DD')).toBe(today);
+    });
+
+    it('refuses a completion date in the future', async () => {
+        // Otherwise a caller could manufacture an "On time" verdict for work
+        // that has not been delivered.
+        userFindMock.mockReturnValue(mkUserChain([]));
+        const future = dayjs().tz(DEFAULT_TIMEZONE).add(30, 'day').format('YYYY-MM-DD');
+
+        await expect(
+            svc.createProject(
+                {
+                    name: 'Future',
+                    code: 'BACK-3',
+                    description: '',
+                    status: PROJECT_STATUSES.COMPLETED,
+                    start_date: '2026-04-22',
+                    end_date: '2026-05-11',
+                    completed_on: future,
+                    member_ids: [],
+                    representative_ids: [],
+                    custom_task_statuses: [],
+                } as never,
+                adminCaller()
+            )
+        ).rejects.toMatchObject({ statusCode: 422 });
+        expect(projectCreateMock).not.toHaveBeenCalled();
     });
 
     it('refuses a completed project with no end date', async () => {
