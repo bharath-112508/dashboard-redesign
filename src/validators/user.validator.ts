@@ -88,16 +88,32 @@ const emergencyContactSchema = z.object({
     relation: z.string().trim().min(1),
 });
 
+/**
+ * Treat an empty string as "not supplied".
+ *
+ * A form field the user left alone submits as `''`, not as an absent key —
+ * so `.min(1).optional()` rejects it, because `optional()` admits `undefined`
+ * and nothing else. That is precisely how the freelancer path broke: the API
+ * accepted an omitted `employee_id` while the actual create form sent `''`
+ * and got "Too small: expected string to have >=1 characters".
+ *
+ * Normalising here rather than asking every client to strip blanks keeps the
+ * contract forgiving for any caller, and the per-employment-type requirement
+ * still runs afterwards in the superRefine.
+ */
+const blankAsAbsent = <T extends z.ZodTypeAny>(inner: T) =>
+    z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), inner.optional());
+
 const internalProfileCreateSchema = z.object({
     // Optional in SHAPE, required per employment type in the superRefine on
     // `createUserBodySchema`: staff must supply all four, a freelancer none.
     // A freelancer is engaged, not employed — they have no employee number,
     // no job title, no department and no joining date, and forcing invented
     // values for them is what this relaxes.
-    employee_id: z.string().trim().min(1).optional(),
-    job_title: z.string().trim().min(1).optional(),
-    department: z.string().trim().min(1).optional(),
-    date_of_joining: dateYMD.optional(),
+    employee_id: blankAsAbsent(z.string().trim().min(1)),
+    job_title: blankAsAbsent(z.string().trim().min(1)),
+    department: blankAsAbsent(z.string().trim().min(1)),
+    date_of_joining: blankAsAbsent(dateYMD),
     // Optional-with-default: every caller that predates the field (the demo
     // seeder, the smoke suite, existing integrations) keeps working and gets
     // `staff`, which is what they all meant.
@@ -243,10 +259,10 @@ export type CreateUserBody = z.infer<typeof createUserBodySchema>;
  * Same idiom `reporting_manager_id` already uses for "unset this".
  */
 const internalProfilePatchSchema = internalProfileCreateSchema.partial().extend({
-    employee_id: z.string().trim().min(1).nullable().optional(),
-    job_title: z.string().trim().min(1).nullable().optional(),
-    department: z.string().trim().min(1).nullable().optional(),
-    date_of_joining: dateYMD.nullable().optional(),
+    employee_id: blankAsAbsent(z.string().trim().min(1).nullable()),
+    job_title: blankAsAbsent(z.string().trim().min(1).nullable()),
+    department: blankAsAbsent(z.string().trim().min(1).nullable()),
+    date_of_joining: blankAsAbsent(dateYMD.nullable()),
 });
 const clientProfilePatchSchema = clientProfileCreateSchema.partial();
 
