@@ -516,6 +516,66 @@ describe('cancelLeave', () => {
 
 // ─── C4 — buildSlMonthUsedMap re-derive month-by-month ────────────────────
 
+/**
+ * Freelancers accrue no leave, so `initializeBalancesForUserYear` creates no
+ * balance rows for them. Before this guard, apply reached `findOrInitBalance`,
+ * found nothing, created nothing, and threw `Failed to initialise leave
+ * balance row` — a 500 on a request that simply doesn't apply to the caller.
+ *
+ * Both entry points are pinned: guarding apply alone would let someone fill
+ * in the whole form, see a valid preview, and fail only on submit.
+ */
+describe('freelancers are not on the leave scheme', () => {
+    const stubEmploymentType = (employment_type: string | undefined) => {
+        userFindByIdMock.mockReturnValue({
+            select: () => ({ lean: () => Promise.resolve({ internal_profile: { employment_type } }) }),
+        });
+    };
+
+    const body = {
+        leave_type_id: new Types.ObjectId().toString(),
+        start_date: '2026-09-10',
+        end_date: '2026-09-10',
+        reason: 'Personal',
+    };
+
+    it('refuses applyLeave with 422 LEAVE_NOT_APPLICABLE, not a 500', async () => {
+        stubEmploymentType('freelancer');
+        const caller = { id: new Types.ObjectId(), role: ROLES.EMPLOYEE };
+
+        await expect(svc.applyLeave(body as never, caller)).rejects.toMatchObject({
+            statusCode: 422,
+            code: ERROR_CODES.LEAVE_NOT_APPLICABLE,
+        });
+    });
+
+    it('refuses previewSplit too, so the form fails before it is filled in', async () => {
+        stubEmploymentType('freelancer');
+
+        await expect(svc.previewSplit(body as never, { id: new Types.ObjectId() })).rejects.toMatchObject({
+            code: ERROR_CODES.LEAVE_NOT_APPLICABLE,
+        });
+    });
+
+    it('lets staff through the guard', async () => {
+        stubEmploymentType('staff');
+        // Falls through to the ordinary flow and fails LATER, on the missing
+        // leave type — which is the point: the guard is not what stopped it.
+        await expect(svc.previewSplit(body as never, { id: new Types.ObjectId() })).rejects.not.toMatchObject({
+            code: ERROR_CODES.LEAVE_NOT_APPLICABLE,
+        });
+    });
+
+    it('treats a missing employment_type as staff', async () => {
+        // Users created before the field existed have no value at all. They
+        // must not be locked out of leave by an absent key.
+        stubEmploymentType(undefined);
+        await expect(svc.previewSplit(body as never, { id: new Types.ObjectId() })).rejects.not.toMatchObject({
+            code: ERROR_CODES.LEAVE_NOT_APPLICABLE,
+        });
+    });
+});
+
 describe('buildSlMonthUsedMap — C4 month attribution', () => {
     const userId = new Types.ObjectId();
     const slTypeId = new Types.ObjectId();

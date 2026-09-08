@@ -565,6 +565,12 @@ export const getMe = async (user_id: Types.ObjectId): Promise<Record<string, unk
         session_count: sessionCount,
         role_keys: authCtx.role_keys,
         permissions: authCtx.permissions,
+        // Staff vs freelancer. Not a permission — a freelancer holds the same
+        // bundle as any employee — but it decides whether the leave and
+        // comp-off surfaces have anything in them at all, so the sidebar needs
+        // it to avoid offering screens that are permanently empty. `null` for
+        // users predating the field, which consumers read as staff.
+        employment_type: user.internal_profile?.employment_type ?? null,
     };
 };
 
