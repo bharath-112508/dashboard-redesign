@@ -89,10 +89,15 @@ const emergencyContactSchema = z.object({
 });
 
 const internalProfileCreateSchema = z.object({
-    employee_id: z.string().trim().min(1),
-    job_title: z.string().trim().min(1),
-    department: z.string().trim().min(1),
-    date_of_joining: dateYMD,
+    // Optional in SHAPE, required per employment type in the superRefine on
+    // `createUserBodySchema`: staff must supply all four, a freelancer none.
+    // A freelancer is engaged, not employed — they have no employee number,
+    // no job title, no department and no joining date, and forcing invented
+    // values for them is what this relaxes.
+    employee_id: z.string().trim().min(1).optional(),
+    job_title: z.string().trim().min(1).optional(),
+    department: z.string().trim().min(1).optional(),
+    date_of_joining: dateYMD.optional(),
     // Optional-with-default: every caller that predates the field (the demo
     // seeder, the smoke suite, existing integrations) keeps working and gets
     // `staff`, which is what they all meant.
@@ -191,6 +196,20 @@ export const createUserBodySchema = z
             // Admin is exempt because the admin IS the root of the chain —
             // requiring one there would mean inventing a manager for the
             // person at the top.
+            // Staff-only employment record. Skipped for freelancers, whose
+            // engagement carries none of these.
+            if (data.internal_profile && data.internal_profile.employment_type !== EMPLOYMENT_TYPES.FREELANCER) {
+                const required = ['employee_id', 'job_title', 'department', 'date_of_joining'] as const;
+                for (const field of required) {
+                    if (!data.internal_profile[field]) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            path: ['internal_profile', field],
+                            message: `${field.replace(/_/g, ' ')} is required for staff`,
+                        });
+                    }
+                }
+            }
             if (data.role !== ROLES.ADMIN && data.internal_profile && !data.internal_profile.reporting_manager_id) {
                 ctx.addIssue({
                     code: z.ZodIssueCode.custom,
@@ -214,7 +233,21 @@ export type CreateUserBody = z.infer<typeof createUserBodySchema>;
 // Liberal schema: every field optional. Field-level authorization (admin vs
 // self) is enforced in the service layer.
 
-const internalProfilePatchSchema = internalProfileCreateSchema.partial();
+/**
+ * PATCH shape. `.partial()` makes every field optional, and the four
+ * staff-only fields additionally accept `null` to CLEAR them — which is what
+ * switching someone from staff to freelancer has to do. Without it, the form
+ * either sends `''` (rejected by `.min(1)`) or omits the keys, silently
+ * leaving a freelancer carrying a stale job title and department.
+ *
+ * Same idiom `reporting_manager_id` already uses for "unset this".
+ */
+const internalProfilePatchSchema = internalProfileCreateSchema.partial().extend({
+    employee_id: z.string().trim().min(1).nullable().optional(),
+    job_title: z.string().trim().min(1).nullable().optional(),
+    department: z.string().trim().min(1).nullable().optional(),
+    date_of_joining: dateYMD.nullable().optional(),
+});
 const clientProfilePatchSchema = clientProfileCreateSchema.partial();
 
 export const updateUserBodySchema = z

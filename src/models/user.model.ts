@@ -35,10 +35,10 @@ export interface EmergencyContact {
 }
 
 export interface InternalProfile {
-    employee_id: string;
-    job_title: string;
-    department: string;
-    date_of_joining: string; // YYYY-MM-DD
+    employee_id?: string;
+    job_title?: string;
+    department?: string;
+    date_of_joining?: string; // YYYY-MM-DD
     /**
      * How this person is engaged — `staff` or `freelancer`. Orthogonal to
      * `role`: a freelancer is usually `role: 'employee'` and gets exactly the
@@ -175,10 +175,20 @@ const emergencyContactSchema = new Schema<EmergencyContact>(
 
 const internalProfileSchema = new Schema<InternalProfile>(
     {
-        employee_id: { type: String, required: true, trim: true },
-        job_title: { type: String, required: true, trim: true },
-        department: { type: String, required: true, trim: true },
-        date_of_joining: { type: String, required: true },
+        // Not `required` at the model layer: a FREELANCER has no employee
+        // number, job title, department or joining date — they are engaged,
+        // not employed. The rule is per-employment-type, so it lives in
+        // `user.validator.ts`'s superRefine where the whole payload is
+        // visible; the same pattern the timesheet `description` rule uses.
+        //
+        // 🔴 `employee_id` must be ABSENT, never `''`. The unique index below
+        // is sparse, which skips documents missing the key — but an empty
+        // string IS a value, so a second freelancer saved with `''` collides
+        // on E11000. `user.service.ts` drops blanks before persisting.
+        employee_id: { type: String, required: false, trim: true },
+        job_title: { type: String, required: false, trim: true },
+        department: { type: String, required: false, trim: true },
+        date_of_joining: { type: String, required: false },
         employment_type: {
             type: String,
             required: true,
