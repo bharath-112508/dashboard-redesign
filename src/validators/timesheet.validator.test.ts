@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { createTimesheetBodySchema, patchTimesheetBodySchema } from './timesheet.validator.js';
 
 /**
- * A `general` entry is the "log time without a task" path. It must stay
- * attributable — to a project, a category, or both — but must NOT demand a
- * free-text category when a project already answers "what was this for?".
+ * A `general` entry is the "log time without a task" path. It still belongs to
+ * a project: every logged hour rolls up to one, so the project is mandatory
+ * and `general_category` is an optional label on top of it ("Standup",
+ * "Onboarding"), never a substitute for it.
  */
 describe('createTimesheetBodySchema — general entries', () => {
     const base = {
@@ -25,13 +26,29 @@ describe('createTimesheetBodySchema — general entries', () => {
         expect(parsed.success).toBe(true);
     });
 
-    it('accepts a category with no project', () => {
-        const parsed = createTimesheetBodySchema.safeParse({ ...base, general_category: 'Standup' });
+    it('accepts a project with a category', () => {
+        const parsed = createTimesheetBodySchema.safeParse({
+            ...base,
+            project_id: projectId,
+            general_category: 'Standup',
+        });
         expect(parsed.success).toBe(true);
     });
 
-    it('rejects an entry with neither — nothing to attribute the time to', () => {
+    it('rejects a category with no project — a label is not an attribution', () => {
+        const parsed = createTimesheetBodySchema.safeParse({ ...base, general_category: 'Standup' });
+        expect(parsed.success).toBe(false);
+    });
+
+    it('rejects an entry with no project at all', () => {
         const parsed = createTimesheetBodySchema.safeParse(base);
+        expect(parsed.success).toBe(false);
+    });
+
+    it('rejects an explicitly null project', () => {
+        // The old schema accepted `null` here; the FE sent it for internal
+        // time. It must now fail rather than fall through to a null column.
+        const parsed = createTimesheetBodySchema.safeParse({ ...base, project_id: null });
         expect(parsed.success).toBe(false);
     });
 
@@ -65,8 +82,16 @@ describe('patchTimesheetBodySchema — notes', () => {
         expect(parsed.success).toBe(true);
     });
 
-    it('allows clearing the category with null, now that a task is optional', () => {
+    it('allows clearing the category with null — it is only a label', () => {
         expect(patchTimesheetBodySchema.safeParse({ general_category: null }).success).toBe(true);
+    });
+
+    it('allows MOVING an entry to another project', () => {
+        expect(patchTimesheetBodySchema.safeParse({ project_id: 'b'.repeat(24) }).success).toBe(true);
+    });
+
+    it('refuses to clear the project — every entry keeps one', () => {
+        expect(patchTimesheetBodySchema.safeParse({ project_id: null }).success).toBe(false);
     });
 
     it('still refuses an empty-string category', () => {

@@ -318,7 +318,9 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
     assertNonZero(input);
     assertEntryUnderDailyCap(input);
 
-    let projectId: Types.ObjectId | null = null;
+    // Not nullable and not pre-seeded: both branches below assign it, because
+    // every entry — task-linked or general — now belongs to a project.
+    let projectId: Types.ObjectId;
     let sprintId: Types.ObjectId | null = null;
     let taskId: Types.ObjectId | null = null;
     let generalCategory: string | null = null;
@@ -340,17 +342,15 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
         // to the task's current sprint to keep summaries clean.
         sprintId = input.sprint_id ? new Types.ObjectId(input.sprint_id) : task.sprint_id;
     } else {
-        // General entry. project_id is optional; when supplied, verify the
+        // General entry. The project is required by the schema; verify the
         // caller can see it so the row doesn't quietly land against a
         // project they have no access to.
-        if (input.project_id) {
-            const pOid = new Types.ObjectId(input.project_id);
-            await loadProjectForCaller(pOid, caller);
-            projectId = pOid;
-        }
+        const pOid = new Types.ObjectId(input.project_id);
+        await loadProjectForCaller(pOid, caller);
+        projectId = pOid;
         // Omitted is stored as `null`, not `undefined` — the column is
         // `String | null` and an undefined would leave the key off the doc,
-        // so `{ project_id: null }` grouping in the summary would miss it.
+        // so `{ general_category: null }` grouping in the summary would miss it.
         generalCategory = input.general_category ?? null;
     }
 
@@ -448,23 +448,22 @@ export const patchEntry = async (
         entry.general_category = patch.general_category;
     }
 
+    // Moving a general entry between projects is allowed; removing the project
+    // is not — the schema makes `project_id` non-nullable, so there is no
+    // "clear it" branch to write here.
     if (entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL && patch.project_id !== undefined) {
-        if (patch.project_id) {
-            const pOid = new Types.ObjectId(patch.project_id);
-            await loadProjectForCaller(pOid, caller);
-            entry.project_id = pOid;
-        } else {
-            entry.project_id = null;
-        }
+        const pOid = new Types.ObjectId(patch.project_id);
+        await loadProjectForCaller(pOid, caller);
+        entry.project_id = pOid;
     }
 
-    // Same attributability rule the create schema enforces, re-checked against
-    // the POST-patch state. A partial body can't express "a project OR a
-    // category" on its own: clearing either one alone is legal, clearing the
-    // last one leaves an entry that says nothing about what the time was for.
+    // Rows created before the project became mandatory may still carry a null
+    // project and a category. They stay editable — retro-fitting a project
+    // onto historical time would be a guess — but the category that is the
+    // only thing attributing them can't then be cleared as well.
     if (entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL && !entry.project_id && !entry.general_category) {
         throw AppError.unprocessable(
-            'Keep either a project or a category on the entry, so the time stays attributable.',
+            'This entry has no project, so keep its category — otherwise the time is unattributable.',
             ERROR_CODES.VALIDATION_ERROR
         );
     }

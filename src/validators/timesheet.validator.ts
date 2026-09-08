@@ -79,27 +79,25 @@ const taskLinkedCreateSchema = z
     })
     .extend(durationSchema.shape);
 
+// Every logged hour belongs to a project — a general one included. The rule
+// used to be "a project OR a category", which let internal time accumulate
+// against no project at all; those rows then sat outside every project rollup
+// and could only be found by listing timesheets directly. Internal time now
+// goes against an internal project, and `general_category` is a free-text
+// refinement of it ("Standup", "Onboarding") rather than a substitute for it.
+// Rows created under the old rule keep their null project — `updateEntry`
+// still lets them be edited.
 const generalCreateSchema = z
     .object({
         local_date: isoDateSchema,
         entry_type: z.literal(TIMESHEET_ENTRY_TYPES.GENERAL),
-        project_id: objectIdSchema.nullable().optional(),
+        project_id: objectIdSchema,
         sprint_id: z.null().optional(),
         task_id: z.null().optional(),
         general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable().optional(),
         description: descriptionSchema,
     })
-    .extend(durationSchema.shape)
-    // A general entry has to say what the time was FOR — but a project is an
-    // answer to that on its own. Requiring the category unconditionally meant
-    // "log two hours against Project X" also demanded a free-text label, so
-    // people typed "work" and the field carried no information. Requiring at
-    // least one keeps the entry attributable without inventing a category
-    // where the project already is one.
-    .refine((d) => Boolean(d.project_id) || Boolean(d.general_category), {
-        message: 'Pick a project or name a category, so the time is attributable.',
-        path: ['general_category'],
-    });
+    .extend(durationSchema.shape);
 
 export const createTimesheetBodySchema = z.discriminatedUnion('entry_type', [
     taskLinkedCreateSchema,
@@ -122,14 +120,15 @@ export const patchTimesheetBodySchema = z
         idle_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
         idle_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
         description: descriptionSchema,
-        // Nullable so a category can be CLEARED, now that it's optional on
-        // create. Still `.min(1)` when a string is sent, so it can't be
-        // blanked to '' — that's the un-representable state the create schema
-        // already refuses. `updateEntry` re-checks attributability after the
-        // patch is applied, since one field alone can't express "a project OR
-        // a category" on a partial body.
+        // Nullable so a category can be CLEARED — it's an optional label, not
+        // the thing the time is attributed to. Still `.min(1)` when a string
+        // is sent, so it can't be blanked to '' — the un-representable state
+        // the create schema also refuses.
         general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable(),
-        project_id: objectIdSchema.nullable(),
+        // NOT nullable: a project can be MOVED but never removed, matching
+        // create. Clearing it would reintroduce the project-less row by the
+        // back door.
+        project_id: objectIdSchema,
         sprint_id: objectIdSchema.nullable(),
         task_id: objectIdSchema,
     })
