@@ -5,10 +5,18 @@ import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES } from '../constants/roles.js';
 import { SLACK_SELECT_OPTION_CAP } from '../constants/slack.js';
 
-const { findMock, buildFilterMock, resolvePermissionsMock } = vi.hoisted(() => ({
-    findMock: vi.fn(),
-    buildFilterMock: vi.fn(),
-    resolvePermissionsMock: vi.fn(),
+const { findMock, buildFilterMock, resolvePermissionsMock, taskFindMock, loadProjectForCallerMock } = vi.hoisted(
+    () => ({
+        findMock: vi.fn(),
+        buildFilterMock: vi.fn(),
+        resolvePermissionsMock: vi.fn(),
+        taskFindMock: vi.fn(),
+        loadProjectForCallerMock: vi.fn(),
+    })
+);
+
+vi.mock('../models/task.model.js', () => ({
+    Task: { find: taskFindMock },
 }));
 
 vi.mock('../models/project.model.js', () => ({
@@ -17,13 +25,14 @@ vi.mock('../models/project.model.js', () => ({
 
 vi.mock('./project.service.js', () => ({
     buildProjectVisibilityFilter: buildFilterMock,
+    loadProjectForCaller: loadProjectForCallerMock,
 }));
 
 vi.mock('./role.service.js', () => ({
     resolvePermissionsForUser: resolvePermissionsMock,
 }));
 
-const { loadLogTimeProjects, callerCanLogTime } = await import('./slack-timesheet.service.js');
+const { loadLogTimeProjects, callerCanLogTime, loadLogTimeTickets } = await import('./slack-timesheet.service.js');
 
 /** `Project.find()` returns a chainable query — mirror just the links used. */
 const queryStub = (rows: unknown[]) => ({
@@ -115,5 +124,62 @@ describe('callerCanLogTime', () => {
     it('refuses a caller with no resolved permissions at all', async () => {
         resolvePermissionsMock.mockResolvedValue({ permissions: [] });
         await expect(callerCanLogTime(caller.id)).resolves.toBe(false);
+    });
+});
+
+// ─── loadLogTimeTickets ───────────────────────────────────────────────────
+//
+// Feeds the Ticket select. Scope is "MY open tickets in THIS project": the
+// list has to stay short enough to scan in a dropdown, and Slack caps a
+// static_select at 100 options regardless.
+
+describe('loadLogTimeTickets', () => {
+    const projectId = new Types.ObjectId();
+
+    beforeEach(() => {
+        loadProjectForCallerMock.mockResolvedValue({ _id: projectId, code: 'VLJ' });
+    });
+
+    it("asks for the caller's own non-done tasks in that project", async () => {
+        taskFindMock.mockReturnValue(queryStub([]));
+        await loadLogTimeTickets(projectId.toString(), caller);
+
+        const filter = taskFindMock.mock.calls[0]![0] as Record<string, unknown>;
+        expect(filter.project_id).toStrictEqual(projectId);
+        // assignee_ids, not primary_assignee_id — a task assigned to several
+        // people belongs to all of them equally (see task.model.ts).
+        expect(filter.assignee_ids).toStrictEqual(caller.id);
+        expect(filter.status).toEqual({ $ne: 'done' });
+    });
+
+    it('labels options as {project code}-{task number} {title}', async () => {
+        taskFindMock.mockReturnValue(
+            queryStub([{ _id: new Types.ObjectId('6a9ff1a60f7ba40f3388d705'), task_number: 142, title: 'Fix login' }])
+        );
+        const out = await loadLogTimeTickets(projectId.toString(), caller);
+        expect(out).toEqual([{ id: '6a9ff1a60f7ba40f3388d705', label: 'VLJ-142 Fix login' }]);
+    });
+
+    it('caps at the Slack option ceiling', async () => {
+        taskFindMock.mockReturnValue(queryStub([]));
+        await loadLogTimeTickets(projectId.toString(), caller);
+        expect(queryStub([]).limit).toBeDefined();
+        const q = taskFindMock.mock.results[0]!.value as { limit: ReturnType<typeof vi.fn> };
+        expect(q.limit).toHaveBeenCalledWith(SLACK_SELECT_OPTION_CAP);
+    });
+
+    it('returns nothing for a project the caller cannot see, instead of throwing', async () => {
+        // This feeds a dropdown, so it must degrade rather than break the
+        // modal. It is NOT the authorization boundary: `createEntry` calls
+        // loadTaskForCaller/loadProjectForCaller on the write itself, so a
+        // forged submission naming a hidden project is still refused there.
+        loadProjectForCallerMock.mockRejectedValue(new Error('forbidden'));
+        await expect(loadLogTimeTickets(projectId.toString(), caller)).resolves.toEqual([]);
+        expect(taskFindMock).not.toHaveBeenCalled();
+    });
+
+    it('returns nothing for a malformed project id', async () => {
+        await expect(loadLogTimeTickets('not-an-id', caller)).resolves.toEqual([]);
+        expect(taskFindMock).not.toHaveBeenCalled();
     });
 });

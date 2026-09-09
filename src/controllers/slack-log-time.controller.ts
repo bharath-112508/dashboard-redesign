@@ -5,7 +5,7 @@ import { TIMESHEET_ENTRY_TYPES } from '../constants/timesheet.js';
 import type { RoleType } from '../constants/roles.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { getOrInitSettings } from '../services/settings.service.js';
-import { callerCanLogTime, loadLogTimeProjects } from '../services/slack-timesheet.service.js';
+import { callerCanLogTime, loadLogTimeProjects, loadLogTimeTickets } from '../services/slack-timesheet.service.js';
 import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
 import { createEntry } from '../services/timesheet.service.js';
 import { AppError } from '../utils/app-error.js';
@@ -17,17 +17,27 @@ import {
     buildLogTimeModal,
     guardModalErrors,
     parseLogTimeSubmission,
+    readLogTimeState,
     timesheetAppErrorToModalErrors,
 } from '../utils/slack-block-kit/timesheet.js';
 import {
     SLACK_BLOCK_TS_BILLABLE,
+    SLACK_BLOCK_TS_CONTEXT,
     SLACK_BLOCK_TS_DATE,
     SLACK_BLOCK_TS_DESCRIPTION,
     SLACK_BLOCK_TS_NON_BILLABLE,
     SLACK_BLOCK_TS_PROJECT,
+    SLACK_BLOCK_TS_TICKET,
+    SLACK_TS_TYPE_TICKET,
 } from '../constants/slack.js';
 import type { SlackContext } from '../utils/slack.js';
-import { openSlackModal, postSlackMessage, publishHomeView, slackContextFrom } from '../utils/slack.js';
+import {
+    openSlackModal,
+    postSlackMessage,
+    publishHomeView,
+    slackContextFrom,
+    updateSlackModal,
+} from '../utils/slack.js';
 import { createTimesheetBodySchema } from '../validators/timesheet.validator.js';
 
 /**
@@ -83,6 +93,59 @@ const republishHome = async (ctx: SlackContext | null, slackUserId: string, user
 };
 
 /**
+ * Re-render the open modal after a Type or Project change.
+ *
+ * Slack does not do conditional fields: a modal's blocks are fixed at render
+ * time, so "show the Ticket select only for a ticket entry" means replacing
+ * the view. The two selects carry `dispatch_action: true` (see the builder)
+ * and land here.
+ *
+ * Everything already typed is read back off the submitted view and handed to
+ * the builder as `initial_*` — `views.update` REPLACES the blocks and keeps
+ * none of the entered values, so skipping that step silently wipes the
+ * user's date, hours and notes the moment they touch the type select.
+ *
+ * Failure is survivable and deliberately quiet: the modal keeps showing its
+ * previous blocks, which is still a submittable form. There is nothing to
+ * tell the user that would help — a DM about a dropdown they are looking at
+ * would be noise — so this logs and returns.
+ */
+export const handleLogTimeModalChange = async (
+    payload: {
+        user: { id: string };
+        actions?: Array<{ action_id?: string }>;
+        view?: { id?: string; hash?: string; state?: unknown };
+    },
+    user: SlackCaller
+): Promise<void> => {
+    const viewId = payload.view?.id;
+    if (!viewId) return;
+
+    const settings = await getOrInitSettings();
+    const ctx = slackContextFrom(settings.slack);
+    if (!ctx) return;
+
+    const state = readLogTimeState(payload.view);
+    const projects = await loadLogTimeProjects({ id: user._id, role: user.role });
+
+    // Only fetch tickets when they will actually be rendered. On General the
+    // block is not shown, and with no project chosen there is nothing to
+    // scope the query by — the builder renders guidance for both cases.
+    const tickets =
+        state.entry_type === SLACK_TS_TYPE_TICKET && state.project_id
+            ? await loadLogTimeTickets(state.project_id, { id: user._id, role: user.role })
+            : [];
+
+    await updateSlackModal(
+        ctx,
+        viewId,
+        buildLogTimeModal(projects, todayIso(), { state, tickets }),
+        'log-time-modal-update',
+        payload.view?.hash
+    );
+};
+
+/**
  * Map a `createTimesheetBodySchema` Zod issue's field path onto a block id
  * IN THE LOG-TIME MODAL. Slack silently drops an error keyed to a block
  * that isn't in the view (see `timesheetAppErrorToModalErrors`'s doc
@@ -98,9 +161,14 @@ const republishHome = async (ctx: SlackContext | null, slackUserId: string, user
 const FIELD_TO_BLOCK: Record<string, string> = {
     local_date: SLACK_BLOCK_TS_DATE,
     project_id: SLACK_BLOCK_TS_PROJECT,
-    // No category field in this modal — project is the only attributable
-    // input it offers, so "pick a project or name a category" surfaces there.
-    general_category: SLACK_BLOCK_TS_PROJECT,
+    // "Ticket" chosen but none picked. Without this the error would fall
+    // through to the description block — telling someone their NOTE is wrong
+    // when the empty field is the ticket select right above it.
+    task_id: SLACK_BLOCK_TS_TICKET,
+    // The Context input, which only exists on a general entry. On a ticket
+    // entry that block is not rendered and `guardModalErrors` re-keys this
+    // to the description block rather than letting Slack drop it.
+    general_category: SLACK_BLOCK_TS_CONTEXT,
     billable_hours: SLACK_BLOCK_TS_BILLABLE,
     billable_minutes: SLACK_BLOCK_TS_BILLABLE,
     non_billable_hours: SLACK_BLOCK_TS_NON_BILLABLE,
@@ -139,11 +207,17 @@ export const handleLogTimeSubmission: RequestHandler = async (req, res) => {
 
     // Reuse the HTTP validator so Slack input gets identical validation and
     // defaults — the description-required rule lives there, not on the model.
+    // The Slack-facing type ('general' | 'ticket') maps onto the persisted
+    // `entry_type` here and nowhere else, so the two vocabularies stay
+    // independent. `parseLogTimeSubmission` has already nulled whichever of
+    // task_id / general_category does not belong to the chosen branch — the
+    // validator is a discriminated union and refuses a task_id on a general
+    // entry (and vice versa).
+    const submitted = parseLogTimeSubmission(payload.view);
+    const isTicketEntry = submitted.entry_type === SLACK_TS_TYPE_TICKET;
     const parsed = createTimesheetBodySchema.safeParse({
-        ...parseLogTimeSubmission(payload.view),
-        entry_type: TIMESHEET_ENTRY_TYPES.GENERAL,
-        general_category: null,
-        task_id: null,
+        ...submitted,
+        entry_type: isTicketEntry ? TIMESHEET_ENTRY_TYPES.TASK_LINKED : TIMESHEET_ENTRY_TYPES.GENERAL,
     });
 
     if (!parsed.success) {

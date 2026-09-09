@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import type { Response } from 'express';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -6,9 +7,13 @@ import { ROLES } from '../constants/roles.js';
 import { AppError } from '../utils/app-error.js';
 import {
     SLACK_BLOCK_TS_BILLABLE,
+    SLACK_BLOCK_TS_CONTEXT,
     SLACK_BLOCK_TS_DATE,
+    SLACK_BLOCK_TS_TICKET,
+    SLACK_BLOCK_TS_TYPE,
     SLACK_BLOCK_TS_DESCRIPTION,
     SLACK_BLOCK_TS_PROJECT,
+    SLACK_TS_TYPE_TICKET,
 } from '../constants/slack.js';
 
 const {
@@ -58,6 +63,7 @@ const { handleLogTimeSubmission, openLogTimeModal } = await import('./slack-log-
 
 const USER = { _id: new Types.ObjectId(), role: ROLES.EMPLOYEE, full_name: 'Ananya' };
 const PROJECT_ID = new Types.ObjectId().toString();
+const TASK_ID = new Types.ObjectId().toString();
 
 const submission = (over: Record<string, unknown> = {}) => ({
     body: {
@@ -86,11 +92,17 @@ const submission = (over: Record<string, unknown> = {}) => ({
     headers: {},
 });
 
+/** Minimal Express `Response` double. Typed mocks (so assertions keep their
+ *  `.mock.calls` types) and cast once at the boundary — the controller only
+ *  ever touches `.status().json()`. */
 const resStub = () => {
-    const res: any = {};
-    res.status = vi.fn().mockReturnValue(res);
-    res.json = vi.fn().mockReturnValue(res);
-    return res;
+    const res = {
+        status: vi.fn(),
+        json: vi.fn(),
+    };
+    res.status.mockReturnValue(res);
+    res.json.mockReturnValue(res);
+    return res as unknown as Response & typeof res;
 };
 
 beforeEach(() => {
@@ -356,5 +368,83 @@ describe('openLogTimeModal', () => {
     it('guards a missing trigger_id without hitting Slack', async () => {
         await expect(openLogTimeModal(undefined, USER as never)).resolves.toEqual(expect.any(String));
         expect(openModalMock).not.toHaveBeenCalled();
+    });
+});
+
+// ─── Ticket entries ───────────────────────────────────────────────────────
+//
+// The modal's Type select decides which shape the submission takes. The
+// validator is a discriminated union, so each branch must null the other's
+// field or the entry is rejected for a reason the user cannot act on.
+
+describe('handleLogTimeSubmission — ticket entries', () => {
+    it('a ticket entry is submitted as task_linked with the task id', async () => {
+        createEntryMock.mockResolvedValue({
+            data: { id: 'e1' },
+            warnings: { exceeds_daily_threshold: false, overlaps_approved_leave: false },
+        });
+        const res = resStub();
+        await handleLogTimeSubmission(
+            submission({
+                [SLACK_BLOCK_TS_TYPE]: {
+                    [SLACK_BLOCK_TS_TYPE]: { selected_option: { value: SLACK_TS_TYPE_TICKET } },
+                },
+                [SLACK_BLOCK_TS_TICKET]: {
+                    [SLACK_BLOCK_TS_TICKET]: { selected_option: { value: TASK_ID } },
+                },
+            }) as never,
+            res,
+            vi.fn()
+        );
+        expect(createEntryMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                entry_type: 'task_linked',
+                task_id: TASK_ID,
+                general_category: null,
+            }),
+            expect.anything()
+        );
+    });
+
+    it('a general entry carries the context through as general_category', async () => {
+        createEntryMock.mockResolvedValue({
+            data: { id: 'e1' },
+            warnings: { exceeds_daily_threshold: false, overlaps_approved_leave: false },
+        });
+        const res = resStub();
+        await handleLogTimeSubmission(
+            submission({
+                [SLACK_BLOCK_TS_CONTEXT]: { [SLACK_BLOCK_TS_CONTEXT]: { value: 'Standup' } },
+            }) as never,
+            res,
+            vi.fn()
+        );
+        expect(createEntryMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                entry_type: 'general',
+                general_category: 'Standup',
+                task_id: null,
+            }),
+            expect.anything()
+        );
+    });
+
+    it('choosing Ticket without picking one errors on the ticket block, not the notes', async () => {
+        const res = resStub();
+        await handleLogTimeSubmission(
+            submission({
+                [SLACK_BLOCK_TS_TYPE]: {
+                    [SLACK_BLOCK_TS_TYPE]: { selected_option: { value: SLACK_TS_TYPE_TICKET } },
+                },
+                // Ticket block rendered but nothing selected.
+                [SLACK_BLOCK_TS_TICKET]: { [SLACK_BLOCK_TS_TICKET]: { selected_option: null } },
+            }) as never,
+            res,
+            vi.fn()
+        );
+        const body = res.json.mock.calls[0]![0] as { response_action: string; errors: Record<string, string> };
+        expect(body.response_action).toBe('errors');
+        expect(Object.keys(body.errors)).toContain(SLACK_BLOCK_TS_TICKET);
+        expect(createEntryMock).not.toHaveBeenCalled();
     });
 });

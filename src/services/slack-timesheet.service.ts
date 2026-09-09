@@ -1,12 +1,15 @@
-import type { Types } from 'mongoose';
+import { Types } from 'mongoose';
 
 import type { RoleType } from '../constants/roles.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { Project } from '../models/project.model.js';
+import { Task } from '../models/task.model.js';
+import { DEFAULT_TASK_STATUSES } from '../constants/task.js';
 import { SLACK_SELECT_OPTION_CAP } from '../constants/slack.js';
 import { callerCan } from '../utils/caller-permissions.js';
-import type { LogTimeProjectOption } from '../utils/slack-block-kit/timesheet.js';
-import { buildProjectVisibilityFilter } from './project.service.js';
+import logger from '../utils/logger.js';
+import type { LogTimeProjectOption, LogTimeTicketOption } from '../utils/slack-block-kit/timesheet.js';
+import { buildProjectVisibilityFilter, loadProjectForCaller } from './project.service.js';
 import { resolvePermissionsForUser } from './role.service.js';
 
 /**
@@ -68,4 +71,66 @@ export const loadLogTimeProjects = async (caller: {
 export const callerCanLogTime = async (userId: Types.ObjectId): Promise<boolean> => {
     const { permissions } = await resolvePermissionsForUser(userId);
     return callerCan(permissions, PERMISSIONS.TIMESHEET_WRITE);
+};
+
+/**
+ * Tickets offerable in the "Log time" modal for ONE project.
+ *
+ * Scope is deliberately narrow — the caller's own tasks, excluding `done`.
+ * A `static_select` is a scrolling menu, not a search box, so a project-wide
+ * list would be unusable long before it hit Slack's 100-option ceiling; and
+ * when you are logging YOUR time, the ticket is almost always one of yours.
+ * Matches on `assignee_ids` rather than `primary_assignee_id` because a task
+ * shared between several people belongs to all of them (see task.model.ts) —
+ * keying on the denormalized field would hide co-assigned work.
+ *
+ * DISPLAY ONLY — never an authorization boundary. It returns `[]` instead of
+ * throwing for a project the caller cannot see, so a stale or forged
+ * `block_actions` degrades to an empty menu rather than breaking the open
+ * modal. The write is still guarded: `createEntry` runs `loadTaskForCaller`
+ * and cross-checks the task's parent project against `project_id`, so a
+ * submission naming a hidden project or someone else's ticket is refused
+ * there regardless of what this returned.
+ */
+export const loadLogTimeTickets = async (
+    projectId: string,
+    caller: { id: Types.ObjectId; role: RoleType }
+): Promise<LogTimeTicketOption[]> => {
+    let oid: Types.ObjectId;
+    try {
+        oid = new Types.ObjectId(projectId);
+    } catch {
+        return [];
+    }
+
+    // Loaded for two reasons: it applies the caller's visibility scope, and
+    // the project's `code` is half of every ticket label (`VLJ-142`).
+    let code: string;
+    try {
+        const project = await loadProjectForCaller(oid, caller);
+        code = (project as unknown as { code?: string }).code ?? '';
+    } catch (err) {
+        logger.warn(
+            { err, project_id: projectId, reason: 'log_time_tickets_project_unreadable' },
+            'Slack log-time: ticket list requested for a project the caller cannot read'
+        );
+        return [];
+    }
+
+    const rows = await Task.find({
+        project_id: oid,
+        assignee_ids: caller.id,
+        status: { $ne: DEFAULT_TASK_STATUSES.DONE },
+    })
+        .sort({ task_number: 1 })
+        .limit(SLACK_SELECT_OPTION_CAP)
+        .lean();
+
+    return rows.map((t) => {
+        const row = t as unknown as { _id: Types.ObjectId; task_number?: number; title?: string };
+        return {
+            id: String(row._id),
+            label: `${code}-${row.task_number ?? '?'} ${row.title ?? ''}`.trim(),
+        };
+    });
 };

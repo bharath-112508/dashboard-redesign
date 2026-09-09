@@ -81,6 +81,7 @@ export const SLACK_API_LOOKUP_BY_EMAIL = `${SLACK_API_BASE}/users.lookupByEmail`
 // Modal — open an interactive form (Apply-for-leave). Same bot-token auth.
 // https://api.slack.com/methods/views.open
 export const SLACK_API_VIEWS_OPEN = `${SLACK_API_BASE}/views.open`;
+export const SLACK_API_VIEWS_UPDATE = `${SLACK_API_BASE}/views.update`;
 
 /**
  * Network timeout for a single Slack API call. Slack's docs target ~3s
@@ -145,6 +146,24 @@ export const SLACK_BLOCK_TS_PROJECT = 'ts_project';
 export const SLACK_BLOCK_TS_BILLABLE = 'ts_billable';
 export const SLACK_BLOCK_TS_NON_BILLABLE = 'ts_non_billable';
 export const SLACK_BLOCK_TS_DESCRIPTION = 'ts_description';
+
+// Entry-type switch and the two blocks it toggles between. `ts_type` carries
+// `dispatch_action: true` so changing it (and changing the project, which
+// re-populates the ticket list) sends a `block_actions` from INSIDE the
+// modal — the controller answers those with `views.update`. Slack's own
+// input blocks are otherwise silent until submit.
+export const SLACK_BLOCK_TS_TYPE = 'ts_type';
+export const SLACK_BLOCK_TS_TICKET = 'ts_ticket';
+export const SLACK_BLOCK_TS_CONTEXT = 'ts_context';
+
+/**
+ * Values of the `ts_type` select. Deliberately NOT the `TIMESHEET_ENTRY_TYPES`
+ * strings: those are the persisted `entry_type` ('task_linked' / 'general')
+ * and this is the Slack-facing control. The submit handler maps one to the
+ * other in one place, so a rename on either side stays local.
+ */
+export const SLACK_TS_TYPE_GENERAL = 'general';
+export const SLACK_TS_TYPE_TICKET = 'ticket';
 
 /** Slack rejects a `static_select` with more than 100 options. */
 export const SLACK_SELECT_OPTION_CAP = 100;

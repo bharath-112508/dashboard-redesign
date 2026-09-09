@@ -17,7 +17,9 @@ import {
  *
  * The shape splits along `entry_type`:
  *   - `task_linked` → `project_id` + `task_id` are required, `general_category` must be null.
- *   - `general`     → `general_category` is required, `task_id` must be null.
+ *   - `general`     → `general_category` is OPTIONAL (a free-text label on
+ *                     top of the required project, not a substitute for it),
+ *                     `task_id` must be null.
  *
  * We use a discriminated union so Zod gives a useful per-branch error
  * instead of a fan of "expected/forbidden" messages on every field.

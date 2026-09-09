@@ -5,6 +5,7 @@ import {
     SLACK_API_PUBLISH_VIEW,
     SLACK_API_UPDATE_MESSAGE,
     SLACK_API_VIEWS_OPEN,
+    SLACK_API_VIEWS_UPDATE,
     SLACK_REQUEST_TIMEOUT_MS,
     SLACK_TEXT_MAX,
 } from '../constants/slack.js';
@@ -425,6 +426,84 @@ export const postOrUpdateSlackMessage = async (
  * return means the modal never opened; the caller falls back to an ephemeral
  * "please try again".
  */
+/**
+ * Re-render an OPEN modal via `views.update`. Used by the log-time modal,
+ * whose Type and Project selects change which fields the form should show.
+ *
+ * Same non-throwing dispatch policy as `openSlackModal`. Two differences
+ * that matter:
+ *
+ *  - It is addressed by `view_id`, not a `trigger_id`, so it is not on the
+ *    ~3s expiry clock — the caller can do a DB read first.
+ *  - `hash` is Slack's optimistic-concurrency token. Passing the hash from
+ *    the interaction payload makes Slack reject the update if the user has
+ *    changed the view since (`hash_conflict`), rather than silently
+ *    clobbering whatever they just typed. It is optional; we always send it.
+ *
+ * A false return means the modal still shows the previous blocks. That is a
+ * survivable state — the form is still submittable — so callers log and
+ * carry on rather than trying to tear the modal down.
+ */
+export const updateSlackModal = async (
+    ctx: SlackContext,
+    viewId: string,
+    view: unknown,
+    context: string,
+    hash?: string
+): Promise<boolean> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), SLACK_REQUEST_TIMEOUT_MS);
+    try {
+        const response = await fetch(SLACK_API_VIEWS_UPDATE, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                Authorization: `Bearer ${ctx.botToken}`,
+            },
+            body: JSON.stringify({ view_id: viewId, view, ...(hash ? { hash } : {}) }),
+            signal: controller.signal,
+        });
+        if (!response.ok) {
+            logger.warn(
+                {
+                    code: ERROR_CODES.SLACK_DISPATCH_FAILED,
+                    dispatch_event: context,
+                    http_status: response.status,
+                },
+                'Slack views.update returned a non-2xx status'
+            );
+            return false;
+        }
+        const body = (await response.json()) as { ok: boolean; error?: string };
+        if (!body.ok) {
+            logger.warn(
+                {
+                    code: ERROR_CODES.SLACK_DISPATCH_FAILED,
+                    dispatch_event: context,
+                    slack_error: body.error,
+                },
+                'Slack views.update rejected the request'
+            );
+            return false;
+        }
+        return true;
+    } catch (err) {
+        const isAbort = (err as { name?: string })?.name === 'AbortError';
+        logger.warn(
+            {
+                err,
+                code: ERROR_CODES.SLACK_DISPATCH_FAILED,
+                dispatch_event: context,
+                timed_out: isAbort,
+            },
+            isAbort ? 'Slack views.update timed out' : 'Slack views.update threw'
+        );
+        return false;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+};
+
 export const openSlackModal = async (
     ctx: SlackContext,
     triggerId: string,

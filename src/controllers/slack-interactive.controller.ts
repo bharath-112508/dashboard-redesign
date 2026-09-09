@@ -14,10 +14,12 @@ import {
     SLACK_ACTION_APPLY_LEAVE_OPEN,
     SLACK_CALLBACK_APPLY_LEAVE,
     SLACK_ACTION_LOG_TIME_OPEN,
+    SLACK_BLOCK_TS_PROJECT,
+    SLACK_BLOCK_TS_TYPE,
     SLACK_CALLBACK_LOG_TIME,
 } from '../constants/slack.js';
 import { approveLeave, rejectLeave, applyLeave } from '../services/leave-request.service.js';
-import { handleLogTimeSubmission, openLogTimeModal } from './slack-log-time.controller.js';
+import { handleLogTimeModalChange, handleLogTimeSubmission, openLogTimeModal } from './slack-log-time.controller.js';
 import { callerCanLogTime } from '../services/slack-timesheet.service.js';
 import { callerCanCheckInOut } from '../services/slack-attendance.service.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
@@ -67,7 +69,20 @@ interface BlockActionPayload {
     user: { id: string };
     actions: Array<{ action_id: string; value?: string }>;
     response_url?: string;
-    view?: { type?: string };
+    /**
+     * Present when the action came from a surface rather than a message:
+     * `type: 'home'` for the App Home tab, `'modal'` for a select inside an
+     * open modal. The modal fields (`id`/`hash`/`callback_id`/`state`) are
+     * what `views.update` needs to re-render the right view without
+     * clobbering a concurrent edit.
+     */
+    view?: {
+        type?: string;
+        id?: string;
+        hash?: string;
+        callback_id?: string;
+        state?: { values?: unknown };
+    };
     trigger_id?: string;
 }
 
@@ -300,6 +315,27 @@ export const handleInteractive: RequestHandler = async (req, res) => {
     }
 
     const action = payload.actions[0];
+
+    // A select inside the OPEN log-time modal, not a Home/message button.
+    // Handled before everything below because the rest of this function
+    // assumes a Home- or message-origin action and answers with an
+    // ephemeral — but Slack shows nothing for an in-modal block_actions, so
+    // the only useful reply is `views.update`, and the only correct HTTP
+    // response is a bare 200 ack.
+    if (payload.view?.type === 'modal' && payload.view?.callback_id === SLACK_CALLBACK_LOG_TIME) {
+        res.status(200).json({});
+        // Only the two selects that change WHICH blocks are shown. Picking a
+        // ticket changes nothing structural, so re-rendering on it would be a
+        // wasted round-trip the user perceives as the form flickering.
+        const actionId = action.action_id;
+        if (actionId !== SLACK_BLOCK_TS_TYPE && actionId !== SLACK_BLOCK_TS_PROJECT) return;
+
+        const modalUser = await resolveSlackCaller(payload.user.id);
+        if (!modalUser) return;
+        await handleLogTimeModalChange(payload, modalUser as never);
+        return;
+    }
+
     const isApprove = action.action_id.startsWith('approve_leave_');
     const isReject = action.action_id.startsWith('reject_leave_');
 
