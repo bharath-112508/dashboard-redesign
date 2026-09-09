@@ -267,10 +267,14 @@ const myTimeTable = (entries: MyTimeEntry[]): Array<Record<string, unknown>> => 
 /**
  * Today's logged time, the day's entries, and the Log-time button.
  *
- * Renders FIRST on the Home tab: logging time is the thing people open this
- * for most often, and it used to sit below every leave and attendance
- * section. Being first is also why it emits no leading divider — the tab
- * would open on a rule.
+ * Sits between attendance and leaves — you check in, then log what you did,
+ * which is the order the day actually happens in. (It was briefly FIRST on
+ * the tab; that pushed the Check In button below a full day of entries, and
+ * checking in is the one control most people open this for.)
+ *
+ * Emits a TRAILING divider and no leading one — the assembly above supplies
+ * the separator. That way a caller without `timesheet.write`, for whom this
+ * returns `[]`, gets exactly the layout that existed before the section did.
  */
 const myTimeBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
     if (!data.can_log_time) return [];
@@ -310,11 +314,15 @@ const myTimeBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> =
  */
 export const buildHomeDashboardView = (data: HomeDashboardData, user: DashboardUser): Record<string, unknown> => {
     const blocks: Array<Record<string, unknown>> = [
-        ...myTimeBlocks(data),
         header(`Attendance · ${istNow().format('ddd DD MMM')}`),
         ...attendanceHeaderBlocks(data.my_today as never, user.full_name ?? 'there'),
         ...teamAttendanceBlocks(data),
         divider(),
+        // Between attendance and leaves: you check in, then log what you did.
+        // Emits its own trailing divider, so when the caller can't log time
+        // and this collapses to [], the divider above still separates
+        // attendance from leaves exactly as it did before.
+        ...myTimeBlocks(data),
         ...myLeavesBlocks(data),
         divider(),
         ...whosOutBlocks(data),

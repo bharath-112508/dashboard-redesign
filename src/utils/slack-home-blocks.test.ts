@@ -377,27 +377,41 @@ describe('Your time — placement', () => {
     } as never;
     const user = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Ananya' } as never;
 
-    it('is the first thing on the tab, above Attendance', () => {
+    const idxOf = (view: { blocks: Array<Record<string, unknown>> }, needle: string) =>
+        view.blocks.findIndex((b) => JSON.stringify(b).includes(needle));
+
+    it('sits after Attendance and before Your leaves', () => {
         const view = buildHomeDashboardView(dataWithTime, user) as { blocks: Array<Record<string, unknown>> };
-        const text = (b: Record<string, unknown>) => JSON.stringify(b);
-        const timeIdx = view.blocks.findIndex((b) => text(b).includes('Your time'));
-        const attIdx = view.blocks.findIndex((b) => text(b).includes('Attendance'));
-        expect(timeIdx).toBeGreaterThanOrEqual(0);
-        expect(attIdx).toBeGreaterThanOrEqual(0);
-        expect(timeIdx).toBeLessThan(attIdx);
+        const att = idxOf(view, 'Attendance');
+        const time = idxOf(view, 'Your time');
+        const leaves = idxOf(view, 'Your leaves');
+        expect(att).toBeGreaterThanOrEqual(0);
+        expect(time).toBeGreaterThan(att);
+        expect(leaves).toBeGreaterThan(time);
     });
 
-    it('does not open with a stray divider when it is the first section', () => {
+    it('the tab still opens on Attendance, not on Your time', () => {
         const view = buildHomeDashboardView(dataWithTime, user) as { blocks: Array<Record<string, unknown>> };
-        expect(view.blocks[0]!.type).not.toBe('divider');
+        expect(JSON.stringify(view.blocks[0])).toContain('Attendance');
     });
 
-    it('a caller without timesheet.write still opens on Attendance', () => {
+    it('keeps the Check In control above the fold', () => {
+        // Regression: Your time was briefly first, which pushed Check In —
+        // the reason most people open the tab — below a full day of entries.
+        const view = buildHomeDashboardView(dataWithTime, user) as { blocks: Array<Record<string, unknown>> };
+        expect(idxOf(view, 'Attendance')).toBeLessThan(idxOf(view, 'Your time'));
+    });
+
+    it('leaves the layout unchanged for a caller who cannot log time', () => {
+        // The section collapses to [] and the divider above it still does the
+        // separating — no doubled rule, no stray one.
         const view = buildHomeDashboardView({ ...(dataWithTime as object), can_log_time: false } as never, user) as {
             blocks: Array<Record<string, unknown>>;
         };
+        expect(idxOf(view, 'Your time')).toBe(-1);
         expect(view.blocks[0]!.type).not.toBe('divider');
-        expect(JSON.stringify(view.blocks[0])).toContain('Attendance');
+        const types = view.blocks.map((b) => b.type);
+        expect(types.some((t, i) => t === 'divider' && types[i + 1] === 'divider')).toBe(false);
     });
 });
 
