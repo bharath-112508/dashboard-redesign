@@ -27,6 +27,18 @@ export interface BaseJWTPayload {
     role_keys: string[];
     /** Deduped union of every assigned role's permissions. */
     permissions: Permission[];
+    /**
+     * Session id — the `refresh_tokens` row this token was minted
+     * alongside. Lets `authenticate` reject an access token whose
+     * session has been revoked; without it a revoked session kept
+     * full API access until the token expired (8h).
+     *
+     * Optional: tokens issued before this claim shipped don't carry
+     * it. `authenticate` treats a missing `sid` as un-revocable and
+     * lets it through, so a deploy doesn't log the whole company out —
+     * those tokens age out within `JWT_EXPIRES_IN`.
+     */
+    sid?: string;
 }
 
 /** Refresh tokens carry a per-token `jti` so two tokens issued in the same second differ. */

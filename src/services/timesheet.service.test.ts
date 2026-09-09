@@ -97,6 +97,7 @@ vi.mock('../models/user.model.js', () => ({
 const stubReports = (ids: unknown[]) => userFindMock.mockReturnValue({ distinct: () => Promise.resolve(ids) });
 
 const svc = await import('./timesheet.service.js');
+import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES } from '../constants/roles.js';
@@ -325,6 +326,8 @@ describe('createEntry', () => {
     });
 
     it('accepts a general entry without task_id and persists general_category', async () => {
+        const projectId = new Types.ObjectId();
+        loadProjectForCallerMock.mockResolvedValueOnce({ _id: projectId });
         entryCreateMock.mockResolvedValueOnce(makeEntry({ entry_type: 'general' }));
         stubAggregate(60);
 
@@ -332,7 +335,7 @@ describe('createEntry', () => {
             {
                 local_date: today(),
                 entry_type: 'general',
-                project_id: null,
+                project_id: projectId.toString(),
                 sprint_id: null,
                 task_id: null,
                 general_category: 'meeting',
@@ -351,6 +354,37 @@ describe('createEntry', () => {
             expect.objectContaining({ entry_type: 'general', general_category: 'meeting' })
         );
         expect(taskFindByIdMock).not.toHaveBeenCalled();
+    });
+
+    // The project is what a general entry is attributed to, so it goes through
+    // the same visibility check as a task-linked one — a caller can't park
+    // internal time on a project they can't see.
+    it('scope-checks the project on a general entry', async () => {
+        const projectId = new Types.ObjectId();
+        loadProjectForCallerMock.mockRejectedValueOnce(AppError.notFound('Project not found'));
+
+        await expect(
+            svc.createEntry(
+                {
+                    local_date: today(),
+                    entry_type: 'general',
+                    project_id: projectId.toString(),
+                    sprint_id: null,
+                    task_id: null,
+                    general_category: 'meeting',
+                    billable_hours: 1,
+                    billable_minutes: 0,
+                    non_billable_hours: 0,
+                    non_billable_minutes: 0,
+                    idle_hours: 0,
+                    idle_minutes: 0,
+                    description: 'Weekly sync',
+                },
+                employeeCaller()
+            )
+        ).rejects.toThrow('Project not found');
+
+        expect(entryCreateMock).not.toHaveBeenCalled();
     });
 
     it('rolls idle time into the persisted totals (idle_total_minutes + total_minutes)', async () => {

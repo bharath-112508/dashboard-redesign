@@ -172,10 +172,20 @@ const issueTokenPair = async (input: IssueTokensInput): Promise<AuthTokenPair & 
         permissions: input.permissions,
     };
 
-    const access = createAccessToken(basePayload);
+    // The access token must name the session row it belongs to, so
+    // `authenticate` can reject it once that session is revoked. Mint
+    // the row's _id first rather than reading it back after insert —
+    // the token has to be signed with it already in the payload.
+    const sessionId = new Types.ObjectId();
+
+    const access = createAccessToken({ ...basePayload, sid: sessionId.toString() });
+    // The refresh token is looked up by its own hashed row, so it
+    // doesn't need `sid` — but carrying it keeps the rotated pair
+    // describing the same session.
     const refresh = createRefreshToken(basePayload);
 
     const row = await RefreshToken.create({
+        _id: sessionId,
         user_id: input.user_id,
         token_hash: sha256Hex(refresh.token),
         device_info: input.device_info,
@@ -565,6 +575,12 @@ export const getMe = async (user_id: Types.ObjectId): Promise<Record<string, unk
         session_count: sessionCount,
         role_keys: authCtx.role_keys,
         permissions: authCtx.permissions,
+        // Staff vs freelancer. Not a permission — a freelancer holds the same
+        // bundle as any employee — but it decides whether the leave and
+        // comp-off surfaces have anything in them at all, so the sidebar needs
+        // it to avoid offering screens that are permanently empty. `null` for
+        // users predating the field, which consumers read as staff.
+        employment_type: user.internal_profile?.employment_type ?? null,
     };
 };
 

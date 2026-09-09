@@ -238,6 +238,33 @@ const assertCallerCanWrite = (project: ProjectDocument, caller: ProjectCaller): 
  * completed after 18:30 UTC. The backend already owns IST anchoring; it stays
  * here.
  */
+/**
+ * Turn a user-supplied `completed_on` (`YYYY-MM-DD`, IST) into the instant
+ * stored in `completed_at`, or `null` to mean "use now".
+ *
+ * End-of-day in IST rather than midnight: `completed_on` is a calendar date,
+ * and `toPublic` renders `completed_at` back through the IST timezone. Taking
+ * midnight would be correct too, but end-of-day keeps a project completed on
+ * its own end_date reading as delivered ON that date rather than at its very
+ * first second — which matters only for display, and reads better.
+ *
+ * A future date is refused: the delivery verdict compares this against
+ * `end_date`, and letting someone claim a completion that has not happened
+ * yet would manufacture an "On time" badge for work still in flight.
+ */
+const resolveCompletedAt = (completedOn: string | null | undefined): Date | null => {
+    if (!completedOn) return null;
+    const day = dayjs.tz(completedOn, DEFAULT_TIMEZONE);
+    if (!day.isValid()) {
+        throw AppError.unprocessable('completed_on is not a valid date', ERROR_CODES.VALIDATION_ERROR);
+    }
+    const today = dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
+    if (completedOn > today) {
+        throw AppError.unprocessable("A project can't be completed on a future date.", ERROR_CODES.VALIDATION_ERROR);
+    }
+    return day.endOf('day').toDate();
+};
+
 const toPublic = (doc: ProjectDocument): Record<string, unknown> => ({
     ...(doc.toJSON() as Record<string, unknown>),
     completed_on: doc.completed_at ? dayjs(doc.completed_at).tz(DEFAULT_TIMEZONE).format(DATE_FORMAT) : null,
@@ -336,6 +363,45 @@ const companyOf = (
     doc: ProjectDocument,
     byId: Map<string, { id: string; name: string }>
 ): { id: string; name: string } | null => (doc.company_id ? (byId.get(String(doc.company_id)) ?? null) : null);
+
+/**
+ * Resolve `created_by` → `created_by_user: {id, full_name} | null` for a page.
+ *
+ * Same reasoning as `attachCompanies`: the raw id is useless to the list, one
+ * `$in` covers the page instead of an N+1, and a dangling pointer degrades to
+ * `null` rather than taking the list down. A deactivated author still resolves
+ * — who made the project is history and doesn't stop being true.
+ */
+const attachCreators = async (rows: ProjectDocument[]): Promise<Map<string, { id: string; full_name: string }>> => {
+    const ids = [
+        ...new Set(
+            rows
+                .map((r) => r.created_by)
+                .filter(Boolean)
+                .map(String)
+        ),
+    ];
+    if (ids.length === 0) return new Map();
+    const users = await User.find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(users.map((u) => [String(u._id), { id: String(u._id), full_name: u.full_name }]));
+};
+
+/**
+ * The `created_by_user` field as it appears on a project response.
+ *
+ * 🔴 Withheld from client-side callers. A Client or Representative holds no
+ * `user.read`, and the projects list would otherwise be the one place they
+ * learn an internal staff member's name. `null` for them is the same shape
+ * they'd see for an unresolvable author, so no consumer needs a second branch.
+ */
+const createdByUserOf = (
+    doc: ProjectDocument,
+    byId: Map<string, { id: string; full_name: string }>,
+    caller: ProjectCaller
+): { id: string; full_name: string } | null =>
+    PROJECT_CLIENT_SIDE_ROLES.includes(caller.role) ? null : (byId.get(String(doc.created_by)) ?? null);
 
 // ─── Member / client role validation ─────────────────────────────────────
 
@@ -544,7 +610,16 @@ export const createProject = async (
                 // A project can legitimately be created already `completed`
                 // (back-filling finished work). Stamp the delivery moment here
                 // too, or such a row would be permanently verdict-less.
-                completed_at: input.status === PROJECT_STATUSES.COMPLETED ? new Date() : null,
+                //
+                // `completed_on` when the caller supplied it — back-filling a
+                // project that finished in May must not record delivery as
+                // TODAY, which is what produced `Late 120d` on freshly entered
+                // historical work. Absent, "now" is still the right default:
+                // the common case is completing something as it happens.
+                completed_at:
+                    input.status === PROJECT_STATUSES.COMPLETED
+                        ? (resolveCompletedAt(input.completed_on) ?? new Date())
+                        : null,
                 created_by: caller.id,
             });
             break;
@@ -612,6 +687,13 @@ export const listProjects = async (
     // Admins/managers can additionally filter by membership.
     if (query.member_id) filter.member_ids = new Types.ObjectId(query.member_id);
     if (query.company_id) filter.company_id = new Types.ObjectId(query.company_id);
+    // Client work vs our own — a presence test on `company_id`, which already
+    // carries that meaning. Skipped when an explicit `company_id` was given:
+    // naming one company is the more specific request, and the two would
+    // otherwise fight over the same key ("company X" AND "no company" matches
+    // nothing).
+    else if (query.kind === 'internal') filter.company_id = null;
+    else if (query.kind === 'client') filter.company_id = { $ne: null };
 
     if (query.q) {
         const safe = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -786,12 +868,13 @@ export const listProjects = async (
         }
     }
 
-    const companyById = await attachCompanies(rows);
+    const [companyById, creatorById] = await Promise.all([attachCompanies(rows), attachCreators(rows)]);
 
     return {
         data: rows.map((r) => ({
             ...toPublicFor(r, caller),
             company: companyOf(r, companyById),
+            created_by_user: createdByUserOf(r, creatorById, caller),
             ...(rollupById.get(r._id.toString()) ?? emptyRollup()),
         })),
         meta: {
@@ -812,8 +895,12 @@ export const getProject = async (id: Types.ObjectId, caller: ProjectCaller): Pro
     // Resolved here too, so `company` isn't a field that exists on the list
     // response but vanishes on the detail one — that asymmetry is the kind
     // of thing a consumer only discovers at runtime.
-    const companyById = await attachCompanies([doc]);
-    return { ...toPublicFor(doc, caller), company: companyOf(doc, companyById) };
+    const [companyById, creatorById] = await Promise.all([attachCompanies([doc]), attachCreators([doc])]);
+    return {
+        ...toPublicFor(doc, caller),
+        company: companyOf(doc, companyById),
+        created_by_user: createdByUserOf(doc, creatorById, caller),
+    };
 };
 
 /**
@@ -896,10 +983,16 @@ export const updateProject = async (
     // Un-completing clears it, which also discards the delivery-scope freeze
     // and folds any post-delivery tasks back into ordinary scope. That is the
     // correct reading: the project is being declared not-delivered.
+    const suppliedCompletedAt = resolveCompletedAt(patch.completed_on);
     if (doc.status === PROJECT_STATUSES.COMPLETED && statusBefore !== PROJECT_STATUSES.COMPLETED) {
-        doc.completed_at = new Date();
+        doc.completed_at = suppliedCompletedAt ?? new Date();
     } else if (doc.status !== PROJECT_STATUSES.COMPLETED) {
         doc.completed_at = null;
+    } else if (suppliedCompletedAt) {
+        // Already completed and the caller is correcting the date — the one
+        // case where re-stamping an existing completion is intended, unlike
+        // the incidental re-saves the guard above protects against.
+        doc.completed_at = suppliedCompletedAt;
     }
 
     await doc.save();

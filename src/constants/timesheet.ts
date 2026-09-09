@@ -5,8 +5,8 @@
  * Timesheet entries capture both billable and non-billable time on the same
  * row (Data_Model §6.1). `entry_type` distinguishes a task-linked entry
  * (must reference a project + task the caller can see) from a "general"
- * entry (a category like meeting / training / admin / other; project is
- * optional, task is null).
+ * entry (project is required too — task is null, and `general_category` is an
+ * optional label such as meeting / training / admin on top of the project).
  *
  * Policy knobs live on `system_settings.timesheet`:
  *   - `self_edit_window_days`        — how long an employee can edit their

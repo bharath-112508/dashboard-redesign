@@ -181,12 +181,21 @@ export const createUser = async (
         }
         doc.client_profile = { ...input.client_profile, company_id: companyId };
     } else if (input.internal_profile) {
+        const profile = input.internal_profile;
         doc.internal_profile = {
-            ...input.internal_profile,
-            reporting_manager_id: input.internal_profile.reporting_manager_id
-                ? new Types.ObjectId(input.internal_profile.reporting_manager_id)
+            ...profile,
+            reporting_manager_id: profile.reporting_manager_id
+                ? new Types.ObjectId(profile.reporting_manager_id)
                 : null,
         };
+        // 🔴 Drop a blank `employee_id` rather than storing `''`.
+        //
+        // The unique index on `internal_profile.employee_id` is SPARSE, which
+        // skips documents missing the key — but an empty string is a value,
+        // not a missing key, so the SECOND freelancer saved with `''` would
+        // fail on E11000 duplicate key. Freelancers legitimately have no
+        // employee number, so the field must be absent, not empty.
+        if (!doc.internal_profile.employee_id) delete doc.internal_profile.employee_id;
     }
 
     // H1 — user create + leave-balance init are atomic: a balance-init
@@ -443,6 +452,16 @@ export const updateUser = async (input: {
 
     if (patch.internal_profile) {
         const coerced: Record<string, unknown> = { ...patch.internal_profile };
+        // `null` on a staff-only field means CLEAR it — the freelancer switch.
+        // Deleting the key (rather than writing null) matters for
+        // `employee_id`: its unique index is sparse, so an absent key is
+        // skipped while a stored null/'' would collide across freelancers.
+        for (const field of ['employee_id', 'job_title', 'department', 'date_of_joining'] as const) {
+            if (field in coerced && !coerced[field]) {
+                delete coerced[field];
+                target.set(`internal_profile.${field}`, undefined);
+            }
+        }
         if ('reporting_manager_id' in coerced) {
             const raw = coerced.reporting_manager_id;
             coerced.reporting_manager_id = typeof raw === 'string' ? new Types.ObjectId(raw) : raw;

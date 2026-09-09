@@ -118,6 +118,20 @@ export const createProjectBodySchema = z
         description: z.string().trim().max(PROJECT_DESCRIPTION_MAX).default(''),
         start_date: isoDateSchema,
         end_date: isoDateSchema.nullable().default(null),
+        /**
+         * When the work actually finished, for a project created (or set)
+         * as `completed`.
+         *
+         * Optional; omitted means "just now". It exists because back-filling
+         * finished work otherwise stamps the delivery moment as TODAY, so a
+         * project that ran Apr–May and is entered in September reads as
+         * `Late 120d` — the arithmetic is right and the input is a lie.
+         *
+         * Ignored unless the merged status is `completed`; the service is
+         * what applies it, since a PATCH carrying only `{status}` cannot see
+         * the persisted dates.
+         */
+        completed_on: isoDateSchema.nullable().optional(),
         status: z.enum(PROJECT_STATUS_VALUES as unknown as [string, ...string[]]).optional(),
         member_ids: z.array(objectIdSchema).max(PROJECT_MEMBERS_MAX).default([]),
         // The client company this project belongs to. Null/absent = an
@@ -152,6 +166,8 @@ export const patchProjectBodySchema = z
         description: z.string().trim().max(PROJECT_DESCRIPTION_MAX),
         start_date: isoDateSchema,
         end_date: isoDateSchema.nullable(),
+        /** See the create schema — the actual delivery date, optional. */
+        completed_on: isoDateSchema.nullable().optional(),
         status: z.enum(PROJECT_STATUS_VALUES as unknown as [string, ...string[]]),
         is_archived: z.boolean(),
         /**
@@ -200,6 +216,14 @@ export const listProjectsQuerySchema = z
         // Was `client_id` (a client USER). Projects now belong to a company,
         // so the filter is by company.
         company_id: objectIdSchema.optional(),
+        // Client work vs our own. `company_id === null` already MEANS internal
+        // (see the model's note — a real state, not missing data), so this is
+        // a presence test on that field rather than a new column.
+        //
+        // Absent = both, which is what the list showed before this existed.
+        // Orthogonal to `status`/`is_archived`, so it composes with them the
+        // same way they compose with each other.
+        kind: z.enum(['client', 'internal']).optional(),
         // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
         q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
     })

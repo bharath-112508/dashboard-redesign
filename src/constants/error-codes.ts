@@ -31,6 +31,9 @@ export const ERROR_CODES = {
     /** The subject is a freelancer, engaged per contract rather than employed,
      *  so no employment letter applies to them. */
     LETTER_NOT_APPLICABLE: 'LETTER_NOT_APPLICABLE',
+    /** The subject is a freelancer, who accrues no leave and so has no
+     *  balance to spend. Same idiom as the two payroll codes above. */
+    LEAVE_NOT_APPLICABLE: 'LEAVE_NOT_APPLICABLE',
     STORY_WRITE_FORBIDDEN: 'STORY_WRITE_FORBIDDEN',
     TASK_WRITE_FORBIDDEN: 'TASK_WRITE_FORBIDDEN',
     COMMENT_EDIT_FORBIDDEN: 'COMMENT_EDIT_FORBIDDEN',

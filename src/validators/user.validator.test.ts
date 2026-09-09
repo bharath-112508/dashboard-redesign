@@ -283,3 +283,78 @@ describe('createUserBodySchema — reporting manager', () => {
         expect(r.success).toBe(true);
     });
 });
+
+/**
+ * The employment record is staff-only. A freelancer is engaged, not employed,
+ * so they have no employee number, job title, department or joining date.
+ *
+ * 🔴 These tests send EMPTY STRINGS, not omitted keys — that distinction is
+ * the whole bug. A form field the user left alone submits as `''`, and
+ * `.min(1).optional()` rejects it, because `optional()` admits `undefined`
+ * and nothing else. The first version of this feature was verified against
+ * omitted keys, passed, and still returned "Too small: expected string to
+ * have >=1 characters" to every real user of the form.
+ */
+describe('createUserBodySchema — freelancer employment record', () => {
+    const blanks = { employee_id: '', job_title: '', department: '', date_of_joining: '' };
+
+    it('accepts a freelancer whose employment fields are empty strings', () => {
+        const r = createUserBodySchema.safeParse({
+            ...baseCreatePayload,
+            internal_profile: { ...baseInternalProfile, ...blanks, employment_type: 'freelancer' },
+        });
+        expect(r.success).toBe(true);
+    });
+
+    it('normalises those blanks to absent rather than storing empty strings', () => {
+        // `employee_id` carries a UNIQUE SPARSE index: sparse skips documents
+        // missing the key, but an empty string is a value — so a second
+        // freelancer stored with '' would collide on E11000.
+        const r = createUserBodySchema.safeParse({
+            ...baseCreatePayload,
+            internal_profile: { ...baseInternalProfile, ...blanks, employment_type: 'freelancer' },
+        });
+        expect(r.success).toBe(true);
+        if (r.success) {
+            expect(r.data.internal_profile?.employee_id).toBeUndefined();
+            expect(r.data.internal_profile?.job_title).toBeUndefined();
+            expect(r.data.internal_profile?.department).toBeUndefined();
+            expect(r.data.internal_profile?.date_of_joining).toBeUndefined();
+        }
+    });
+
+    it('accepts a freelancer whose employment fields are omitted entirely', () => {
+        const r = createUserBodySchema.safeParse({
+            ...baseCreatePayload,
+            internal_profile: { reporting_manager_id: MANAGER_ID, employment_type: 'freelancer' },
+        });
+        expect(r.success).toBe(true);
+    });
+
+    it('still REFUSES staff sending the same empty strings', () => {
+        const r = createUserBodySchema.safeParse({
+            ...baseCreatePayload,
+            internal_profile: { ...baseInternalProfile, ...blanks, employment_type: 'staff' },
+        });
+        expect(r.success).toBe(false);
+        if (!r.success) {
+            const fields = r.error.issues.map((i) => i.path.join('.'));
+            expect(fields).toEqual(
+                expect.arrayContaining([
+                    'internal_profile.employee_id',
+                    'internal_profile.job_title',
+                    'internal_profile.department',
+                    'internal_profile.date_of_joining',
+                ])
+            );
+        }
+    });
+
+    it('defaults to staff, so an omitted employment_type still requires the record', () => {
+        const r = createUserBodySchema.safeParse({
+            ...baseCreatePayload,
+            internal_profile: { ...baseInternalProfile, ...blanks },
+        });
+        expect(r.success).toBe(false);
+    });
+});

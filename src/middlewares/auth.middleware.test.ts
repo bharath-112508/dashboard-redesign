@@ -23,9 +23,10 @@ import { Types } from 'mongoose';
  *     re-toggle the flag without first enabling MFA.
  */
 
-const { verifyAccessTokenMock, userFindByIdMock, getOrInitSettingsMock } = vi.hoisted(() => ({
+const { verifyAccessTokenMock, userFindByIdMock, refreshFindByIdMock, getOrInitSettingsMock } = vi.hoisted(() => ({
     verifyAccessTokenMock: vi.fn(),
     userFindByIdMock: vi.fn(),
+    refreshFindByIdMock: vi.fn(),
     getOrInitSettingsMock: vi.fn(),
 }));
 
@@ -35,6 +36,10 @@ vi.mock('../utils/jwt.js', () => ({
 
 vi.mock('../models/user.model.js', () => ({
     User: { findById: userFindByIdMock },
+}));
+
+vi.mock('../models/refresh-token.model.js', () => ({
+    RefreshToken: { findById: refreshFindByIdMock },
 }));
 
 vi.mock('../services/settings.service.js', () => ({
@@ -85,6 +90,12 @@ const userMfa = (mfa_enabled: boolean, status: string = 'active') => ({
     },
 });
 
+// Session-row (`refresh_tokens`) mock for the revoked-session gate.
+// `revoked_at: null` is a live session; a Date means revoked.
+const sessionRow = (row: { revoked_at: Date | null; user_id: Types.ObjectId } | null) => ({
+    select: () => ({ lean: () => Promise.resolve(row) }),
+});
+
 // A `findById(...)` chain whose terminal `.lean()` resolves to null —
 // the user was deleted between JWT issue and this middleware run.
 const userMfaDeleted = () => ({
@@ -118,6 +129,9 @@ beforeEach(() => {
     // `status` + `mfa_enabled`. Default mock returns an active user
     // with MFA off; tests exercising deactivation / MFA-on override.
     userFindByIdMock.mockReturnValue(userMfa(false));
+    // Default: whatever session a token names is live. Tokens in most
+    // tests carry no `sid` at all, so this is never consulted there.
+    refreshFindByIdMock.mockReturnValue(sessionRow({ revoked_at: null, user_id: adminId }));
 });
 
 // ─── Flag OFF — true no-op ───────────────────────────────────────────────
@@ -555,5 +569,94 @@ describe('authenticate (company scope)', () => {
         await runAuthenticate(req);
 
         expect((req as { caller_company_id?: Types.ObjectId }).caller_company_id).toBeUndefined();
+    });
+});
+
+// ─── Revoked-session gate ────────────────────────────────────────────────
+//
+// Access tokens are stateless and live 8h on their signature alone, while
+// "Revoke" only flips `revoked_at` on the `refresh_tokens` row. Before the
+// `sid` claim existed, `authenticate` had no way to connect the two: a
+// revoked session kept full API access until its token expired, and the
+// Sessions tab's Revoke button did nothing observable.
+//
+// These lock the connection in place. The grandfather case matters as much
+// as the rejection: making a missing `sid` fail would log out every signed-in
+// user the moment this deploys.
+describe('authenticate (revoked-session gate)', () => {
+    const sid = new Types.ObjectId();
+
+    const tokenWithSid = (over: Record<string, unknown> = {}) => ({
+        user_id: adminId.toString(),
+        role: ROLES.ADMIN,
+        sid: sid.toString(),
+        ...over,
+    });
+
+    it('rejects a token whose session has been revoked', async () => {
+        verifyAccessTokenMock.mockReturnValue(tokenWithSid());
+        refreshFindByIdMock.mockReturnValue(sessionRow({ revoked_at: new Date(), user_id: adminId }));
+        getOrInitSettingsMock.mockResolvedValue(settingsWithFlag(false));
+
+        const res = await runAuthenticate(makeReq({ method: 'GET' }));
+
+        expect(res.ok).toBe(false);
+        expect((res.err as { code?: string }).code).toBe(ERROR_CODES.UNAUTHENTICATED);
+    });
+
+    it('allows a token whose session is still live', async () => {
+        verifyAccessTokenMock.mockReturnValue(tokenWithSid());
+        refreshFindByIdMock.mockReturnValue(sessionRow({ revoked_at: null, user_id: adminId }));
+        getOrInitSettingsMock.mockResolvedValue(settingsWithFlag(false));
+
+        const res = await runAuthenticate(makeReq({ method: 'GET' }));
+
+        expect(res.ok).toBe(true);
+    });
+
+    it('rejects a token whose session row is gone', async () => {
+        verifyAccessTokenMock.mockReturnValue(tokenWithSid());
+        refreshFindByIdMock.mockReturnValue(sessionRow(null));
+        getOrInitSettingsMock.mockResolvedValue(settingsWithFlag(false));
+
+        const res = await runAuthenticate(makeReq({ method: 'GET' }));
+
+        expect(res.ok).toBe(false);
+    });
+
+    it('rejects a session belonging to a different user than the token claims', async () => {
+        verifyAccessTokenMock.mockReturnValue(tokenWithSid());
+        refreshFindByIdMock.mockReturnValue(sessionRow({ revoked_at: null, user_id: employeeId }));
+        getOrInitSettingsMock.mockResolvedValue(settingsWithFlag(false));
+
+        const res = await runAuthenticate(makeReq({ method: 'GET' }));
+
+        expect(res.ok).toBe(false);
+    });
+
+    it('rejects a malformed sid without hitting the database', async () => {
+        verifyAccessTokenMock.mockReturnValue(tokenWithSid({ sid: 'not-an-object-id' }));
+        getOrInitSettingsMock.mockResolvedValue(settingsWithFlag(false));
+
+        const res = await runAuthenticate(makeReq({ method: 'GET' }));
+
+        expect(res.ok).toBe(false);
+        expect(refreshFindByIdMock).not.toHaveBeenCalled();
+    });
+
+    // Grandfather clause — tokens minted before the `sid` claim shipped.
+    // They can't be checked, and failing them would log the whole company
+    // out on deploy; they age out within JWT_EXPIRES_IN instead.
+    it('lets a pre-sid token through without reading the session row', async () => {
+        verifyAccessTokenMock.mockReturnValue({
+            user_id: adminId.toString(),
+            role: ROLES.ADMIN,
+        });
+        getOrInitSettingsMock.mockResolvedValue(settingsWithFlag(false));
+
+        const res = await runAuthenticate(makeReq({ method: 'GET' }));
+
+        expect(res.ok).toBe(true);
+        expect(refreshFindByIdMock).not.toHaveBeenCalled();
     });
 });

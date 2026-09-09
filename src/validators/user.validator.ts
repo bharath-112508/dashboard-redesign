@@ -88,11 +88,32 @@ const emergencyContactSchema = z.object({
     relation: z.string().trim().min(1),
 });
 
+/**
+ * Treat an empty string as "not supplied".
+ *
+ * A form field the user left alone submits as `''`, not as an absent key —
+ * so `.min(1).optional()` rejects it, because `optional()` admits `undefined`
+ * and nothing else. That is precisely how the freelancer path broke: the API
+ * accepted an omitted `employee_id` while the actual create form sent `''`
+ * and got "Too small: expected string to have >=1 characters".
+ *
+ * Normalising here rather than asking every client to strip blanks keeps the
+ * contract forgiving for any caller, and the per-employment-type requirement
+ * still runs afterwards in the superRefine.
+ */
+const blankAsAbsent = <T extends z.ZodTypeAny>(inner: T) =>
+    z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), inner.optional());
+
 const internalProfileCreateSchema = z.object({
-    employee_id: z.string().trim().min(1),
-    job_title: z.string().trim().min(1),
-    department: z.string().trim().min(1),
-    date_of_joining: dateYMD,
+    // Optional in SHAPE, required per employment type in the superRefine on
+    // `createUserBodySchema`: staff must supply all four, a freelancer none.
+    // A freelancer is engaged, not employed — they have no employee number,
+    // no job title, no department and no joining date, and forcing invented
+    // values for them is what this relaxes.
+    employee_id: blankAsAbsent(z.string().trim().min(1)),
+    job_title: blankAsAbsent(z.string().trim().min(1)),
+    department: blankAsAbsent(z.string().trim().min(1)),
+    date_of_joining: blankAsAbsent(dateYMD),
     // Optional-with-default: every caller that predates the field (the demo
     // seeder, the smoke suite, existing integrations) keeps working and gets
     // `staff`, which is what they all meant.
@@ -191,6 +212,20 @@ export const createUserBodySchema = z
             // Admin is exempt because the admin IS the root of the chain —
             // requiring one there would mean inventing a manager for the
             // person at the top.
+            // Staff-only employment record. Skipped for freelancers, whose
+            // engagement carries none of these.
+            if (data.internal_profile && data.internal_profile.employment_type !== EMPLOYMENT_TYPES.FREELANCER) {
+                const required = ['employee_id', 'job_title', 'department', 'date_of_joining'] as const;
+                for (const field of required) {
+                    if (!data.internal_profile[field]) {
+                        ctx.addIssue({
+                            code: z.ZodIssueCode.custom,
+                            path: ['internal_profile', field],
+                            message: `${field.replace(/_/g, ' ')} is required for staff`,
+                        });
+                    }
+                }
+            }
             if (data.role !== ROLES.ADMIN && data.internal_profile && !data.internal_profile.reporting_manager_id) {
                 ctx.addIssue({
                     code: z.ZodIssueCode.custom,
@@ -214,7 +249,21 @@ export type CreateUserBody = z.infer<typeof createUserBodySchema>;
 // Liberal schema: every field optional. Field-level authorization (admin vs
 // self) is enforced in the service layer.
 
-const internalProfilePatchSchema = internalProfileCreateSchema.partial();
+/**
+ * PATCH shape. `.partial()` makes every field optional, and the four
+ * staff-only fields additionally accept `null` to CLEAR them — which is what
+ * switching someone from staff to freelancer has to do. Without it, the form
+ * either sends `''` (rejected by `.min(1)`) or omits the keys, silently
+ * leaving a freelancer carrying a stale job title and department.
+ *
+ * Same idiom `reporting_manager_id` already uses for "unset this".
+ */
+const internalProfilePatchSchema = internalProfileCreateSchema.partial().extend({
+    employee_id: blankAsAbsent(z.string().trim().min(1).nullable()),
+    job_title: blankAsAbsent(z.string().trim().min(1).nullable()),
+    department: blankAsAbsent(z.string().trim().min(1).nullable()),
+    date_of_joining: blankAsAbsent(dateYMD.nullable()),
+});
 const clientProfilePatchSchema = clientProfileCreateSchema.partial();
 
 export const updateUserBodySchema = z

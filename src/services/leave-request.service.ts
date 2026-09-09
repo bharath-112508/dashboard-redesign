@@ -23,6 +23,7 @@ import {
     type LeaveCode,
     type LeaveRequestStatus,
 } from '../constants/leave.js';
+import { EMPLOYMENT_TYPES } from '../constants/user-statuses.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { directReportIdsOf, isDirectReportOf } from './reporting-scope.service.js';
 import { consumeCompOffLots, refundConsumedLots, resyncCompOff } from './comp-off.service.js';
@@ -330,6 +331,30 @@ const resolveSegments = (
     });
 };
 
+/**
+ * Freelancers accrue no leave, so `initializeBalancesForUserYear` creates no
+ * balance rows for them at all. Without this guard the apply path reached
+ * `findOrInitBalance`, found nothing, failed to create anything, and threw
+ * `Failed to initialise leave balance row` — a 500 on a request that is
+ * simply not applicable to the caller.
+ *
+ * Called from BOTH entry points rather than one shared funnel because there
+ * isn't one: preview and apply each load their own context. Guarding only
+ * `applyLeave` would let someone fill in the whole form, see a valid preview,
+ * and fail on submit.
+ */
+const assertOnLeaveScheme = async (userId: Types.ObjectId): Promise<void> => {
+    const u = await User.findById(userId)
+        .select('internal_profile.employment_type')
+        .lean<{ internal_profile?: { employment_type?: string } }>();
+    if (u?.internal_profile?.employment_type === EMPLOYMENT_TYPES.FREELANCER) {
+        throw AppError.unprocessable(
+            'Freelancers are engaged per contract and accrue no leave, so there is no balance to apply against.',
+            ERROR_CODES.LEAVE_NOT_APPLICABLE
+        );
+    }
+};
+
 // ─── Public: preview (dry run) ────────────────────────────────────────────
 
 export const previewSplit = async (
@@ -341,6 +366,7 @@ export const previewSplit = async (
     requires_additional_approval: boolean;
     warnings: { code: string; message: string }[];
 }> => {
+    await assertOnLeaveScheme(caller.id);
     const ctx = await loadApplyContext(body.start_date, body.end_date);
     const requestedType = ctx.typesById.get(body.leave_type_id);
     if (!requestedType) {
@@ -502,6 +528,7 @@ export const applyLeave = async (
     body: ApplyLeaveBody,
     caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
+    await assertOnLeaveScheme(caller.id);
     const ctx = await loadApplyContext(body.start_date, body.end_date);
     const requestedType = ctx.typesById.get(body.leave_type_id);
     if (!requestedType) {
