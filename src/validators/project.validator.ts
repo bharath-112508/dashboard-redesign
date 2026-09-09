@@ -216,6 +216,14 @@ export const listProjectsQuerySchema = z
         // Was `client_id` (a client USER). Projects now belong to a company,
         // so the filter is by company.
         company_id: objectIdSchema.optional(),
+        // Client work vs our own. `company_id === null` already MEANS internal
+        // (see the model's note — a real state, not missing data), so this is
+        // a presence test on that field rather than a new column.
+        //
+        // Absent = both, which is what the list showed before this existed.
+        // Orthogonal to `status`/`is_archived`, so it composes with them the
+        // same way they compose with each other.
+        kind: z.enum(['client', 'internal']).optional(),
         // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
         q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
     })

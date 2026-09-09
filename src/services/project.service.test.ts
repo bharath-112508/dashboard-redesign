@@ -255,6 +255,12 @@ beforeEach(() => {
     // listProjects/getProject. Default to "no companies found", which is the
     // internal-project shape; tests that care override per-call.
     companyFindMock.mockReturnValue(mkUserChain([]));
+    // User.find backs BOTH member/client validation on writes and the
+    // `created_by` → `{id, full_name}` resolution on listProjects/getProject.
+    // Default to "nobody found" — the unresolvable-author shape — so read
+    // tests don't have to know the creator lookup exists; tests that assert
+    // on a name override per-call.
+    userFindMock.mockReturnValue(mkUserChain([]));
 });
 
 // ─── createProject ────────────────────────────────────────────────────────
@@ -471,6 +477,122 @@ describe('createProject', () => {
 
         expect(out).toMatchObject({ code: 'NEW-1' });
         expect(recordAuditMock).not.toHaveBeenCalled();
+    });
+});
+
+// ─── listProjects — client vs internal, and the creator's name ───────────
+
+/**
+ * `company_id === null` already MEANS internal (see the model note), so the
+ * Client / Internal split is a presence test on that field rather than a new
+ * column. It is orthogonal to `status`/`is_archived` and has to compose with
+ * them the same way they compose with each other — the projects list stacks
+ * a Client/Internal tab on top of the status chip row.
+ */
+describe('listProjects — kind filter', () => {
+    const stubFindChain = () => {
+        projectFindMock.mockReturnValueOnce({
+            sort: () => ({ skip: () => ({ limit: () => Promise.resolve([]) }) }),
+        });
+        projectCountDocumentsMock.mockResolvedValueOnce(0);
+    };
+    const filterOf = () => projectFindMock.mock.calls[0]![0] as Record<string, unknown>;
+
+    it('internal matches projects with no company', async () => {
+        stubFindChain();
+        await svc.listProjects({ page: 1, limit: 20, kind: 'internal' } as never, adminCaller());
+        expect(filterOf().company_id).toBeNull();
+    });
+
+    it('client matches projects that have one', async () => {
+        stubFindChain();
+        await svc.listProjects({ page: 1, limit: 20, kind: 'client' } as never, adminCaller());
+        expect(filterOf().company_id).toEqual({ $ne: null });
+    });
+
+    it('is absent by default, so the list still shows both', async () => {
+        stubFindChain();
+        await svc.listProjects({ page: 1, limit: 20 } as never, adminCaller());
+        expect(filterOf()).not.toHaveProperty('company_id');
+    });
+
+    it('composes with the status chips rather than replacing them', async () => {
+        stubFindChain();
+        await svc.listProjects(
+            { page: 1, limit: 20, kind: 'internal', status: 'active', is_archived: false } as never,
+            adminCaller()
+        );
+        const f = filterOf();
+        expect(f.company_id).toBeNull();
+        expect(f.status).toBe('active');
+        expect(f.is_archived).toBe(false);
+    });
+
+    it('yields to an explicit company_id, which is the more specific request', async () => {
+        // Naming a company AND "no company" would match nothing at all, so the
+        // narrower filter has to win rather than the two being ANDed.
+        stubFindChain();
+        const companyId = new Types.ObjectId();
+        await svc.listProjects(
+            { page: 1, limit: 20, kind: 'internal', company_id: companyId.toString() } as never,
+            adminCaller()
+        );
+        expect(String(filterOf().company_id)).toBe(companyId.toString());
+    });
+});
+
+/**
+ * The list resolves `created_by` → a name server-side for the same reason it
+ * resolves the company: the raw id is useless to the UI, and one `$in` beats
+ * an N+1 per row.
+ *
+ * The guard is the interesting half. A Client or Representative holds no
+ * `user.read`, so without it the projects list would be the one surface where
+ * they learn an internal staff member's name.
+ */
+describe('listProjects — created_by_user', () => {
+    const creator = { _id: new Types.ObjectId(), full_name: 'Aditya R' };
+    const stubOneRow = () => {
+        const row = makeProject({ created_by: creator._id, company_id: null });
+        projectFindMock.mockReturnValueOnce({
+            sort: () => ({ skip: () => ({ limit: () => Promise.resolve([row]) }) }),
+        });
+        projectCountDocumentsMock.mockResolvedValueOnce(1);
+        userFindMock.mockReturnValue(mkUserChain([creator] as never));
+    };
+
+    it('ships the resolved name to internal staff', async () => {
+        stubOneRow();
+        const res = await svc.listProjects({ page: 1, limit: 20 } as never, adminCaller());
+        expect(res.data[0]!.created_by_user).toEqual({
+            id: creator._id.toString(),
+            full_name: 'Aditya R',
+        });
+    });
+
+    it('withholds it from a client, who has no user.read', async () => {
+        stubOneRow();
+        const res = await svc.listProjects({ page: 1, limit: 20 } as never, clientCaller(new Types.ObjectId()));
+        expect(res.data[0]!.created_by_user).toBeNull();
+    });
+
+    it('withholds it from a representative too', async () => {
+        stubOneRow();
+        const res = await svc.listProjects({ page: 1, limit: 20 } as never, representativeCaller(new Types.ObjectId()));
+        expect(res.data[0]!.created_by_user).toBeNull();
+    });
+
+    it('degrades to null when the author no longer resolves', async () => {
+        // A dangling pointer is a bug, but it must not take the list down.
+        const row = makeProject({ created_by: new Types.ObjectId(), company_id: null });
+        projectFindMock.mockReturnValueOnce({
+            sort: () => ({ skip: () => ({ limit: () => Promise.resolve([row]) }) }),
+        });
+        projectCountDocumentsMock.mockResolvedValueOnce(1);
+        userFindMock.mockReturnValue(mkUserChain([]));
+
+        const res = await svc.listProjects({ page: 1, limit: 20 } as never, adminCaller());
+        expect(res.data[0]!.created_by_user).toBeNull();
     });
 });
 

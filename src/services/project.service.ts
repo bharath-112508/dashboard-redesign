@@ -364,6 +364,45 @@ const companyOf = (
     byId: Map<string, { id: string; name: string }>
 ): { id: string; name: string } | null => (doc.company_id ? (byId.get(String(doc.company_id)) ?? null) : null);
 
+/**
+ * Resolve `created_by` → `created_by_user: {id, full_name} | null` for a page.
+ *
+ * Same reasoning as `attachCompanies`: the raw id is useless to the list, one
+ * `$in` covers the page instead of an N+1, and a dangling pointer degrades to
+ * `null` rather than taking the list down. A deactivated author still resolves
+ * — who made the project is history and doesn't stop being true.
+ */
+const attachCreators = async (rows: ProjectDocument[]): Promise<Map<string, { id: string; full_name: string }>> => {
+    const ids = [
+        ...new Set(
+            rows
+                .map((r) => r.created_by)
+                .filter(Boolean)
+                .map(String)
+        ),
+    ];
+    if (ids.length === 0) return new Map();
+    const users = await User.find({ _id: { $in: ids.map((id) => new Types.ObjectId(id)) } })
+        .select('_id full_name')
+        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
+    return new Map(users.map((u) => [String(u._id), { id: String(u._id), full_name: u.full_name }]));
+};
+
+/**
+ * The `created_by_user` field as it appears on a project response.
+ *
+ * 🔴 Withheld from client-side callers. A Client or Representative holds no
+ * `user.read`, and the projects list would otherwise be the one place they
+ * learn an internal staff member's name. `null` for them is the same shape
+ * they'd see for an unresolvable author, so no consumer needs a second branch.
+ */
+const createdByUserOf = (
+    doc: ProjectDocument,
+    byId: Map<string, { id: string; full_name: string }>,
+    caller: ProjectCaller
+): { id: string; full_name: string } | null =>
+    PROJECT_CLIENT_SIDE_ROLES.includes(caller.role) ? null : (byId.get(String(doc.created_by)) ?? null);
+
 // ─── Member / client role validation ─────────────────────────────────────
 
 const INTERNAL_ROLES: readonly RoleType[] = [ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE];
@@ -648,6 +687,13 @@ export const listProjects = async (
     // Admins/managers can additionally filter by membership.
     if (query.member_id) filter.member_ids = new Types.ObjectId(query.member_id);
     if (query.company_id) filter.company_id = new Types.ObjectId(query.company_id);
+    // Client work vs our own — a presence test on `company_id`, which already
+    // carries that meaning. Skipped when an explicit `company_id` was given:
+    // naming one company is the more specific request, and the two would
+    // otherwise fight over the same key ("company X" AND "no company" matches
+    // nothing).
+    else if (query.kind === 'internal') filter.company_id = null;
+    else if (query.kind === 'client') filter.company_id = { $ne: null };
 
     if (query.q) {
         const safe = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -822,12 +868,13 @@ export const listProjects = async (
         }
     }
 
-    const companyById = await attachCompanies(rows);
+    const [companyById, creatorById] = await Promise.all([attachCompanies(rows), attachCreators(rows)]);
 
     return {
         data: rows.map((r) => ({
             ...toPublicFor(r, caller),
             company: companyOf(r, companyById),
+            created_by_user: createdByUserOf(r, creatorById, caller),
             ...(rollupById.get(r._id.toString()) ?? emptyRollup()),
         })),
         meta: {
@@ -848,8 +895,12 @@ export const getProject = async (id: Types.ObjectId, caller: ProjectCaller): Pro
     // Resolved here too, so `company` isn't a field that exists on the list
     // response but vanishes on the detail one — that asymmetry is the kind
     // of thing a consumer only discovers at runtime.
-    const companyById = await attachCompanies([doc]);
-    return { ...toPublicFor(doc, caller), company: companyOf(doc, companyById) };
+    const [companyById, creatorById] = await Promise.all([attachCompanies([doc]), attachCreators([doc])]);
+    return {
+        ...toPublicFor(doc, caller),
+        company: companyOf(doc, companyById),
+        created_by_user: createdByUserOf(doc, creatorById, caller),
+    };
 };
 
 /**
