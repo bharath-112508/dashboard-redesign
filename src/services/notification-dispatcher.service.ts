@@ -10,6 +10,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { REALTIME_TOPICS } from '../constants/realtime.js';
 import { publish } from './realtime.service.js';
 import logger from '../utils/logger.js';
+import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { sendEmail } from '../utils/mailer.js';
 import { postOrUpdateSlackMessage, postSlackMessage, slackContextFrom, type SlackContext } from '../utils/slack.js';
 import { buildLeaveMessageBlocks } from '../utils/slack-block-kit/leave.js';
@@ -342,6 +343,11 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
  * reviews their own request) and the list is de-duplicated, so an admin who
  * IS the reporting manager gets one notification, not two.
  */
+/** Today in IST, as `YYYY-MM-DD`. The decision is taken now, so this IS the
+ *  decided-on date — there is no stored `decided_at` on this path. IST
+ *  because every other local-date in this system is anchored there. */
+const istToday = (): string => dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
+
 const RECIPIENT_SELECT =
     '_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled';
 
@@ -386,7 +392,13 @@ const resolveActorName = async (actor: ActorRef, fallback = 'a user'): Promise<s
 export interface LeaveDispatchInput {
     request_id: Types.ObjectId;
     requester_id: Types.ObjectId;
+    /** "SL — Sick Leave". Still used for the notification preview text. */
     leave_type_label: string;
+    /** Type code + name, split out for the Slack message: the code picks the
+     *  heading emoji and the name reads better there than the combined
+     *  label. Optional so a caller that hasn't been updated still works. */
+    leave_type_code?: string;
+    leave_type_name?: string;
     start_date: string;
     end_date: string;
     total_days: number;
@@ -441,9 +453,14 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
                         {
                             _id: input.request_id.toString(),
                             employee_name: requester.full_name,
+                            employee_email: requester.email,
+                            employee_role: requester.role,
                             type_label: input.leave_type_label,
+                            type_code: input.leave_type_code,
+                            type_name: input.leave_type_name,
                             start_date: input.start_date,
                             end_date: input.end_date,
+                            total_days: input.total_days,
                             reason: input.reason,
                             is_half_day: input.is_half_day,
                         },
@@ -567,14 +584,23 @@ export const notifyLeaveDecided = async (input: LeaveDecisionDispatchInput): Pro
                         {
                             _id: input.request_id.toString(),
                             employee_name: requester.full_name,
+                            employee_email: requester.email,
+                            employee_role: requester.role,
                             type_label: input.leave_type_label,
+                            type_code: input.leave_type_code,
+                            type_name: input.leave_type_name,
                             start_date: input.start_date,
                             end_date: input.end_date,
+                            total_days: input.total_days,
                             reason: input.reason,
                             is_half_day: input.is_half_day,
                         },
                         {
                             status: input.decision,
+                            // The decision is happening now, so "today" IS
+                            // the decision date — there is no stored
+                            // decided_at to read on this path.
+                            decided_on: istToday(),
                             // Self-cancel — actor IS the requester. Skip the
                             // "by …" line; "Cancelled" on its own reads cleaner.
                             decided_by: actorIsRequester ? undefined : actorName,
