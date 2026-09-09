@@ -880,8 +880,23 @@ export const listLeaves = async (
             const reportIds = await directReportIdsOf(caller.id);
             if (query.user_id) {
                 const wanted = new Types.ObjectId(query.user_id);
-                filter.user_id = reportIds.some((id) => id.equals(wanted)) ? wanted : { $in: [] };
+                // `|| wanted.equals(caller.id)` — nobody is their own direct
+                // report, so without this a reviewer asking for THEMSELVES
+                // fell into the `$in: []` branch and saw nothing. Their own
+                // "My leaves" tab (which pins `user_id` to the caller) and
+                // the Slack Home "my leaves" card both came up empty while
+                // the same request sat pending in the admin queue.
+                //
+                // This widens nothing: every employee can already read their
+                // own requests via the `else` branch below, so a reviewer
+                // seeing their own is strictly less access than the role they
+                // were promoted from. The reports check still governs
+                // everyone ELSE.
+                const allowed = wanted.equals(caller.id) || reportIds.some((id) => id.equals(wanted));
+                filter.user_id = allowed ? wanted : { $in: [] };
             } else {
+                // Deliberately NOT including self here: the unfiltered list is
+                // the approvals queue, and you cannot approve your own request.
                 filter.user_id = { $in: reportIds };
             }
         }

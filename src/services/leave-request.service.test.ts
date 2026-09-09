@@ -918,6 +918,55 @@ describe('listLeaves — reviewer approvals queue', () => {
         expect(filter.user_id).toEqual({ $in: [] });
     });
 
+    // 🔴 The reports-membership guard above is what makes drilling into a
+    // non-report return nothing — and it also caught the reviewer THEMSELVES,
+    // because nobody is their own direct report. A team lead's "My leaves"
+    // tab sends `user_id=<their own id>` and got `{ $in: [] }`, so their own
+    // request was invisible to them while sitting in the admin queue as
+    // pending. Both surfaces read through here: the web Mine tab and the
+    // Slack Home "my leaves" card.
+    it('MANAGER: can see their OWN requests when asking for themselves', async () => {
+        const managerId = new Types.ObjectId();
+        stubDirectReports([new Types.ObjectId()]); // reports, none of them self
+        let filter: Record<string, unknown> = {};
+        stubFindReturningEmpty((f) => (filter = f));
+
+        await svc.listLeaves({ page: 1, limit: 50, user_id: managerId.toString() } as never, {
+            id: managerId,
+            role: ROLES.MANAGER,
+        });
+
+        expect(filter.user_id).toEqual(managerId);
+    });
+
+    it('TEAM LEAD: can see their OWN requests when asking for themselves', async () => {
+        const leadId = new Types.ObjectId();
+        stubDirectReports([]); // the no-org-chart case, where this bit hardest
+        let filter: Record<string, unknown> = {};
+        stubFindReturningEmpty((f) => (filter = f));
+
+        await svc.listLeaves({ page: 1, limit: 50, user_id: leadId.toString() } as never, {
+            id: leadId,
+            role: ROLES.TEAM_LEAD,
+        });
+
+        expect(filter.user_id).toEqual(leadId);
+    });
+
+    it('MANAGER: the unfiltered QUEUE still excludes self — you cannot approve your own', async () => {
+        // Self is visible only when explicitly asked for. The approvals queue
+        // must not start listing the reviewer's own pending requests.
+        const managerId = new Types.ObjectId();
+        const reportA = new Types.ObjectId();
+        stubDirectReports([reportA]);
+        let filter: Record<string, unknown> = {};
+        stubFindReturningEmpty((f) => (filter = f));
+
+        await svc.listLeaves({ page: 1, limit: 50 } as never, { id: managerId, role: ROLES.MANAGER });
+
+        expect(filter.user_id).toEqual({ $in: [reportA] });
+    });
+
     it('scopes an employee to ONLY their own requests', async () => {
         const employeeId = new Types.ObjectId();
         let filter: Record<string, unknown> = {};
