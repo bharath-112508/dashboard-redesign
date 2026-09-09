@@ -474,13 +474,15 @@ describe('Your time — entry list', () => {
         expect(text(view)).not.toMatch(/·\s+·/);
     });
 
-    it('clamps a very long note rather than flooding the tab', () => {
+    it('shows a long note in full, bounded only by Slack’s section limit', () => {
+        // This used to assert a 90-char clamp. That clamp was the bug — real
+        // notes are a few bullet lines and were being cut mid-sentence. The
+        // only ceiling now is Slack's own 3000-char section limit.
         const view = buildHomeDashboardView(
             withEntries([{ project: 'P', work: 'T-1', note: 'x'.repeat(400), minutes: 60 }]),
             user
         ) as never as { blocks: Array<Record<string, unknown>> };
-        expect(text(view)).not.toContain('x'.repeat(200));
-        expect(text(view)).toContain('…');
+        expect(text(view)).toContain('x'.repeat(400));
     });
 
     it('caps a long day, says how many are hidden, and stays under the block ceiling', () => {
@@ -502,5 +504,108 @@ describe('Your time — entry list', () => {
             blocks: Array<Record<string, unknown>>;
         };
         expect(text(view)).not.toMatch(/more today/);
+    });
+});
+
+// ─── Your time: note rendering ────────────────────────────────────────────
+//
+// The note was wrapped in `_…_` for italics. Slack's mrkdwn italic does not
+// span newlines, so on a multi-line note (the common case — people write
+// bullet lists) the delimiters rendered as LITERAL characters: the tab showed
+// "_- Implemented…" and "…informed to..._". It was also clamped at 90 chars,
+// which cut most real notes mid-sentence.
+
+describe('Your time — note rendering', () => {
+    const user = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Ananya' } as never;
+    const withNote = (note: string) =>
+        ({
+            user: { _id: new Types.ObjectId(), role: 'employee', full_name: 'Ananya' },
+            my_today: null,
+            my_balances: null,
+            my_pending: null,
+            whos_out: null,
+            team_attendance: null,
+            pending_leaves: null,
+            pending_total: null,
+            my_time: {
+                total_minutes: 60,
+                billable_minutes: 60,
+                non_billable_minutes: 0,
+                entries: [{ project: 'Alnarp Lead Automation', work: 'Deployment', note, minutes: 60 }],
+            },
+            can_log_time: true,
+        }) as never;
+
+    const noteBlockText = (view: { blocks: Array<Record<string, unknown>> }): string => {
+        const b = view.blocks.find((x) => JSON.stringify(x).includes('Alnarp Lead Automation'))!;
+        return ((b.text as { text: string }).text ?? '') + JSON.stringify(view.blocks);
+    };
+
+    const MULTILINE =
+        '- Implemented google campaign retrieval and tested\n- Deployed the changes and informed to the team';
+
+    it('leaves no literal underscore around a multi-line note', () => {
+        const view = buildHomeDashboardView(withNote(MULTILINE), user) as never as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        const t = noteBlockText(view);
+        expect(t).not.toContain('_-');
+        expect(t).not.toMatch(/_\\s*$/);
+    });
+
+    it('shows the whole note, not a 90-character stub', () => {
+        const view = buildHomeDashboardView(withNote(MULTILINE), user) as never as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        const t = noteBlockText(view);
+        expect(t).toContain('Implemented google campaign retrieval and tested');
+        expect(t).toContain('Deployed the changes and informed to the team');
+    });
+
+    it("keeps the user's own line breaks", () => {
+        const view = buildHomeDashboardView(withNote(MULTILINE), user) as never as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        const b = view.blocks.find((x) => JSON.stringify(x).includes('Alnarp'))!;
+        const text = (b.text as { text: string }).text;
+        // Header line + two note lines.
+        expect(text.split('\n').length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('does not add a bullet of its own to a line the user already bulleted', () => {
+        const view = buildHomeDashboardView(withNote(MULTILINE), user) as never as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        const b = view.blocks.find((x) => JSON.stringify(x).includes('Alnarp'))!;
+        const text = (b.text as { text: string }).text;
+        expect(text).not.toMatch(/[-•]\\s*-\\s/);
+    });
+
+    it('survives a note containing markdown characters', () => {
+        // Arbitrary user text went straight into a `_…_` wrapper before, so a
+        // note with its own underscore or asterisk broke the formatting of
+        // the whole row.
+        const view = buildHomeDashboardView(withNote('fixed snake_case and *bold* handling'), user) as never as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        const b = view.blocks.find((x) => JSON.stringify(x).includes('Alnarp'))!;
+        expect((b.text as { text: string }).text).toContain('snake_case');
+    });
+
+    it('still bounds a runaway note — a section has a hard character limit', () => {
+        const view = buildHomeDashboardView(withNote('x'.repeat(6000)), user) as never as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        const b = view.blocks.find((x) => JSON.stringify(x).includes('Alnarp'))!;
+        // Slack rejects a section whose text exceeds 3000 characters.
+        expect((b.text as { text: string }).text.length).toBeLessThanOrEqual(3000);
+    });
+
+    it('renders nothing extra for an entry with no note', () => {
+        const view = buildHomeDashboardView(withNote(''), user) as never as {
+            blocks: Array<Record<string, unknown>>;
+        };
+        const b = view.blocks.find((x) => JSON.stringify(x).includes('Alnarp'))!;
+        expect((b.text as { text: string }).text.split('\n')).toHaveLength(1);
     });
 });

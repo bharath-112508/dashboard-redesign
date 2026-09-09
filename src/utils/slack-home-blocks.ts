@@ -228,9 +228,13 @@ const hm = (minutes: number): string => {
  *  would push later sections past Slack's 100-block view ceiling. */
 export const MY_TIME_ENTRY_CAP = 10;
 
-/** Longest note shown inline. A full day's description can run to a
- *  paragraph; the web timesheet is the place to read it in full. */
-const NOTE_MAX = 90;
+/**
+ * Slack rejects a `section` whose text exceeds 3000 characters, so the row
+ * is bounded by that rather than by taste. The budget is generous enough
+ * that a real note is shown IN FULL — an earlier 90-char clamp cut most of
+ * them mid-sentence ("…and informed to...").
+ */
+const SECTION_TEXT_MAX = 3000;
 
 const clamp = (v: string, max: number): string => (v.length > max ? `${v.slice(0, max - 1)}…` : v);
 
@@ -255,8 +259,21 @@ const myTimeTable = (entries: MyTimeEntry[]): Array<Record<string, unknown>> => 
         const head = [`*${e.project}*`, e.work ? `\`${e.work}\`` : null, `*${hm(e.minutes)}*`]
             .filter(Boolean)
             .join('  ·  ');
-        const note = e.note ? `\n_${clamp(e.note, NOTE_MAX)}_` : '';
-        return section(`${head}${note}`);
+        // Plain text, NOT wrapped in `_…_`. Slack's mrkdwn italic does not
+        // span newlines, so on a multi-line note — the common case, since
+        // people write bullet lists — the delimiters rendered as literal
+        // characters: the tab showed "_- Implemented…" and "…to the team_".
+        // Wrapping arbitrary user text in markdown delimiters is the bug
+        // class, not just that one symptom: a note containing its own `_`
+        // or `*` broke the formatting of the whole row. The header line
+        // above is bold, so the note is already visually subordinate
+        // without needing a style of its own.
+        //
+        // The user's own line breaks and bullets are passed through
+        // untouched — adding a marker here would double up the "- " they
+        // already typed.
+        const note = e.note ? `\n${e.note}` : '';
+        return section(clamp(`${head}${note}`, SECTION_TEXT_MAX));
     });
 
     const hidden = entries.length - shown.length;
