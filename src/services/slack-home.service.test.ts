@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 
 vi.mock('./attendance.service.js', () => ({
@@ -19,6 +19,14 @@ vi.mock('./leave-request.service.js', () => ({
 }));
 vi.mock('./role.service.js', () => ({ resolvePermissionsForUser: vi.fn() }));
 vi.mock('./user.service.js', () => ({ getSlackAvatarUrlsByIds: vi.fn(async () => new Map()) }));
+
+// The "Your time" table resolves project names and ticket keys from ids —
+// `listMyDay` returns raw ids, not populated docs.
+const projectFindMock = vi.fn();
+const taskFindMock = vi.fn();
+vi.mock('../models/project.model.js', () => ({ Project: { find: (...a: unknown[]) => projectFindMock(...a) } }));
+vi.mock('../models/task.model.js', () => ({ Task: { find: (...a: unknown[]) => taskFindMock(...a) } }));
+const leanStub = (rows: unknown[]) => ({ select: () => ({ lean: async () => rows }) });
 vi.mock('./timesheet.service.js', () => ({
     listMyDay: vi.fn(async () => ({ data: [], meta: { local_date: '2026-01-01', total_minutes: 0 } })),
 }));
@@ -124,7 +132,19 @@ describe('buildHomeDashboardData — my_time', () => {
         const data = await buildHomeDashboardData(employee);
         expect(listMyDay).toHaveBeenCalledWith(today, { id: data.user._id, role: data.user.role });
         expect(data.can_log_time).toBe(true);
-        expect(data.my_time).toEqual({ total_minutes: 165, billable_minutes: 90, non_billable_minutes: 60 });
+        expect(data.my_time).toMatchObject({
+            total_minutes: 165,
+            billable_minutes: 90,
+            non_billable_minutes: 60,
+        });
+        // Rows carrying no project_id/task_id resolve to placeholders rather
+        // than blank cells, and neither lookup is issued for them.
+        expect(data.my_time?.entries).toEqual([
+            { project: '—', work: '—', minutes: 90 },
+            { project: '—', work: '—', minutes: 75 },
+        ]);
+        expect(projectFindMock).not.toHaveBeenCalled();
+        expect(taskFindMock).not.toHaveBeenCalled();
     });
 
     it('caller without timesheet.write: can_log_time is false and listMyDay is never called', async () => {
@@ -153,5 +173,71 @@ describe('buildHomeDashboardData — my_time', () => {
         expect(data.my_time).toBeNull();
         expect(data.can_log_time).toBe(true);
         expect(data.whos_out).toEqual([]);
+    });
+});
+
+// ─── "Your time" table rows ───────────────────────────────────────────────
+
+describe('buildHomeDashboardData — my_time entries', () => {
+    beforeEach(() => {
+        (resolvePermissionsForUser as ReturnType<typeof vi.fn>).mockResolvedValue({
+            permissions: ['timesheet.write'],
+        });
+    });
+
+    it('resolves the project name and the ticket key', async () => {
+        const projectId = new Types.ObjectId();
+        const taskId = new Types.ObjectId();
+        (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
+            data: [
+                {
+                    total_minutes: 150,
+                    project_id: projectId.toString(),
+                    task_id: taskId.toString(),
+                    description: 'ignored when a ticket is named',
+                },
+            ],
+            meta: { local_date: today, total_minutes: 150 },
+        });
+        projectFindMock.mockReturnValue(leanStub([{ _id: projectId, name: 'Nordmark Fleet', code: 'NMF' }]));
+        taskFindMock.mockReturnValue(leanStub([{ _id: taskId, task_number: 142, project_id: projectId }]));
+
+        const data = await buildHomeDashboardData(employee);
+        expect(data.my_time?.entries).toEqual([{ project: 'Nordmark Fleet', work: 'NMF-142', minutes: 150 }]);
+    });
+
+    it('falls back to general_category, then description, so a row is never blank', async () => {
+        const projectId = new Types.ObjectId();
+        (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
+            data: [
+                { total_minutes: 30, project_id: projectId.toString(), general_category: 'Standup' },
+                { total_minutes: 45, project_id: projectId.toString(), description: 'Paired on routing' },
+            ],
+            meta: { local_date: today, total_minutes: 75 },
+        });
+        projectFindMock.mockReturnValue(leanStub([{ _id: projectId, name: 'Aurora', code: 'AUR' }]));
+        taskFindMock.mockReturnValue(leanStub([]));
+
+        const data = await buildHomeDashboardData(employee);
+        expect(data.my_time?.entries.map((e) => e.work)).toEqual(['Standup', 'Paired on routing']);
+    });
+
+    it('looks each project up once, not once per row', async () => {
+        const projectId = new Types.ObjectId();
+        (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
+            data: Array.from({ length: 5 }, () => ({
+                total_minutes: 30,
+                project_id: projectId.toString(),
+                general_category: 'Standup',
+            })),
+            meta: { local_date: today, total_minutes: 150 },
+        });
+        projectFindMock.mockReturnValue(leanStub([{ _id: projectId, name: 'Aurora', code: 'AUR' }]));
+        taskFindMock.mockReturnValue(leanStub([]));
+
+        await buildHomeDashboardData(employee);
+        expect(projectFindMock).toHaveBeenCalledTimes(1);
+        const filter = projectFindMock.mock.calls[0]![0] as { _id: { $in: unknown[] } };
+        expect(filter._id.$in).toHaveLength(1);
     });
 });

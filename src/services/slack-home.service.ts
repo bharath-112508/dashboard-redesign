@@ -7,6 +7,8 @@ import { visibleUserIdsForReviewer } from './reporting-scope.service.js';
 import { resolvePermissionsForUser } from './role.service.js';
 import { listMyDay } from './timesheet.service.js';
 import { getSlackAvatarUrlsByIds } from './user.service.js';
+import { Project } from '../models/project.model.js';
+import { Task } from '../models/task.model.js';
 import { callerCan } from '../utils/caller-permissions.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
@@ -45,10 +47,30 @@ export interface HomeDashboardData {
      *  logged — deliberate: the headline stays "everything logged today",
      *  and idle simply isn't billable or non-billable, so it's not counted
      *  as either in the breakdown. */
-    my_time: { total_minutes: number; billable_minutes: number; non_billable_minutes: number } | null;
+    my_time: {
+        total_minutes: number;
+        billable_minutes: number;
+        non_billable_minutes: number;
+        /** The day's individual entries, for the Home tab's table. */
+        entries: MyTimeEntry[];
+    } | null;
     /** Whether the caller holds `timesheet.write`. Clients and Representatives
      *  don't, and must not see a button that would refuse them. */
     can_log_time: boolean;
+}
+
+/**
+ * One row of the "Your time" table.
+ *
+ * `work` is the ticket key (`VLJ-142`) for a task-linked entry, the
+ * `general_category` for a general one, and falls back to the description so
+ * a row is never blank — `general_category` is optional and most people
+ * leave it empty.
+ */
+export interface MyTimeEntry {
+    project: string;
+    work: string;
+    minutes: number;
 }
 
 /** Per-list caps (Block Kit 100-block ceiling). */
@@ -95,6 +117,82 @@ const attachAvatars = async (rowLists: Array<Record<string, unknown>[] | null>):
         }
 };
 
+/**
+ * Turn today's raw timesheet rows into table rows.
+ *
+ * `listMyDay` returns `toPublic(doc)` — raw ids, no populated project or
+ * task — so names cost two extra reads. Both are `$in` lookups over the
+ * handful of DISTINCT ids in one person's day (usually one or two projects),
+ * not a query per row, and both are already inside the caller's `safe()`
+ * wrapper: a failure here degrades this one card, not the Home tab.
+ *
+ * Rows keep `listMyDay`'s order (`created_at`), so the table reads in the
+ * order the day was actually logged.
+ */
+const buildMyTimeEntries = async (
+    rows: Array<{
+        total_minutes?: number;
+        project_id?: string | null;
+        task_id?: string | null;
+        general_category?: string | null;
+        description?: string | null;
+    }>
+): Promise<MyTimeEntry[]> => {
+    if (rows.length === 0) return [];
+
+    const oid = (v: unknown): Types.ObjectId | null =>
+        typeof v === 'string' && Types.ObjectId.isValid(v) ? new Types.ObjectId(v) : null;
+
+    const projectIds = [...new Set(rows.map((r) => r.project_id).filter(Boolean) as string[])]
+        .map(oid)
+        .filter((v): v is Types.ObjectId => v !== null);
+    const taskIds = [...new Set(rows.map((r) => r.task_id).filter(Boolean) as string[])]
+        .map(oid)
+        .filter((v): v is Types.ObjectId => v !== null);
+
+    const [projects, tasks] = await Promise.all([
+        projectIds.length
+            ? Project.find({ _id: { $in: projectIds } })
+                  .select('name code')
+                  .lean()
+            : [],
+        taskIds.length
+            ? Task.find({ _id: { $in: taskIds } })
+                  .select('task_number project_id')
+                  .lean()
+            : [],
+    ]);
+
+    const projectById = new Map(
+        (projects as Array<{ _id: Types.ObjectId; name?: string; code?: string }>).map((p) => [
+            String(p._id),
+            { name: p.name ?? '', code: p.code ?? '' },
+        ])
+    );
+    const taskById = new Map(
+        (tasks as Array<{ _id: Types.ObjectId; task_number?: number; project_id?: Types.ObjectId }>).map((t) => [
+            String(t._id),
+            t,
+        ])
+    );
+
+    return rows.map((r) => {
+        const project = r.project_id ? projectById.get(r.project_id) : undefined;
+        const task = r.task_id ? taskById.get(r.task_id) : undefined;
+        // Ticket key first, then the general category, then the description —
+        // `general_category` is optional and most people leave it blank, so
+        // without the last fallback the busiest column would be empty.
+        const work = task
+            ? `${project?.code ?? ''}-${task.task_number ?? '?'}`
+            : (r.general_category ?? r.description ?? '—');
+        return {
+            project: project?.name ?? '—',
+            work,
+            minutes: r.total_minutes ?? 0,
+        };
+    });
+};
+
 export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeDashboardData> => {
     const today = dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
     const weekEnd = dayjs().tz(DEFAULT_TIMEZONE).add(7, 'day').format(DATE_FORMAT);
@@ -114,6 +212,11 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
               const rows = day.data as Array<{
                   billable_total_minutes?: number;
                   non_billable_total_minutes?: number;
+                  total_minutes?: number;
+                  project_id?: string | null;
+                  task_id?: string | null;
+                  general_category?: string | null;
+                  description?: string | null;
               }>;
               const billable = rows.reduce((acc, r) => acc + (r.billable_total_minutes ?? 0), 0);
               // Summed off the rows the same way `billable` is, NOT derived as
@@ -125,6 +228,7 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
                   total_minutes: day.meta.total_minutes,
                   billable_minutes: billable,
                   non_billable_minutes: nonBillable,
+                  entries: await buildMyTimeEntries(rows),
               };
           })
         : null;
