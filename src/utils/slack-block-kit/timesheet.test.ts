@@ -49,8 +49,14 @@ const viewWith = (over: Record<string, unknown> = {}) => ({
             [SLACK_BLOCK_TS_PROJECT]: {
                 [SLACK_BLOCK_TS_PROJECT]: { selected_option: { value: PROJECTS[0]!.id } },
             },
-            [SLACK_BLOCK_TS_BILLABLE]: { [SLACK_BLOCK_TS_BILLABLE]: { value: '3.5' } },
-            [SLACK_BLOCK_TS_NON_BILLABLE]: { [SLACK_BLOCK_TS_NON_BILLABLE]: { value: '0' } },
+            // 210 minutes = the 3h 30m preset. Durations are a static_select
+            // of preset minutes now, not a decimal-hours text box.
+            [SLACK_BLOCK_TS_BILLABLE]: {
+                [SLACK_BLOCK_TS_BILLABLE]: { selected_option: { value: '210' } },
+            },
+            [SLACK_BLOCK_TS_NON_BILLABLE]: {
+                [SLACK_BLOCK_TS_NON_BILLABLE]: { selected_option: { value: '0' } },
+            },
             [SLACK_BLOCK_TS_DESCRIPTION]: {
                 [SLACK_BLOCK_TS_DESCRIPTION]: { value: 'Depot routing bug' },
             },
@@ -133,7 +139,7 @@ describe('buildLogTimeModal', () => {
 });
 
 describe('parseLogTimeSubmission', () => {
-    it('reads every field and converts decimal hours to hours + minutes', () => {
+    it('reads every field and converts the selected minutes to hours + minutes', () => {
         expect(parseLogTimeSubmission(viewWith())).toEqual({
             local_date: '2026-09-07',
             project_id: PROJECTS[0]!.id,
@@ -150,15 +156,19 @@ describe('parseLogTimeSubmission', () => {
         });
     });
 
-    it('rounds to the nearest minute', () => {
+    it('an unrecognised duration reads as zero rather than NaN', () => {
+        // The old decimal input could be rounded; a select can only ever
+        // return one of its own option values, so the remaining risk is a
+        // hand-crafted payload — which must degrade to 0, not NaN.
         const parsed = parseLogTimeSubmission(
             viewWith({
-                [SLACK_BLOCK_TS_BILLABLE]: { [SLACK_BLOCK_TS_BILLABLE]: { value: '3.33' } },
+                [SLACK_BLOCK_TS_BILLABLE]: {
+                    [SLACK_BLOCK_TS_BILLABLE]: { selected_option: { value: 'not-a-number' } },
+                },
             })
         );
-        // 3.33h = 199.8 minutes -> 200 -> 3h 20m
-        expect(parsed.billable_hours).toBe(3);
-        expect(parsed.billable_minutes).toBe(20);
+        expect(parsed.billable_hours).toBe(0);
+        expect(parsed.billable_minutes).toBe(0);
     });
 
     it('treats a blank or absent duration as zero rather than NaN', () => {
@@ -352,8 +362,8 @@ describe('buildLogTimeModal — re-seeding on views.update', () => {
         local_date: '2026-09-01',
         project_id: PROJECTS[1].id,
         ticket_id: TICKETS[0].id,
-        billable: '2.5',
-        non_billable: '0.5',
+        billable: '150',
+        non_billable: '30',
         description: 'Paired on the routing bug',
     };
 
@@ -361,8 +371,8 @@ describe('buildLogTimeModal — re-seeding on views.update', () => {
         const view = buildLogTimeModal(PROJECTS, '2026-09-09', { state, tickets: TICKETS });
         const el = (id: string) => blockById(view, id)?.element as Record<string, unknown>;
         expect(el(SLACK_BLOCK_TS_DATE).initial_date).toBe('2026-09-01');
-        expect(el(SLACK_BLOCK_TS_BILLABLE).initial_value).toBe('2.5');
-        expect(el(SLACK_BLOCK_TS_NON_BILLABLE).initial_value).toBe('0.5');
+        expect((el(SLACK_BLOCK_TS_BILLABLE).initial_option as { value: string }).value).toBe('150');
+        expect((el(SLACK_BLOCK_TS_NON_BILLABLE).initial_option as { value: string }).value).toBe('30');
         expect(el(SLACK_BLOCK_TS_DESCRIPTION).initial_value).toBe('Paired on the routing bug');
     });
 
@@ -416,7 +426,9 @@ describe('readLogTimeState', () => {
                     [SLACK_BLOCK_TS_TICKET]: {
                         [SLACK_BLOCK_TS_TICKET]: { selected_option: { value: TICKETS[0].id } },
                     },
-                    [SLACK_BLOCK_TS_BILLABLE]: { [SLACK_BLOCK_TS_BILLABLE]: { value: '3.25' } },
+                    [SLACK_BLOCK_TS_BILLABLE]: {
+                        [SLACK_BLOCK_TS_BILLABLE]: { selected_option: { value: '195' } },
+                    },
                     [SLACK_BLOCK_TS_DESCRIPTION]: { [SLACK_BLOCK_TS_DESCRIPTION]: { value: 'note' } },
                 },
             },
@@ -426,7 +438,7 @@ describe('readLogTimeState', () => {
             local_date: '2026-09-01',
             project_id: PROJECTS[0].id,
             ticket_id: TICKETS[0].id,
-            billable: '3.25',
+            billable: '195',
             description: 'note',
         });
     });
@@ -467,5 +479,126 @@ describe('parseLogTimeSubmission — ticket and context', () => {
             [SLACK_BLOCK_TS_CONTEXT]: { [SLACK_BLOCK_TS_CONTEXT]: { value: '   ' } },
         });
         expect(parseLogTimeSubmission(view).general_category).toBeNull();
+    });
+});
+
+// ─── Duration pickers ─────────────────────────────────────────────────────
+//
+// Billable / non-billable are preset dropdowns, not a decimal-hours box.
+// The option list mirrors the web `DurationSelect` exactly (15-min steps
+// under an hour, 30-min to 8h, hourly to 24h) so the two surfaces never
+// offer different choices for the same field.
+
+describe('duration selects', () => {
+    const durationBlock = (view: Record<string, unknown>, id: string) =>
+        (view.blocks as BlockLike[]).find((b) => b.block_id === id)!;
+
+    it('billable is a select, not a number input', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09');
+        expect(durationBlock(view, SLACK_BLOCK_TS_BILLABLE).element.type).toBe('static_select');
+    });
+
+    it('non-billable is a select too', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09');
+        expect(durationBlock(view, SLACK_BLOCK_TS_NON_BILLABLE).element.type).toBe('static_select');
+    });
+
+    it('offers the same presets the web picker does, labelled the same way', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09');
+        const labels = (
+            durationBlock(view, SLACK_BLOCK_TS_BILLABLE).element.options as Array<{
+                text: { text: string };
+            }>
+        ).map((o) => o.text.text);
+        expect(labels).toContain('15 min');
+        expect(labels).toContain('45 min');
+        expect(labels).toContain('1 hr');
+        expect(labels).toContain('1.5 hr');
+        expect(labels).toContain('8 hr');
+        expect(labels).toContain('24 hr');
+        // 30-min granularity stops at 8h; 8.5 would mean the hourly tail is wrong.
+        expect(labels).not.toContain('8.5 hr');
+    });
+
+    it('leads with a zero option so "no time on this side" is selectable', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09');
+        const opts = durationBlock(view, SLACK_BLOCK_TS_BILLABLE).element.options as Array<{
+            value: string;
+            text: { text: string };
+        }>;
+        expect(opts[0]!.value).toBe('0');
+        expect(opts[0]!.text.text).toBe('—');
+    });
+
+    it('stays under Slack’s option ceiling', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09');
+        const opts = durationBlock(view, SLACK_BLOCK_TS_BILLABLE).element.options as unknown[];
+        expect(opts.length).toBeLessThanOrEqual(100);
+    });
+
+    it('defaults both sides to zero', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09');
+        for (const id of [SLACK_BLOCK_TS_BILLABLE, SLACK_BLOCK_TS_NON_BILLABLE]) {
+            const el = durationBlock(view, id).element as { initial_option?: { value?: string } };
+            expect(el.initial_option?.value).toBe('0');
+        }
+    });
+
+    it('re-seeds the chosen duration across a views.update', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
+            state: { billable: '150', non_billable: '30' },
+        });
+        const b = durationBlock(view, SLACK_BLOCK_TS_BILLABLE).element as {
+            initial_option?: { value?: string; text?: { text?: string } };
+        };
+        expect(b.initial_option?.value).toBe('150');
+        expect(b.initial_option?.text?.text).toBe('2.5 hr');
+    });
+
+    it('drops a re-seed that is not one of the presets rather than being rejected', () => {
+        // Slack refuses a view whose initial_option is absent from options.
+        // A legacy "1:05" style value must therefore fall back, not crash.
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09', { state: { billable: '65' } });
+        const b = durationBlock(view, SLACK_BLOCK_TS_BILLABLE).element as {
+            initial_option?: { value?: string };
+        };
+        expect(b.initial_option?.value).toBe('0');
+    });
+});
+
+describe('parseLogTimeSubmission — durations from the select', () => {
+    const withDurations = (billable: string, nonBillable: string) =>
+        viewWith({
+            [SLACK_BLOCK_TS_BILLABLE]: {
+                [SLACK_BLOCK_TS_BILLABLE]: { selected_option: { value: billable } },
+            },
+            [SLACK_BLOCK_TS_NON_BILLABLE]: {
+                [SLACK_BLOCK_TS_NON_BILLABLE]: { selected_option: { value: nonBillable } },
+            },
+        });
+
+    it('converts selected minutes into hours + minutes', () => {
+        expect(parseLogTimeSubmission(withDurations('150', '30'))).toMatchObject({
+            billable_hours: 2,
+            billable_minutes: 30,
+            non_billable_hours: 0,
+            non_billable_minutes: 30,
+        });
+    });
+
+    it('reads the zero option as zero, not as missing', () => {
+        expect(parseLogTimeSubmission(withDurations('0', '0'))).toMatchObject({
+            billable_hours: 0,
+            billable_minutes: 0,
+            non_billable_hours: 0,
+            non_billable_minutes: 0,
+        });
+    });
+
+    it('a full 24h option maps to 24h, not 23h 60m', () => {
+        expect(parseLogTimeSubmission(withDurations('1440', '0'))).toMatchObject({
+            billable_hours: 24,
+            billable_minutes: 0,
+        });
     });
 });

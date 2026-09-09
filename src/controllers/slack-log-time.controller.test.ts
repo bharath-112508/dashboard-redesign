@@ -78,8 +78,10 @@ const submission = (over: Record<string, unknown> = {}) => ({
                         [SLACK_BLOCK_TS_PROJECT]: {
                             [SLACK_BLOCK_TS_PROJECT]: { selected_option: { value: PROJECT_ID } },
                         },
-                        [SLACK_BLOCK_TS_BILLABLE]: { [SLACK_BLOCK_TS_BILLABLE]: { value: '3.5' } },
-                        ts_non_billable: { ts_non_billable: { value: '0' } },
+                        [SLACK_BLOCK_TS_BILLABLE]: {
+                            [SLACK_BLOCK_TS_BILLABLE]: { selected_option: { value: '210' } },
+                        },
+                        ts_non_billable: { ts_non_billable: { selected_option: { value: '0' } } },
                         [SLACK_BLOCK_TS_DESCRIPTION]: {
                             [SLACK_BLOCK_TS_DESCRIPTION]: { value: 'Depot routing bug' },
                         },
@@ -325,8 +327,10 @@ describe('handleLogTimeSubmission', () => {
                         state: {
                             values: {
                                 [SLACK_BLOCK_TS_DATE]: { [SLACK_BLOCK_TS_DATE]: { selected_date: '2026-09-07' } },
-                                [SLACK_BLOCK_TS_BILLABLE]: { [SLACK_BLOCK_TS_BILLABLE]: { value: '3.5' } },
-                                ts_non_billable: { ts_non_billable: { value: '0' } },
+                                [SLACK_BLOCK_TS_BILLABLE]: {
+                                    [SLACK_BLOCK_TS_BILLABLE]: { selected_option: { value: '210' } },
+                                },
+                                ts_non_billable: { ts_non_billable: { selected_option: { value: '0' } } },
                                 [SLACK_BLOCK_TS_DESCRIPTION]: {
                                     [SLACK_BLOCK_TS_DESCRIPTION]: { value: 'Depot routing bug' },
                                 },

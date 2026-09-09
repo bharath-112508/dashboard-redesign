@@ -66,6 +66,7 @@ export interface LogTimeModalState {
     project_id?: string;
     ticket_id?: string;
     context?: string;
+    /** Selected duration in MINUTES, as the option value string. */
     billable?: string;
     non_billable?: string;
     description?: string;
@@ -77,6 +78,61 @@ export interface LogTimeModalOptions {
      *  project is chosen yet, or when the project has none for them. */
     tickets?: LogTimeTicketOption[];
 }
+
+/**
+ * Preset durations for the billable / non-billable pickers.
+ *
+ * MIRRORS `components/duration-select.tsx` on the web deliberately: 15-min
+ * steps under an hour, 30-min steps to 8h, then hourly to 24h (the per-field
+ * cap, `TIMESHEET_HOURS_MAX`). If the two lists drift, the same field offers
+ * different choices depending on where you log from.
+ *
+ * Values are plain MINUTES. The web stores "H:MM" strings because its grid
+ * round-trips them as text; nothing here needs that, and minutes go straight
+ * into the hours/minutes split the validator wants.
+ */
+const DURATION_STEP_MINUTES: number[] = [
+    15,
+    30,
+    45,
+    ...Array.from({ length: 15 }, (_, i) => 60 + i * 30),
+    ...Array.from({ length: 16 }, (_, i) => (9 + i) * 60),
+];
+
+/** "45 min" / "1 hr" / "1.5 hr" — the web picker's labelling, unchanged. */
+const durationLabel = (mins: number): string => {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    if (h === 0) return `${m} min`;
+    return `${m === 30 ? `${h}.5` : h} hr`;
+};
+
+/** Leading "—" is a real option worth 0, not a placeholder: an `input` block
+ *  is required, so "no time on this side" has to be selectable. */
+const DURATION_OPTIONS: Array<{ text: { type: 'plain_text'; text: string; emoji: boolean }; value: string }> = [
+    { text: plain('—'), value: '0' },
+    ...DURATION_STEP_MINUTES.map((mins) => ({ text: plain(durationLabel(mins)), value: String(mins) })),
+];
+
+/** The option matching `minutes`, or the zero option. Slack REJECTS a view
+ *  whose `initial_option` is absent from `options`, so an unrecognised value
+ *  (a legacy "1:05", a hand-crafted payload) must fall back rather than be
+ *  passed through. */
+const durationInitial = (minutes: string | undefined) =>
+    DURATION_OPTIONS.find((o) => o.value === minutes) ?? DURATION_OPTIONS[0]!;
+
+/** A duration input block. */
+const durationBlock = (blockId: string, label: string, selected: string | undefined) => ({
+    type: 'input',
+    block_id: blockId,
+    label: plain(label),
+    element: {
+        type: 'static_select',
+        action_id: blockId,
+        options: DURATION_OPTIONS,
+        initial_option: durationInitial(selected),
+    },
+});
 
 const selectOption = (o: LogTimeProjectOption) => ({
     text: plain(truncateOptionLabel(o.label)),
@@ -221,30 +277,8 @@ export const buildLogTimeModal = (
     }
 
     blocks.push(
-        {
-            type: 'input',
-            block_id: SLACK_BLOCK_TS_BILLABLE,
-            label: plain('Billable hours'),
-            element: {
-                type: 'number_input',
-                action_id: SLACK_BLOCK_TS_BILLABLE,
-                is_decimal_allowed: true,
-                min_value: '0',
-                initial_value: state.billable ?? '0',
-            },
-        },
-        {
-            type: 'input',
-            block_id: SLACK_BLOCK_TS_NON_BILLABLE,
-            label: plain('Non-billable hours'),
-            element: {
-                type: 'number_input',
-                action_id: SLACK_BLOCK_TS_NON_BILLABLE,
-                is_decimal_allowed: true,
-                min_value: '0',
-                initial_value: state.non_billable ?? '0',
-            },
-        },
+        durationBlock(SLACK_BLOCK_TS_BILLABLE, 'Billable', state.billable),
+        durationBlock(SLACK_BLOCK_TS_NON_BILLABLE, 'Non-billable', state.non_billable),
         {
             type: 'input',
             block_id: SLACK_BLOCK_TS_DESCRIPTION,
@@ -281,12 +315,19 @@ type StateValues = Record<string, Record<string, StateValue>>;
 /** Block id and action id are the same string throughout this codebase. */
 const cell = (values: StateValues, block: string): StateValue => values?.[block]?.[block] ?? {};
 
-/** Decimal hours → whole hours + minutes, rounded to the nearest minute. */
+/**
+ * Selected minutes → whole hours + minutes.
+ *
+ * The durations were a decimal-hours `number_input` ("3.5") and are now a
+ * preset `static_select` carrying plain minutes, matching the web picker.
+ * That removed a class of problem rather than moving it: no float rounding,
+ * and no way to type 100 hours into a field the validator caps at 24 — the
+ * option list simply stops there.
+ */
 const toHoursMinutes = (raw: string | undefined): { hours: number; minutes: number } => {
-    const parsed = Number.parseFloat(raw ?? '');
-    if (!Number.isFinite(parsed) || parsed < 0) return { hours: 0, minutes: 0 };
-    const totalMinutes = Math.round(parsed * 60);
-    return { hours: Math.floor(totalMinutes / 60), minutes: totalMinutes % 60 };
+    const total = Number.parseInt(raw ?? '', 10);
+    if (!Number.isFinite(total) || total < 0) return { hours: 0, minutes: 0 };
+    return { hours: Math.floor(total / 60), minutes: total % 60 };
 };
 
 export interface ParsedLogTimeSubmission {
@@ -321,16 +362,16 @@ export const readLogTimeState = (view: unknown): LogTimeModalState => {
         project_id: cell(values, SLACK_BLOCK_TS_PROJECT).selected_option?.value ?? undefined,
         ticket_id: cell(values, SLACK_BLOCK_TS_TICKET).selected_option?.value ?? undefined,
         context: cell(values, SLACK_BLOCK_TS_CONTEXT).value ?? undefined,
-        billable: cell(values, SLACK_BLOCK_TS_BILLABLE).value ?? undefined,
-        non_billable: cell(values, SLACK_BLOCK_TS_NON_BILLABLE).value ?? undefined,
+        billable: cell(values, SLACK_BLOCK_TS_BILLABLE).selected_option?.value ?? undefined,
+        non_billable: cell(values, SLACK_BLOCK_TS_NON_BILLABLE).selected_option?.value ?? undefined,
         description: cell(values, SLACK_BLOCK_TS_DESCRIPTION).value ?? undefined,
     };
 };
 
 export const parseLogTimeSubmission = (view: unknown): ParsedLogTimeSubmission => {
     const values = ((view as { state?: { values?: StateValues } })?.state?.values ?? {}) as StateValues;
-    const billable = toHoursMinutes(cell(values, SLACK_BLOCK_TS_BILLABLE).value);
-    const nonBillable = toHoursMinutes(cell(values, SLACK_BLOCK_TS_NON_BILLABLE).value);
+    const billable = toHoursMinutes(cell(values, SLACK_BLOCK_TS_BILLABLE).selected_option?.value);
+    const nonBillable = toHoursMinutes(cell(values, SLACK_BLOCK_TS_NON_BILLABLE).selected_option?.value);
     const entryType = cell(values, SLACK_BLOCK_TS_TYPE).selected_option?.value ?? SLACK_TS_TYPE_GENERAL;
     const isTicket = entryType === SLACK_TS_TYPE_TICKET;
     // Trimmed to null, not left as '': the validator's `general_category` is

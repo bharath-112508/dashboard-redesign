@@ -151,12 +151,14 @@ export const handleLogTimeModalChange = async (
  * that isn't in the view (see `timesheetAppErrorToModalErrors`'s doc
  * comment), so this can't just be `ts_${field}` — most validator field
  * names don't match a block id 1:1 in this modal (e.g. `billable_hours` and
- * `billable_minutes` both land on the one `ts_billable` decimal-hours
- * input). That distinction matters concretely: `toHoursMinutes` (the
- * decimal→hours/minutes conversion) doesn't clamp to `TIMESHEET_HOURS_MAX`,
- * so someone typing 100 billable hours reaches the validator's `.max(24)`
- * check on `billable_hours` — mapped here, that lands back on the billable
- * field instead of silently vanishing.
+ * `billable_minutes` both land on the one `ts_billable` picker).
+ *
+ * This used to also carry the over-24h case: the durations were a decimal
+ * `number_input`, so someone could type 100 hours and hit the validator's
+ * `.max(24)`. They are preset selects now (capped at the 24h option), so
+ * that particular error can no longer originate from the UI — the mapping
+ * stays because a hand-crafted `view_submission` can still send anything,
+ * and an error with nowhere to land is one Slack drops silently.
  */
 const FIELD_TO_BLOCK: Record<string, string> = {
     local_date: SLACK_BLOCK_TS_DATE,
