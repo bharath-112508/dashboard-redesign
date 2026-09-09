@@ -154,6 +154,21 @@ describe('leave message — redesigned layout', () => {
         expect(s).toContain('1 day');
     });
 
+    it('splits the dates and the duration into SEPARATE sections', () => {
+        // Four fields in one section stack as two tight rows with no gap —
+        // Block Kit exposes no spacing control inside a `fields` grid, so the
+        // only way to separate them is a second block.
+        const b = buildLeaveMessageBlocks(full, { status: 'pending' }) as unknown as Array<{
+            type: string;
+            fields?: Array<{ text: string }>;
+        }>;
+        const fieldRows = b.filter((x) => x.type === 'section' && Array.isArray(x.fields));
+        expect(fieldRows).toHaveLength(2);
+        expect(fieldRows.every((r) => r.fields?.length === 2)).toBe(true);
+        expect(flat(fieldRows[0])).toContain('From');
+        expect(flat(fieldRows[1])).toContain('Duration');
+    });
+
     it('pluralises the duration', () => {
         const s = flat(buildLeaveMessageBlocks({ ...full, total_days: 3 }, { status: 'pending' }));
         expect(s).toContain('3 days');

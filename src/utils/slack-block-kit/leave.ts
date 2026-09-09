@@ -200,14 +200,18 @@ export const buildLeaveMessageBlocks = (leave: LeaveBlockInput, args: BuilderArg
 
     blocks.push({ type: 'divider' });
 
+    // TWO section blocks, not one with four fields. Block Kit gives no
+    // spacing control inside a `fields` grid — four fields in one section
+    // stack as two tight rows with From sitting right on top of Duration.
+    // Separate sections get the normal inter-block gap, which is the only
+    // way to put air between the date row and the duration row.
     blocks.push({
         type: 'section',
-        fields: [
-            field('📅 From', prettyDate(leave.start_date)),
-            field('📅 To', prettyDate(leave.end_date)),
-            field('⏱ Duration', durationText(leave)),
-            field('✅ Status', STATUS_LABEL[args.status]),
-        ],
+        fields: [field('📅 From', prettyDate(leave.start_date)), field('📅 To', prettyDate(leave.end_date))],
+    });
+    blocks.push({
+        type: 'section',
+        fields: [field('⏱ Duration', durationText(leave)), field('✅ Status', STATUS_LABEL[args.status])],
     });
 
     blocks.push(mrkdwn(`💬 *Reason*\n${leave.reason && leave.reason.trim().length > 0 ? leave.reason : '—'}`));
