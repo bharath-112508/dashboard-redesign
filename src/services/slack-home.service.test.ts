@@ -140,8 +140,8 @@ describe('buildHomeDashboardData — my_time', () => {
         // Rows carrying no project_id/task_id resolve to placeholders rather
         // than blank cells, and neither lookup is issued for them.
         expect(data.my_time?.entries).toEqual([
-            { project: '—', work: '—', minutes: 90 },
-            { project: '—', work: '—', minutes: 75 },
+            { project: 'No project', work: '', note: '', minutes: 90 },
+            { project: 'No project', work: '', note: '', minutes: 75 },
         ]);
         expect(projectFindMock).not.toHaveBeenCalled();
         expect(taskFindMock).not.toHaveBeenCalled();
@@ -176,7 +176,7 @@ describe('buildHomeDashboardData — my_time', () => {
     });
 });
 
-// ─── "Your time" table rows ───────────────────────────────────────────────
+// ─── "Your time" entry rows ──────────────────────────────────────────────
 
 describe('buildHomeDashboardData — my_time entries', () => {
     beforeEach(() => {
@@ -185,16 +185,23 @@ describe('buildHomeDashboardData — my_time entries', () => {
         });
     });
 
-    it('resolves the project name and the ticket key', async () => {
+    // 🔴 REGRESSION. `listMyDay` returns `toPublic(doc)` = `doc.toJSON()`, and
+    // Mongoose leaves ObjectId fields as ObjectId INSTANCES — it does not
+    // stringify them. The first version of the resolver guarded with
+    // `typeof v === 'string'`, so it rejected every id, never issued a
+    // lookup, and rendered "—" for every project on the live Home tab. These
+    // fixtures now use real ObjectIds precisely because string fixtures are
+    // what let that ship.
+    it('resolves project and ticket when the ids are ObjectIds, not strings', async () => {
         const projectId = new Types.ObjectId();
         const taskId = new Types.ObjectId();
         (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
             data: [
                 {
                     total_minutes: 150,
-                    project_id: projectId.toString(),
-                    task_id: taskId.toString(),
-                    description: 'ignored when a ticket is named',
+                    project_id: projectId,
+                    task_id: taskId,
+                    description: 'completed the payment integration',
                 },
             ],
             meta: { local_date: today, total_minutes: 150 },
@@ -203,23 +210,51 @@ describe('buildHomeDashboardData — my_time entries', () => {
         taskFindMock.mockReturnValue(leanStub([{ _id: taskId, task_number: 142, project_id: projectId }]));
 
         const data = await buildHomeDashboardData(employee);
-        expect(data.my_time?.entries).toEqual([{ project: 'Nordmark Fleet', work: 'NMF-142', minutes: 150 }]);
+        expect(data.my_time?.entries).toEqual([
+            {
+                project: 'Nordmark Fleet',
+                work: 'NMF-142',
+                note: 'completed the payment integration',
+                minutes: 150,
+            },
+        ]);
     });
 
-    it('falls back to general_category, then description, so a row is never blank', async () => {
+    it('still resolves when the ids arrive as strings', async () => {
         const projectId = new Types.ObjectId();
         (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
-            data: [
-                { total_minutes: 30, project_id: projectId.toString(), general_category: 'Standup' },
-                { total_minutes: 45, project_id: projectId.toString(), description: 'Paired on routing' },
-            ],
-            meta: { local_date: today, total_minutes: 75 },
+            data: [{ total_minutes: 30, project_id: projectId.toString(), general_category: 'Standup' }],
+            meta: { local_date: today, total_minutes: 30 },
         });
         projectFindMock.mockReturnValue(leanStub([{ _id: projectId, name: 'Aurora', code: 'AUR' }]));
         taskFindMock.mockReturnValue(leanStub([]));
 
         const data = await buildHomeDashboardData(employee);
-        expect(data.my_time?.entries.map((e) => e.work)).toEqual(['Standup', 'Paired on routing']);
+        expect(data.my_time?.entries[0]).toMatchObject({ project: 'Aurora', work: 'Standup' });
+    });
+
+    it('keeps the description as the note, never as the work label', async () => {
+        const projectId = new Types.ObjectId();
+        (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
+            data: [{ total_minutes: 45, project_id: projectId, description: 'Paired on routing' }],
+            meta: { local_date: today, total_minutes: 45 },
+        });
+        projectFindMock.mockReturnValue(leanStub([{ _id: projectId, name: 'Aurora', code: 'AUR' }]));
+        taskFindMock.mockReturnValue(leanStub([]));
+
+        const data = await buildHomeDashboardData(employee);
+        // Printing it in both places duplicated the same sentence on one row.
+        expect(data.my_time?.entries[0]).toMatchObject({ work: '', note: 'Paired on routing' });
+    });
+
+    it('labels a project-less row rather than leaving it blank', async () => {
+        (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
+            data: [{ total_minutes: 60, description: 'Internal' }],
+            meta: { local_date: today, total_minutes: 60 },
+        });
+        const data = await buildHomeDashboardData(employee);
+        expect(data.my_time?.entries[0]?.project).toBe('No project');
+        expect(projectFindMock).not.toHaveBeenCalled();
     });
 
     it('looks each project up once, not once per row', async () => {
@@ -227,7 +262,7 @@ describe('buildHomeDashboardData — my_time entries', () => {
         (listMyDay as ReturnType<typeof vi.fn>).mockResolvedValue({
             data: Array.from({ length: 5 }, () => ({
                 total_minutes: 30,
-                project_id: projectId.toString(),
+                project_id: projectId,
                 general_category: 'Standup',
             })),
             meta: { local_date: today, total_minutes: 150 },

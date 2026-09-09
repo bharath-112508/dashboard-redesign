@@ -69,7 +69,11 @@ export interface HomeDashboardData {
  */
 export interface MyTimeEntry {
     project: string;
+    /** Ticket key (`NMF-142`) or the general category. EMPTY when the entry
+     *  has neither — the description is `note`, not a fallback for this. */
     work: string;
+    /** The entry's description, rendered on its own line. */
+    note: string;
     minutes: number;
 }
 
@@ -140,15 +144,21 @@ const buildMyTimeEntries = async (
 ): Promise<MyTimeEntry[]> => {
     if (rows.length === 0) return [];
 
-    const oid = (v: unknown): Types.ObjectId | null =>
-        typeof v === 'string' && Types.ObjectId.isValid(v) ? new Types.ObjectId(v) : null;
+    // `listMyDay` returns `toPublic(doc)` = `doc.toJSON()`, and Mongoose's
+    // toJSON leaves ObjectId fields as ObjectId INSTANCES — it does not
+    // stringify them. An earlier `typeof v === 'string'` guard here therefore
+    // rejected every id, so no lookup ever ran and every row rendered "—".
+    // Normalise through String() so both shapes work.
+    const key = (v: unknown): string | null => {
+        if (v === null || v === undefined) return null;
+        const str = String(v);
+        return Types.ObjectId.isValid(str) ? str : null;
+    };
 
-    const projectIds = [...new Set(rows.map((r) => r.project_id).filter(Boolean) as string[])]
-        .map(oid)
-        .filter((v): v is Types.ObjectId => v !== null);
-    const taskIds = [...new Set(rows.map((r) => r.task_id).filter(Boolean) as string[])]
-        .map(oid)
-        .filter((v): v is Types.ObjectId => v !== null);
+    const projectKeys = [...new Set(rows.map((r) => key(r.project_id)).filter((v): v is string => v !== null))];
+    const taskKeys = [...new Set(rows.map((r) => key(r.task_id)).filter((v): v is string => v !== null))];
+    const projectIds = projectKeys.map((k) => new Types.ObjectId(k));
+    const taskIds = taskKeys.map((k) => new Types.ObjectId(k));
 
     const [projects, tasks] = await Promise.all([
         projectIds.length
@@ -177,17 +187,18 @@ const buildMyTimeEntries = async (
     );
 
     return rows.map((r) => {
-        const project = r.project_id ? projectById.get(r.project_id) : undefined;
-        const task = r.task_id ? taskById.get(r.task_id) : undefined;
-        // Ticket key first, then the general category, then the description —
-        // `general_category` is optional and most people leave it blank, so
-        // without the last fallback the busiest column would be empty.
-        const work = task
-            ? `${project?.code ?? ''}-${task.task_number ?? '?'}`
-            : (r.general_category ?? r.description ?? '—');
+        const pk = key(r.project_id);
+        const tk = key(r.task_id);
+        const project = pk ? projectById.get(pk) : undefined;
+        const task = tk ? taskById.get(tk) : undefined;
+        // Ticket key, else the general category, else nothing. The
+        // description is NOT a fallback here any more — it has its own line
+        // as `note`, and using it for both printed the same text twice.
+        const work = task ? `${project?.code ?? ''}-${task.task_number ?? '?'}` : (r.general_category ?? '');
         return {
-            project: project?.name ?? '—',
+            project: project?.name ?? 'No project',
             work,
+            note: r.description ?? '',
             minutes: r.total_minutes ?? 0,
         };
     });

@@ -401,7 +401,7 @@ describe('Your time — placement', () => {
     });
 });
 
-describe('Your time — entry table', () => {
+describe('Your time — entry list', () => {
     const user = { _id: new Types.ObjectId(), role: 'employee', full_name: 'Ananya' } as never;
     const withEntries = (entries: unknown[]) =>
         ({
@@ -418,80 +418,75 @@ describe('Your time — entry table', () => {
         }) as never;
 
     const ENTRIES = [
-        { project: 'Nordmark Fleet', work: 'VLJ-142', minutes: 150 },
-        { project: 'Aurora Foods', work: 'Standup', minutes: 30 },
+        {
+            project: 'Nordmark Fleet Dashboard',
+            work: 'NMF-142',
+            note: 'completed the payment integration',
+            minutes: 150,
+        },
+        { project: 'Aurora Foods', work: 'Standup', note: '', minutes: 30 },
     ];
 
-    const tableText = (view: { blocks: Array<Record<string, unknown>> }): string => {
-        const block = view.blocks.find((b) => JSON.stringify(b).includes('```'));
-        return block ? JSON.stringify(block) : '';
-    };
+    const text = (view: { blocks: Array<Record<string, unknown>> }) => JSON.stringify(view.blocks);
 
-    it('renders the entries in a monospace block', () => {
+    it('shows the project name IN FULL — the old table truncated it to 16 chars', () => {
         const view = buildHomeDashboardView(withEntries(ENTRIES), user) as never as {
             blocks: Array<Record<string, unknown>>;
         };
-        const t = tableText(view);
-        expect(t).toContain('Nordmark Fleet');
-        expect(t).toContain('VLJ-142');
-        expect(t).toContain('Aurora Foods');
-        expect(t).toContain('Standup');
+        expect(text(view)).toContain('Nordmark Fleet Dashboard');
     });
 
-    it("shows each entry's duration", () => {
+    it('shows the ticket key and the duration', () => {
         const view = buildHomeDashboardView(withEntries(ENTRIES), user) as never as {
             blocks: Array<Record<string, unknown>>;
         };
-        const t = tableText(view);
-        expect(t).toContain('2h 30m');
-        expect(t).toContain('30m');
+        expect(text(view)).toContain('NMF-142');
+        expect(text(view)).toContain('2h 30m');
     });
 
-    it('pads columns so they line up — the whole point of a code block', () => {
+    it('shows the note on its own line', () => {
         const view = buildHomeDashboardView(withEntries(ENTRIES), user) as never as {
             blocks: Array<Record<string, unknown>>;
         };
-        const block = view.blocks.find((b) => JSON.stringify(b).includes('```'))!;
-        const raw = ((block.text as { text: string }).text ?? '').replace(/```/g, '');
-        const rows = raw.split('\n').filter((l) => l.includes('VLJ-142') || l.includes('Standup'));
-        expect(rows).toHaveLength(2);
-        // Same starting column for the second field on every row.
-        const workCol = rows.map((r) => r.indexOf(r.trim().split(/\s{2,}/)[1]!));
-        expect(new Set(workCol).size).toBe(1);
+        expect(text(view)).toContain('completed the payment integration');
     });
 
-    it('truncates an over-long project rather than breaking alignment', () => {
+    it('omits the separator when an entry has no ticket or category', () => {
         const view = buildHomeDashboardView(
-            withEntries([{ project: 'A'.repeat(60), work: 'VLJ-1', minutes: 60 }]),
+            withEntries([{ project: 'Aurora', work: '', note: 'Ad-hoc', minutes: 60 }]),
             user
         ) as never as { blocks: Array<Record<string, unknown>> };
-        const block = view.blocks.find((b) => JSON.stringify(b).includes('```'))!;
-        const raw = (block.text as { text: string }).text;
-        const row = raw.split('\n').find((l) => l.includes('VLJ-1'))!;
-        expect(row.length).toBeLessThan(60);
-        expect(raw).toContain('…');
+        // "Project ·  · 1h" — a dangling separator where `work` would be.
+        expect(text(view)).not.toMatch(/·\s+·/);
     });
 
-    it('caps a long day and says how many are hidden', () => {
+    it('clamps a very long note rather than flooding the tab', () => {
+        const view = buildHomeDashboardView(
+            withEntries([{ project: 'P', work: 'T-1', note: 'x'.repeat(400), minutes: 60 }]),
+            user
+        ) as never as { blocks: Array<Record<string, unknown>> };
+        expect(text(view)).not.toContain('x'.repeat(200));
+        expect(text(view)).toContain('…');
+    });
+
+    it('caps a long day, says how many are hidden, and stays under the block ceiling', () => {
         const many = Array.from({ length: 25 }, (_, i) => ({
             project: 'P',
             work: `T-${i}`,
+            note: '',
             minutes: 15,
         }));
         const view = buildHomeDashboardView(withEntries(many), user) as never as {
             blocks: Array<Record<string, unknown>>;
         };
-        const all = JSON.stringify(view.blocks);
-        expect(all).toMatch(/\+\s*\d+ more/);
-        // The table is ONE block regardless of row count — that is what keeps
-        // a busy day from eating into the 100-block view ceiling.
+        expect(text(view)).toMatch(/\+\s*\d+ more/);
         expect((view.blocks as unknown[]).length).toBeLessThanOrEqual(100);
     });
 
-    it('shows no table at all when nothing is logged', () => {
+    it('renders nothing extra when nothing is logged', () => {
         const view = buildHomeDashboardView(withEntries([]), user) as never as {
             blocks: Array<Record<string, unknown>>;
         };
-        expect(tableText(view)).toBe('');
+        expect(text(view)).not.toMatch(/more today/);
     });
 });

@@ -223,46 +223,42 @@ const hm = (minutes: number): string => {
     return `${m}m`;
 };
 
-/** Column widths for the entry table. Slack's code block is monospace but
- *  NOT infinitely wide — it scrolls horizontally on mobile rather than
- *  wrapping, so the row has to stay narrow enough to read on a phone. */
-// 16 + 16 + ~6 for the duration ≈ 38 chars per row, which fits a phone-width
-// code block without horizontal scrolling. Widening either column buys
-// longer names at the cost of scrolling on every row.
-const COL_PROJECT = 16;
-const COL_WORK = 16;
-
-/** Pad or truncate to an exact width, so every row starts its next column at
- *  the same offset. A row that overflows its column doesn't wrap — it shunts
- *  the rest of THAT row right and breaks the alignment for the whole table,
- *  which is the only reason to use a code block in the first place. */
-const fit = (value: string, width: number): string => {
-    const v = value ?? '';
-    // `>=`, not `>`: a value of EXACTLY `width` gets no padding from
-    // `padEnd`, so it runs straight into the next column with no gap
-    // ("Nordmark FleetVLJ-142"). Truncating at `width - 2` leaves room for
-    // the ellipsis AND a trailing space, so every column keeps its separator.
-    if (v.length >= width) return `${v.slice(0, width - 2)}… `;
-    return v.padEnd(width);
-};
-
-/** How many entries the table lists before collapsing to a "+N more" line. */
+/** How many entries are listed before collapsing to a "+N more" line.
+ *  One block each, and this section renders FIRST, so an unbounded list
+ *  would push later sections past Slack's 100-block view ceiling. */
 export const MY_TIME_ENTRY_CAP = 10;
 
+/** Longest note shown inline. A full day's description can run to a
+ *  paragraph; the web timesheet is the place to read it in full. */
+const NOTE_MAX = 90;
+
+const clamp = (v: string, max: number): string => (v.length > max ? `${v.slice(0, max - 1)}…` : v);
+
 /**
- * The day's entries as an aligned monospace table.
+ * The day's entries, one Block Kit section each.
  *
- * ONE block regardless of row count — a busy day can't eat into the
- * 100-block view ceiling the way a block-per-row would. Slack has no table
- * primitive; a fenced code block is the only thing that renders in a
- * fixed-width font, which is what makes columns line up at all.
+ * This started as a monospace code-block table, which aligned columns but
+ * cost more than it returned: 16-char columns truncated real project names
+ * to "Viljetech Plat…", the note had nowhere to go, and Slack renders code
+ * blocks in a small font that scrolls sideways on a phone. Native mrkdwn
+ * wraps instead of scrolling, shows names in full, and gives the note its
+ * own line — worth more here than column alignment, since there are only
+ * three fields and the eye tracks them by weight rather than by column.
  */
 const myTimeTable = (entries: MyTimeEntry[]): Array<Record<string, unknown>> => {
     if (entries.length === 0) return [];
     const shown = entries.slice(0, MY_TIME_ENTRY_CAP);
-    const rows = shown.map((e) => `${fit(e.project, COL_PROJECT)}${fit(e.work, COL_WORK)}${hm(e.minutes)}`);
-    const head = `${fit('PROJECT', COL_PROJECT)}${fit('WORK', COL_WORK)}TIME`;
-    const out: Array<Record<string, unknown>> = [section(`\`\`\`\n${head}\n${rows.join('\n')}\n\`\`\``)];
+
+    const out: Array<Record<string, unknown>> = shown.map((e) => {
+        // `work` is empty for a general entry with no category — omit the
+        // separator too, or the line reads "Project ·  · 2h".
+        const head = [`*${e.project}*`, e.work ? `\`${e.work}\`` : null, `*${hm(e.minutes)}*`]
+            .filter(Boolean)
+            .join('  ·  ');
+        const note = e.note ? `\n_${clamp(e.note, NOTE_MAX)}_` : '';
+        return section(`${head}${note}`);
+    });
+
     const hidden = entries.length - shown.length;
     if (hidden > 0) out.push(context(`+ ${hidden} more today — open the web timesheet for the full day.`));
     return out;
