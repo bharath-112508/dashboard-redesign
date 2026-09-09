@@ -10,6 +10,7 @@ import { PERMISSIONS, type Permission } from '../constants/permissions.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { BaseJWTPayload } from '../types/index.js';
 import { User } from '../models/user.model.js';
+import { RefreshToken } from '../models/refresh-token.model.js';
 import { getOrInitSettings } from '../services/settings.service.js';
 
 declare global {
@@ -137,6 +138,46 @@ const loadAuthUserRow = async (userPayload: BaseJWTPayload): Promise<AuthUserRow
     return row;
 };
 
+/**
+ * Reject an access token whose session has been revoked.
+ *
+ * Access tokens are stateless and live `JWT_EXPIRES_IN` (8h) on their
+ * signature alone. Revoking a session only flips `revoked_at` on the
+ * `refresh_tokens` row, which blocks the *refresh* — so without this
+ * gate a revoked session kept full read/write API access for up to 8h,
+ * and "Revoke" in the UI did nothing the user could observe.
+ *
+ * `sid` names the session row. A token minted before that claim
+ * shipped has no `sid`; we let it through rather than logging every
+ * signed-in user out on deploy — those tokens expire within
+ * `JWT_EXPIRES_IN` and every token issued after carries the claim.
+ *
+ * Cost: one indexed `_id` lookup per authenticated request, selecting
+ * a single field. Deliberately not cached — revocation must take
+ * effect on the very next request, which is the whole point.
+ */
+const enforceSessionNotRevoked = async (payload: BaseJWTPayload): Promise<void> => {
+    if (!payload.sid) return;
+
+    let sessionId: Types.ObjectId;
+    try {
+        sessionId = new Types.ObjectId(payload.sid);
+    } catch {
+        // A malformed `sid` is not a token we issued.
+        throw AppError.unauthenticated();
+    }
+
+    const session = await RefreshToken.findById(sessionId)
+        .select('revoked_at user_id')
+        .lean<{ revoked_at: Date | null; user_id: Types.ObjectId } | null>();
+
+    // Gone (pruned or never existed), revoked, or — defence in depth —
+    // belonging to a different user than the token claims.
+    if (!session || session.revoked_at || session.user_id.toString() !== payload.user_id) {
+        throw AppError.unauthenticated();
+    }
+};
+
 const enforceMfaGate = async (req: Request, userPayload: BaseJWTPayload, userRow: AuthUserRow): Promise<void> => {
     if (!isCallerAdmin(userPayload)) return;
     if (READ_METHODS.has(req.method)) return;
@@ -174,6 +215,11 @@ export const authenticate = async (req: Request, _res: Response, next: NextFunct
     // T1 — close the deactivate-but-token-still-valid window AND fetch
     // the row needed by the Step-28 admin-MFA gate in the same query.
     const userRow = await loadAuthUserRow(payload);
+
+    // Close the revoke-but-token-still-valid window. Sits next to the
+    // T1 deactivation gate above because it defends the same class of
+    // hole: a credential that outlives the decision to withdraw it.
+    await enforceSessionNotRevoked(payload);
 
     // Company scope for client-side roles, from the row above (not the
     // JWT — see the `caller_company_id` note on the Request augmentation).
