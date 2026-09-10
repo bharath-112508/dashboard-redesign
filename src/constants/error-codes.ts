@@ -165,6 +165,12 @@ export const ERROR_CODES = {
     TIMESHEET_ZERO_DURATION: 'TIMESHEET_ZERO_DURATION',
     TIMESHEET_DURATION_TOO_LARGE: 'TIMESHEET_DURATION_TOO_LARGE',
     TIMESHEET_TASK_REQUIRED: 'TIMESHEET_TASK_REQUIRED',
+    /** One or more rows in a bulk import failed validation. The response
+     *  carries per-row reasons; nothing was written. */
+    TIMESHEET_IMPORT_INVALID: 'TIMESHEET_IMPORT_INVALID',
+    /** The data changed between preview and commit (a project archived, say),
+     *  so the previewed outcome is no longer accurate. Nothing was written. */
+    TIMESHEET_IMPORT_STALE: 'TIMESHEET_IMPORT_STALE',
     BILLING_RATE_INVALID_RANGE: 'BILLING_RATE_INVALID_RANGE',
     BILLING_RATE_IN_USE: 'BILLING_RATE_IN_USE',
     /** Billing Phase 2 — Cost Rates & Margin (Task 3). Cost-side twin of

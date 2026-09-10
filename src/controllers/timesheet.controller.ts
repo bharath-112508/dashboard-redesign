@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { Types } from 'mongoose';
 
 import * as service from '../services/timesheet.service.js';
+import * as importService from '../services/timesheet-import.service.js';
+import { buildAuditContext } from '../utils/audit-context.js';
 import { TIMESHEET_EXPORT_MAX_ROWS } from '../constants/timesheet.js';
 import { generateXlsx } from '../services/report-exporters/xlsx.js';
 import { toTabularTeamTimesheets, type TeamTimesheetExportRow } from '../services/report-exporters/tabular.js';
@@ -9,6 +11,7 @@ import { created, ok, paginated } from '../utils/api-response.js';
 import { projectCallerFrom } from '../utils/caller.js';
 import type {
     CreateTimesheetBody,
+    TimesheetImportBody,
     DayDatePath,
     ListTimesheetsQuery,
     PatchTimesheetBody,
@@ -123,4 +126,25 @@ export const patchOne = async (req: Request, res: Response): Promise<Response> =
 export const deleteOne = async (req: Request, res: Response): Promise<Response> => {
     const data = await service.deleteEntry(idOf(req, 'id'), projectCallerFrom(req));
     return ok(res, data);
+};
+
+// ─── POST /timesheets/import/preview ─────────────────────────────────────
+
+/**
+ * Dry run. Resolves and validates every row and reports what WOULD happen —
+ * writes nothing. Always 200, even when every row is blocked: a file full of
+ * mistakes is a successful preview, not a failed request, and the per-row
+ * verdicts are the payload the user needs.
+ */
+export const postImportPreview = async (req: Request, res: Response): Promise<Response> => {
+    const body = req.body as TimesheetImportBody;
+    return ok(res, await importService.previewImport(body.rows, projectCallerFrom(req)));
+};
+
+// ─── POST /timesheets/import ─────────────────────────────────────────────
+
+export const postImport = async (req: Request, res: Response): Promise<Response> => {
+    const body = req.body as TimesheetImportBody;
+    const result = await importService.commitImport(body.rows, projectCallerFrom(req), buildAuditContext(req));
+    return created(res, result);
 };

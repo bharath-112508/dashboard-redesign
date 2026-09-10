@@ -82,3 +82,18 @@ export const TIMESHEET_DEFAULT_DAILY_WARN_THRESHOLD_HOURS = 8;
  * than silently handing over a short one.
  */
 export const TIMESHEET_EXPORT_MAX_ROWS = 5000;
+
+// ─── Bulk import ─────────────────────────────────────────────────────────
+
+/**
+ * Rows accepted in one import.
+ *
+ * A month for one person is 20–60 rows, so this covers a quarter while
+ * staying a synchronous request with no job queue. Higher than the holidays
+ * bulk cap (`BULK_INSERT_MAX = 200`) because timesheet rows are denser — one
+ * per project per day rather than one per date.
+ *
+ * Over the cap is REFUSED, never truncated: silently importing the first 500
+ * rows of a 700-row sheet loses billable hours nobody would notice.
+ */
+export const TIMESHEET_IMPORT_MAX_ROWS = 500;

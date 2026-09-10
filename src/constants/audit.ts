@@ -246,6 +246,9 @@ export const AUDIT_ACTIONS = {
     TIMESHEET_UPDATE: 'timesheet.update',
     TIMESHEET_EDIT_OUT_OF_WINDOW: 'timesheet.edit_out_of_window',
     TIMESHEET_DELETE: 'timesheet.delete',
+    /** ONE row per bulk import, carrying the count and date range — not one
+     *  row per entry. The entries are already individually traceable. */
+    TIMESHEET_IMPORT: 'timesheet.import',
 
     // Billing-rate lifecycle (Phase 2 Step 23). `billing_rate.create`
     // records the auto-closed predecessor (when one existed) in

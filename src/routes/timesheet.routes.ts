@@ -12,6 +12,7 @@ import {
     patchTimesheetBodySchema,
     summaryQuerySchema,
     timesheetIdPathSchema,
+    timesheetImportBodySchema,
 } from '../validators/timesheet.validator.js';
 
 /**
@@ -34,6 +35,33 @@ router.use(authenticate);
 // list their own entries (Employee, Team Lead, Manager, Admin all do).
 
 router.get('/me', validate({ query: listTimesheetsQuerySchema }), asyncHandler(ctrl.getMyList));
+
+// ─── /import — bulk import of YOUR OWN entries ──────────────────────────
+//
+// Declared above `/:id` for the same reason as `/me` and `/summary`: Express
+// would otherwise try to cast the literal "import" to an ObjectId.
+//
+// Gated on `TIMESHEET_WRITE` — the same permission a single entry needs, and
+// no more. The service pins every row to the caller (`user_id: caller.id`),
+// so this cannot create time for anyone else no matter what the file says;
+// there is deliberately no user column in the format.
+//
+// Preview writes nothing but is a POST, not a GET: the row set is a body, not
+// something that belongs in a query string.
+
+router.post(
+    '/import/preview',
+    requirePermission(PERMISSIONS.TIMESHEET_WRITE),
+    validate({ body: timesheetImportBodySchema }),
+    asyncHandler(ctrl.postImportPreview)
+);
+
+router.post(
+    '/import',
+    requirePermission(PERMISSIONS.TIMESHEET_WRITE),
+    validate({ body: timesheetImportBodySchema }),
+    asyncHandler(ctrl.postImport)
+);
 
 router.get('/me/day/:date', validate({ params: dayDatePathSchema }), asyncHandler(ctrl.getMyDay));
 

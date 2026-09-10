@@ -69,6 +69,8 @@ interface PolicyContext {
     dailyWarnThresholdHours: number;
 }
 
+export type { PolicyContext };
+
 export interface TimesheetWriteResult {
     data: Record<string, unknown>;
     warnings: {
@@ -112,7 +114,12 @@ const toPublic = (doc: TimesheetEntryDocument): Record<string, unknown> => doc.t
 
 const todayLocal = (): string => dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
 
-const loadPolicy = async (): Promise<PolicyContext> => {
+/**
+ * Exported for `timesheet-import.service.ts`, which must apply the SAME soft
+ * policies as a single-entry create — a preview that computed its own
+ * threshold would drift from what the commit actually warns about.
+ */
+export const loadPolicy = async (): Promise<PolicyContext> => {
     const settings = await getOrInitSettings();
     return {
         selfEditWindowDays: Number.isFinite(settings.timesheet.self_edit_window_days)
@@ -221,7 +228,7 @@ const loadTaskForCaller = async (
  * the new value is included in the aggregate naturally — no row-
  * exclusion is required.
  */
-const sumDailyTotalMinutes = async (userId: Types.ObjectId, localDate: string): Promise<number> => {
+export const sumDailyTotalMinutes = async (userId: Types.ObjectId, localDate: string): Promise<number> => {
     const rows = await TimesheetEntry.aggregate<{ total: number }>([
         { $match: { user_id: userId, local_date: localDate } },
         { $group: { _id: null, total: { $sum: '$total_minutes' } } },
@@ -283,7 +290,7 @@ export const sumLoggedTimeForTask = async (taskId: Types.ObjectId): Promise<Task
  * "warn only if the slot conflicts with the entry's time-of-day"
  * once we capture that on entries.
  */
-const overlapsApprovedLeave = async (userId: Types.ObjectId, localDate: string): Promise<boolean> => {
+export const overlapsApprovedLeave = async (userId: Types.ObjectId, localDate: string): Promise<boolean> => {
     const overlap = await LeaveRequest.exists({
         user_id: userId,
         status: LEAVE_REQUEST_STATUSES.APPROVED,
@@ -293,7 +300,7 @@ const overlapsApprovedLeave = async (userId: Types.ObjectId, localDate: string):
     return Boolean(overlap);
 };
 
-const exceedsDailyThreshold = (totalMinutes: number, thresholdHours: number): boolean => {
+export const exceedsDailyThreshold = (totalMinutes: number, thresholdHours: number): boolean => {
     return totalMinutes > thresholdHours * 60;
 };
 

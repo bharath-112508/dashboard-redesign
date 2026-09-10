@@ -8,6 +8,7 @@ import {
     TIMESHEET_LIST_DEFAULT_LIMIT,
     TIMESHEET_LIST_MAX_LIMIT,
     TIMESHEET_MINUTES_MAX,
+    TIMESHEET_IMPORT_MAX_ROWS,
     TIMESHEET_SUMMARY_GROUP_BY,
 } from '../constants/timesheet.js';
 
@@ -176,3 +177,47 @@ export type TimesheetIdPath = z.infer<typeof timesheetIdPathSchema>;
 
 export const dayDatePathSchema = z.object({ date: isoDateSchema });
 export type DayDatePath = z.infer<typeof dayDatePathSchema>;
+
+// ─── POST /timesheets/import[/preview] ───────────────────────────────────
+
+/**
+ * One row as it came out of the user's spreadsheet.
+ *
+ * Deliberately NOT `createTimesheetBodySchema`. That schema speaks the
+ * database's language — resolved ObjectIds, hours split from minutes — and a
+ * spreadsheet speaks the user's: a project CODE or name, a ticket key, and
+ * decimal hours. Resolving one into the other is the service's job, and
+ * keeping the wire format close to the file is what lets an error name the
+ * cell the user actually has to fix.
+ */
+const importRowSchema = z.object({
+    /**
+     * 1-based line in the source file, carried through so every error can
+     * point at a row the user can find. Assigned by the parser, not typed by
+     * anyone — without it, "row 12 is invalid" means the twelfth VALID row,
+     * which is not where the mistake is.
+     */
+    row_number: z.number().int().min(1),
+    date: isoDateSchema,
+    /** Project code (`TEM2`) or a name; the service resolves and rejects an
+     *  ambiguous name rather than guessing. */
+    project: z.string().trim().min(1, 'Name a project.'),
+    /** `TEM2-142`. Present ⇒ the row becomes a task-linked entry. */
+    ticket: z.string().trim().min(1).optional().nullable(),
+    /** `general_category`. Ignored on ticket rows. */
+    context: z.string().trim().max(TIMESHEET_GENERAL_CATEGORY_MAX).optional().nullable(),
+    /** DECIMAL hours as typed in the sheet (`3.5`), not hours + minutes. */
+    billable: z.number().min(0).max(TIMESHEET_HOURS_MAX).default(0),
+    non_billable: z.number().min(0).max(TIMESHEET_HOURS_MAX).default(0),
+    notes: descriptionSchema,
+});
+
+export const timesheetImportBodySchema = z.object({
+    // `.min(1)` so an empty file is a clear 400 rather than a successful
+    // import of nothing. Over the cap is refused, never truncated — silently
+    // importing the first 500 rows of a 700-row sheet loses billable hours.
+    rows: z.array(importRowSchema).min(1, 'The file has no rows.').max(TIMESHEET_IMPORT_MAX_ROWS),
+});
+
+export type TimesheetImportRow = z.infer<typeof importRowSchema>;
+export type TimesheetImportBody = z.infer<typeof timesheetImportBodySchema>;
