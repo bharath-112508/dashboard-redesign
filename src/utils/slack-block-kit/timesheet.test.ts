@@ -318,6 +318,24 @@ describe('buildLogTimeModal — entry type', () => {
         expect(blockById(view, SLACK_BLOCK_TS_CONTEXT)?.optional).toBe(false);
     });
 
+    it('with a project chosen, the field becomes a free-text input', () => {
+        // The project attributes the hour, so this only names the area worked
+        // on — a list would be in the way rather than buying any grouping.
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
+            state: { entry_type: SLACK_TS_TYPE_GENERAL, project_id: PROJECTS[0].id },
+        });
+        const el = blockById(view, SLACK_BLOCK_TS_CONTEXT)?.element as { type?: string };
+        expect(el.type).toBe('plain_text_input');
+    });
+
+    it('with no project, it is the managed select instead', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
+            state: { entry_type: SLACK_TS_TYPE_GENERAL },
+        });
+        const el = blockById(view, SLACK_BLOCK_TS_CONTEXT)?.element as { type?: string };
+        expect(el.type).toBe('static_select');
+    });
+
     it('with a project chosen, the category relaxes to optional', () => {
         const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
             state: { entry_type: SLACK_TS_TYPE_GENERAL, project_id: PROJECTS[0].id },
@@ -432,9 +450,22 @@ describe('buildLogTimeModal — re-seeding on views.update', () => {
         expect(el.initial_option?.value).toBe('Meeting');
     });
 
+    it('re-seeds free text typed on the project path', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
+            state: {
+                entry_type: SLACK_TS_TYPE_GENERAL,
+                project_id: PROJECTS[0].id,
+                context: 'Payroll module',
+            },
+        });
+        const el = blockById(view, SLACK_BLOCK_TS_CONTEXT)?.element as { initial_value?: string };
+        expect(el.initial_value).toBe('Payroll module');
+    });
+
     it('drops a category that is not in the list rather than failing the view', () => {
-        // Slack rejects an `initial_option` absent from `options`; a stale
-        // free-text value from the old field would take the whole modal down.
+        // Slack rejects an `initial_option` absent from `options`, so free
+        // text typed while a project was selected must be dropped when the
+        // project is cleared — carrying it over takes the whole modal down.
         const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
             state: { entry_type: SLACK_TS_TYPE_GENERAL, context: 'Standup' },
         });

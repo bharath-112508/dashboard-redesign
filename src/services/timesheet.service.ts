@@ -19,6 +19,7 @@ import {
     TIMESHEET_DEFAULT_DAILY_WARN_THRESHOLD_HOURS,
     TIMESHEET_DEFAULT_SELF_EDIT_WINDOW_DAYS,
     TIMESHEET_ENTRY_TYPES,
+    isGeneralCategoryValid,
     type TimesheetSummaryGroupBy,
 } from '../constants/timesheet.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
@@ -467,8 +468,13 @@ export const patchEntry = async (
 
     // The create-time invariant, re-checked against the MERGED row: a patch
     // that clears one attributor can't be judged on its own, because whether
-    // it's legal depends on the field it didn't mention.
-    if (entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL && !entry.project_id && !entry.general_category) {
+    // it's legal depends on the field it didn't mention. Detaching the project
+    // also narrows the category from free text to the managed list, which is
+    // the other thing only the merged row can tell us.
+    if (
+        entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL &&
+        !isGeneralCategoryValid(entry.general_category, Boolean(entry.project_id))
+    ) {
         throw AppError.unprocessable(
             'Pick a project, or choose what this time was for — otherwise the hours are unattributable.',
             ERROR_CODES.VALIDATION_ERROR

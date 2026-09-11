@@ -3,7 +3,8 @@ import { z } from 'zod';
 import {
     TIMESHEET_DESCRIPTION_MAX,
     TIMESHEET_ENTRY_TYPES,
-    TIMESHEET_GENERAL_CATEGORIES,
+    TIMESHEET_GENERAL_CATEGORY_MAX,
+    isGeneralCategoryValid,
     TIMESHEET_HOURS_MAX,
     TIMESHEET_LIST_DEFAULT_LIMIT,
     TIMESHEET_LIST_MAX_LIMIT,
@@ -103,15 +104,21 @@ const generalCreateSchema = z
         project_id: objectIdSchema.nullable().optional(),
         sprint_id: z.null().optional(),
         task_id: z.null().optional(),
-        /** One of the fixed list — never free text. See the constant. */
-        general_category: z.enum(TIMESHEET_GENERAL_CATEGORIES).nullable().optional(),
+        /**
+         * Free text WITH a project (the area worked on — "Payroll module"),
+         * one of `TIMESHEET_GENERAL_CATEGORIES` WITHOUT one. The refine below
+         * is what enforces the difference; the string bounds here are the
+         * column's, and apply either way.
+         */
+        general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable().optional(),
         description: descriptionSchema,
     })
     .extend(durationSchema.shape)
-    .refine((d) => Boolean(d.project_id) || Boolean(d.general_category), {
+    .refine((d) => isGeneralCategoryValid(d.general_category, Boolean(d.project_id)), {
         // The invariant that replaces "project is mandatory": an hour is
         // attributable to a PROJECT or to a CATEGORY. Dropping both would put
-        // the row outside every rollup, findable only by listing timesheets.
+        // the row outside every rollup, findable only by listing timesheets —
+        // and a free-text category could not carry that load alone.
         message: 'Pick a project, or choose what this time was for.',
         path: ['general_category'],
     });
@@ -139,9 +146,10 @@ export const patchTimesheetBodySchema = z
         description: descriptionSchema,
         // Both nullable: on a general entry either one may be cleared, as long
         // as the OTHER still attributes the time. That pairwise rule needs the
-        // stored row to evaluate, so `updateEntry` enforces it post-merge
-        // rather than the schema guessing at what isn't in the patch.
-        general_category: z.enum(TIMESHEET_GENERAL_CATEGORIES).nullable(),
+        // stored row to evaluate — and so does whether this may be free text —
+        // so `updateEntry` enforces both post-merge rather than the schema
+        // guessing at what isn't in the patch.
+        general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable(),
         project_id: objectIdSchema.nullable(),
         sprint_id: objectIdSchema.nullable(),
         task_id: objectIdSchema,

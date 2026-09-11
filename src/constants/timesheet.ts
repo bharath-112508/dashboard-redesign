@@ -86,16 +86,17 @@ export const TIMESHEET_EXPORT_MAX_ROWS = 5000;
 // ─── General-entry categories ────────────────────────────────────────────
 
 /**
- * What a general (non-project) entry was FOR.
+ * What a general entry with NO PROJECT was for.
  *
- * A fixed list, not free text. `general_category` used to be free-text, and
- * free text cannot be grouped, charted or filtered — it drifted into a second
- * description box ("Testing the login flow", "test"), so internal time was
- * neither attributable to a project nor reportable as a category.
+ * A fixed list, and only on the project-less path. There, `general_category`
+ * is the sole thing attributing the hour, so it has to be groupable: free text
+ * cannot be charted or filtered — it drifted into a second description box
+ * ("Testing the login flow", "test") — and internal time would be as invisible
+ * as it was back when it had no project at all.
  *
- * This is the other half of making `project_id` optional on a general entry:
- * every logged hour stays attributable to SOMETHING — a project, or a named
- * category. Nothing floats.
+ * With a project chosen the field carries no reporting load (the project does)
+ * and stays FREE TEXT, naming the area worked on — "Payroll module", "Login
+ * flow". `isGeneralCategoryValid` is where that either-or is decided.
  *
  * A list rather than an admin-managed collection because eight values cover
  * the cases and a CRUD surface for them is not yet worth its own model,
@@ -113,3 +114,16 @@ export const TIMESHEET_GENERAL_CATEGORIES = [
 ] as const;
 
 export type TimesheetGeneralCategory = (typeof TIMESHEET_GENERAL_CATEGORIES)[number];
+
+/**
+ * Is this category legal for an entry with this project?
+ *
+ * The one place the either-or lives, because it is asked twice — once by the
+ * create validator and once by `updateEntry` against the MERGED row, where a
+ * patch that clears the project has to be judged on the category it didn't
+ * mention.
+ */
+export const isGeneralCategoryValid = (category: string | null | undefined, hasProject: boolean): boolean => {
+    if (hasProject) return true; // free text, or nothing — the project attributes it
+    return Boolean(category) && (TIMESHEET_GENERAL_CATEGORIES as readonly string[]).includes(category!);
+};

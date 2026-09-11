@@ -54,9 +54,21 @@ describe('createTimesheetBodySchema — general entries', () => {
         expect(parsed.success).toBe(false);
     });
 
+    it('accepts FREE TEXT as the category when a project is chosen', () => {
+        // With a project carrying the attribution the field only refines it —
+        // it names the area worked on and has no grouping load.
+        const parsed = createTimesheetBodySchema.safeParse({
+            ...base,
+            project_id: projectId,
+            general_category: 'Payroll module — PDF export',
+        });
+        expect(parsed.success).toBe(true);
+    });
+
     it('rejects a category outside the managed list', () => {
-        // Free text is what the list replaces — accepting it would let the
-        // old drift back in one entry at a time.
+        // Only on the PROJECT-LESS path, where this field is the sole
+        // attribution: free text there can't be grouped or charted, which is
+        // the whole reason the list exists.
         const parsed = createTimesheetBodySchema.safeParse({ ...base, general_category: 'Standup' });
         expect(parsed.success).toBe(false);
     });

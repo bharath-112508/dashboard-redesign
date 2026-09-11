@@ -1,5 +1,5 @@
 import { ERROR_CODES } from '../../constants/error-codes.js';
-import { TIMESHEET_GENERAL_CATEGORIES } from '../../constants/timesheet.js';
+import { TIMESHEET_GENERAL_CATEGORIES, TIMESHEET_GENERAL_CATEGORY_MAX } from '../../constants/timesheet.js';
 import {
     SLACK_BLOCK_TS_BILLABLE,
     SLACK_BLOCK_TS_CONTEXT,
@@ -261,28 +261,47 @@ export const buildLogTimeModal = (
             });
         }
     } else {
+        // Two different fields behind one block id, chosen by whether a
+        // project is carrying the attribution. WITH a project the value only
+        // refines it, so free text naming the area worked on is fine; WITHOUT
+        // one it IS the attribution, so it must come off a list that can be
+        // grouped and charted. The project select already dispatches its
+        // changes, so the swap rides the `views.update` that re-renders the
+        // rest of the modal — no extra round-trip.
         const categoryOptions = TIMESHEET_GENERAL_CATEGORIES.map((c) => ({ text: plain(c), value: c }));
-        blocks.push({
-            type: 'input',
-            block_id: SLACK_BLOCK_TS_CONTEXT,
-            // Required exactly when no project is carrying the attribution.
-            // The project select dispatches its changes, so this flips on the
-            // same `views.update` that re-renders the rest of the modal.
-            optional: Boolean(state.project_id),
-            label: plain('What for?'),
-            element: {
-                // A closed list, not free text: the old free-text field could
-                // not be grouped or charted, so it drifted into a second
-                // description box.
-                type: 'static_select',
-                action_id: SLACK_BLOCK_TS_CONTEXT,
-                placeholder: plain('Meeting, Support, …'),
-                options: categoryOptions,
-                ...(categoryOptions.find((o) => o.value === state.context)
-                    ? { initial_option: categoryOptions.find((o) => o.value === state.context) }
-                    : {}),
-            },
-        });
+        const initialCategory = categoryOptions.find((o) => o.value === state.context);
+        blocks.push(
+            state.project_id
+                ? {
+                      type: 'input',
+                      block_id: SLACK_BLOCK_TS_CONTEXT,
+                      optional: true,
+                      label: plain('Area worked on'),
+                      element: {
+                          type: 'plain_text_input',
+                          action_id: SLACK_BLOCK_TS_CONTEXT,
+                          max_length: TIMESHEET_GENERAL_CATEGORY_MAX,
+                          placeholder: plain('Payroll module, Login flow, …'),
+                          ...(state.context ? { initial_value: state.context } : {}),
+                      },
+                  }
+                : {
+                      type: 'input',
+                      block_id: SLACK_BLOCK_TS_CONTEXT,
+                      optional: false,
+                      label: plain('What for?'),
+                      element: {
+                          type: 'static_select',
+                          action_id: SLACK_BLOCK_TS_CONTEXT,
+                          placeholder: plain('Meeting, Support, …'),
+                          options: categoryOptions,
+                          // Slack rejects an `initial_option` absent from
+                          // `options`, so a free-text value carried over from
+                          // the project path is dropped, not re-seeded.
+                          ...(initialCategory ? { initial_option: initialCategory } : {}),
+                      },
+                  }
+        );
     }
 
     blocks.push(
@@ -370,7 +389,12 @@ export const readLogTimeState = (view: unknown): LogTimeModalState => {
         local_date: cell(values, SLACK_BLOCK_TS_DATE).selected_date ?? undefined,
         project_id: cell(values, SLACK_BLOCK_TS_PROJECT).selected_option?.value ?? undefined,
         ticket_id: cell(values, SLACK_BLOCK_TS_TICKET).selected_option?.value ?? undefined,
-        context: cell(values, SLACK_BLOCK_TS_CONTEXT).selected_option?.value ?? undefined,
+        // Either element type, depending on whether a project was chosen —
+        // the re-seed has to survive the user switching between them.
+        context:
+            cell(values, SLACK_BLOCK_TS_CONTEXT).selected_option?.value ??
+            cell(values, SLACK_BLOCK_TS_CONTEXT).value ??
+            undefined,
         billable: cell(values, SLACK_BLOCK_TS_BILLABLE).selected_option?.value ?? undefined,
         non_billable: cell(values, SLACK_BLOCK_TS_NON_BILLABLE).selected_option?.value ?? undefined,
         description: cell(values, SLACK_BLOCK_TS_DESCRIPTION).value ?? undefined,
@@ -383,9 +407,10 @@ export const parseLogTimeSubmission = (view: unknown): ParsedLogTimeSubmission =
     const nonBillable = toHoursMinutes(cell(values, SLACK_BLOCK_TS_NON_BILLABLE).selected_option?.value);
     const entryType = cell(values, SLACK_BLOCK_TS_TYPE).selected_option?.value ?? SLACK_TS_TYPE_GENERAL;
     const isTicket = entryType === SLACK_TS_TYPE_TICKET;
-    // Null, not '': an untouched optional select has no value, and the
-    // validator's `general_category` is an enum that '' would fail.
-    const context = cell(values, SLACK_BLOCK_TS_CONTEXT).selected_option?.value ?? '';
+    // Null, not '': an untouched optional field has no value, and the
+    // validator's `general_category` is `.min(1)`, which '' would fail.
+    const contextCell = cell(values, SLACK_BLOCK_TS_CONTEXT);
+    const context = (contextCell.selected_option?.value ?? contextCell.value ?? '').trim();
     return {
         local_date: cell(values, SLACK_BLOCK_TS_DATE).selected_date ?? undefined,
         project_id: cell(values, SLACK_BLOCK_TS_PROJECT).selected_option?.value ?? undefined,
