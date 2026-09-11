@@ -1183,14 +1183,19 @@ async function seedTimesheets(): Promise<void> {
                 if (r2.status === 201) entries += 1;
                 else quirks.push(`timesheet ${key} ${date} #2 → ${r2.status}`);
             } else {
-                // Managers (no assigned tasks): general entries.
+                // Managers (no assigned tasks): general entries with no
+                // project, so `general_category` is their only attribution and
+                // must come off TIMESHEET_GENERAL_CATEGORIES. These POST through
+                // the API, and a rejected row lands in `quirks` rather than
+                // failing the run — free text here would quietly seed a demo
+                // dataset with no manager time in it at all.
                 const r1 = await api(
                     'POST',
                     '/timesheets',
                     {
                         local_date: date,
                         entry_type: 'general',
-                        general_category: 'Project management',
+                        general_category: 'Meeting',
                         billable_hours: 3,
                         billable_minutes: 0,
                         non_billable_hours: 1,
@@ -1205,7 +1210,7 @@ async function seedTimesheets(): Promise<void> {
                     {
                         local_date: date,
                         entry_type: 'general',
-                        general_category: 'Planning & 1:1s',
+                        general_category: 'Internal discussion',
                         billable_hours: 2,
                         billable_minutes: 30,
                         non_billable_hours: 0,

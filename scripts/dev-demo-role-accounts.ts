@@ -183,10 +183,13 @@ async function seedTimesheets(acc: { key: string; email: string }, userId: strin
                       },
                   ]
                 : [
+                      // No project on these, so `general_category` is the only
+                      // thing attributing the hour and has to come off
+                      // TIMESHEET_GENERAL_CATEGORIES.
                       {
                           local_date: date,
                           entry_type: 'general',
-                          general_category: 'Management & reviews',
+                          general_category: 'Meeting',
                           billable_hours: 3,
                           billable_minutes: 0,
                           non_billable_hours: 1,
@@ -196,7 +199,7 @@ async function seedTimesheets(acc: { key: string; email: string }, userId: strin
                       {
                           local_date: date,
                           entry_type: 'general',
-                          general_category: 'Planning & 1:1s',
+                          general_category: 'Internal discussion',
                           billable_hours: 2,
                           billable_minutes: 30,
                           non_billable_hours: 0,

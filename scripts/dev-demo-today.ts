@@ -287,14 +287,14 @@ async function seedTimesheets(): Promise<void> {
             // No assigned tasks (managers) — general entries.
             const generals = [
                 {
-                    cat: 'Project management',
+                    cat: 'Meeting',
                     bh: 3,
                     bm: 0,
                     nbh: 1,
                     nbm: 0,
                     desc: 'Sprint coordination, standups and delivery reviews',
                 },
-                { cat: 'Planning & 1:1s', bh: 2, bm: 30, nbh: 0, nbm: 30, desc: 'Roadmap planning and team 1:1s' },
+                { cat: 'Internal discussion', bh: 2, bm: 30, nbh: 0, nbm: 30, desc: 'Roadmap planning and team 1:1s' },
             ];
             for (const g of generals) {
                 const r = await api(
