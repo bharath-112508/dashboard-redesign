@@ -129,13 +129,15 @@ export const isGeneralCategoryValid = (category: string | null | undefined, hasP
 };
 
 /**
- * Shown wherever a project-less entry needs a name in the PROJECT position.
+ * Shown where a project-less entry needs a NAME in the project position.
  *
- * One constant because there were three labels for this single state — the
- * Slack home tab said "No project", the dashboard chart said
- * "General (no project)", and the web tables said "—" — so the same row was
- * called something different on every surface it appeared on.
+ * Only where a dash cannot work. The web tables print "—" — read in a dense
+ * grid, with the category in the next column, the absence is obvious and a
+ * word is noise. A chart legend and a Slack table row have no such context:
+ * a "—" bucket in the dashboard is unreadable and a Slack row starting "*—*"
+ * looks broken, so those two get the word.
  *
- * Mirrored by `NO_PROJECT_LABEL` in the frontend; edit both.
+ * One constant because they previously disagreed with each other — Slack said
+ * "No project", the dashboard said "General (no project)".
  */
 export const TIMESHEET_NO_PROJECT_LABEL = 'Internal';
