@@ -82,3 +82,34 @@ export const TIMESHEET_DEFAULT_DAILY_WARN_THRESHOLD_HOURS = 8;
  * than silently handing over a short one.
  */
 export const TIMESHEET_EXPORT_MAX_ROWS = 5000;
+
+// ─── General-entry categories ────────────────────────────────────────────
+
+/**
+ * What a general (non-project) entry was FOR.
+ *
+ * A fixed list, not free text. `general_category` used to be free-text, and
+ * free text cannot be grouped, charted or filtered — it drifted into a second
+ * description box ("Testing the login flow", "test"), so internal time was
+ * neither attributable to a project nor reportable as a category.
+ *
+ * This is the other half of making `project_id` optional on a general entry:
+ * every logged hour stays attributable to SOMETHING — a project, or a named
+ * category. Nothing floats.
+ *
+ * A list rather than an admin-managed collection because eight values cover
+ * the cases and a CRUD surface for them is not yet worth its own model,
+ * routes and UI. Promote it if people start asking for their own.
+ */
+export const TIMESHEET_GENERAL_CATEGORIES = [
+    'Meeting',
+    'Internal discussion',
+    'Support',
+    'Training',
+    'Documentation',
+    'Admin',
+    'Recruitment',
+    'Other',
+] as const;
+
+export type TimesheetGeneralCategory = (typeof TIMESHEET_GENERAL_CATEGORIES)[number];

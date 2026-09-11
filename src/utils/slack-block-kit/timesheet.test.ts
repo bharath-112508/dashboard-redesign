@@ -313,9 +313,29 @@ describe('buildLogTimeModal — entry type', () => {
         expect(ids).not.toContain(SLACK_BLOCK_TS_CONTEXT);
     });
 
-    it('context is optional — a general entry without one is valid', () => {
+    it('with no project chosen, the category is REQUIRED — it is the only attribution', () => {
         const view = buildLogTimeModal(PROJECTS, '2026-09-09');
+        expect(blockById(view, SLACK_BLOCK_TS_CONTEXT)?.optional).toBe(false);
+    });
+
+    it('with a project chosen, the category relaxes to optional', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
+            state: { entry_type: SLACK_TS_TYPE_GENERAL, project_id: PROJECTS[0].id },
+        });
         expect(blockById(view, SLACK_BLOCK_TS_CONTEXT)?.optional).toBe(true);
+    });
+
+    it('the project itself is optional on a general entry', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09');
+        expect(blockById(view, SLACK_BLOCK_TS_PROJECT)?.optional).toBe(true);
+    });
+
+    it('but required on a ticket entry — a ticket implies its project', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
+            state: { entry_type: SLACK_TS_TYPE_TICKET },
+            tickets: TICKETS,
+        });
+        expect(blockById(view, SLACK_BLOCK_TS_PROJECT)?.optional).toBe(false);
     });
 });
 
@@ -402,12 +422,26 @@ describe('buildLogTimeModal — re-seeding on views.update', () => {
         expect(tic.initial_option).toBeUndefined();
     });
 
-    it('keeps the context text when the type is General', () => {
+    it('keeps the chosen category when the type is General', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
+            state: { entry_type: SLACK_TS_TYPE_GENERAL, context: 'Meeting' },
+        });
+        const el = blockById(view, SLACK_BLOCK_TS_CONTEXT)?.element as {
+            initial_option?: { value?: string };
+        };
+        expect(el.initial_option?.value).toBe('Meeting');
+    });
+
+    it('drops a category that is not in the list rather than failing the view', () => {
+        // Slack rejects an `initial_option` absent from `options`; a stale
+        // free-text value from the old field would take the whole modal down.
         const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
             state: { entry_type: SLACK_TS_TYPE_GENERAL, context: 'Standup' },
         });
-        const el = blockById(view, SLACK_BLOCK_TS_CONTEXT)?.element as { initial_value?: string };
-        expect(el.initial_value).toBe('Standup');
+        const el = blockById(view, SLACK_BLOCK_TS_CONTEXT)?.element as {
+            initial_option?: { value?: string };
+        };
+        expect(el.initial_option).toBeUndefined();
     });
 });
 
@@ -466,17 +500,19 @@ describe('parseLogTimeSubmission — ticket and context', () => {
 
     it('returns the context as general_category on a general entry', () => {
         const view = viewWith({
-            [SLACK_BLOCK_TS_CONTEXT]: { [SLACK_BLOCK_TS_CONTEXT]: { value: 'Standup' } },
+            [SLACK_BLOCK_TS_CONTEXT]: {
+                [SLACK_BLOCK_TS_CONTEXT]: { selected_option: { value: 'Meeting' } },
+            },
         });
         expect(parseLogTimeSubmission(view)).toMatchObject({
             entry_type: SLACK_TS_TYPE_GENERAL,
-            general_category: 'Standup',
+            general_category: 'Meeting',
         });
     });
 
-    it('an empty context is null, not an empty string the validator would reject', () => {
+    it('an unpicked category is null, not an empty string the enum would reject', () => {
         const view = viewWith({
-            [SLACK_BLOCK_TS_CONTEXT]: { [SLACK_BLOCK_TS_CONTEXT]: { value: '   ' } },
+            [SLACK_BLOCK_TS_CONTEXT]: { [SLACK_BLOCK_TS_CONTEXT]: {} },
         });
         expect(parseLogTimeSubmission(view).general_category).toBeNull();
     });

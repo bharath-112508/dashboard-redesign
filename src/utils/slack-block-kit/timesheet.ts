@@ -1,5 +1,5 @@
 import { ERROR_CODES } from '../../constants/error-codes.js';
-import { TIMESHEET_GENERAL_CATEGORY_MAX } from '../../constants/timesheet.js';
+import { TIMESHEET_GENERAL_CATEGORIES } from '../../constants/timesheet.js';
 import {
     SLACK_BLOCK_TS_BILLABLE,
     SLACK_BLOCK_TS_CONTEXT,
@@ -187,7 +187,7 @@ export const buildLogTimeModal = (
             type: 'section',
             text: {
                 type: 'mrkdwn',
-                text: "You're not a member of any project yet, so there's nothing to log time against. Ask an admin to add you to one.",
+                text: "You're not a member of any project yet — you can still log general time below. Ask an admin to add you to a project to log against one.",
             },
         });
     } else {
@@ -197,6 +197,10 @@ export const buildLogTimeModal = (
             // Changing the project has to re-load the ticket list, so this
             // block reports changes instead of staying silent until submit.
             dispatch_action: true,
+            // A ticket always implies its project; general time need not have
+            // one at all (a meeting, support, training), and then the Context
+            // select below turns required instead.
+            optional: !isTicket,
             label: plain('Project'),
             element: {
                 type: 'static_select',
@@ -208,9 +212,7 @@ export const buildLogTimeModal = (
         });
     }
 
-    // Type switch, then whichever field it selects. Every logged hour belongs
-    // to a project either way — the type decides whether it also names a
-    // ticket, not whether a project is required.
+    // Type switch, then whichever field it selects.
     blocks.push({
         type: 'input',
         block_id: SLACK_BLOCK_TS_TYPE,
@@ -259,19 +261,26 @@ export const buildLogTimeModal = (
             });
         }
     } else {
+        const categoryOptions = TIMESHEET_GENERAL_CATEGORIES.map((c) => ({ text: plain(c), value: c }));
         blocks.push({
             type: 'input',
             block_id: SLACK_BLOCK_TS_CONTEXT,
-            // Optional, matching the web form and the validator — a general
-            // entry is already attributed by its project; this only refines it.
-            optional: true,
-            label: plain('Context'),
+            // Required exactly when no project is carrying the attribution.
+            // The project select dispatches its changes, so this flips on the
+            // same `views.update` that re-renders the rest of the modal.
+            optional: Boolean(state.project_id),
+            label: plain('What for?'),
             element: {
-                type: 'plain_text_input',
+                // A closed list, not free text: the old free-text field could
+                // not be grouped or charted, so it drifted into a second
+                // description box.
+                type: 'static_select',
                 action_id: SLACK_BLOCK_TS_CONTEXT,
-                max_length: TIMESHEET_GENERAL_CATEGORY_MAX,
-                placeholder: plain('Standup, Onboarding, …'),
-                ...(state.context ? { initial_value: state.context } : {}),
+                placeholder: plain('Meeting, Support, …'),
+                options: categoryOptions,
+                ...(categoryOptions.find((o) => o.value === state.context)
+                    ? { initial_option: categoryOptions.find((o) => o.value === state.context) }
+                    : {}),
             },
         });
     }
@@ -361,7 +370,7 @@ export const readLogTimeState = (view: unknown): LogTimeModalState => {
         local_date: cell(values, SLACK_BLOCK_TS_DATE).selected_date ?? undefined,
         project_id: cell(values, SLACK_BLOCK_TS_PROJECT).selected_option?.value ?? undefined,
         ticket_id: cell(values, SLACK_BLOCK_TS_TICKET).selected_option?.value ?? undefined,
-        context: cell(values, SLACK_BLOCK_TS_CONTEXT).value ?? undefined,
+        context: cell(values, SLACK_BLOCK_TS_CONTEXT).selected_option?.value ?? undefined,
         billable: cell(values, SLACK_BLOCK_TS_BILLABLE).selected_option?.value ?? undefined,
         non_billable: cell(values, SLACK_BLOCK_TS_NON_BILLABLE).selected_option?.value ?? undefined,
         description: cell(values, SLACK_BLOCK_TS_DESCRIPTION).value ?? undefined,
@@ -374,10 +383,9 @@ export const parseLogTimeSubmission = (view: unknown): ParsedLogTimeSubmission =
     const nonBillable = toHoursMinutes(cell(values, SLACK_BLOCK_TS_NON_BILLABLE).selected_option?.value);
     const entryType = cell(values, SLACK_BLOCK_TS_TYPE).selected_option?.value ?? SLACK_TS_TYPE_GENERAL;
     const isTicket = entryType === SLACK_TS_TYPE_TICKET;
-    // Trimmed to null, not left as '': the validator's `general_category` is
-    // `.min(1)`, so an untouched optional input would fail the entry rather
-    // than read as "no category".
-    const context = (cell(values, SLACK_BLOCK_TS_CONTEXT).value ?? '').trim();
+    // Null, not '': an untouched optional select has no value, and the
+    // validator's `general_category` is an enum that '' would fail.
+    const context = cell(values, SLACK_BLOCK_TS_CONTEXT).selected_option?.value ?? '';
     return {
         local_date: cell(values, SLACK_BLOCK_TS_DATE).selected_date ?? undefined,
         project_id: cell(values, SLACK_BLOCK_TS_PROJECT).selected_option?.value ?? undefined,

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import {
     TIMESHEET_DESCRIPTION_MAX,
     TIMESHEET_ENTRY_TYPES,
-    TIMESHEET_GENERAL_CATEGORY_MAX,
+    TIMESHEET_GENERAL_CATEGORIES,
     TIMESHEET_HOURS_MAX,
     TIMESHEET_LIST_DEFAULT_LIMIT,
     TIMESHEET_LIST_MAX_LIMIT,
@@ -17,9 +17,9 @@ import {
  *
  * The shape splits along `entry_type`:
  *   - `task_linked` → `project_id` + `task_id` are required, `general_category` must be null.
- *   - `general`     → `general_category` is OPTIONAL (a free-text label on
- *                     top of the required project, not a substitute for it),
- *                     `task_id` must be null.
+ *   - `general`     → `project_id` and `general_category` are each optional
+ *                     but at least ONE is required (a category attributes
+ *                     time that belongs to no project), `task_id` must be null.
  *
  * We use a discriminated union so Zod gives a useful per-branch error
  * instead of a fan of "expected/forbidden" messages on every field.
@@ -81,25 +81,40 @@ const taskLinkedCreateSchema = z
     })
     .extend(durationSchema.shape);
 
-// Every logged hour belongs to a project — a general one included. The rule
-// used to be "a project OR a category", which let internal time accumulate
-// against no project at all; those rows then sat outside every project rollup
-// and could only be found by listing timesheets directly. Internal time now
-// goes against an internal project, and `general_category` is a free-text
-// refinement of it ("Standup", "Onboarding") rather than a substitute for it.
-// Rows created under the old rule keep their null project — `updateEntry`
-// still lets them be edited.
+// An hour is attributed to a PROJECT or to a CATEGORY, at least one of the two.
+// Requiring a project on every row (the rule this replaces) meant meetings,
+// internal discussion, support and training either got charged to a client
+// project nobody was working on, or went unlogged. Making the category a
+// closed list is the other half: free text could not be grouped or charted,
+// so it drifted into a second description box.
 const generalCreateSchema = z
     .object({
         local_date: isoDateSchema,
         entry_type: z.literal(TIMESHEET_ENTRY_TYPES.GENERAL),
-        project_id: objectIdSchema,
+        /**
+         * OPTIONAL on a general entry. Meetings, internal discussion, support
+         * and training are real work that belongs to no project, and forcing
+         * a project on them meant people either attributed the hours to a
+         * client project they were not working on, or did not log them.
+         *
+         * The category below is what keeps the hour attributable when this is
+         * absent — see the refine.
+         */
+        project_id: objectIdSchema.nullable().optional(),
         sprint_id: z.null().optional(),
         task_id: z.null().optional(),
-        general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable().optional(),
+        /** One of the fixed list — never free text. See the constant. */
+        general_category: z.enum(TIMESHEET_GENERAL_CATEGORIES).nullable().optional(),
         description: descriptionSchema,
     })
-    .extend(durationSchema.shape);
+    .extend(durationSchema.shape)
+    .refine((d) => Boolean(d.project_id) || Boolean(d.general_category), {
+        // The invariant that replaces "project is mandatory": an hour is
+        // attributable to a PROJECT or to a CATEGORY. Dropping both would put
+        // the row outside every rollup, findable only by listing timesheets.
+        message: 'Pick a project, or choose what this time was for.',
+        path: ['general_category'],
+    });
 
 export const createTimesheetBodySchema = z.discriminatedUnion('entry_type', [
     taskLinkedCreateSchema,
@@ -122,15 +137,12 @@ export const patchTimesheetBodySchema = z
         idle_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
         idle_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
         description: descriptionSchema,
-        // Nullable so a category can be CLEARED — it's an optional label, not
-        // the thing the time is attributed to. Still `.min(1)` when a string
-        // is sent, so it can't be blanked to '' — the un-representable state
-        // the create schema also refuses.
-        general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable(),
-        // NOT nullable: a project can be MOVED but never removed, matching
-        // create. Clearing it would reintroduce the project-less row by the
-        // back door.
-        project_id: objectIdSchema,
+        // Both nullable: on a general entry either one may be cleared, as long
+        // as the OTHER still attributes the time. That pairwise rule needs the
+        // stored row to evaluate, so `updateEntry` enforces it post-merge
+        // rather than the schema guessing at what isn't in the patch.
+        general_category: z.enum(TIMESHEET_GENERAL_CATEGORIES).nullable(),
+        project_id: objectIdSchema.nullable(),
         sprint_id: objectIdSchema.nullable(),
         task_id: objectIdSchema,
     })

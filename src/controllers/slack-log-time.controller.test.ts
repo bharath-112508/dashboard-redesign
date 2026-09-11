@@ -418,7 +418,9 @@ describe('handleLogTimeSubmission — ticket entries', () => {
         const res = resStub();
         await handleLogTimeSubmission(
             submission({
-                [SLACK_BLOCK_TS_CONTEXT]: { [SLACK_BLOCK_TS_CONTEXT]: { value: 'Standup' } },
+                [SLACK_BLOCK_TS_CONTEXT]: {
+                    [SLACK_BLOCK_TS_CONTEXT]: { selected_option: { value: 'Meeting' } },
+                },
             }) as never,
             res,
             vi.fn()
@@ -426,7 +428,7 @@ describe('handleLogTimeSubmission — ticket entries', () => {
         expect(createEntryMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 entry_type: 'general',
-                general_category: 'Standup',
+                general_category: 'Meeting',
                 task_id: null,
             }),
             expect.anything()

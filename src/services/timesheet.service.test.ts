@@ -338,7 +338,7 @@ describe('createEntry', () => {
                 project_id: projectId.toString(),
                 sprint_id: null,
                 task_id: null,
-                general_category: 'meeting',
+                general_category: 'Meeting',
                 billable_hours: 1,
                 billable_minutes: 0,
                 non_billable_hours: 0,
@@ -351,9 +351,41 @@ describe('createEntry', () => {
         );
 
         expect(entryCreateMock).toHaveBeenCalledWith(
-            expect.objectContaining({ entry_type: 'general', general_category: 'meeting' })
+            expect.objectContaining({ entry_type: 'general', general_category: 'Meeting' })
         );
         expect(taskFindByIdMock).not.toHaveBeenCalled();
+    });
+
+    // Meetings, internal discussion, support and training belong to no
+    // project. The category is what attributes them; nothing to scope-check.
+    it('persists a general entry with NO project, attributed by its category', async () => {
+        entryCreateMock.mockResolvedValueOnce(makeEntry({ entry_type: 'general' }));
+        stubAggregate(60);
+
+        await svc.createEntry(
+            {
+                local_date: today(),
+                entry_type: 'general',
+                sprint_id: null,
+                task_id: null,
+                general_category: 'Meeting',
+                billable_hours: 1,
+                billable_minutes: 0,
+                non_billable_hours: 0,
+                non_billable_minutes: 0,
+                idle_hours: 0,
+                idle_minutes: 0,
+                description: 'Sprint planning with the whole team',
+            },
+            employeeCaller()
+        );
+
+        expect(entryCreateMock).toHaveBeenCalledWith(
+            expect.objectContaining({ project_id: null, general_category: 'Meeting' })
+        );
+        // No project id to check, so the ACL must not be consulted at all —
+        // calling it with `undefined` would 404 the whole entry.
+        expect(loadProjectForCallerMock).not.toHaveBeenCalled();
     });
 
     // The project is what a general entry is attributed to, so it goes through
@@ -371,7 +403,7 @@ describe('createEntry', () => {
                     project_id: projectId.toString(),
                     sprint_id: null,
                     task_id: null,
-                    general_category: 'meeting',
+                    general_category: 'Meeting',
                     billable_hours: 1,
                     billable_minutes: 0,
                     non_billable_hours: 0,
