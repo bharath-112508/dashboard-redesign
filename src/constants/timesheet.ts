@@ -127,3 +127,15 @@ export const isGeneralCategoryValid = (category: string | null | undefined, hasP
     if (hasProject) return true; // free text, or nothing — the project attributes it
     return Boolean(category) && (TIMESHEET_GENERAL_CATEGORIES as readonly string[]).includes(category!);
 };
+
+/**
+ * Shown wherever a project-less entry needs a name in the PROJECT position.
+ *
+ * One constant because there were three labels for this single state — the
+ * Slack home tab said "No project", the dashboard chart said
+ * "General (no project)", and the web tables said "—" — so the same row was
+ * called something different on every surface it appeared on.
+ *
+ * Mirrored by `NO_PROJECT_LABEL` in the frontend; edit both.
+ */
+export const TIMESHEET_NO_PROJECT_LABEL = 'Internal';

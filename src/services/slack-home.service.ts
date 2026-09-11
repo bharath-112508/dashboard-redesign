@@ -1,4 +1,5 @@
 import { Types } from 'mongoose';
+import { TIMESHEET_NO_PROJECT_LABEL } from '../constants/timesheet.js';
 
 import { getMyToday, getTodayAttendanceSummary, type TodayAttendanceSummary } from './attendance.service.js';
 import { listOwnBalances } from './leave-balance.service.js';
@@ -196,7 +197,7 @@ const buildMyTimeEntries = async (
         // as `note`, and using it for both printed the same text twice.
         const work = task ? `${project?.code ?? ''}-${task.task_number ?? '?'}` : (r.general_category ?? '');
         return {
-            project: project?.name ?? 'No project',
+            project: project?.name ?? TIMESHEET_NO_PROJECT_LABEL,
             work,
             note: r.description ?? '',
             minutes: r.total_minutes ?? 0,
