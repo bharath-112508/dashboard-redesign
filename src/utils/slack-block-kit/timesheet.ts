@@ -165,7 +165,28 @@ export const buildLogTimeModal = (
     const cappedProjects = projects.slice(0, SLACK_SELECT_OPTION_CAP);
     const cappedTickets = tickets.slice(0, SLACK_SELECT_OPTION_CAP);
 
+    // Type FIRST — it decides what every field under it means (whether the
+    // project is required, whether you name a ticket or a category), so asking
+    // it after the project made people fill in a form whose rules then changed
+    // under them. Same order as the web dialog.
     const blocks: Array<Record<string, unknown>> = [
+        {
+            type: 'input',
+            block_id: SLACK_BLOCK_TS_TYPE,
+            dispatch_action: true,
+            label: plain('Type'),
+            element: {
+                type: 'static_select',
+                action_id: SLACK_BLOCK_TS_TYPE,
+                options: [
+                    { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
+                    { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET },
+                ],
+                initial_option: isTicket
+                    ? { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET }
+                    : { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
+            },
+        },
         {
             type: 'input',
             block_id: SLACK_BLOCK_TS_DATE,
@@ -211,25 +232,6 @@ export const buildLogTimeModal = (
             },
         });
     }
-
-    // Type switch, then whichever field it selects.
-    blocks.push({
-        type: 'input',
-        block_id: SLACK_BLOCK_TS_TYPE,
-        dispatch_action: true,
-        label: plain('Type'),
-        element: {
-            type: 'static_select',
-            action_id: SLACK_BLOCK_TS_TYPE,
-            options: [
-                { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
-                { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET },
-            ],
-            initial_option: isTicket
-                ? { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET }
-                : { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
-        },
-    });
 
     if (isTicket) {
         if (cappedTickets.length === 0) {

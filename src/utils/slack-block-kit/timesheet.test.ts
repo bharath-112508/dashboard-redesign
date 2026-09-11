@@ -318,6 +318,25 @@ describe('buildLogTimeModal — entry type', () => {
         expect(blockById(view, SLACK_BLOCK_TS_CONTEXT)?.optional).toBe(false);
     });
 
+    it('leads with Type — it decides what every field under it means', () => {
+        // Ordering is load-bearing here, and nothing else asserts it: the type
+        // governs whether the project is required and whether you name a ticket
+        // or a category, so asking it last made the rules change under a form
+        // the user had already filled in.
+        const ids = (view: Record<string, unknown>) =>
+            (view.blocks as BlockLike[]).map((b) => b.block_id).filter(Boolean);
+
+        for (const state of [
+            { entry_type: SLACK_TS_TYPE_GENERAL },
+            { entry_type: SLACK_TS_TYPE_GENERAL, project_id: PROJECTS[0].id },
+            { entry_type: SLACK_TS_TYPE_TICKET, project_id: PROJECTS[0].id },
+        ]) {
+            const order = ids(buildLogTimeModal(PROJECTS, '2026-09-09', { state, tickets: TICKETS }));
+            expect(order[0]).toBe(SLACK_BLOCK_TS_TYPE);
+            expect(order.indexOf(SLACK_BLOCK_TS_PROJECT)).toBeGreaterThan(0);
+        }
+    });
+
     it('with a project chosen, the field becomes a free-text input', () => {
         // The project attributes the hour, so this only names the area worked
         // on — a list would be in the way rather than buying any grouping.
