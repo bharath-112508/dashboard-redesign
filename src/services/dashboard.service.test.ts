@@ -92,6 +92,18 @@ vi.mock('../models/leave-balance.model.js', () => ({
     LeaveBalance: {
         find: leaveBalanceFindMock,
     },
+    presentedAvailable: (
+        b: {
+            allocated: number;
+            carried_forward: number;
+            used: number;
+            pending: number;
+            adjusted: number;
+            monthly_forfeited: number;
+        },
+        lt: { is_unlimited?: boolean } | null | undefined
+    ) =>
+        lt?.is_unlimited ? 0 : b.allocated + b.carried_forward + b.adjusted - b.used - b.pending - b.monthly_forfeited,
 }));
 
 vi.mock('../models/leave-type.model.js', () => ({
@@ -392,7 +404,18 @@ describe('buildEmployeeDashboard', () => {
             flagged_for_correction: false,
         });
         leaveBalanceFindMock.mockReturnValueOnce(
-            queryStub([{ leave_type_id: typeId, allocated: 12, used: 2, pending: 1, available: 9 }])
+            queryStub([
+                {
+                    leave_type_id: typeId,
+                    allocated: 12,
+                    carried_forward: 0,
+                    adjusted: 0,
+                    used: 2,
+                    pending: 1,
+                    monthly_forfeited: 0,
+                    available: 9,
+                },
+            ])
         );
         leaveTypeFindMock.mockResolvedValueOnce([{ _id: typeId, code: 'CL', name: 'Casual Leave' }]);
         leaveFindMock.mockReturnValueOnce(
@@ -423,10 +446,74 @@ describe('buildEmployeeDashboard', () => {
                 used: 2,
                 pending: 1,
                 available: 9,
+                is_unlimited: false,
             },
         ]);
         expect(result.recent_leaves).toHaveLength(1);
         expect(result.unread_notifications).toBe(5);
+    });
+
+    it('keeps unspendable rows out of the leave-balance cards', async () => {
+        const userId = new Types.ObjectId();
+        const capped = new Types.ObjectId();
+        const uncapped = new Types.ObjectId();
+        const retired = new Types.ObjectId();
+        attendanceFindOneMock.mockResolvedValueOnce(null);
+        leaveBalanceFindMock.mockReturnValueOnce(
+            queryStub([
+                {
+                    leave_type_id: capped,
+                    allocated: 12,
+                    carried_forward: 0,
+                    adjusted: 0,
+                    used: 2,
+                    pending: 0,
+                    monthly_forfeited: 0,
+                    available: 10,
+                },
+                // WFH: allocated nothing and never checked on apply, so the
+                // raw arithmetic here is 0 − 2 = −2.
+                {
+                    leave_type_id: uncapped,
+                    allocated: 0,
+                    carried_forward: 0,
+                    adjusted: 0,
+                    used: 2,
+                    pending: 0,
+                    monthly_forfeited: 0,
+                    available: -2,
+                },
+                // Retired type carrying a leftover nobody can spend.
+                {
+                    leave_type_id: retired,
+                    allocated: 99,
+                    carried_forward: 0,
+                    adjusted: 0,
+                    used: 0,
+                    pending: 0,
+                    monthly_forfeited: 0,
+                    available: 99,
+                },
+            ])
+        );
+        leaveTypeFindMock.mockResolvedValueOnce([
+            { _id: capped, code: 'CL', name: 'Casual Leave', is_active: true, is_unlimited: false },
+            { _id: uncapped, code: 'WFH', name: 'Work From Home', is_active: true, is_unlimited: true },
+            { _id: retired, code: 'OLD', name: 'Retired Leave', is_active: false, is_unlimited: false },
+        ]);
+        leaveFindMock.mockReturnValueOnce(queryStub([]));
+        notificationCountMock.mockResolvedValueOnce(0);
+
+        const result = await dashboard.buildEmployeeDashboard(userId);
+
+        expect(result.leave_balances.map((b) => b.code)).toEqual(['CL', 'WFH']);
+        const wfh = result.leave_balances.find((b) => b.code === 'WFH');
+        // Zero, not −2: nothing to have left of a type with no limit. The
+        // consumer sums these into one headline figure.
+        expect(wfh?.available).toBe(0);
+        expect(wfh?.used).toBe(2);
+        expect(wfh?.is_unlimited).toBe(true);
+        expect(result.leave_balances.reduce((acc, b) => acc + b.available, 0)).toBe(10);
     });
 
     it('does not throw when an individual card aggregation fails', async () => {

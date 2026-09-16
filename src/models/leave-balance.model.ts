@@ -73,6 +73,32 @@ export const LeaveBalance: Model<LeaveBalanceDocument> = model<LeaveBalanceDocum
     leaveBalanceSchema
 );
 
+/**
+ * The remaining figure a consumer should show or sum.
+ *
+ * An uncapped type (WFH) is allocated nothing and its balance is never
+ * checked on apply, so the raw arithmetic reads `0 − used − pending` and
+ * produces a **negative** "remaining" that means nothing: someone with two
+ * WFH days booked showed `-2`, and a 45-day pending row dragged an
+ * employee's dashboard total down by 45. There is nothing left to count
+ * against a type with no limit, so it contributes zero, and the figure that
+ * actually matters for it is `used`.
+ *
+ * Every read path that publishes `available` goes through here — the
+ * `/leave-balances` responses, the employee dashboard card, and the leaves
+ * report — rather than each one remembering to special-case the flag. The
+ * STORED value stays the raw arithmetic so the counters remain auditable.
+ */
+export function presentedAvailable(
+    b: Pick<
+        LeaveBalanceDocument,
+        'allocated' | 'carried_forward' | 'adjusted' | 'used' | 'pending' | 'monthly_forfeited'
+    >,
+    leaveType: { is_unlimited?: boolean } | null | undefined
+): number {
+    return leaveType?.is_unlimited ? 0 : recomputeAvailable(b);
+}
+
 /** Pure helper — keeps `available` consistent across services + tests. */
 export function recomputeAvailable(
     b: Pick<

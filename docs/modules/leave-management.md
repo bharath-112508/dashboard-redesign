@@ -282,10 +282,10 @@ Holidays are loaded for the **full year span** of every touched year (not just t
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| `GET` | `/leave-balances/me` | `authenticate` | Self-heals: initializes balances for the requested year if missing |
+| `GET` | `/leave-balances/me` | `authenticate` | Self-heals: initializes balances for the requested year if missing. `available` is published through `presentedAvailable`, so an uncapped type (WFH) reports **0**, not the raw `0 − used − pending` negative; `used` is the meaningful figure there. Same for the dashboard card and the leaves report. |
 | `GET` | `/leave-balances` | `leave_balance.read_team` | `?user_id&year` |
-| `POST` | `/leave-balances/initialize-year` | `leave_balance.adjust` | Manual bulk-init across all active non-client users |
-| `PATCH` | `/leave-balances/:id` | `leave_balance.adjust` | `{delta, reason}` — adjusts `adjusted`, recomputes `available` |
+| `POST` | `/leave-balances/initialize-year` | `leave_balance.adjust` | Manual bulk-init across every active user who is neither client-side nor a freelancer. 🔴 **Not filtered on `date_of_joining`** — it used to require one, which silently skipped every employee without a joining date on file, leaving them with zero balance rows and therefore absent from the admin leave-balance list (which renders from balance rows). `initializeBalancesForUserYear` already defaults a missing joining date to the start of the target year; that one fallback owns the case for every caller. |
+| `PATCH` | `/leave-balances/:id` | `leave_balance.adjust` | `{total_days?, used_days?, reason}` **or** `{delta, reason}` — one shape or the other, never both. **Totals** are how an operator reconciles against an external leave portal: state the counters as that system reports them and the remaining balance is derived. `total_days` is the full allowance (quota + carry-forward + manual adjustment) and lands on `adjusted`, so the computed quota and any carry-forward stay on the row; `used_days` is written straight to `used`, because days taken in a system being migrated from have no leave requests here to derive them from. Either field may be sent alone. Totals that already match are accepted, so syncing a roster doesn't error on the rows that agree. **`delta`** is the original relative move, non-zero, and still reads better for a known grant or clawback. Everything rounds to 2dp. |
 
 ### Leave requests ([`routes/leave-request.routes.ts`](../../src/routes/leave-request.routes.ts))
 
@@ -467,7 +467,7 @@ Lives in the codebase but **inert** because `leave_types.SL.monthly_forfeiture: 
 | Action | When |
 |---|---|
 | `LEAVE_TYPE_CREATE` / `_UPDATE` / `_DEACTIVATE` | Type CRUD |
-| `LEAVE_BALANCE_ADJUST` | `PATCH /leave-balances/:id` — metadata: `{reason, delta, user_id, leave_type_id, year}` |
+| `LEAVE_BALANCE_ADJUST` | `PATCH /leave-balances/:id` — `before`/`after: {adjusted, used, available}`; metadata: `{reason, delta, user_id, leave_type_id, year}`, plus `total_days`/`used_days` when the operator stated totals. 🔴 On that path `delta` is the **derived** move in what's left, so it can be 0 while both counters changed (raising allowed and taken by the same amount) — the stated figures are what the operator actually typed. A 0 delta also suppresses the employee's notification: nothing they can spend moved. |
 | `LEAVE_APPLY` | `POST /leaves` (H4) — `after: {status, dates, total_days, requires_additional_approval}`, `metadata: {user_id, leave_type_id, is_half_day, segments_count}` |
 | `LEAVE_APPROVE` | `POST /leaves/:id/approve` — `metadata: {requester_id, requires_additional_approval, total_days}` |
 | `LEAVE_REJECT` | `POST /leaves/:id/reject` — `metadata: {requester_id}` |

@@ -100,6 +100,33 @@ Sub-modules with their own routers; grouped because they share `LeaveRequest`/`L
 #### Leave requests
 [`routes/leave-request.routes.ts`](src/routes/leave-request.routes.ts) · [`services/leave-request.service.ts`](src/services/leave-request.service.ts). `POST /leaves/preview-split` (dry-run segment generation), `GET /leaves/calendar` (org-wide approved; gated on `LEAVE_REQUEST_READ_TEAM` per C5 to prevent rank-and-file enumeration), `POST /leaves` (apply), `POST /leaves/:id/approve|reject|cancel`.
 - **Flow** — apply → preview-split computes segments excluding holidays + non-working days → `withTransaction(LeaveBalance.pending++ via $gte CAS predicate, LeaveRequest.create)` → notify (Slack DM + push + in-app). On approve: `findOneAndUpdate({status: 'pending'}, {$set: {status: 'approved'}})` (race-safe gate) + `withTransaction(LeaveBalance.used++, LeaveBalance.pending--)` + audit row + Slack `chat.update` against the persisted `slack_message.{channel, ts}` so the same DM mutates in-place through the lifecycle.
+- 🔴 **An uncapped type has no "days left" — publish it through
+  `presentedAvailable`, never the raw `available`.** `available` is stored as
+  `allocated + carried_forward + adjusted − used − pending − monthly_forfeited`,
+  and an uncapped type (WFH) is allocated nothing and never balance-checked on
+  apply, so that arithmetic yields a NEGATIVE remainder: two WFH days booked
+  rendered as `-2`, and one 45-day pending row pulled an employee's dashboard
+  total down by 45. `presentedAvailable(row, leaveType)`
+  ([`models/leave-balance.model.ts`](src/models/leave-balance.model.ts))
+  returns 0 for those and the raw figure otherwise. Every read path that
+  publishes the field goes through it — `toBalancePublic`, the employee
+  dashboard card, the leaves report — rather than each consumer remembering
+  the flag; a capped type is still free to go negative (CL overdraft with
+  approver sign-off), so the rule is about the absence of a cap, not the sign.
+  The STORED value stays raw so the counters remain auditable. For these types
+  the figure that carries meaning is `used`.
+- 🔴 **Client-side people accrue no leave, and that means `CLIENT_SIDE_ROLES`,
+  not `role === 'client'`.** The guard in `initializeBalancesForUserYear` (and
+  the roll-out query) predates the `representative` role and checked only
+  `client`, so a client company's project-scoped person would have accrued an
+  allocation they can neither see nor spend. Same list every other staff-only
+  surface uses — add a role there and this is covered too.
+- 🔴 **`initializeYearForAllUsers` does NOT filter on `date_of_joining`.** It
+  used to, which dropped every employee with no joining date on file from the
+  roll-out: zero balance rows, therefore invisible on the admin leave-balance
+  list, which renders from balance rows. The per-user initializer already
+  defaults a missing joining date to the start of the target year — let that
+  one fallback own the case rather than pre-filtering it away here.
 - 🔴 **Freelancers accrue no leave.** `initializeBalancesForUserYear` returns 0
   for `internal_profile.employment_type === 'freelancer'`, and
   `initializeYearForAllUsers` excludes them in its query as well (that caller

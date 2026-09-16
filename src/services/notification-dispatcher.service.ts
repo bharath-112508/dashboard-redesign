@@ -981,6 +981,10 @@ export const notifyLeaveBalanceAdjusted = async (input: {
     reason: string;
 }): Promise<void> => {
     if (input.user_id.equals(input.actor_id)) return;
+    // Nothing spendable moved. Reconciling totals against another leave
+    // portal routinely raises what's allowed and what's taken by the same
+    // amount, and "your balance changed by 0" is noise, not news.
+    if (input.delta === 0) return;
     const actor = await findUserById(input.actor_id).catch(() => null);
     const sign = input.delta > 0 ? '+' : '';
     await notifyOne(
