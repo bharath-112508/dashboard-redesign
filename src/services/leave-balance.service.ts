@@ -366,14 +366,18 @@ export const listOwnBalances = async (user_id: Types.ObjectId, year?: number): P
 interface BalanceUserDisplay {
     id: string;
     full_name: string | null;
+    /** Kept internal — the wire shape stays `{id, full_name}`. */
+    status?: string;
 }
 
 const loadBalanceUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, BalanceUserDisplay>> => {
     if (ids.length === 0) return new Map();
     const users = await User.find({ _id: { $in: ids } })
-        .select('_id full_name')
-        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
-    return new Map(users.map((u) => [u._id.toString(), { id: u._id.toString(), full_name: u.full_name }]));
+        .select('_id full_name status')
+        .lean<{ _id: Types.ObjectId; full_name: string; status: string }[]>();
+    return new Map(
+        users.map((u) => [u._id.toString(), { id: u._id.toString(), full_name: u.full_name, status: u.status }])
+    );
 };
 
 export const listBalances = async (
@@ -394,22 +398,33 @@ export const listBalances = async (
         await initializeBalancesForUserYear({ user_id: scopedUid, year: targetYear });
     }
 
-    const rows = await LeaveBalance.find(filter).sort({ user_id: 1, leave_type_id: 1 });
-    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
-    const [cache, userMap, data] = await Promise.all([
-        buildTypeCache(rows),
-        loadBalanceUserDisplays(userIds),
-        Promise.resolve(rows),
-    ]);
+    const allRows = await LeaveBalance.find(filter).sort({ user_id: 1, leave_type_id: 1 });
+    const userIds = Array.from(new Set(allRows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
+    const userMap = await loadBalanceUserDisplays(userIds);
+
+    // A roster of current balances has no business listing people who have
+    // left. Deletion here is non-destructive — a removed account is
+    // `status: 'deactivated'`, and GDPR erasure only renames it to
+    // "Deleted user …" — so neither has an absent record to filter on, and
+    // both kept appearing with their balances intact. A hard-deleted account
+    // leaves orphan rows whose user is gone from the map entirely.
+    //
+    // Exempted when the caller drills into ONE person: hiding leavers from
+    // the roster shouldn't make a deliberate look at a leaver's final
+    // balance come back empty.
+    const drillingIntoOneUser = Boolean(query.user_id) && scopedUid instanceof Types.ObjectId;
+    const data = drillingIntoOneUser
+        ? allRows
+        : allRows.filter((r) => userMap.get(r.user_id.toString())?.status === USER_STATUSES.ACTIVE);
+
+    const cache = await buildTypeCache(data);
     const out = await Promise.all(data.map((r) => toBalancePublic(r, cache)));
     for (let i = 0; i < data.length; i++) {
         const r = data[i];
         const o = out[i];
         if (!r || !o) continue;
-        o.user = userMap.get(r.user_id.toString()) ?? {
-            id: r.user_id.toString(),
-            full_name: null,
-        };
+        const u = userMap.get(r.user_id.toString());
+        o.user = u ? { id: u.id, full_name: u.full_name } : { id: r.user_id.toString(), full_name: null };
     }
     return out;
 };

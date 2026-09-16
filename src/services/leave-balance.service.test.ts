@@ -26,6 +26,7 @@ const {
     leaveTypeFindByIdMock,
     userFindByIdMock,
     userFindMock,
+    leaveBalanceFindMock,
     recomputeAvailableMock,
     recordAuditMock,
 } = vi.hoisted(() => ({
@@ -35,6 +36,7 @@ const {
     leaveTypeFindByIdMock: vi.fn(),
     userFindByIdMock: vi.fn(),
     userFindMock: vi.fn(),
+    leaveBalanceFindMock: vi.fn(),
     recomputeAvailableMock: vi.fn(),
     recordAuditMock: vi.fn(),
 }));
@@ -44,7 +46,7 @@ vi.mock('../models/leave-balance.model.js', () => ({
         updateOne: leaveBalanceUpdateOneMock,
         findById: leaveBalanceFindByIdMock,
         findOne: vi.fn(),
-        find: vi.fn(),
+        find: leaveBalanceFindMock,
     },
     recomputeAvailable: recomputeAvailableMock,
     // Real rule, not a stub: an uncapped type contributes 0 rather than a
@@ -520,6 +522,83 @@ describe('initializeYearForAllUsers', () => {
 });
 
 // ─── adjustBalance ────────────────────────────────────────────────────────
+
+describe('listBalances', () => {
+    const ACTIVE = new Types.ObjectId();
+    const LEAVER = new Types.ObjectId();
+    const GONE = new Types.ObjectId();
+    const typeId = new Types.ObjectId();
+
+    const balanceDoc = (user_id: Types.ObjectId) => ({
+        _id: new Types.ObjectId(),
+        user_id,
+        leave_type_id: typeId,
+        year: 2026,
+        allocated: 12,
+        carried_forward: 0,
+        used: 0,
+        pending: 0,
+        adjusted: 0,
+        monthly_forfeited: 0,
+        available: 12,
+    });
+
+    const arrangeRows = (rows: unknown[]) => {
+        leaveBalanceFindMock.mockReturnValueOnce({ sort: () => Promise.resolve(rows) });
+        leaveTypeFindMock.mockResolvedValueOnce([fullType({ _id: typeId, code: 'CL' })]);
+        // `User.find(...).select(...).lean()` — the display hydration.
+        userFindMock.mockReturnValueOnce({
+            select: () => ({
+                lean: () =>
+                    Promise.resolve([
+                        { _id: ACTIVE, full_name: 'Aditya Kulkarni', status: 'active' },
+                        { _id: LEAVER, full_name: 'Former Employee', status: 'deactivated' },
+                        // GONE deliberately absent — hard-deleted account.
+                    ]),
+            }),
+        });
+    };
+
+    it('leaves out people who no longer work here', async () => {
+        arrangeRows([balanceDoc(ACTIVE), balanceDoc(LEAVER), balanceDoc(GONE)]);
+
+        const out = await svc.listBalances({}, { id: new Types.ObjectId(), role: ROLES.ADMIN });
+
+        // A deactivated account is how this platform represents a deleted
+        // user (deletion is non-destructive, and GDPR erasure only renames
+        // them to "Deleted user …"), so a roster of current balances must
+        // not list them. A hard-deleted account leaves orphan rows behind
+        // and has no name to show at all.
+        expect(out).toHaveLength(1);
+        expect(out[0]?.user).toMatchObject({ full_name: 'Aditya Kulkarni' });
+    });
+
+    it('still resolves a leaver when an admin opens that person directly', async () => {
+        leaveBalanceUpdateOneMock.mockResolvedValue({ upsertedCount: 0 });
+        userFindByIdMock.mockReturnValueOnce({
+            select: () =>
+                Promise.resolve({
+                    role: ROLES.EMPLOYEE,
+                    status: 'deactivated',
+                    internal_profile: { date_of_joining: '2024-01-01' },
+                }),
+        });
+        // The self-heal runs first on a drill-down and consumes one
+        // `LeaveType.find`, so queue that before the display query.
+        leaveTypeFindMock.mockResolvedValueOnce([fullType({ _id: typeId, code: 'CL' })]);
+        arrangeRows([balanceDoc(LEAVER)]);
+
+        const out = await svc.listBalances(
+            { user_id: LEAVER.toString() },
+            { id: new Types.ObjectId(), role: ROLES.ADMIN }
+        );
+
+        // Hiding them from the roster shouldn't make a deliberate drill-down
+        // into a leaver's final balance come back empty.
+        expect(out).toHaveLength(1);
+        expect(out[0]?.user).toMatchObject({ full_name: 'Former Employee' });
+    });
+});
 
 describe('adjustBalance', () => {
     it('throws RESOURCE_NOT_FOUND when the row does not exist', async () => {
