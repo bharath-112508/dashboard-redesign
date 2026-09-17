@@ -423,7 +423,13 @@ export const patchEntry = async (
     }
 
     const policy = await loadPolicy();
-    const inWindow = isWithinSelfEditWindow(entry.local_date, policy.selfEditWindowDays);
+    // The date the edit window is judged on: the one the entry ALREADY has,
+    // captured before any move below. A mistyped date is frequently outside
+    // the window BECAUSE it is wrong — somebody who meant yesterday and typed
+    // last month would otherwise be locked out of the fix. Kept for the audit
+    // row too, which has to name the date that allowed an override.
+    const windowDate = entry.local_date;
+    const inWindow = isWithinSelfEditWindow(windowDate, policy.selfEditWindowDays);
     if (isOwner && !isPrivileged && !inWindow) {
         throw AppError.forbidden(
             `Edits are restricted to the ${policy.selfEditWindowDays}-day window after the entry date`,
@@ -440,6 +446,12 @@ export const patchEntry = async (
     }
 
     const before = toPublic(entry);
+
+    // Applied AFTER the window verdict above, which is the whole point.
+    if (patch.local_date !== undefined) {
+        assertNotFuture(patch.local_date);
+        entry.local_date = patch.local_date;
+    }
 
     if (patch.billable_hours !== undefined) entry.billable_hours = patch.billable_hours;
     if (patch.billable_minutes !== undefined) entry.billable_minutes = patch.billable_minutes;
@@ -520,6 +532,9 @@ export const patchEntry = async (
     entry.last_edited_at = new Date();
     await entry.save();
 
+    // Against `entry.local_date`, which is the DESTINATION day after a move.
+    // The warnings describe the day the hours now land on; reporting the day
+    // they left would describe a total that no longer includes them.
     const dailyTotal = await sumDailyTotalMinutes(entry.user_id, entry.local_date);
     const warnings = {
         exceeds_daily_threshold: exceedsDailyThreshold(dailyTotal, policy.dailyWarnThresholdHours),
@@ -549,7 +564,12 @@ export const patchEntry = async (
                 target: { kind: AUDIT_TARGET_KINDS.TIMESHEET_ENTRY, id: entry._id },
                 metadata: {
                     user_id: entry.user_id.toString(),
-                    local_date: entry.local_date,
+                    // The date the window was judged on, NOT the entry's
+                    // current one — after a move those differ, and the
+                    // compliance record has to name the date that allowed
+                    // the override.
+                    local_date: windowDate,
+                    ...(entry.local_date !== windowDate ? { moved_to: entry.local_date } : {}),
                     edit_window_days: policy.selfEditWindowDays,
                 },
             });
