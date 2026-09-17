@@ -219,9 +219,17 @@ const importRowSchema = z.object({
      */
     row_number: z.number().int().min(1),
     date: isoDateSchema,
-    /** Project code (`TEM2`) or a name; the service resolves and rejects an
-     *  ambiguous name rather than guessing. */
-    project: z.string().trim().min(1, 'Name a project.'),
+    /**
+     * Project code (`TEM2`) or a name; the service resolves and rejects an
+     * ambiguous name rather than guessing.
+     *
+     * OPTIONAL, and empty is meaningful: an hour is attributed to a project
+     * OR to a category, so a row for a meeting or training names no project
+     * and gives a managed category instead. Blank reaches the service, which
+     * decides — a wrong project is still an error there, only a missing one
+     * is allowed.
+     */
+    project: z.string().trim().optional().default(''),
     /** `TEM2-142`. Present ⇒ the row becomes a task-linked entry. */
     ticket: z.string().trim().min(1).optional().nullable(),
     /** `general_category`. Ignored on ticket rows. */

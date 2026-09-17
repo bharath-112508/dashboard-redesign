@@ -3,7 +3,12 @@ import { Types } from 'mongoose';
 import { Project } from '../models/project.model.js';
 import { Task } from '../models/task.model.js';
 import { TimesheetEntry } from '../models/timesheet-entry.model.js';
-import { TIMESHEET_ENTRY_TYPES, TIMESHEET_HOURS_MAX } from '../constants/timesheet.js';
+import {
+    TIMESHEET_ENTRY_TYPES,
+    TIMESHEET_GENERAL_CATEGORIES,
+    TIMESHEET_HOURS_MAX,
+    TIMESHEET_NO_PROJECT_LABEL,
+} from '../constants/timesheet.js';
 import type { TimesheetImportRow } from '../validators/timesheet.validator.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { buildProjectVisibilityFilter } from './project.service.js';
@@ -36,10 +41,28 @@ import type { ProjectCaller } from './project.service.js';
 /** `TEM2-142` → the project code and the per-project task number. */
 const TICKET_KEY = /^([A-Za-z0-9_]+)-(\d+)$/;
 
+/**
+ * Match a category cell against the managed list, returning the CANONICAL
+ * spelling, or null when it isn't one of them.
+ *
+ * Case- and space-insensitive, unlike the single-entry path: there the value
+ * comes from a `<Select>` and can only be exact, here somebody typed it into
+ * a spreadsheet. Blocking a file over "meeting" versus "Meeting" would be
+ * pedantry. The canonical value is what gets stored, so the hour still groups
+ * with every other one of its kind.
+ */
+const canonicalGeneralCategory = (raw: string | null): string | null => {
+    if (!raw) return null;
+    const needle = raw.trim().toLowerCase();
+    return TIMESHEET_GENERAL_CATEGORIES.find((c) => c.toLowerCase() === needle) ?? null;
+};
+
 export interface ResolvedImportRow {
     local_date: string;
     entry_type: string;
-    project_id: Types.ObjectId;
+    /** Null on a general row that names no project — see the category rule
+     *  in `validateImportRows`. */
+    project_id: Types.ObjectId | null;
     task_id: Types.ObjectId | null;
     general_category: string | null;
     billable_hours: number;
@@ -180,15 +203,32 @@ export const validateImportRows = async (
 
         if (r.date > today) return blocked(`${r.date} is in the future.`);
 
-        const project = resolveProject(r.project, index);
-        if ('reason' in project) return blocked(project.reason);
-        const label = project.project.name ?? project.project.code ?? '';
+        // OPTIONAL. An hour is attributed to a project OR to a category, at
+        // least one of the two — so a row for a meeting, training or support
+        // legitimately names no project. This importer was written when a
+        // project was mandatory on every row, which made internal time
+        // impossible to import at all. Empty means "general"; filled in but
+        // unmatched is still an error, since optional is not the same as
+        // ignored when wrong.
+        const projectCell = (r.project ?? '').trim();
+        let project: ProjectRow | null = null;
+        if (projectCell) {
+            const resolved = resolveProject(r.project, index);
+            if ('reason' in resolved) return blocked(resolved.reason);
+            project = resolved.project;
+        }
+        const label = project ? (project.name ?? project.code ?? '') : TIMESHEET_NO_PROJECT_LABEL;
 
         let task: Types.ObjectId | null = null;
-        if (r.ticket) {
+        if (r.ticket && !project) {
+            // A ticket belongs to a project. Naming one without the other is
+            // a gap in the sheet, not an intent to log general time.
+            return blocked(`Ticket "${r.ticket}" needs its project — fill in the project column.`);
+        }
+        if (r.ticket && project) {
             const m = TICKET_KEY.exec(r.ticket.trim());
             if (!m) return blocked(`"${r.ticket}" is not a ticket key — expected something like NMF-142.`);
-            const hit = taskByKey.get(taskKey(project.project._id, Number(m[2])));
+            const hit = taskByKey.get(taskKey(project._id, Number(m[2])));
             if (!hit) {
                 // Either it does not exist, or it belongs to another project.
                 // Both mean the same thing to the user: this ticket is not on
@@ -207,6 +247,27 @@ export const validateImportRows = async (
             return blocked(`A single entry cannot exceed ${TIMESHEET_HOURS_MAX} hours.`);
         }
 
+        // The validator's discriminated union refuses a category on a
+        // task-linked entry, so a ticket row drops it rather than failing at
+        // write time with an error about a field the user never saw.
+        const rawCategory = task ? null : r.context?.trim() || null;
+        let category = rawCategory;
+        if (!task && !project) {
+            // With no project the category is the ONLY thing attributing the
+            // hour, so it has to be groupable — free text can't be charted or
+            // filtered, and internal time would be as invisible as it was
+            // when it had no project either. Mirrors `isGeneralCategoryValid`
+            // on the single-entry path.
+            category = canonicalGeneralCategory(rawCategory);
+            if (!category) {
+                return blocked(
+                    rawCategory
+                        ? `"${rawCategory}" is not a category. With no project, use one of: ${TIMESHEET_GENERAL_CATEGORIES.join(', ')}.`
+                        : `Give a project, or a category — one of: ${TIMESHEET_GENERAL_CATEGORIES.join(', ')}.`
+                );
+            }
+        }
+
         return {
             row_number: r.row_number,
             ok: true,
@@ -214,13 +275,9 @@ export const validateImportRows = async (
             resolved: {
                 local_date: r.date,
                 entry_type: task ? TIMESHEET_ENTRY_TYPES.TASK_LINKED : TIMESHEET_ENTRY_TYPES.GENERAL,
-                project_id: project.project._id,
+                project_id: project ? project._id : null,
                 task_id: task,
-                // The validator's discriminated union refuses a category on a
-                // task-linked entry, so a ticket row drops it rather than
-                // failing at write time with an error about a field the user
-                // never saw.
-                general_category: task ? null : r.context?.trim() || null,
+                general_category: category,
                 billable_hours: billable.hours,
                 billable_minutes: billable.minutes,
                 non_billable_hours: nonBillable.hours,

@@ -121,6 +121,75 @@ describe('validateImportRows — project resolution', () => {
     });
 });
 
+describe('validateImportRows — a general row with no project', () => {
+    /**
+     * An hour is attributed to a PROJECT or to a CATEGORY, at least one of
+     * the two (`isGeneralCategoryValid`). This importer was written when a
+     * project was mandatory on every row, so internal time — meetings,
+     * training, support — could not be imported at all.
+     */
+    it('accepts a blank project when the category is one of the managed values', async () => {
+        const out = await svc.validateImportRows([row({ project: '', context: 'Meeting' })], caller as never);
+        expect(out.rows[0]!.ok).toBe(true);
+        expect(out.rows[0]!.resolved?.project_id).toBeNull();
+        expect(out.rows[0]!.resolved?.general_category).toBe('Meeting');
+        expect(out.rows[0]!.resolved?.entry_type).toBe(TIMESHEET_ENTRY_TYPES.GENERAL);
+    });
+
+    it('matches a managed category regardless of the case the sheet used', async () => {
+        // People type into a spreadsheet, not a select.
+        const out = await svc.validateImportRows(
+            [row({ project: '', context: '  internal discussion ' })],
+            caller as never
+        );
+        expect(out.rows[0]!.ok).toBe(true);
+        expect(out.rows[0]!.resolved?.general_category).toBe('Internal discussion');
+    });
+
+    it('blocks a blank project whose category is free text', async () => {
+        // Without a project the category is the only thing attributing the
+        // hour, so it has to be groupable — free text cannot be charted.
+        const out = await svc.validateImportRows(
+            [row({ project: '', context: 'Testing the login flow' })],
+            caller as never
+        );
+        expect(out.rows[0]!.ok).toBe(false);
+        // The message has to name the options: the person is looking at a
+        // spreadsheet, not at the code.
+        expect(out.rows[0]!.reason).toMatch(/Meeting/);
+    });
+
+    it('blocks a row with neither a project nor a category', async () => {
+        const out = await svc.validateImportRows([row({ project: '', context: null })], caller as never);
+        expect(out.rows[0]!.ok).toBe(false);
+    });
+
+    it('blocks a ticket on a row with no project', async () => {
+        // A ticket belongs to a project; naming one without the other is a
+        // mistake in the sheet, not a general entry.
+        const out = await svc.validateImportRows(
+            [row({ project: '', ticket: 'NMF-142', context: 'Meeting' })],
+            caller as never
+        );
+        expect(out.rows[0]!.ok).toBe(false);
+        expect(out.rows[0]!.reason).toMatch(/project/i);
+    });
+
+    it('still allows free text as the category when a project IS named', async () => {
+        // With a project the field carries no reporting load — it just names
+        // the area worked on.
+        const out = await svc.validateImportRows([row({ context: 'Payroll module' })], caller as never);
+        expect(out.rows[0]!.ok).toBe(true);
+        expect(out.rows[0]!.resolved?.general_category).toBe('Payroll module');
+    });
+
+    it('still blocks a project cell that was filled in but matches nothing', async () => {
+        // Optional means "may be empty", not "ignored when wrong".
+        const out = await svc.validateImportRows([row({ project: 'Nope' })], caller as never);
+        expect(out.rows[0]!.ok).toBe(false);
+    });
+});
+
 describe('validateImportRows — tickets', () => {
     it('resolves a ticket key to a task and marks the row task-linked', async () => {
         const out = await svc.validateImportRows([row({ ticket: 'NMF-142' })], caller as never);

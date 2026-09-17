@@ -55,6 +55,16 @@ const GUARDS: Array<{ name: string; inCreateEntry: RegExp; inImport: RegExp; why
         why: 'THE authorization boundary — typing a code must not reach a project the caller cannot open',
     },
     {
+        name: 'a project-less general entry carries a managed category',
+        inCreateEntry: /isGeneralCategoryValid\(/,
+        inImport: /canonicalGeneralCategory\(/,
+        why:
+            'without a project the category is the only thing attributing the hour, so free text ' +
+            'there cannot be grouped or charted — and this is the rule that caught the list out: ' +
+            'the single-entry path moved to "a project OR a category" while import still demanded ' +
+            'a project on every row, and every test here passed throughout',
+    },
+    {
         name: 'task belongs to the named project',
         inCreateEntry: /does not match the parent project of task_id|loadTaskForCaller\(/,
         inImport: /is not on \$\{label\}|taskByKey\.get\(/,
@@ -78,6 +88,14 @@ describe('import rules track single-entry rules', () => {
             ).toBe(true);
         });
     }
+
+    it('import does not demand a project on every row', () => {
+        // The inverse of the guard above, and the one a structural checklist
+        // cannot express as a pattern: this is about the ABSENCE of a rule.
+        // `resolveProject` must be reached conditionally, or internal time —
+        // meetings, training, support — cannot be imported at all.
+        expect(importSvc).toMatch(/if \(projectCell\) \{[\s\S]{0,200}resolveProject\(/);
+    });
 
     it('the commit does not trust the preview', () => {
         // The commit must re-run validation. If it ever starts accepting a
