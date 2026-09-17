@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { createTimesheetBodySchema, patchTimesheetBodySchema } from './timesheet.validator.js';
 
 /**
- * A `general` entry is the "log time without a task" path. It still belongs to
- * a project: every logged hour rolls up to one, so the project is mandatory
- * and `general_category` is an optional label on top of it ("Standup",
- * "Onboarding"), never a substitute for it.
+ * A `general` entry is the "log time without a task" path. It is attributed by
+ * a PROJECT or by a CATEGORY — at least one, never neither. The category is a
+ * closed list so internal time can be grouped ("Meeting", "Support"); free text
+ * could not be, and became a second description box.
  */
 describe('createTimesheetBodySchema — general entries', () => {
     const base = {
@@ -30,25 +30,46 @@ describe('createTimesheetBodySchema — general entries', () => {
         const parsed = createTimesheetBodySchema.safeParse({
             ...base,
             project_id: projectId,
-            general_category: 'Standup',
+            general_category: 'Meeting',
         });
         expect(parsed.success).toBe(true);
     });
 
-    it('rejects a category with no project — a label is not an attribution', () => {
-        const parsed = createTimesheetBodySchema.safeParse({ ...base, general_category: 'Standup' });
-        expect(parsed.success).toBe(false);
+    it('accepts a category with no project — that is what attributes the hour', () => {
+        const parsed = createTimesheetBodySchema.safeParse({ ...base, general_category: 'Meeting' });
+        expect(parsed.success).toBe(true);
     });
 
-    it('rejects an entry with no project at all', () => {
+    it('accepts a category with an explicitly null project', () => {
+        const parsed = createTimesheetBodySchema.safeParse({
+            ...base,
+            project_id: null,
+            general_category: 'Support',
+        });
+        expect(parsed.success).toBe(true);
+    });
+
+    it('rejects an entry with neither a project nor a category', () => {
         const parsed = createTimesheetBodySchema.safeParse(base);
         expect(parsed.success).toBe(false);
     });
 
-    it('rejects an explicitly null project', () => {
-        // The old schema accepted `null` here; the FE sent it for internal
-        // time. It must now fail rather than fall through to a null column.
-        const parsed = createTimesheetBodySchema.safeParse({ ...base, project_id: null });
+    it('accepts FREE TEXT as the category when a project is chosen', () => {
+        // With a project carrying the attribution the field only refines it —
+        // it names the area worked on and has no grouping load.
+        const parsed = createTimesheetBodySchema.safeParse({
+            ...base,
+            project_id: projectId,
+            general_category: 'Payroll module — PDF export',
+        });
+        expect(parsed.success).toBe(true);
+    });
+
+    it('rejects a category outside the managed list', () => {
+        // Only on the PROJECT-LESS path, where this field is the sole
+        // attribution: free text there can't be grouped or charted, which is
+        // the whole reason the list exists.
+        const parsed = createTimesheetBodySchema.safeParse({ ...base, general_category: 'Standup' });
         expect(parsed.success).toBe(false);
     });
 
@@ -90,8 +111,10 @@ describe('patchTimesheetBodySchema — notes', () => {
         expect(patchTimesheetBodySchema.safeParse({ project_id: 'b'.repeat(24) }).success).toBe(true);
     });
 
-    it('refuses to clear the project — every entry keeps one', () => {
-        expect(patchTimesheetBodySchema.safeParse({ project_id: null }).success).toBe(false);
+    it('allows clearing the project — the service re-checks the pair', () => {
+        // Legal only if a category survives, which depends on the stored row;
+        // `updateEntry` decides that, not the schema.
+        expect(patchTimesheetBodySchema.safeParse({ project_id: null }).success).toBe(true);
     });
 
     it('still refuses an empty-string category', () => {

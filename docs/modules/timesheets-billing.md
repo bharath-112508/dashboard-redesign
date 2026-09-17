@@ -69,11 +69,13 @@ No per-row authorization beyond the route gate.
   entry_type: 'task_linked' | 'general',
 
   // task_linked: project_id + task_id required (sprint_id optional, falls back to task's current sprint)
-  // general: project_id optional, sprint_id null, task_id null, general_category required
+  // general: sprint_id/task_id null; project_id and general_category are each
+  //          optional BUT at least one is required — and with no project the
+  //          category must come off TIMESHEET_GENERAL_CATEGORIES
   project_id: ObjectId | null,
   sprint_id:  ObjectId | null,
   task_id:    ObjectId | null,
-  general_category: string | null,   // ≤ 64
+  general_category: string | null,   // ≤ 64; free text only when project_id is set
 
   // Same-row billable + non-billable split (NOT a separate is_billable flag — see plan §6.1)
   billable_hours: 0..24,
@@ -154,7 +156,8 @@ No per-row authorization beyond the route gate.
   local_date, entry_type: 'general',
   project_id?: nullable,         // optional; if set, caller must be able to see it
   sprint_id: null, task_id: null,
-  general_category: string (1..64),
+  general_category: string (1..64),  // REQUIRED + from the list when project_id is absent;
+                                     // optional free text when it is present
   billable_hours, billable_minutes, non_billable_hours, non_billable_minutes,
   description?: ≤ 2000,
 }
@@ -212,7 +215,9 @@ Response envelope: `{data: row, warnings: {exceeds_daily_threshold, overlaps_app
 
 ### Create entry (general, project optional)
 
-`project_id` is optional. When supplied, `loadProjectForCaller` runs so the row doesn't quietly land against a project the caller can't see. `general_category` 1..64 chars required. `task_id`, `sprint_id` always null.
+`project_id` is optional — meetings, internal discussion, support and training belong to no project, and requiring one meant they were either charged to a client project nobody was working on or went unlogged. When supplied, `loadProjectForCaller` runs so the row doesn't quietly land against a project the caller can't see; when absent, no ACL call is made at all.
+
+🔴 **An hour is attributed by a PROJECT or by a CATEGORY — at least one, never neither** — and the shape of `general_category` follows from which. Without a project it IS the attribution, so it is required and must be one of `TIMESHEET_GENERAL_CATEGORIES`: free text there cannot be grouped or charted and drifts into a second description box, which would leave internal time as invisible as it was when it had no project. With a project the project carries that load, so the field is optional free text naming the area worked on (`"Payroll module"`). `isGeneralCategoryValid(category, hasProject)` (`constants/timesheet.ts`) is the one place that decides, because the question is asked twice — by the create validator, and again by `updateEntry` against the **merged** row, where clearing the project also narrows the category back to the list and only the merged row can tell. `task_id`, `sprint_id` always null.
 
 ### Patch (in-window own, or privileged any-time)
 

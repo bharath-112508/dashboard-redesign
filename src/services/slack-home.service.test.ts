@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TIMESHEET_NO_PROJECT_LABEL } from '../constants/timesheet.js';
 import { Types } from 'mongoose';
 
 vi.mock('./attendance.service.js', () => ({
@@ -140,8 +141,8 @@ describe('buildHomeDashboardData — my_time', () => {
         // Rows carrying no project_id/task_id resolve to placeholders rather
         // than blank cells, and neither lookup is issued for them.
         expect(data.my_time?.entries).toEqual([
-            { project: 'No project', work: '', note: '', minutes: 90 },
-            { project: 'No project', work: '', note: '', minutes: 75 },
+            { project: TIMESHEET_NO_PROJECT_LABEL, work: '', note: '', minutes: 90 },
+            { project: TIMESHEET_NO_PROJECT_LABEL, work: '', note: '', minutes: 75 },
         ]);
         expect(projectFindMock).not.toHaveBeenCalled();
         expect(taskFindMock).not.toHaveBeenCalled();
@@ -253,7 +254,9 @@ describe('buildHomeDashboardData — my_time entries', () => {
             meta: { local_date: today, total_minutes: 60 },
         });
         const data = await buildHomeDashboardData(employee);
-        expect(data.my_time?.entries[0]?.project).toBe('No project');
+        // The shared constant, not a literal: the label has to match what the
+        // web tables and the dashboard print for the same row.
+        expect(data.my_time?.entries[0]?.project).toBe(TIMESHEET_NO_PROJECT_LABEL);
         expect(projectFindMock).not.toHaveBeenCalled();
     });
 

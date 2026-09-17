@@ -126,7 +126,7 @@ describe('renderReportSubscriptionEmail', () => {
                     user: { id: 'u1', full_name: 'Anna' },
                     by_type: [
                         {
-                            leave_type: { id: 'lt1', key: 'CL', label: 'Casual Leave' },
+                            leave_type: { id: 'lt1', key: 'CL', label: 'Casual Leave', is_unlimited: false },
                             allocated: 12,
                             carried_forward: 0,
                             used: 2,

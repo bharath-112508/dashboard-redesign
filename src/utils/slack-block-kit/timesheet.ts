@@ -1,5 +1,5 @@
 import { ERROR_CODES } from '../../constants/error-codes.js';
-import { TIMESHEET_GENERAL_CATEGORY_MAX } from '../../constants/timesheet.js';
+import { TIMESHEET_GENERAL_CATEGORIES, TIMESHEET_GENERAL_CATEGORY_MAX } from '../../constants/timesheet.js';
 import {
     SLACK_BLOCK_TS_BILLABLE,
     SLACK_BLOCK_TS_CONTEXT,
@@ -165,7 +165,28 @@ export const buildLogTimeModal = (
     const cappedProjects = projects.slice(0, SLACK_SELECT_OPTION_CAP);
     const cappedTickets = tickets.slice(0, SLACK_SELECT_OPTION_CAP);
 
+    // Type FIRST — it decides what every field under it means (whether the
+    // project is required, whether you name a ticket or a category), so asking
+    // it after the project made people fill in a form whose rules then changed
+    // under them. Same order as the web dialog.
     const blocks: Array<Record<string, unknown>> = [
+        {
+            type: 'input',
+            block_id: SLACK_BLOCK_TS_TYPE,
+            dispatch_action: true,
+            label: plain('Type'),
+            element: {
+                type: 'static_select',
+                action_id: SLACK_BLOCK_TS_TYPE,
+                options: [
+                    { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
+                    { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET },
+                ],
+                initial_option: isTicket
+                    ? { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET }
+                    : { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
+            },
+        },
         {
             type: 'input',
             block_id: SLACK_BLOCK_TS_DATE,
@@ -187,7 +208,7 @@ export const buildLogTimeModal = (
             type: 'section',
             text: {
                 type: 'mrkdwn',
-                text: "You're not a member of any project yet, so there's nothing to log time against. Ask an admin to add you to one.",
+                text: "You're not a member of any project yet — you can still log general time below. Ask an admin to add you to a project to log against one.",
             },
         });
     } else {
@@ -197,6 +218,10 @@ export const buildLogTimeModal = (
             // Changing the project has to re-load the ticket list, so this
             // block reports changes instead of staying silent until submit.
             dispatch_action: true,
+            // A ticket always implies its project; general time need not have
+            // one at all (a meeting, support, training), and then the Context
+            // select below turns required instead.
+            optional: !isTicket,
             label: plain('Project'),
             element: {
                 type: 'static_select',
@@ -207,27 +232,6 @@ export const buildLogTimeModal = (
             },
         });
     }
-
-    // Type switch, then whichever field it selects. Every logged hour belongs
-    // to a project either way — the type decides whether it also names a
-    // ticket, not whether a project is required.
-    blocks.push({
-        type: 'input',
-        block_id: SLACK_BLOCK_TS_TYPE,
-        dispatch_action: true,
-        label: plain('Type'),
-        element: {
-            type: 'static_select',
-            action_id: SLACK_BLOCK_TS_TYPE,
-            options: [
-                { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
-                { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET },
-            ],
-            initial_option: isTicket
-                ? { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET }
-                : { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
-        },
-    });
 
     if (isTicket) {
         if (cappedTickets.length === 0) {
@@ -259,21 +263,47 @@ export const buildLogTimeModal = (
             });
         }
     } else {
-        blocks.push({
-            type: 'input',
-            block_id: SLACK_BLOCK_TS_CONTEXT,
-            // Optional, matching the web form and the validator — a general
-            // entry is already attributed by its project; this only refines it.
-            optional: true,
-            label: plain('Context'),
-            element: {
-                type: 'plain_text_input',
-                action_id: SLACK_BLOCK_TS_CONTEXT,
-                max_length: TIMESHEET_GENERAL_CATEGORY_MAX,
-                placeholder: plain('Standup, Onboarding, …'),
-                ...(state.context ? { initial_value: state.context } : {}),
-            },
-        });
+        // Two different fields behind one block id, chosen by whether a
+        // project is carrying the attribution. WITH a project the value only
+        // refines it, so free text naming the area worked on is fine; WITHOUT
+        // one it IS the attribution, so it must come off a list that can be
+        // grouped and charted. The project select already dispatches its
+        // changes, so the swap rides the `views.update` that re-renders the
+        // rest of the modal — no extra round-trip.
+        const categoryOptions = TIMESHEET_GENERAL_CATEGORIES.map((c) => ({ text: plain(c), value: c }));
+        const initialCategory = categoryOptions.find((o) => o.value === state.context);
+        blocks.push(
+            state.project_id
+                ? {
+                      type: 'input',
+                      block_id: SLACK_BLOCK_TS_CONTEXT,
+                      optional: true,
+                      label: plain('Area worked on'),
+                      element: {
+                          type: 'plain_text_input',
+                          action_id: SLACK_BLOCK_TS_CONTEXT,
+                          max_length: TIMESHEET_GENERAL_CATEGORY_MAX,
+                          placeholder: plain('Payroll module, Login flow, …'),
+                          ...(state.context ? { initial_value: state.context } : {}),
+                      },
+                  }
+                : {
+                      type: 'input',
+                      block_id: SLACK_BLOCK_TS_CONTEXT,
+                      optional: false,
+                      label: plain('What for?'),
+                      element: {
+                          type: 'static_select',
+                          action_id: SLACK_BLOCK_TS_CONTEXT,
+                          placeholder: plain('Meeting, Support, …'),
+                          options: categoryOptions,
+                          // Slack rejects an `initial_option` absent from
+                          // `options`, so a free-text value carried over from
+                          // the project path is dropped, not re-seeded.
+                          ...(initialCategory ? { initial_option: initialCategory } : {}),
+                      },
+                  }
+        );
     }
 
     blocks.push(
@@ -361,7 +391,12 @@ export const readLogTimeState = (view: unknown): LogTimeModalState => {
         local_date: cell(values, SLACK_BLOCK_TS_DATE).selected_date ?? undefined,
         project_id: cell(values, SLACK_BLOCK_TS_PROJECT).selected_option?.value ?? undefined,
         ticket_id: cell(values, SLACK_BLOCK_TS_TICKET).selected_option?.value ?? undefined,
-        context: cell(values, SLACK_BLOCK_TS_CONTEXT).value ?? undefined,
+        // Either element type, depending on whether a project was chosen —
+        // the re-seed has to survive the user switching between them.
+        context:
+            cell(values, SLACK_BLOCK_TS_CONTEXT).selected_option?.value ??
+            cell(values, SLACK_BLOCK_TS_CONTEXT).value ??
+            undefined,
         billable: cell(values, SLACK_BLOCK_TS_BILLABLE).selected_option?.value ?? undefined,
         non_billable: cell(values, SLACK_BLOCK_TS_NON_BILLABLE).selected_option?.value ?? undefined,
         description: cell(values, SLACK_BLOCK_TS_DESCRIPTION).value ?? undefined,
@@ -374,10 +409,10 @@ export const parseLogTimeSubmission = (view: unknown): ParsedLogTimeSubmission =
     const nonBillable = toHoursMinutes(cell(values, SLACK_BLOCK_TS_NON_BILLABLE).selected_option?.value);
     const entryType = cell(values, SLACK_BLOCK_TS_TYPE).selected_option?.value ?? SLACK_TS_TYPE_GENERAL;
     const isTicket = entryType === SLACK_TS_TYPE_TICKET;
-    // Trimmed to null, not left as '': the validator's `general_category` is
-    // `.min(1)`, so an untouched optional input would fail the entry rather
-    // than read as "no category".
-    const context = (cell(values, SLACK_BLOCK_TS_CONTEXT).value ?? '').trim();
+    // Null, not '': an untouched optional field has no value, and the
+    // validator's `general_category` is `.min(1)`, which '' would fail.
+    const contextCell = cell(values, SLACK_BLOCK_TS_CONTEXT);
+    const context = (contextCell.selected_option?.value ?? contextCell.value ?? '').trim();
     return {
         local_date: cell(values, SLACK_BLOCK_TS_DATE).selected_date ?? undefined,
         project_id: cell(values, SLACK_BLOCK_TS_PROJECT).selected_option?.value ?? undefined,

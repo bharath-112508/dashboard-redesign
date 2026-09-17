@@ -19,6 +19,7 @@ import {
     TIMESHEET_DEFAULT_DAILY_WARN_THRESHOLD_HOURS,
     TIMESHEET_DEFAULT_SELF_EDIT_WINDOW_DAYS,
     TIMESHEET_ENTRY_TYPES,
+    isGeneralCategoryValid,
     type TimesheetSummaryGroupBy,
 } from '../constants/timesheet.js';
 import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
@@ -325,9 +326,9 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
     assertNonZero(input);
     assertEntryUnderDailyCap(input);
 
-    // Not nullable and not pre-seeded: both branches below assign it, because
-    // every entry — task-linked or general — now belongs to a project.
-    let projectId: Types.ObjectId;
+    // Task-linked always resolves one; a general entry may have none, in which
+    // case `general_category` carries the attribution instead (validator-enforced).
+    let projectId: Types.ObjectId | null = null;
     let sprintId: Types.ObjectId | null = null;
     let taskId: Types.ObjectId | null = null;
     let generalCategory: string | null = null;
@@ -349,12 +350,16 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
         // to the task's current sprint to keep summaries clean.
         sprintId = input.sprint_id ? new Types.ObjectId(input.sprint_id) : task.sprint_id;
     } else {
-        // General entry. The project is required by the schema; verify the
-        // caller can see it so the row doesn't quietly land against a
-        // project they have no access to.
-        const pOid = new Types.ObjectId(input.project_id);
-        await loadProjectForCaller(pOid, caller);
-        projectId = pOid;
+        // General entry. A project is OPTIONAL here — meetings, internal
+        // discussion, support and training belong to no project, and the
+        // validator requires a category instead when one is absent. When a
+        // project IS given, verify the caller can see it so the row doesn't
+        // quietly land against a project they have no access to.
+        if (input.project_id) {
+            const pOid = new Types.ObjectId(input.project_id);
+            await loadProjectForCaller(pOid, caller);
+            projectId = pOid;
+        }
         // Omitted is stored as `null`, not `undefined` — the column is
         // `String | null` and an undefined would leave the key off the doc,
         // so `{ general_category: null }` grouping in the summary would miss it.
@@ -455,22 +460,30 @@ export const patchEntry = async (
         entry.general_category = patch.general_category;
     }
 
-    // Moving a general entry between projects is allowed; removing the project
-    // is not — the schema makes `project_id` non-nullable, so there is no
-    // "clear it" branch to write here.
+    // A general entry may be moved between projects, or have its project
+    // cleared entirely — an entry reclassified as a meeting shouldn't have to
+    // be deleted and re-created.
     if (entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL && patch.project_id !== undefined) {
-        const pOid = new Types.ObjectId(patch.project_id);
-        await loadProjectForCaller(pOid, caller);
-        entry.project_id = pOid;
+        if (patch.project_id) {
+            const pOid = new Types.ObjectId(patch.project_id);
+            await loadProjectForCaller(pOid, caller);
+            entry.project_id = pOid;
+        } else {
+            entry.project_id = null;
+        }
     }
 
-    // Rows created before the project became mandatory may still carry a null
-    // project and a category. They stay editable — retro-fitting a project
-    // onto historical time would be a guess — but the category that is the
-    // only thing attributing them can't then be cleared as well.
-    if (entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL && !entry.project_id && !entry.general_category) {
+    // The create-time invariant, re-checked against the MERGED row: a patch
+    // that clears one attributor can't be judged on its own, because whether
+    // it's legal depends on the field it didn't mention. Detaching the project
+    // also narrows the category from free text to the managed list, which is
+    // the other thing only the merged row can tell us.
+    if (
+        entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL &&
+        !isGeneralCategoryValid(entry.general_category, Boolean(entry.project_id))
+    ) {
         throw AppError.unprocessable(
-            'This entry has no project, so keep its category — otherwise the time is unattributable.',
+            'Pick a project, or choose what this time was for — otherwise the hours are unattributable.',
             ERROR_CODES.VALIDATION_ERROR
         );
     }

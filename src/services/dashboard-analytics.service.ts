@@ -1,5 +1,6 @@
 // src/services/dashboard-analytics.service.ts
 import { Types } from 'mongoose';
+import { TIMESHEET_NO_PROJECT_LABEL } from '../constants/timesheet.js';
 
 import { AttendanceRecord } from '../models/attendance-record.model.js';
 import { LeaveRequest } from '../models/leave-request.model.js';
@@ -355,7 +356,7 @@ export const computeHoursByProject = async (
         const p = r._id ? byId.get(r._id.toString()) : undefined;
         return {
             project_id: r._id?.toString() ?? null,
-            project_name: p?.name ?? 'General (no project)',
+            project_name: p?.name ?? TIMESHEET_NO_PROJECT_LABEL,
             project_code: p?.code ?? null,
             minutes: r.minutes,
         };

@@ -1008,6 +1008,22 @@ describe('person-affecting admin dispatchers', () => {
         expect(row.body).toContain('correction');
     });
 
+    it('stays silent when nothing spendable moved', async () => {
+        // Reconciling against another leave portal often raises what's
+        // allowed and what's taken by the same amount. The days the person
+        // can still take are unchanged, so there is nothing to tell them.
+        await dispatcher.notifyLeaveBalanceAdjusted({
+            balance_id: balanceId,
+            user_id: requesterId,
+            actor_id: adminId,
+            leave_type_label: 'CL — Casual Leave',
+            delta: 0,
+            reason: 'synced totals with the leave portal',
+        });
+
+        expect(notificationCreateMock).not.toHaveBeenCalled();
+    });
+
     it('stays silent when an admin adjusts their own balance', async () => {
         await dispatcher.notifyLeaveBalanceAdjusted({
             balance_id: balanceId,

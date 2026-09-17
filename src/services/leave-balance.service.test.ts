@@ -25,6 +25,8 @@ const {
     leaveTypeFindMock,
     leaveTypeFindByIdMock,
     userFindByIdMock,
+    userFindMock,
+    leaveBalanceFindMock,
     recomputeAvailableMock,
     recordAuditMock,
 } = vi.hoisted(() => ({
@@ -33,6 +35,8 @@ const {
     leaveTypeFindMock: vi.fn(),
     leaveTypeFindByIdMock: vi.fn(),
     userFindByIdMock: vi.fn(),
+    userFindMock: vi.fn(),
+    leaveBalanceFindMock: vi.fn(),
     recomputeAvailableMock: vi.fn(),
     recordAuditMock: vi.fn(),
 }));
@@ -42,9 +46,23 @@ vi.mock('../models/leave-balance.model.js', () => ({
         updateOne: leaveBalanceUpdateOneMock,
         findById: leaveBalanceFindByIdMock,
         findOne: vi.fn(),
-        find: vi.fn(),
+        find: leaveBalanceFindMock,
     },
     recomputeAvailable: recomputeAvailableMock,
+    // Real rule, not a stub: an uncapped type contributes 0 rather than a
+    // negative, and every published `available` goes through it.
+    presentedAvailable: (
+        b: {
+            allocated: number;
+            carried_forward: number;
+            used: number;
+            pending: number;
+            adjusted: number;
+            monthly_forfeited: number;
+        },
+        lt: { is_unlimited?: boolean } | null | undefined
+    ) =>
+        lt?.is_unlimited ? 0 : b.allocated + b.carried_forward + b.adjusted - b.used - b.pending - b.monthly_forfeited,
 }));
 
 vi.mock('../models/leave-type.model.js', () => ({
@@ -56,7 +74,7 @@ vi.mock('../models/sl-monthly-forfeiture.model.js', () => ({
 }));
 
 vi.mock('../models/user.model.js', () => ({
-    User: { findById: userFindByIdMock, find: vi.fn() },
+    User: { findById: userFindByIdMock, find: userFindMock },
 }));
 
 vi.mock('./audit.service.js', () => ({
@@ -67,7 +85,7 @@ vi.mock('./audit.service.js', () => ({
 const svc = await import('./leave-balance.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { LEAVE_CODES, LEAVE_TYPE_SEEDS, PRO_RATA_STRATEGIES } from '../constants/leave.js';
-import { ROLES } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES, ROLES } from '../constants/roles.js';
 
 const fullType = (overrides: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(),
@@ -254,6 +272,29 @@ describe('initializeBalancesForUserYear', () => {
         expect(leaveBalanceUpdateOneMock).not.toHaveBeenCalled();
     });
 
+    it('skips representatives early — they are client-side, not staff', async () => {
+        // `CLIENT_SIDE_ROLES` is the org-wide answer to "who is external".
+        // This guard checked `role === CLIENT` only, which predates the
+        // `representative` role, so a client company's project-scoped person
+        // would accrue leave they can neither see nor apply for.
+        userFindByIdMock.mockReturnValueOnce({
+            select: () =>
+                Promise.resolve({
+                    role: ROLES.REPRESENTATIVE,
+                    status: 'active',
+                    internal_profile: null,
+                }),
+        });
+
+        const inserted = await svc.initializeBalancesForUserYear({
+            user_id: new Types.ObjectId(),
+            year: 2026,
+        });
+
+        expect(inserted).toBe(0);
+        expect(leaveBalanceUpdateOneMock).not.toHaveBeenCalled();
+    });
+
     it('skips freelancers early (no DB writes)', async () => {
         // A freelancer is engaged per contract, not on an employment
         // allocation. Guarding here rather than per-caller is what makes it
@@ -410,7 +451,154 @@ describe('initializeBalancesForUserYear', () => {
     });
 });
 
+describe('initializeYearForAllUsers', () => {
+    it('excludes every client-side role from the roll-out, not just `client`', async () => {
+        userFindMock.mockReturnValueOnce({ select: () => Promise.resolve([]) });
+
+        await svc.initializeYearForAllUsers({ year: 2026 });
+
+        const filter = userFindMock.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(filter.role).toEqual({ $nin: CLIENT_SIDE_ROLES });
+    });
+
+    it('does not filter the user query on date_of_joining', async () => {
+        userFindMock.mockReturnValueOnce({ select: () => Promise.resolve([]) });
+
+        await svc.initializeYearForAllUsers({ year: 2026 });
+
+        const filter = userFindMock.mock.calls[0]?.[0] as Record<string, unknown>;
+        // A missing joining date must not remove somebody from the roll-out.
+        // `initializeBalancesForUserYear` already defaults them to the start
+        // of the target year; pre-filtering here bypassed that fallback and
+        // left those employees with zero balance rows, so they vanished from
+        // the admin leave-balance screens entirely.
+        expect(filter).not.toHaveProperty('internal_profile.date_of_joining');
+    });
+
+    it('still seeds employees who have no date_of_joining on file', async () => {
+        const uid = new Types.ObjectId();
+        userFindMock.mockReturnValueOnce({
+            select: () => Promise.resolve([{ _id: uid, internal_profile: {} }]),
+        });
+        // No joining date is pre-resolved, so the per-user initializer does
+        // its own lookup and applies the start-of-year fallback.
+        userFindByIdMock.mockReturnValueOnce({
+            select: () =>
+                Promise.resolve({
+                    role: ROLES.EMPLOYEE,
+                    status: 'active',
+                    internal_profile: {},
+                }),
+        });
+        leaveTypeFindMock.mockResolvedValueOnce([fullType({ code: 'CL', default_allocation_days: 12 })]);
+        leaveBalanceUpdateOneMock.mockResolvedValueOnce({ upsertedCount: 1 });
+
+        const out = await svc.initializeYearForAllUsers({ year: 2026 });
+
+        expect(out).toMatchObject({ year: 2026, processed_users: 1, total_inserted: 1 });
+    });
+
+    it('passes a known joining date through without a second user lookup', async () => {
+        userFindMock.mockReturnValueOnce({
+            select: () =>
+                Promise.resolve([{ _id: new Types.ObjectId(), internal_profile: { date_of_joining: '2026-07-01' } }]),
+        });
+        leaveTypeFindMock.mockResolvedValueOnce([fullType({ code: 'CL', default_allocation_days: 12 })]);
+        leaveBalanceUpdateOneMock.mockResolvedValueOnce({ upsertedCount: 1 });
+
+        const out = await svc.initializeYearForAllUsers({ year: 2026 });
+
+        expect(userFindByIdMock).not.toHaveBeenCalled();
+        expect(out.total_inserted).toBe(1);
+        // Joined in month 7 → round_half(12 × 6/12) = 6.
+        expect(leaveBalanceUpdateOneMock).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                $setOnInsert: expect.objectContaining({ allocated: 6 }),
+            }),
+            { upsert: true }
+        );
+    });
+});
+
 // ─── adjustBalance ────────────────────────────────────────────────────────
+
+describe('listBalances', () => {
+    const ACTIVE = new Types.ObjectId();
+    const LEAVER = new Types.ObjectId();
+    const GONE = new Types.ObjectId();
+    const typeId = new Types.ObjectId();
+
+    const balanceDoc = (user_id: Types.ObjectId) => ({
+        _id: new Types.ObjectId(),
+        user_id,
+        leave_type_id: typeId,
+        year: 2026,
+        allocated: 12,
+        carried_forward: 0,
+        used: 0,
+        pending: 0,
+        adjusted: 0,
+        monthly_forfeited: 0,
+        available: 12,
+    });
+
+    const arrangeRows = (rows: unknown[]) => {
+        leaveBalanceFindMock.mockReturnValueOnce({ sort: () => Promise.resolve(rows) });
+        leaveTypeFindMock.mockResolvedValueOnce([fullType({ _id: typeId, code: 'CL' })]);
+        // `User.find(...).select(...).lean()` — the display hydration.
+        userFindMock.mockReturnValueOnce({
+            select: () => ({
+                lean: () =>
+                    Promise.resolve([
+                        { _id: ACTIVE, full_name: 'Aditya Kulkarni', status: 'active' },
+                        { _id: LEAVER, full_name: 'Former Employee', status: 'deactivated' },
+                        // GONE deliberately absent — hard-deleted account.
+                    ]),
+            }),
+        });
+    };
+
+    it('leaves out people who no longer work here', async () => {
+        arrangeRows([balanceDoc(ACTIVE), balanceDoc(LEAVER), balanceDoc(GONE)]);
+
+        const out = await svc.listBalances({}, { id: new Types.ObjectId(), role: ROLES.ADMIN });
+
+        // A deactivated account is how this platform represents a deleted
+        // user (deletion is non-destructive, and GDPR erasure only renames
+        // them to "Deleted user …"), so a roster of current balances must
+        // not list them. A hard-deleted account leaves orphan rows behind
+        // and has no name to show at all.
+        expect(out).toHaveLength(1);
+        expect(out[0]?.user).toMatchObject({ full_name: 'Aditya Kulkarni' });
+    });
+
+    it('still resolves a leaver when an admin opens that person directly', async () => {
+        leaveBalanceUpdateOneMock.mockResolvedValue({ upsertedCount: 0 });
+        userFindByIdMock.mockReturnValueOnce({
+            select: () =>
+                Promise.resolve({
+                    role: ROLES.EMPLOYEE,
+                    status: 'deactivated',
+                    internal_profile: { date_of_joining: '2024-01-01' },
+                }),
+        });
+        // The self-heal runs first on a drill-down and consumes one
+        // `LeaveType.find`, so queue that before the display query.
+        leaveTypeFindMock.mockResolvedValueOnce([fullType({ _id: typeId, code: 'CL' })]);
+        arrangeRows([balanceDoc(LEAVER)]);
+
+        const out = await svc.listBalances(
+            { user_id: LEAVER.toString() },
+            { id: new Types.ObjectId(), role: ROLES.ADMIN }
+        );
+
+        // Hiding them from the roster shouldn't make a deliberate drill-down
+        // into a leaver's final balance come back empty.
+        expect(out).toHaveLength(1);
+        expect(out[0]?.user).toMatchObject({ full_name: 'Former Employee' });
+    });
+});
 
 describe('adjustBalance', () => {
     it('throws RESOURCE_NOT_FOUND when the row does not exist', async () => {
@@ -448,6 +636,10 @@ describe('adjustBalance', () => {
         expect((row as { updated_by?: Types.ObjectId }).updated_by).toBe(updater);
         expect(save).toHaveBeenCalledOnce();
         expect(out).toMatchObject({ id: row._id.toString(), allocated: 12, available: 10 });
+        // The consumers gate on these: `is_earned` warns before adjusting a
+        // ledger-mirrored type, `is_active` keeps a retired type out of the
+        // "available" headline. Dropping either silently breaks that.
+        expect(out.leave_type).toMatchObject({ is_earned: false, is_active: true });
     });
 
     it('handles a negative delta (admin clawback)', async () => {
@@ -570,6 +762,138 @@ describe('adjustBalance', () => {
 //  2. Balance formula — under `monthly_forfeited = 0` (the steady
 //     state), available reduces only via `used` and `pending`. An
 //     unused January bucket survives through Dec 31.
+
+describe('adjustBalance — stated totals', () => {
+    const rowWith = (over: Record<string, number> = {}) => ({
+        _id: new Types.ObjectId(),
+        user_id: new Types.ObjectId(),
+        leave_type_id: new Types.ObjectId(),
+        year: 2026,
+        allocated: 12,
+        carried_forward: 0,
+        used: 4,
+        pending: 0,
+        adjusted: 0,
+        monthly_forfeited: 0,
+        available: 8,
+        save: vi.fn().mockResolvedValue(undefined),
+        ...over,
+    });
+
+    it('writes both counters as stated and re-derives what is left', async () => {
+        const row = rowWith();
+        leaveBalanceFindByIdMock.mockResolvedValueOnce(row);
+        leaveTypeFindByIdMock.mockResolvedValueOnce(fullType({ _id: row.leave_type_id }));
+
+        // The other leave portal says: 15 allowed, 7 taken.
+        const out = await svc.adjustBalance(
+            row._id,
+            { total_days: 15, used_days: 7, reason: 'sync with leave portal' },
+            new Types.ObjectId()
+        );
+
+        expect(row.used).toBe(7);
+        // `adjusted` absorbs the gap to the stated total so the quota and
+        // carry-forward the engine computed stay on the row.
+        expect(row.adjusted).toBe(3); // 15 − 12 allocated − 0 carried
+        expect(row.available).toBe(8); // 15 − 7
+        expect(out).toMatchObject({ used: 7, available: 8 });
+    });
+
+    it('holds the stated total against an existing carry-forward', async () => {
+        const row = rowWith({ allocated: 12, carried_forward: 5, adjusted: 0, used: 0, available: 17 });
+        leaveBalanceFindByIdMock.mockResolvedValueOnce(row);
+        leaveTypeFindByIdMock.mockResolvedValueOnce(fullType({ _id: row.leave_type_id }));
+
+        await svc.adjustBalance(row._id, { total_days: 20, reason: 'sync' }, new Types.ObjectId());
+
+        expect(row.allocated).toBe(12); // untouched
+        expect(row.carried_forward).toBe(5); // untouched
+        expect(row.adjusted).toBe(3); // 20 − 12 − 5
+        expect(row.available).toBe(20);
+    });
+
+    it('subtracts days already held by a pending request', async () => {
+        const row = rowWith({ pending: 2, used: 0, available: 10 });
+        leaveBalanceFindByIdMock.mockResolvedValueOnce(row);
+        leaveTypeFindByIdMock.mockResolvedValueOnce(fullType({ _id: row.leave_type_id }));
+
+        await svc.adjustBalance(row._id, { total_days: 15, used_days: 3, reason: 'sync' }, new Types.ObjectId());
+
+        // A pending request still holds its days — the operator states what
+        // is allowed and taken, never what is left.
+        expect(row.available).toBe(10); // 15 − 3 − 2
+    });
+
+    it('leaves the counter alone when only the other one is sent', async () => {
+        const row = rowWith();
+        leaveBalanceFindByIdMock.mockResolvedValueOnce(row);
+        leaveTypeFindByIdMock.mockResolvedValueOnce(fullType({ _id: row.leave_type_id }));
+
+        await svc.adjustBalance(row._id, { used_days: 6, reason: 'correcting the count' }, new Types.ObjectId());
+
+        expect(row.used).toBe(6);
+        expect(row.adjusted).toBe(0); // no total stated → untouched
+        expect(row.available).toBe(6); // 12 − 6
+    });
+
+    it('accepts totals that already match (bulk sync must not error)', async () => {
+        const row = rowWith();
+        leaveBalanceFindByIdMock.mockResolvedValueOnce(row);
+        leaveTypeFindByIdMock.mockResolvedValueOnce(fullType({ _id: row.leave_type_id }));
+
+        await svc.adjustBalance(
+            row._id,
+            { total_days: 12, used_days: 4, reason: 'already matches the portal' },
+            new Types.ObjectId()
+        );
+
+        expect(row.adjusted).toBe(0);
+        expect(row.used).toBe(4);
+        expect(row.available).toBe(8);
+        expect(row.save).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the arithmetic free of binary-float dust', async () => {
+        const row = rowWith({ allocated: 12.1, used: 0, available: 12.1 });
+        leaveBalanceFindByIdMock.mockResolvedValueOnce(row);
+        leaveTypeFindByIdMock.mockResolvedValueOnce(fullType({ _id: row.leave_type_id }));
+
+        await svc.adjustBalance(row._id, { total_days: 12, reason: 'sync' }, new Types.ObjectId());
+
+        // 12 − 12.1 is −0.09999999999999964 in IEEE-754; what lands has to be
+        // the number the admin typed.
+        expect(row.adjusted).toBe(-0.1);
+        expect(row.available).toBe(12);
+    });
+
+    it('audits the stated totals and the resulting move in what is left', async () => {
+        const row = rowWith();
+        leaveBalanceFindByIdMock.mockResolvedValueOnce(row);
+        leaveTypeFindByIdMock.mockResolvedValueOnce(fullType({ _id: row.leave_type_id }));
+
+        await svc.adjustBalance(
+            row._id,
+            { total_days: 15, used_days: 7, reason: 'sync with leave portal' },
+            new Types.ObjectId(),
+            { actor_id: new Types.ObjectId(), actor_role: 'admin' } as never
+        );
+
+        expect(recordAuditMock).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({
+                before: expect.objectContaining({ used: 4, available: 8 }),
+                after: expect.objectContaining({ used: 7, available: 8 }),
+                metadata: expect.objectContaining({
+                    total_days: 15,
+                    used_days: 7,
+                    delta: 0, // available didn't move: +3 allowed, +3 taken
+                    reason: 'sync with leave portal',
+                }),
+            })
+        );
+    });
+});
 
 describe('Sick Leave policy invariant', () => {
     it('LEAVE_TYPE_SEEDS pins SL with monthly_forfeiture=false (within-year accumulation)', () => {

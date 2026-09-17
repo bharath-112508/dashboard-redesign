@@ -80,6 +80,18 @@ vi.mock('../models/attendance-record.model.js', () => ({
 
 vi.mock('../models/leave-balance.model.js', () => ({
     LeaveBalance: { find: leaveBalanceFindMock },
+    presentedAvailable: (
+        b: {
+            allocated: number;
+            carried_forward: number;
+            used: number;
+            pending: number;
+            adjusted: number;
+            monthly_forfeited: number;
+        },
+        lt: { is_unlimited?: boolean } | null | undefined
+    ) =>
+        lt?.is_unlimited ? 0 : b.allocated + b.carried_forward + b.adjusted - b.used - b.pending - b.monthly_forfeited,
 }));
 
 vi.mock('../models/leave-type.model.js', () => ({

@@ -3,7 +3,7 @@ import { Types } from 'mongoose';
 import { User } from '../models/user.model.js';
 import { AttendanceRecord } from '../models/attendance-record.model.js';
 import { LeaveRequest } from '../models/leave-request.model.js';
-import { LeaveBalance } from '../models/leave-balance.model.js';
+import { LeaveBalance, presentedAvailable } from '../models/leave-balance.model.js';
 import { LeaveType, type LeaveTypeDocument } from '../models/leave-type.model.js';
 import { Holiday } from '../models/holiday.model.js';
 import { Notification } from '../models/notification.model.js';
@@ -388,6 +388,8 @@ interface LeaveBalanceCard {
     allocated: number;
     used: number;
     pending: number;
+    /** WFH and friends: no annual cap, so `available` is always 0 here. */
+    is_unlimited: boolean;
 }
 
 const computeEmployeeLeaveBalances = async (user_id: Types.ObjectId): Promise<LeaveBalanceCard[]> => {
@@ -403,16 +405,25 @@ const computeEmployeeLeaveBalances = async (user_id: Types.ObjectId): Promise<Le
     const types = await LeaveType.find({ _id: { $in: typeIds } });
     const typeMap = new Map<string, LeaveTypeDocument>(types.map((t) => [t._id.toString(), t]));
 
-    return rows.map((r) => {
+    return rows.flatMap((r) => {
         const lt = typeMap.get(r.leave_type_id.toString()) ?? null;
+        // A retired type can't be applied for, so whatever sits on its row is
+        // unspendable. The card's consumer sums these into a single "leave
+        // available" headline, and leftovers on long-dead types were inflating
+        // it well past anything the employee could actually take.
+        if (!lt || lt.is_active === false) return [];
         return {
             leave_type_id: r.leave_type_id.toString(),
-            code: lt?.code ?? null,
-            name: lt?.name ?? null,
-            available: r.available,
+            code: lt.code ?? null,
+            name: lt.name ?? null,
+            // An uncapped type contributes nothing to "days left" rather
+            // than a negative — see `presentedAvailable`. The flag rides
+            // along so the card can label it instead of printing a bare 0.
+            available: presentedAvailable(r, lt),
             allocated: r.allocated,
             used: r.used,
             pending: r.pending,
+            is_unlimited: lt.is_unlimited ?? false,
         };
     });
 };

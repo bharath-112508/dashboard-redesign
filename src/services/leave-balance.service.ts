@@ -1,6 +1,11 @@
 import { Types, type ClientSession } from 'mongoose';
 
-import { LeaveBalance, type LeaveBalanceDocument, recomputeAvailable } from '../models/leave-balance.model.js';
+import {
+    LeaveBalance,
+    presentedAvailable,
+    recomputeAvailable,
+    type LeaveBalanceDocument,
+} from '../models/leave-balance.model.js';
 import { LeaveType, type LeaveTypeDocument } from '../models/leave-type.model.js';
 import { SlMonthlyForfeiture } from '../models/sl-monthly-forfeiture.model.js';
 import { User } from '../models/user.model.js';
@@ -8,7 +13,7 @@ import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { LEAVE_CODES, PRO_RATA_STRATEGIES, type ProRataStrategy } from '../constants/leave.js';
-import { ROLES, type RoleType } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES, type RoleType } from '../constants/roles.js';
 import { notifyLeaveBalanceAdjusted } from './notification-dispatcher.service.js';
 import { scopedUserIdFilter } from './reporting-scope.service.js';
 import { EMPLOYMENT_TYPES, USER_STATUSES } from '../constants/user-statuses.js';
@@ -45,6 +50,14 @@ type Filter = Record<string, unknown>;
  * `round_half(15 × 6/12) = 7.5` example.
  */
 export const roundHalf = (n: number): number => Math.round(n * 2) / 2;
+
+/**
+ * Trim binary-float dust to 2dp. `7 - 7.1` is `-0.10000000000000053` in
+ * IEEE-754, and an admin who typed "7" must see 7 stored, not that.
+ * 2dp rather than the 0.5 grid because an adjustment reconciled against an
+ * external portal can legitimately be a quarter-day.
+ */
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /**
  * Compute the annual allocation for a given user × type × target year.
@@ -130,8 +143,12 @@ export const initializeBalancesForUserYear = async (params: {
         if (params.session) userQuery.session(params.session);
         const u = await userQuery;
         if (!u) return 0;
-        // Clients don't apply for leave.
-        if (u.role === ROLES.CLIENT) return 0;
+        // Client-side people don't apply for leave. This asked `role ===
+        // CLIENT` only, which predates the `representative` role — a client
+        // company's project-scoped person would accrue an allocation they
+        // can neither see nor spend. `CLIENT_SIDE_ROLES` is the org-wide
+        // answer to "who is external"; adding a role there covers this too.
+        if (CLIENT_SIDE_ROLES.includes(u.role as RoleType)) return 0;
         // Freelancers accrue no leave — they're engaged per contract, not on
         // an employment allocation. Guarded HERE rather than in each caller
         // because every path that can create a balance row funnels through
@@ -210,25 +227,32 @@ export const initializeYearForAllUsers = async (
 ): Promise<{ year: number; processed_users: number; total_inserted: number }> => {
     const users = await User.find({
         status: USER_STATUSES.ACTIVE,
-        role: { $ne: ROLES.CLIENT },
+        role: { $nin: CLIENT_SIDE_ROLES },
         // Freelancers accrue no leave. Excluded in the QUERY as well as in
         // `initializeBalancesForUserYear` because this caller pre-resolves the
         // joining date and passes it in, which skips that function's user
         // lookup — and with it, its freelancer guard.
         'internal_profile.employment_type': { $ne: EMPLOYMENT_TYPES.FREELANCER },
-        'internal_profile.date_of_joining': { $exists: true, $ne: null },
+        // NOTE: deliberately NOT filtered on `internal_profile.date_of_joining`.
+        // It used to require one, which silently dropped every employee with
+        // no joining date on file from the roll-out — they ended up with zero
+        // balance rows, so the admin leave-balance list (which renders from
+        // balance rows) showed nothing for them and the detail page could not
+        // adjust them at all. `initializeBalancesForUserYear` already defaults
+        // a missing joining date to the start of the target year; let that
+        // single fallback own the case for every caller.
     }).select('_id internal_profile.date_of_joining');
 
     let totalInserted = 0;
     for (const u of users) {
         const doj = u.internal_profile?.date_of_joining;
-        if (!doj) continue;
-        const { year, month } = parseJoiningDate(doj);
+        const parsed = doj ? parseJoiningDate(doj) : null;
         totalInserted += await initializeBalancesForUserYear({
             user_id: u._id,
             year: body.year,
-            joining_year: year,
-            joining_month: month,
+            // Leaving these undefined makes the per-user initializer look the
+            // user up and apply its start-of-target-year fallback.
+            ...(parsed ? { joining_year: parsed.year, joining_month: parsed.month } : {}),
         });
     }
 
@@ -246,12 +270,30 @@ const toBalancePublic = async (
     typeCache: Map<string, LeaveTypeDocument>
 ): Promise<Record<string, unknown>> => {
     const lt = typeCache.get(b.leave_type_id.toString());
-    const baseAvail = recomputeAvailable(b);
+    // Zero, not a negative, for an uncapped type — see `presentedAvailable`.
+    const baseAvail = presentedAvailable(b, lt);
     const out: Record<string, unknown> = {
         id: b._id.toString(),
         user_id: b.user_id.toString(),
         leave_type: lt
-            ? { id: lt._id.toString(), code: lt.code, name: lt.name, is_unlimited: lt.is_unlimited }
+            ? {
+                  id: lt._id.toString(),
+                  code: lt.code,
+                  name: lt.name,
+                  is_unlimited: lt.is_unlimited,
+                  // Surfaced so an operator can be warned before adjusting an
+                  // EARNED type: `comp-off.service:syncCompOffMirror` owns the
+                  // `adjusted` counter on those rows and overwrites whatever a
+                  // manual adjust put there. The comp-off ledger
+                  // (`POST /comp-off/adjust`) is the durable way in.
+                  is_earned: lt.is_earned,
+                  // A retired type can't be applied for (`leave-request.service`
+                  // refuses it), so a balance sitting on one is unspendable.
+                  // The consumers need this to keep it out of an "available"
+                  // headline — it was inflating the figure on the employee's
+                  // own Leaves hero by every leftover row.
+                  is_active: lt.is_active,
+              }
             : { id: b.leave_type_id.toString() },
         year: b.year,
         allocated: b.allocated,
@@ -324,14 +366,18 @@ export const listOwnBalances = async (user_id: Types.ObjectId, year?: number): P
 interface BalanceUserDisplay {
     id: string;
     full_name: string | null;
+    /** Kept internal — the wire shape stays `{id, full_name}`. */
+    status?: string;
 }
 
 const loadBalanceUserDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, BalanceUserDisplay>> => {
     if (ids.length === 0) return new Map();
     const users = await User.find({ _id: { $in: ids } })
-        .select('_id full_name')
-        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
-    return new Map(users.map((u) => [u._id.toString(), { id: u._id.toString(), full_name: u.full_name }]));
+        .select('_id full_name status')
+        .lean<{ _id: Types.ObjectId; full_name: string; status: string }[]>();
+    return new Map(
+        users.map((u) => [u._id.toString(), { id: u._id.toString(), full_name: u.full_name, status: u.status }])
+    );
 };
 
 export const listBalances = async (
@@ -352,22 +398,33 @@ export const listBalances = async (
         await initializeBalancesForUserYear({ user_id: scopedUid, year: targetYear });
     }
 
-    const rows = await LeaveBalance.find(filter).sort({ user_id: 1, leave_type_id: 1 });
-    const userIds = Array.from(new Set(rows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
-    const [cache, userMap, data] = await Promise.all([
-        buildTypeCache(rows),
-        loadBalanceUserDisplays(userIds),
-        Promise.resolve(rows),
-    ]);
+    const allRows = await LeaveBalance.find(filter).sort({ user_id: 1, leave_type_id: 1 });
+    const userIds = Array.from(new Set(allRows.map((r) => r.user_id.toString()))).map((id) => new Types.ObjectId(id));
+    const userMap = await loadBalanceUserDisplays(userIds);
+
+    // A roster of current balances has no business listing people who have
+    // left. Deletion here is non-destructive — a removed account is
+    // `status: 'deactivated'`, and GDPR erasure only renames it to
+    // "Deleted user …" — so neither has an absent record to filter on, and
+    // both kept appearing with their balances intact. A hard-deleted account
+    // leaves orphan rows whose user is gone from the map entirely.
+    //
+    // Exempted when the caller drills into ONE person: hiding leavers from
+    // the roster shouldn't make a deliberate look at a leaver's final
+    // balance come back empty.
+    const drillingIntoOneUser = Boolean(query.user_id) && scopedUid instanceof Types.ObjectId;
+    const data = drillingIntoOneUser
+        ? allRows
+        : allRows.filter((r) => userMap.get(r.user_id.toString())?.status === USER_STATUSES.ACTIVE);
+
+    const cache = await buildTypeCache(data);
     const out = await Promise.all(data.map((r) => toBalancePublic(r, cache)));
     for (let i = 0; i < data.length; i++) {
         const r = data[i];
         const o = out[i];
         if (!r || !o) continue;
-        o.user = userMap.get(r.user_id.toString()) ?? {
-            id: r.user_id.toString(),
-            full_name: null,
-        };
+        const u = userMap.get(r.user_id.toString());
+        o.user = u ? { id: u.id, full_name: u.full_name } : { id: r.user_id.toString(), full_name: null };
     }
     return out;
 };
@@ -385,21 +442,46 @@ export const adjustBalance = async (
         throw AppError.notFound('Leave balance not found', ERROR_CODES.RESOURCE_NOT_FOUND);
     }
 
-    // H3 — capture the counters that actually move on adjust so the
-    // audit row's before/after diff is meaningful. The full balance row
-    // would also work but contains plenty of fields adjust never touches
-    // (allocated, carried_forward, used, pending, monthly_forfeited);
-    // pinning the diff to {adjusted, available} keeps the timeline
-    // readable in the future Step-31 audit UI.
+    // H3 — capture the counters an adjust can actually move so the audit
+    // row's before/after diff is meaningful. `used` joins {adjusted,
+    // available} because the reconciliation path below writes it.
     const before = {
         adjusted: row.adjusted ?? 0,
+        used: row.used ?? 0,
         available: row.available,
     };
 
-    row.adjusted = (row.adjusted || 0) + body.delta;
-    row.available = recomputeAvailable(row);
+    if (body.delta !== undefined) {
+        // Relative move: the operator knows the change, not the totals.
+        row.adjusted = round2((row.adjusted || 0) + body.delta);
+    } else {
+        // Reconciliation: the operator states the counters as the other
+        // leave portal reports them and we derive the rest.
+        //
+        // `total_days` lands on `adjusted` rather than overwriting
+        // `allocated`, so the quota the policy computed and any
+        // carry-forward stay on the row and remain auditable — `adjusted`
+        // is the manual-correction lane and this is a manual correction.
+        // `used` has no such lane: it IS the count of days taken, so a
+        // stated figure is written straight to it. That's deliberate — when
+        // days were taken in the system being migrated from, there are no
+        // leave requests here to derive it from.
+        if (body.total_days !== undefined) {
+            row.adjusted = round2(body.total_days - (row.allocated || 0) - (row.carried_forward || 0));
+        }
+        if (body.used_days !== undefined) {
+            row.used = round2(body.used_days);
+        }
+    }
+
+    row.available = round2(recomputeAvailable(row));
     row.updated_by = updated_by;
     await row.save();
+
+    // What the employee actually experiences: the move in days they can
+    // still take. For a relative adjust that is the delta they asked for;
+    // for a reconciliation it falls out of the two stated counters.
+    const delta = round2(row.available - before.available);
 
     if (audit) {
         await recordAudit(audit, {
@@ -408,6 +490,7 @@ export const adjustBalance = async (
             before,
             after: {
                 adjusted: row.adjusted,
+                used: row.used,
                 available: row.available,
             },
             metadata: {
@@ -415,7 +498,12 @@ export const adjustBalance = async (
                 // the service silently dropped it. The audit row is the
                 // only place that text ever lands, so we surface it here.
                 reason: body.reason,
-                delta: body.delta,
+                delta,
+                // Present only on the reconciliation path — what the operator
+                // actually typed, which the derived delta alone doesn't show
+                // (stating "+3 allowed, +3 taken" moves `delta` by zero).
+                ...(body.total_days !== undefined ? { total_days: body.total_days } : {}),
+                ...(body.used_days !== undefined ? { used_days: body.used_days } : {}),
                 user_id: row.user_id.toString(),
                 leave_type_id: row.leave_type_id.toString(),
                 year: row.year,
@@ -432,7 +520,7 @@ export const adjustBalance = async (
         user_id: row.user_id,
         actor_id: updated_by,
         leave_type_label: lt ? `${lt.code} — ${lt.name}` : 'leave',
-        delta: body.delta,
+        delta,
         reason: body.reason,
     });
 

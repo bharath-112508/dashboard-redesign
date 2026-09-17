@@ -119,7 +119,12 @@ async function main() {
                     entry_type: 'general',
                     project_id: null,
                     task_id: null,
-                    general_category: 'Team sync & planning',
+                    // From TIMESHEET_GENERAL_CATEGORIES — this row has no
+                    // project, so the category is its only attribution and the
+                    // validator holds it to the list. This script writes through
+                    // the model and would happily seed free text the API then
+                    // refuses to patch, leaving an uneditable demo row.
+                    general_category: 'Meeting',
                     non_billable_hours: 3,
                     non_billable_total_minutes: total(3, 0),
                     total_minutes: total(3, 0),

@@ -39,10 +39,13 @@ const LEAVE_REASONS: Array<[string, string]> = [
 ];
 
 /** Junk categories → the two real ones already in use. */
+// Targets must be TIMESHEET_GENERAL_CATEGORIES values: this rewrites rows in
+// place, and most of what it cleans up is project-less general time, where a
+// free-text category is no longer valid and blocks any later edit of the row.
 const CATEGORY_MAP: Record<string, string> = {
-    'Test one': 'Project management',
-    'Test one edit': 'Project management',
-    'working of certificates': 'Documentation & certificates',
+    'Test one': 'Meeting',
+    'Test one edit': 'Meeting',
+    'working of certificates': 'Documentation',
 };
 
 const main = async (): Promise<void> => {

@@ -3,7 +3,7 @@ import { Types } from 'mongoose';
 import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { BillingRate } from '../models/billing-rate.model.js';
 import { AttendanceRecord } from '../models/attendance-record.model.js';
-import { LeaveBalance } from '../models/leave-balance.model.js';
+import { LeaveBalance, presentedAvailable } from '../models/leave-balance.model.js';
 import { LeaveType } from '../models/leave-type.model.js';
 import { User } from '../models/user.model.js';
 import { Project } from '../models/project.model.js';
@@ -674,7 +674,8 @@ export const buildAttendanceReport = async (query: AttendanceReportQuery): Promi
 // ─── /reports/leave ──────────────────────────────────────────────────────
 
 interface LeaveByType {
-    leave_type: { id: string; key: string; label: string };
+    /** `is_unlimited` rides along so the table can say "no cap" instead of 0. */
+    leave_type: { id: string; key: string; label: string; is_unlimited: boolean };
     allocated: number;
     carried_forward: number;
     used: number;
@@ -732,10 +733,18 @@ export const buildLeaveReport = async (query: LeaveReportQuery): Promise<LeaveRe
     // "Name" field). The report's public shape calls it `label` so the
     // FE table renders consistently with other report views — map here.
     const leaveTypeRows = await LeaveType.find({ _id: { $in: leaveTypeIds } })
-        .select('_id code name')
-        .lean<{ _id: Types.ObjectId; code: string; name: string }[]>();
+        .select('_id code name is_unlimited')
+        .lean<{ _id: Types.ObjectId; code: string; name: string; is_unlimited: boolean }[]>();
     const leaveTypeById = new Map(
-        leaveTypeRows.map((lt) => [lt._id.toString(), { id: lt._id.toString(), key: lt.code, label: lt.name }])
+        leaveTypeRows.map((lt) => [
+            lt._id.toString(),
+            {
+                id: lt._id.toString(),
+                key: lt.code,
+                label: lt.name,
+                is_unlimited: lt.is_unlimited ?? false,
+            },
+        ])
     );
 
     const balancesByUser = new Map<string, typeof balances>();
@@ -759,7 +768,10 @@ export const buildLeaveReport = async (query: LeaveReportQuery): Promise<LeaveRe
                     pending: b.pending,
                     adjusted: b.adjusted,
                     monthly_forfeited: b.monthly_forfeited,
-                    available: b.available,
+                    // Zero rather than a negative for an uncapped type —
+                    // see `presentedAvailable`. `used` is the figure that
+                    // carries meaning for those rows.
+                    available: presentedAvailable(b, lt),
                 };
             })
             .filter((x): x is LeaveByType => x !== null)
