@@ -1,0 +1,19 @@
+date,project,ticket,context,billable,non_billable,notes
+2026-09-16,NFD,NFD-1,,3.5,0,VALID ticket row - billable work on GPS polling
+2026-09-16,NFD,,Payroll module,2,0,VALID project with free-text context
+2026-09-15,NFD,,,4,0,VALID project with no context at all
+2026-09-15,,,Meeting,0,1,VALID no project - managed category
+2026-09-15,,,training,0,2,VALID no project - lowercase canonicalises
+2026-09-14,,,  Internal discussion  ,0,0.5,VALID no project - padded category
+2026-09-14,NFD,,Support,1.5,0.5,VALID billable and non-billable on one row
+2026-09-14,nfd,,Admin,0,1,VALID lowercase project code
+2026-09-14,Nordmark Fleet Dashboard,,Other,0,1,VALID project by full name
+2026-09-16,,,Testing the login flow,1,0,BLOCK free text category with no project
+2026-09-16,,,,1,0,BLOCK neither project nor category
+2026-09-16,,NFD-1,Meeting,1,0,BLOCK ticket without a project
+2026-09-16,Nope,,Meeting,1,0,BLOCK project that does not exist
+2026-09-16,Template-1,,Meeting,1,0,BLOCK ambiguous project name
+2026-09-16,NFD,NFD-9999,,1,0,BLOCK ticket not on that project
+2026-09-16,NFD,,Meeting,0,0,BLOCK no hours on either side
+2026-09-20,NFD,,Meeting,1,0,BLOCK date in the future
+2026-09-16,NFD,,Meeting,20,10,BLOCK row total over the per-entry cap
