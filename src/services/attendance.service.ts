@@ -393,23 +393,27 @@ export const startBreak = async (
     return record.toJSON() as unknown as Record<string, unknown>;
 };
 
+/** Latest open break across today's segments (scan from the end), or null. */
+const findOpenBreak = (record: AttendanceRecordDocument | null): BreakSession | null => {
+    const segs = record?.segments ?? [];
+    for (let i = segs.length - 1; i >= 0; i -= 1) {
+        const bs = segs[i]!.breaks ?? [];
+        for (let j = bs.length - 1; j >= 0; j -= 1) {
+            if (!bs[j]!.end) return bs[j]!;
+        }
+    }
+    return null;
+};
+
+/** The caller's currently open break today, or null. */
+export const getOpenBreak = async (user_id: Types.ObjectId): Promise<BreakSession | null> =>
+    findOpenBreak(await AttendanceRecord.findOne({ user_id, local_date: todayLocalDate() }));
+
 // ─── POST /attendance/break/end ──────────────────────────────────────────
 
 export const endBreak = async (user_id: Types.ObjectId, source: BreakSource): Promise<Record<string, unknown>> => {
-    const local_date = todayLocalDate();
-    const record = await AttendanceRecord.findOne({ user_id, local_date });
-    const segs = record?.segments ?? [];
-    // Find the latest open break across segments (scan from the end).
-    let openBreak: { end: { time: Date; source: BreakSource } | null } | null = null;
-    for (let i = segs.length - 1; i >= 0 && !openBreak; i -= 1) {
-        const bs = segs[i]!.breaks ?? [];
-        for (let j = bs.length - 1; j >= 0; j -= 1) {
-            if (!bs[j]!.end) {
-                openBreak = bs[j]!;
-                break;
-            }
-        }
-    }
+    const record = await AttendanceRecord.findOne({ user_id, local_date: todayLocalDate() });
+    const openBreak = findOpenBreak(record);
     if (!record || !openBreak) {
         throw AppError.conflict('Not on a break', ERROR_CODES.NOT_ON_BREAK);
     }
