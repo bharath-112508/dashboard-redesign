@@ -107,17 +107,20 @@ export const resolveSlackCaller = async (slackUserId: string) => {
 };
 
 /**
- * Slack user → platform user for `user_change` events. The payload already
- * carries the profile email (`users:read.email`), so this never calls
- * users.info, and an unmatched user (a guest, a Slack Connect member) is
+ * Slack user → platform user for `user_change` events. Slack's `user_change`
+ * payload does NOT carry the profile email, so an unmapped user falls back to
+ * users.info like every other inbound path (a payload email, if ever present,
+ * skips that call). Once matched, `slack_user_id` is cached and later events
+ * take the fast path. An unmatched user (a guest, a Slack Connect member) is
  * skipped without a warning — the event fires for every workspace member.
  */
 export const resolveSlackStatusUser = async (slackUserId: string, email: string | undefined) => {
     const settings = await getOrInitSettings();
-    if (!slackContextFrom(settings.slack)) return null;
+    const ctx = slackContextFrom(settings.slack);
+    if (!ctx) return null;
     return resolveSlackUser(slackUserId, {
-        botToken: '',
-        fetchUserInfo: async () => (email ? { email, avatar_url: null } : null),
+        botToken: ctx.botToken!,
+        fetchUserInfo: email ? async () => ({ email, avatar_url: null }) : fetchSlackUserInfo,
         warnUnmatched: false,
     });
 };
