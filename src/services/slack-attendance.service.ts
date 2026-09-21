@@ -3,6 +3,7 @@ import type { Types } from 'mongoose';
 import type { BreakType } from '../constants/attendance.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { PERMISSIONS } from '../constants/permissions.js';
+import { User } from '../models/user.model.js';
 import { callerCan } from '../utils/caller-permissions.js';
 import { endBreak, getOpenBreak, startBreak } from './attendance.service.js';
 import { resolvePermissionsForUser } from './role.service.js';
@@ -57,12 +58,22 @@ const BENIGN_CODES: ReadonlySet<string> = new Set([
  * from the app or a Slack button is left alone, since Slack fires this event
  * for ANY profile edit, not only status changes.
  *
+ * Acts only when the MAPPED status changes (`User.slack_status_break`):
+ * Slack re-sends the whole profile on every edit, so a still-"Lunch" status
+ * seen again after the break was ended in the app must not reopen it. The
+ * conditional update also makes a duplicate/retried event a no-op.
+ *
  * Returns true when attendance changed.
  */
 export const syncBreakFromSlackStatus = async (
     userId: Types.ObjectId,
     breakType: BreakType | null
 ): Promise<boolean> => {
+    const { modifiedCount } = await User.updateOne(
+        { _id: userId, slack_status_break: { $ne: breakType } },
+        { $set: { slack_status_break: breakType } }
+    );
+    if (modifiedCount === 0) return false;
     try {
         const open = await getOpenBreak(userId);
         const ownedBySlackStatus = open?.start.source === 'slack_status';

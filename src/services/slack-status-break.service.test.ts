@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 
-const { getOpenBreak, startBreak, endBreak } = vi.hoisted(() => ({
+const { getOpenBreak, startBreak, endBreak, updateOne } = vi.hoisted(() => ({
     getOpenBreak: vi.fn(),
     startBreak: vi.fn(),
     endBreak: vi.fn(),
+    updateOne: vi.fn(),
 }));
 vi.mock('./attendance.service.js', () => ({ getOpenBreak, startBreak, endBreak }));
+vi.mock('../models/user.model.js', () => ({ User: { updateOne } }));
 vi.mock('./role.service.js', () => ({ resolvePermissionsForUser: vi.fn() }));
 
 import { breakTypeFromSlackStatus, syncBreakFromSlackStatus } from './slack-attendance.service.js';
@@ -31,7 +33,21 @@ describe('breakTypeFromSlackStatus', () => {
 });
 
 describe('syncBreakFromSlackStatus', () => {
-    beforeEach(() => vi.clearAllMocks());
+    beforeEach(() => {
+        vi.clearAllMocks();
+        updateOne.mockResolvedValue({ modifiedCount: 1 }); // status changed
+    });
+
+    it('does nothing when the mapped status did not change (profile re-sent)', async () => {
+        updateOne.mockResolvedValue({ modifiedCount: 0 });
+        getOpenBreak.mockResolvedValue(null);
+        expect(await syncBreakFromSlackStatus(uid, 'lunch')).toBe(false);
+        expect(startBreak).not.toHaveBeenCalled();
+        expect(updateOne).toHaveBeenCalledWith(
+            { _id: uid, slack_status_break: { $ne: 'lunch' } },
+            { $set: { slack_status_break: 'lunch' } }
+        );
+    });
 
     it('starts a break when not on one', async () => {
         getOpenBreak.mockResolvedValue(null);

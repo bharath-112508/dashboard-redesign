@@ -31,6 +31,8 @@ export interface ResolverContext {
     /** Fetch hook. Production wires this to `fetchSlackUserInfo`; tests
      *  pass a vi.fn() stub. */
     fetchUserInfo: (slackUserId: string, botToken: string) => Promise<SlackUserInfo | null>;
+    /** Warn when the Slack email matches no account. Default true. */
+    warnUnmatched?: boolean;
 }
 
 export const resolveSlackUser = async (slackUserId: string, ctx: ResolverContext) => {
@@ -56,6 +58,7 @@ export const resolveSlackUser = async (slackUserId: string, ctx: ResolverContext
 
     const byEmail = await User.findOne({ email: info.email.toLowerCase(), status: USER_STATUSES.ACTIVE });
     if (!byEmail) {
+        if (ctx.warnUnmatched === false) return null;
         logger.warn(
             {
                 slack_user_id: slackUserId,
@@ -100,6 +103,22 @@ export const resolveSlackCaller = async (slackUserId: string) => {
     return resolveSlackUser(slackUserId, {
         botToken: ctx.botToken!,
         fetchUserInfo: fetchSlackUserInfo,
+    });
+};
+
+/**
+ * Slack user → platform user for `user_change` events. The payload already
+ * carries the profile email (`users:read.email`), so this never calls
+ * users.info, and an unmatched user (a guest, a Slack Connect member) is
+ * skipped without a warning — the event fires for every workspace member.
+ */
+export const resolveSlackStatusUser = async (slackUserId: string, email: string | undefined) => {
+    const settings = await getOrInitSettings();
+    if (!slackContextFrom(settings.slack)) return null;
+    return resolveSlackUser(slackUserId, {
+        botToken: '',
+        fetchUserInfo: async () => (email ? { email, avatar_url: null } : null),
+        warnUnmatched: false,
     });
 };
 

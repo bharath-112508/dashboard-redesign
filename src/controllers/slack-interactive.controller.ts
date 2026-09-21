@@ -28,7 +28,7 @@ import {
 } from '../services/slack-attendance.service.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
-import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
+import { resolveSlackCaller, resolveSlackStatusUser } from '../services/slack-user-mapping.service.js';
 import { slackContextFrom, publishHomeView, openSlackModal, postSlackMessage } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
@@ -814,7 +814,7 @@ interface SlackEventEnvelope {
     event?: {
         type?: string;
         /** A Slack user ID for `app_home_opened`; a user object for profile events. */
-        user?: string | { id?: string; profile?: { status_text?: string; status_emoji?: string } };
+        user?: string | { id?: string; profile?: { status_text?: string; status_emoji?: string; email?: string } };
         tab?: string;
     };
 }
@@ -879,7 +879,10 @@ export const handleSlackEvents: RequestHandler = async (req, res) => {
     ) {
         res.status(200).json({});
         try {
-            const user = await resolveCaller(eventUser.id);
+            // Every workspace member's profile edit lands here (guests and
+            // Slack Connect users too) — match on the payload's email, no
+            // users.info call, and skip non-employees silently.
+            const user = await resolveSlackStatusUser(eventUser.id, eventUser.profile?.email);
             if (!user || !(await callerCanCheckInOut(user._id))) return;
             const breakType = breakTypeFromSlackStatus(eventUser.profile?.status_emoji, eventUser.profile?.status_text);
             if (await syncBreakFromSlackStatus(user._id, breakType)) publish([REALTIME_TOPICS.ATTENDANCE]);

@@ -14,6 +14,7 @@ vi.mock('../models/user.model.js', () => ({
 
 const { resolveSlackUser, resolveSlackIdByEmail, fetchSlackAvatarUrl, fetchSlackUserInfo } =
     await import('./slack-user-mapping.service.js');
+const { default: logger } = await import('../utils/logger.js');
 
 /**
  * Phase 0 — Slack-user → Viljetech-user resolution.
@@ -117,6 +118,18 @@ describe('resolveSlackUser', () => {
         const result = await resolveSlackUser('U999NEW', { botToken: 'xoxb', fetchUserInfo });
         expect(result).toBeNull();
         expect(findByIdAndUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it('skips the unmatched warning when warnUnmatched is false (status events from guests)', async () => {
+        findOneMock.mockResolvedValueOnce(null);
+        findOneMock.mockResolvedValueOnce(null);
+        const warn = vi.spyOn(logger, 'warn');
+        const fetchUserInfo = vi.fn().mockResolvedValueOnce({ email: 'guest@other.com', avatar_url: null });
+
+        const result = await resolveSlackUser('U999NEW', { botToken: '', fetchUserInfo, warnUnmatched: false });
+        expect(result).toBeNull();
+        expect(warn).not.toHaveBeenCalled();
+        warn.mockRestore();
     });
 
     it('returns null when users.info throws / fails', async () => {
