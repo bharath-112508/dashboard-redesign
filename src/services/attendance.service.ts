@@ -21,6 +21,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { getOrInitSettings } from './settings.service.js';
+import { clearBreakFromSlack, showBreakOnSlack } from './slack-status-publish.service.js';
 import {
     notifyAttendanceCorrectionDecided,
     notifyAttendanceCorrectionSubmitted,
@@ -355,6 +356,7 @@ export const checkOut = async (
     record.markModified('segments');
 
     await record.save();
+    if (openB) void clearBreakFromSlack(user_id);
     return record.toJSON() as unknown as Record<string, unknown>;
 };
 
@@ -390,6 +392,8 @@ export const startBreak = async (
     record.markModified('segments');
     await persistTotals(record); // open break → totals unchanged, but keeps fields fresh
     await record.save();
+    // A status-started break already shows on Slack — the user set it.
+    if (source !== 'slack_status') void showBreakOnSlack(user_id, break_type);
     return record.toJSON() as unknown as Record<string, unknown>;
 };
 
@@ -421,6 +425,8 @@ export const endBreak = async (user_id: Types.ObjectId, source: BreakSource): Pr
     record.markModified('segments');
     await persistTotals(record);
     await record.save();
+    // Ended by clearing the Slack status → Slack is already right.
+    if (source !== 'slack_status') void clearBreakFromSlack(user_id);
     return record.toJSON() as unknown as Record<string, unknown>;
 };
 

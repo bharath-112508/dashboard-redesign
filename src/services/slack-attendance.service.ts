@@ -8,6 +8,8 @@ import { callerCan } from '../utils/caller-permissions.js';
 import { endBreak, getOpenBreak, startBreak } from './attendance.service.js';
 import { resolvePermissionsForUser } from './role.service.js';
 
+export { breakTypeFromSlackStatus } from './slack-status-publish.service.js';
+
 /**
  * May this caller check in/out or start/end a break from Slack?
  *
@@ -29,19 +31,6 @@ import { resolvePermissionsForUser } from './role.service.js';
 export const callerCanCheckInOut = async (userId: Types.ObjectId): Promise<boolean> => {
     const { permissions } = await resolvePermissionsForUser(userId);
     return callerCan(permissions, PERMISSIONS.ATTENDANCE_CHECK_IN_OUT);
-};
-
-/**
- * Map a Slack profile status to a break type: 🍔 / "lunch" → lunch,
- * ☕ / "tea" → tea, any other status mentioning "break" / "brb" / "be right
- * back" → other. Anything else (incl. a cleared status) → null.
- */
-export const breakTypeFromSlackStatus = (emoji: string | undefined, text: string | undefined): BreakType | null => {
-    const t = (text ?? '').toLowerCase();
-    if (emoji === ':hamburger:' || /\blunch\b/.test(t)) return 'lunch';
-    if (emoji === ':coffee:' || /\btea\b/.test(t)) return 'tea';
-    if (/\bbreak\b|\bbrb\b|be right back/.test(t)) return 'other';
-    return null;
 };
 
 /** Conflicts that just mean "nothing to do" (not checked in, raced another write). */

@@ -115,6 +115,9 @@ export const MFA_ISSUER = getEnv('MFA_ISSUER', 'Viljetech');
 // (rather than failing boot) so the rest of the app stays usable when
 // Slack interactivity is intentionally off.
 export const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET ?? null;
+/** Workspace admin USER token (xoxp, users.profile:read+write) for App → Slack
+ *  break statuses. Optional — unset disables it. See slack-status-publish.service. */
+export const SLACK_STATUS_ADMIN_TOKEN = process.env.SLACK_STATUS_ADMIN_TOKEN ?? null;
 
 // ─── MFA encryption-key rotation (BACKEND_AUDIT.md R16) ────────────────
 //

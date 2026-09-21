@@ -116,6 +116,9 @@ export interface UserDocument extends Document {
     /** Break type the user's Slack status last mapped to (null = none) —
      *  lets the status sync act only on transitions. */
     slack_status_break: BreakType | null;
+    /** The user's own Slack status, saved when the app put up a break status,
+     *  to put back when the break ends. */
+    slack_status_restore: { status_text: string; status_emoji: string; status_expiration: number } | null;
     /**
      * Step 25 — global Slack DM opt-in. Defaults to `true` so a user
      * who provides their `slack_user_id` automatically receives Slack
@@ -275,6 +278,10 @@ const userSchema = new Schema<UserDocument>(
         slack_user_id: { type: String, default: null },
         slack_avatar_url: { type: String, default: null },
         slack_status_break: { type: String, enum: [...BREAK_TYPES, null], default: null },
+        slack_status_restore: {
+            type: new Schema({ status_text: String, status_emoji: String, status_expiration: Number }, { _id: false }),
+            default: null,
+        },
         slack_notifications_enabled: { type: Boolean, required: true, default: true },
         push_notifications_enabled: { type: Boolean, required: true, default: true },
         comp_off_balance: { type: Number, default: 0, min: 0 },
