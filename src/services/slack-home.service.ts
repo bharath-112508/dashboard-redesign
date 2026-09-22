@@ -79,7 +79,7 @@ export interface MyTimeEntry {
 }
 
 /** Per-list caps (Block Kit 100-block ceiling). */
-export const ATT_ROSTER_CAP = 10;
+export const ATT_ROSTER_CAP = 25;
 export const PENDING_CAP = 10;
 export const WHOSOUT_CAP = 15;
 
@@ -266,7 +266,7 @@ export const buildHomeDashboardData = async (user: DashboardUser): Promise<HomeD
             calendarLeaves({ from_date: today, to_date: weekEnd } as Parameters<typeof calendarLeaves>[0])
         ),
         canReadTeamAttendance
-            ? safe('team_attendance', () => getTodayAttendanceSummary(ATT_ROSTER_CAP, attendanceScope))
+            ? safe('team_attendance', () => getTodayAttendanceSummary(attendanceScope))
             : Promise.resolve(null),
         reviewer
             ? safe('pending_leaves', () =>

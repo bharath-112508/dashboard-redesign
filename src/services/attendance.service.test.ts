@@ -58,6 +58,13 @@ vi.mock('../models/attendance-correction-request.model.js', () => ({
     },
 }));
 
+const { leaveRequestFindMock, leaveTypeFindMock } = vi.hoisted(() => ({
+    leaveRequestFindMock: vi.fn(),
+    leaveTypeFindMock: vi.fn(),
+}));
+vi.mock('../models/leave-request.model.js', () => ({ LeaveRequest: { find: leaveRequestFindMock } }));
+vi.mock('../models/leave-type.model.js', () => ({ LeaveType: { find: leaveTypeFindMock } }));
+
 vi.mock('../models/office-location.model.js', () => ({
     OfficeLocation: { findOne: vi.fn() },
 }));
@@ -504,35 +511,73 @@ describe('checkOut', () => {
 // ─── getTodayAttendanceSummary ────────────────────────────────────────────
 
 describe('getTodayAttendanceSummary', () => {
-    it('counts present/incomplete and lists who is not in', async () => {
-        const u1 = new Types.ObjectId(); // present
-        const u2 = new Types.ObjectId(); // incomplete
-        const u3 = new Types.ObjectId(); // not in (no record)
-
+    it('puts every active person in exactly one named bucket, leave from approved requests', async () => {
+        const [working, onBreak, out, sick, wfhHalf, missing, notIn, sickButIn] = Array.from(
+            { length: 8 },
+            () => new Types.ObjectId()
+        );
+        const names: [Types.ObjectId, string][] = [
+            [working, 'Asha'],
+            [onBreak, 'Kiran'],
+            [out, 'Ravi'],
+            [sick, 'Meera'],
+            [wfhHalf, 'John'],
+            [missing, 'Lata'],
+            [notIn, 'Tom'],
+            [sickButIn, 'Uma'],
+        ];
         userFindMock.mockReturnValue({
-            select: vi.fn().mockReturnValue({
-                lean: vi.fn().mockResolvedValue([
-                    { _id: u1, full_name: 'Asha' },
-                    { _id: u2, full_name: 'Ravi' },
-                    { _id: u3, full_name: 'Meera' },
-                ]),
-            }),
+            // Unsorted on purpose — the service sorts A→Z itself.
+            select: () => ({ lean: async () => names.map(([_id, full_name]) => ({ _id, full_name })).reverse() }),
+        });
+        const seg = (opts: { out?: boolean; openBreak?: boolean } = {}) => ({
+            check_in: { time: new Date() },
+            check_out: opts.out ? { time: new Date() } : null,
+            breaks: opts.openBreak ? [{ break_type: 'tea', start: { time: new Date() }, end: null }] : [],
         });
         attendanceRecordFindMock.mockReturnValue({
-            select: vi.fn().mockReturnValue({
-                lean: vi.fn().mockResolvedValue([
-                    { user_id: u1, status: 'present', check_in: { time: new Date() } },
-                    { user_id: u2, status: 'incomplete', check_in: { time: new Date() } },
-                ]),
+            select: () => ({
+                lean: async () => [
+                    { user_id: working, status: 'present', segments: [seg()] },
+                    { user_id: onBreak, status: 'present', segments: [seg({ openBreak: true })] },
+                    { user_id: out, status: 'present', segments: [seg({ out: true })] },
+                    { user_id: missing, status: 'incomplete', segments: [seg()] },
+                    { user_id: sickButIn, status: 'present', segments: [seg()] },
+                ],
+            }),
+        });
+        const sl = new Types.ObjectId();
+        const wfh = new Types.ObjectId();
+        leaveRequestFindMock.mockReturnValue({
+            select: () => ({
+                lean: async () => [
+                    { user_id: sick, leave_type_id: sl, is_half_day: false },
+                    { user_id: wfhHalf, leave_type_id: wfh, is_half_day: true },
+                    { user_id: sickButIn, leave_type_id: sl, is_half_day: false },
+                ],
+            }),
+        });
+        leaveTypeFindMock.mockReturnValue({
+            select: () => ({
+                lean: async () => [
+                    { _id: sl, name: 'Sick/Personal Leave' },
+                    { _id: wfh, name: 'Work From Home' },
+                ],
             }),
         });
 
-        const summary = await svc.getTodayAttendanceSummary(10);
-        expect(summary.headcount).toBe(3);
-        expect(summary.present).toBe(1);
-        expect(summary.incomplete).toBe(1);
-        expect(summary.not_in_count).toBe(1);
-        expect(summary.not_in_roster).toEqual([{ id: u3.toString(), full_name: 'Meera' }]);
+        const s = await svc.getTodayAttendanceSummary();
+        const n = (list: { full_name: string | null }[]) => list.map((p) => p.full_name);
+        expect(s.headcount).toBe(8);
+        expect(n(s.working)).toEqual(['Asha', 'Uma']); // checked in despite leave → counts as working
+        expect(n(s.on_break)).toEqual(['Kiran']);
+        expect(n(s.checked_out)).toEqual(['Ravi']);
+        expect(n(s.incomplete)).toEqual(['Lata']);
+        expect(n(s.not_in)).toEqual(['Tom']);
+        expect(s.on_leave).toEqual([
+            { id: wfhHalf.toString(), full_name: 'John', leave_type: 'Work From Home', half_day: true },
+            { id: sick.toString(), full_name: 'Meera', leave_type: 'Sick/Personal Leave', half_day: false },
+        ]);
     });
 });
 

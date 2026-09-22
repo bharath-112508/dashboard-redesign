@@ -68,11 +68,12 @@ describe('buildHomeDashboardView', () => {
             user: reviewer,
             team_attendance: {
                 headcount: 3,
-                present: 1,
-                incomplete: 0,
-                on_leave: 0,
-                not_in_count: 2,
-                not_in_roster: [],
+                working: [],
+                on_break: [],
+                checked_out: [],
+                on_leave: [],
+                not_in: [],
+                incomplete: [],
             },
             pending_leaves: [
                 {
@@ -143,11 +144,12 @@ describe('buildHomeDashboardView — redesigned layout', () => {
                 user: reviewer,
                 team_attendance: {
                     headcount: 3,
-                    present: 1,
-                    incomplete: 0,
-                    on_leave: 0,
-                    not_in_count: 2,
-                    not_in_roster: [],
+                    working: [],
+                    on_break: [],
+                    checked_out: [],
+                    on_leave: [],
+                    not_in: [],
+                    incomplete: [],
                 },
             }),
             reviewer
@@ -155,29 +157,59 @@ describe('buildHomeDashboardView — redesigned layout', () => {
         expect(blockTypes(view)).toContain('header');
     });
 
-    it('renders team stats as an inline section with emoji + counts', () => {
+    it('lists names under each attendance group, with leave grouped by type', () => {
         const reviewer: DashboardUser = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' };
+        const p = (full_name: string) => ({ id: full_name, full_name });
         const view = buildHomeDashboardView(
             base({
                 user: reviewer,
                 team_attendance: {
-                    headcount: 22,
-                    present: 18,
-                    incomplete: 1,
-                    on_leave: 3,
-                    not_in_count: 4,
-                    not_in_roster: [],
+                    headcount: 7,
+                    working: [p('Asha'), p('Ravi')],
+                    on_break: [p('Kiran')],
+                    checked_out: [],
+                    on_leave: [
+                        { ...p('Meera'), leave_type: 'Sick/Personal Leave', half_day: false },
+                        { ...p('John'), leave_type: 'Work From Home', half_day: true },
+                    ],
+                    not_in: [p('Tom & Co')],
+                    incomplete: [],
                 },
             }),
             reviewer
         ) as { blocks: Array<Record<string, unknown>> };
         const text = JSON.stringify(view);
-        expect(text).toMatch(/Present\* 18/);
-        expect(text).toMatch(/Not checked in\* 4/);
-        expect(text).toMatch(/On leave\* 3/);
-        expect(text).toMatch(/Missing check-out\* 1/);
-        // No 2-column `fields` block — stats render inline in a section.
-        expect(view.blocks.some((b) => Array.isArray((b as { fields?: unknown }).fields))).toBe(false);
+        expect(text).toContain('Today · 7 people');
+        expect(text).toContain('Working · 2*\\nAsha, Ravi');
+        expect(text).toContain('On break · 1*\\nKiran');
+        expect(text).toContain('*Sick/Personal Leave:* Meera');
+        expect(text).toContain('*Work From Home:* John (½ day)');
+        expect(text).toContain('Not checked in · 1*\\nTom &amp; Co'); // mrkdwn-escaped
+        expect(text).not.toContain('Checked out'); // empty minor groups are hidden
+        expect(text).not.toContain('Missing check-out');
+    });
+
+    it('caps a long name list with "+N more"', () => {
+        const reviewer: DashboardUser = { _id: new Types.ObjectId(), role: 'admin', full_name: 'Boss' };
+        const many = Array.from({ length: 30 }, (_, i) => ({ id: String(i), full_name: `P${i}` }));
+        const view = buildHomeDashboardView(
+            base({
+                user: reviewer,
+                team_attendance: {
+                    headcount: 30,
+                    working: many,
+                    on_break: [],
+                    checked_out: [],
+                    on_leave: [],
+                    not_in: [],
+                    incomplete: [],
+                },
+            }),
+            reviewer
+        ) as { blocks: Array<Record<string, unknown>> };
+        const text = JSON.stringify(view);
+        expect(text).toContain('P24 +5 more');
+        expect(text).not.toContain('P25');
     });
 
     it('pending row uses a small left avatar (context image) when avatar_url present', () => {
