@@ -100,6 +100,7 @@ type RecipientUser = Pick<
     | 'role'
     | 'slack_user_id'
     | 'slack_notifications_enabled'
+    | 'email_notifications_enabled'
     | 'push_notifications_enabled'
 >;
 
@@ -153,7 +154,10 @@ const dispatchToRecipient = async (
     }
 
     // 2. Email — best effort. Failure here does not affect the in-app row.
-    if (email) {
+    // Opted out (`email_notifications_enabled: false`) means the person reads
+    // these in Slack or the bell; account mail doesn't come through here, so
+    // nothing they need to log in is affected.
+    if (email && recipient.email_notifications_enabled !== false) {
         try {
             await sendEmail({
                 to: recipient.email,
@@ -323,7 +327,9 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
     if (excludeUserId) filter._id = { $ne: excludeUserId };
 
     const rows = await User.find(filter)
-        .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+        .select(
+            '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+        )
         .lean<RecipientUser[]>();
     return rows ?? [];
 };
@@ -349,7 +355,7 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
 const istToday = (): string => dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
 
 const RECIPIENT_SELECT =
-    '_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled';
+    '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled';
 
 const findRequestReviewersFor = async (requesterId: Types.ObjectId): Promise<RecipientUser[]> => {
     const requester = await User.findById(requesterId)
@@ -377,7 +383,9 @@ const findRequestReviewersFor = async (requesterId: Types.ObjectId): Promise<Rec
 const findUserById = async (id: Types.ObjectId): Promise<RecipientUser | null> => {
     return (
         (await User.findById(id)
-            .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+            .select(
+                '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+            )
             .lean<RecipientUser>()) ?? null
     );
 };
@@ -1078,7 +1086,9 @@ export const notifyTaskAssigned = async (input: TaskAssignedDispatchInput): Prom
             _id: { $in: recipientIds },
             status: USER_STATUSES.ACTIVE,
         })
-            .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+            .select(
+            '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+        )
             .lean<RecipientUser[]>();
 
         if (recipients.length === 0) {
@@ -1134,7 +1144,9 @@ export const notifyTaskCommentWatchers = async (input: TaskCommentWatcherDispatc
         const [author, recipients] = await Promise.all([
             findUserById(input.author_id),
             User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
-                .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+                .select(
+            '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+        )
                 .lean<RecipientUser[]>(),
         ]);
 
@@ -1194,7 +1206,9 @@ export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatch
         const [author, recipients] = await Promise.all([
             findUserById(input.author_id),
             User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
-                .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+                .select(
+            '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+        )
                 .lean<RecipientUser[]>(),
         ]);
 

@@ -127,6 +127,10 @@ export interface UserDocument extends Document {
      * fan-out.
      */
     slack_notifications_enabled: boolean;
+    /** Per-user opt-out for NOTIFICATION emails. Account mail (password reset,
+     *  the invite with the first password) ignores it — those carry a link
+     *  nothing else delivers. */
+    email_notifications_enabled: boolean;
     /**
      * V2-BE-10 — global Web Push opt-in. Defaults to `true` so a user
      * who registers a browser subscription gets push automatically.
@@ -283,6 +287,7 @@ const userSchema = new Schema<UserDocument>(
             default: null,
         },
         slack_notifications_enabled: { type: Boolean, required: true, default: true },
+        email_notifications_enabled: { type: Boolean, required: true, default: true },
         push_notifications_enabled: { type: Boolean, required: true, default: true },
         comp_off_balance: { type: Number, default: 0, min: 0 },
         comp_off_overtime_bank_minutes: { type: Number, default: 0, min: 0 },

@@ -291,6 +291,28 @@ describe('notifyLeaveSubmitted', () => {
         expect(notified.sort()).toEqual([String(managerId), String(adminId)].sort());
     });
 
+    // The admin reads these in Slack; email is noise in a busy inbox. The
+    // in-app row still lands, so nothing is lost by opting out.
+    it('skips the email for a recipient who opted out, but still writes in-app', async () => {
+        sendEmailMock.mockClear();
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
+            id.equals(requesterId)
+                ? queryReturning({ ...requester, internal_profile: { reporting_manager_id: managerId } })
+                : queryReturning(requester)
+        );
+        userFindOneMock.mockReturnValue(queryReturning({ ...manager, email_notifications_enabled: true }));
+        userFindMock.mockReturnValue(queryReturning([{ ...admin, email_notifications_enabled: false }]));
+
+        await dispatcher.notifyLeaveSubmitted(baseInput);
+
+        const mailed = sendEmailMock.mock.calls.map((c) => c[0].to);
+        expect(mailed).toContain(manager.email);
+        expect(mailed).not.toContain(admin.email);
+        // Both still get the bell.
+        const notified = notificationCreateMock.mock.calls.map((c) => String(c[0].user_id));
+        expect(notified.sort()).toEqual([String(managerId), String(adminId)].sort());
+    });
+
     it('de-dupes when the reporting manager IS an admin', async () => {
         userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
             id.equals(requesterId)

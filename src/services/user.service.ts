@@ -52,6 +52,7 @@ const SELF_EDITABLE_FIELDS = new Set([
     'timezone',
     'slack_user_id',
     'slack_notifications_enabled',
+    'email_notifications_enabled',
     // internal_profile is partially self-editable; see `pickSelfInternalProfile`.
     'internal_profile',
 ]);
@@ -491,6 +492,9 @@ export const updateUser = async (input: {
     if (patch.phone !== undefined) target.phone = patch.phone;
     if (patch.timezone !== undefined) target.timezone = patch.timezone;
     if (patch.slack_user_id !== undefined) target.slack_user_id = patch.slack_user_id;
+    if (patch.email_notifications_enabled !== undefined) {
+        target.email_notifications_enabled = patch.email_notifications_enabled;
+    }
     if (patch.slack_notifications_enabled !== undefined) {
         target.slack_notifications_enabled = patch.slack_notifications_enabled;
     }
