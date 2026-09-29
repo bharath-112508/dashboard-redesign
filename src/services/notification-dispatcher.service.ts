@@ -1087,8 +1087,8 @@ export const notifyTaskAssigned = async (input: TaskAssignedDispatchInput): Prom
             status: USER_STATUSES.ACTIVE,
         })
             .select(
-            '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
-        )
+                '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+            )
             .lean<RecipientUser[]>();
 
         if (recipients.length === 0) {
@@ -1145,8 +1145,8 @@ export const notifyTaskCommentWatchers = async (input: TaskCommentWatcherDispatc
             findUserById(input.author_id),
             User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
                 .select(
-            '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
-        )
+                    '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+                )
                 .lean<RecipientUser[]>(),
         ]);
 
@@ -1207,8 +1207,8 @@ export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatch
             findUserById(input.author_id),
             User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
                 .select(
-            '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
-        )
+                    '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+                )
                 .lean<RecipientUser[]>(),
         ]);
 
