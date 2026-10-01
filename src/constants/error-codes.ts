@@ -90,7 +90,10 @@ export const ERROR_CODES = {
 
     // 409 — Conflict
     EMAIL_ALREADY_EXISTS: 'EMAIL_ALREADY_EXISTS',
+    /** Kept for older clients; nothing raises it since multiple admins landed. */
     ADMIN_ALREADY_EXISTS: 'ADMIN_ALREADY_EXISTS',
+    /** Refused: the change would leave the org with no active admin. */
+    LAST_ADMIN: 'LAST_ADMIN',
     PROJECT_CODE_TAKEN: 'PROJECT_CODE_TAKEN',
     CUSTOM_STATUS_KEY_TAKEN: 'CUSTOM_STATUS_KEY_TAKEN',
     ALREADY_CHECKED_IN: 'ALREADY_CHECKED_IN',

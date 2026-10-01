@@ -104,33 +104,26 @@ const loadPhotoTtlMinutes = async (): Promise<number> => {
     return resolveProfilePhotoTtlMinutes(settings.uploads.sas_token_ttl_minutes);
 };
 
-const assertSingleAdmin = async (excludeUserId?: Types.ObjectId): Promise<void> => {
-    const filter: Filter = {
+/**
+ * Several active admins are allowed — administration shouldn't bottleneck on
+ * one person. What is NOT allowed is removing the last one: an org with zero
+ * admins can't manage roles, settings or users again without database access.
+ *
+ * Called before anything that could take an admin out of the active admin set:
+ * deactivating one, or changing their role to something else. `self` is
+ * already refused upstream on both paths, so this only ever fires on the
+ * "someone demoted the only other admin" case.
+ */
+const assertNotLastAdmin = async (target: UserDocument): Promise<void> => {
+    if (target.role !== ROLES.ADMIN || target.status !== USER_STATUSES.ACTIVE) return;
+    const others = await User.exists({
         role: ROLES.ADMIN,
         status: USER_STATUSES.ACTIVE,
-    };
-    if (excludeUserId) {
-        filter._id = { $ne: excludeUserId };
+        _id: { $ne: target._id },
+    });
+    if (!others) {
+        throw AppError.conflict('This is the last active admin — promote someone else first', ERROR_CODES.LAST_ADMIN);
     }
-    const existing = await User.exists(filter);
-    if (existing) {
-        throw AppError.conflict('An active admin already exists', ERROR_CODES.ADMIN_ALREADY_EXISTS);
-    }
-};
-
-/**
- * R6 backstop — translate the `one_active_admin` partial-unique-index
- * E11000 into the same `ADMIN_ALREADY_EXISTS` error the friendly
- * `assertSingleAdmin` raises. The index closes the TOCTOU race that
- * the in-application check cannot.
- */
-const isOneActiveAdminViolation = (err: unknown): boolean => {
-    if (!err || typeof err !== 'object') return false;
-    const e = err as { code?: number; keyPattern?: Record<string, unknown>; keyValue?: Record<string, unknown> };
-    if (e.code !== 11000) return false;
-    // The partial-unique index's keyPattern is `{ role: 1 }`. Other
-    // E11000s on `users` (email, employee_id) have different shapes.
-    return !!e.keyPattern && 'role' in e.keyPattern && Object.keys(e.keyPattern).length === 1;
 };
 
 const revokeAllRefreshTokens = async (user_id: Types.ObjectId): Promise<void> => {
@@ -145,10 +138,6 @@ export const createUser = async (
     audit?: AuditContext
 ): Promise<Record<string, unknown>> => {
     await assertPasswordPolicy(input.initial_password);
-
-    if (input.role === ROLES.ADMIN) {
-        await assertSingleAdmin();
-    }
 
     const emailInUse = await User.exists({ email: input.email });
     if (emailInUse) {
@@ -206,52 +195,43 @@ export const createUser = async (
     // out until an admin re-ran init. Email + audit happen AFTER the
     // tx commits — they're external/logging side effects that
     // shouldn't dictate atomicity.
-    let created: UserDocument;
-    try {
-        created = await withTransaction(async (session) => {
-            // Mongoose's array-form `create([doc], { session })` is
-            // the only way to enrol a single-document insert in a
-            // transaction (single-doc form ignores the session
-            // option). Returns an array; we destructure the one
-            // element we asked for.
-            //
-            // `session` may be null when the topology doesn't support
-            // transactions (e.g. local-dev standalone Mongo or test
-            // mocks); Mongoose accepts that — it just won't enrol.
-            const createOpts = session ? { session } : {};
-            const [user] = await User.create([doc], createOpts);
-            if (!user) throw new Error('User.create returned no document');
+    const created: UserDocument = await withTransaction(async (session) => {
+        // Mongoose's array-form `create([doc], { session })` is
+        // the only way to enrol a single-document insert in a
+        // transaction (single-doc form ignores the session
+        // option). Returns an array; we destructure the one
+        // element we asked for.
+        //
+        // `session` may be null when the topology doesn't support
+        // transactions (e.g. local-dev standalone Mongo or test
+        // mocks); Mongoose accepts that — it just won't enrol.
+        const createOpts = session ? { session } : {};
+        const [user] = await User.create([doc], createOpts);
+        if (!user) throw new Error('User.create returned no document');
 
-            if (user.role !== ROLES.CLIENT && user.internal_profile?.date_of_joining) {
-                const joining = user.internal_profile.date_of_joining;
-                const [yStr, mStr] = joining.split('-');
-                const joiningYear = Number.parseInt(yStr, 10);
-                const joiningMonth = Number.parseInt(mStr, 10);
-                // Derive "this year" from the IST business calendar.
-                // `getUTCFullYear()` on Jan 1 IST returns last year
-                // until UTC catches up 5h30m later — a Jan-1 IST
-                // joiner would otherwise be seeded into the wrong year.
-                const thisYear = dayjs().tz(DEFAULT_TIMEZONE).year();
-                const yearsToInit = new Set<number>([joiningYear, thisYear]);
-                for (const year of yearsToInit) {
-                    await initializeBalancesForUserYear({
-                        user_id: user._id,
-                        year,
-                        joining_year: joiningYear,
-                        joining_month: joiningMonth,
-                        session: session ?? undefined,
-                    });
-                }
+        if (user.role !== ROLES.CLIENT && user.internal_profile?.date_of_joining) {
+            const joining = user.internal_profile.date_of_joining;
+            const [yStr, mStr] = joining.split('-');
+            const joiningYear = Number.parseInt(yStr, 10);
+            const joiningMonth = Number.parseInt(mStr, 10);
+            // Derive "this year" from the IST business calendar.
+            // `getUTCFullYear()` on Jan 1 IST returns last year
+            // until UTC catches up 5h30m later — a Jan-1 IST
+            // joiner would otherwise be seeded into the wrong year.
+            const thisYear = dayjs().tz(DEFAULT_TIMEZONE).year();
+            const yearsToInit = new Set<number>([joiningYear, thisYear]);
+            for (const year of yearsToInit) {
+                await initializeBalancesForUserYear({
+                    user_id: user._id,
+                    year,
+                    joining_year: joiningYear,
+                    joining_month: joiningMonth,
+                    session: session ?? undefined,
+                });
             }
-            return user;
-        });
-    } catch (err) {
-        if (isOneActiveAdminViolation(err)) {
-            // R6 — concurrent admin-create slipped past assertSingleAdmin.
-            throw AppError.conflict('An active admin already exists', ERROR_CODES.ADMIN_ALREADY_EXISTS);
         }
-        throw err;
-    }
+        return user;
+    });
 
     // Welcome / invite email — best effort, never blocks the create. Logs
     // `NOTIFICATION_DISPATCH_FAILED` if the mailer chokes (Step 11).
@@ -539,6 +519,8 @@ export const deactivateUser = async (input: {
         return toPublicUser(target, await loadPhotoTtlMinutes());
     }
 
+    await assertNotLastAdmin(target);
+
     const beforeSnapshot = { status: target.status, deactivated_at: target.deactivated_at };
 
     target.status = USER_STATUSES.DEACTIVATED;
@@ -600,26 +582,13 @@ export const reactivateUser = async (
         return toPublicUser(target, await loadPhotoTtlMinutes());
     }
 
-    // Single-admin check in case they're being reactivated back into admin role.
-    if (target.role === ROLES.ADMIN) {
-        await assertSingleAdmin(target._id);
-    }
-
     const beforeSnapshot = { status: target.status, deactivated_at: target.deactivated_at };
 
     target.status = USER_STATUSES.ACTIVE;
     target.deactivated_at = null;
-    try {
-        // Symmetric with deactivate — validate only the changed status
-        // fields so a stale `extra_permissions` entry can't block the flip.
-        await target.save({ validateModifiedOnly: true });
-    } catch (err) {
-        if (isOneActiveAdminViolation(err)) {
-            // R6 — concurrent reactivation racing into the admin slot.
-            throw AppError.conflict('An active admin already exists', ERROR_CODES.ADMIN_ALREADY_EXISTS);
-        }
-        throw err;
-    }
+    // Symmetric with deactivate — validate only the changed status fields so a
+    // stale `extra_permissions` entry can't block the flip.
+    await target.save({ validateModifiedOnly: true });
 
     if (audit) {
         await recordAudit(audit, {
@@ -654,8 +623,9 @@ export const changeUserRole = async (input: {
         return toPublicUser(target, await loadPhotoTtlMinutes());
     }
 
-    if (input.new_role === ROLES.ADMIN) {
-        await assertSingleAdmin(target._id);
+    // Promoting into admin is unrestricted now; demoting the last one is not.
+    if (target.role === ROLES.ADMIN && input.new_role !== ROLES.ADMIN) {
+        await assertNotLastAdmin(target);
     }
 
     // Swapping the client/internal axis would leave stale sub-docs; the admin
@@ -687,15 +657,7 @@ export const changeUserRole = async (input: {
         target.role_ids = [newSystemRole._id];
     }
 
-    try {
-        await target.save();
-    } catch (err) {
-        if (isOneActiveAdminViolation(err)) {
-            // R6 — concurrent role-change racing into the admin slot.
-            throw AppError.conflict('An active admin already exists', ERROR_CODES.ADMIN_ALREADY_EXISTS);
-        }
-        throw err;
-    }
+    await target.save();
 
     // Deliberately do NOT revoke the target's refresh tokens here. The
     // change-role dialog promises "Sessions are not revoked", and the FE

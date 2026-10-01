@@ -24,7 +24,7 @@ import request from 'supertest';
  *      AT ROUTE TIME with the canonical error envelope.
  *
  *   3. **Service-layer invariants** — single-admin enforcement (the
- *      `assertSingleAdmin` guard surfaces as 409 ADMIN_ALREADY_EXISTS)
+ *      a second admin is allowed; the last admin can't be removed)
  *      and the email-already-exists branch (409 EMAIL_ALREADY_EXISTS).
  */
 
@@ -238,12 +238,26 @@ describe('integration: POST /api/v1/users (admin-only create)', () => {
 
     // ─── Service-layer invariants ─────────────────────────────────────
 
-    it('409 ADMIN_ALREADY_EXISTS when creating a second active admin', async () => {
-        // The `assertSingleAdmin` guard — pin via integration that
-        // the canonical 409 + code reaches the wire. A regression
-        // that surfaced this as a 500 would let the FE accept a
-        // pre-conditional admin-bootstrap UI flow incorrectly.
-        userExistsMock.mockResolvedValueOnce(true); // existing admin found
+    // Reversed deliberately: the platform used to allow exactly one admin.
+    // Administration is no longer one person's bottleneck, so a second admin
+    // is an ordinary create — the floor (never zero admins) is enforced on
+    // deactivate / demote instead, in user.service.
+    it('creates a second active admin', async () => {
+        userExistsMock.mockResolvedValueOnce(false); // email free
+        const adminId = new Types.ObjectId();
+        userCreateMock.mockResolvedValueOnce([
+            {
+                _id: adminId,
+                email: 'second.admin@example.com',
+                full_name: 'Second Admin',
+                role: 'admin',
+                status: 'active',
+                internal_profile: validInternalProfile,
+                toJSON() {
+                    return { id: this._id.toString(), email: this.email, role: this.role };
+                },
+            },
+        ]);
 
         const res = await request(app)
             .post('/api/v1/users')
@@ -254,15 +268,13 @@ describe('integration: POST /api/v1/users (admin-only create)', () => {
                 internal_profile: validInternalProfile,
             });
 
-        expect(res.status).toBe(409);
-        expect(res.body.error.code).toBe('ADMIN_ALREADY_EXISTS');
-        // The user MUST NOT be created.
-        expect(userCreateMock).not.toHaveBeenCalled();
+        expect(res.status).toBe(201);
+        expect(res.body.data).toMatchObject({ id: adminId.toString(), role: 'admin' });
     });
 
     it('409 EMAIL_ALREADY_EXISTS when the email is taken by another user', async () => {
-        // For role=employee the assertSingleAdmin guard is skipped, so the
-        // email-existence check is the FIRST (and only) `User.exists` call.
+        // The email-existence check is the first `User.exists` call for every
+        // role now that admin creation has no extra guard.
         userExistsMock.mockResolvedValueOnce(true);
 
         const res = await request(app)
