@@ -56,6 +56,11 @@ vi.mock('../models/comp-off-ledger.model.js', () => ({
     },
 }));
 
+// Team scoping reads the caller's project rosters before the user query.
+vi.mock('../models/project.model.js', () => ({
+    Project: { find: () => ({ select: () => ({ lean: () => Promise.resolve([]) }) }) },
+}));
+
 vi.mock('../models/user.model.js', () => ({
     User: {
         exists: userExistsMock,
@@ -597,12 +602,12 @@ describe('listCompOff — caller scoping (org-wide leak guard)', () => {
         expect(compOffLedgerFindMock).toHaveBeenCalledWith(expect.objectContaining({ user_id: me.id }));
     });
 
-    it('scopes a MANAGER to ONLY their direct reports', async () => {
-        const reports = [new Types.ObjectId(), new Types.ObjectId()];
-        userFindMock.mockReturnValue({ distinct: () => Promise.resolve(reports) });
+    it('scopes a MANAGER to ONLY their team (reports ∪ project peers)', async () => {
+        const team = [new Types.ObjectId(), new Types.ObjectId()];
+        userFindMock.mockReturnValue({ distinct: () => Promise.resolve(team) });
         await svc.listCompOff({ page: 1, limit: 20 } as never, caller(ROLES.MANAGER));
         const filter = compOffLedgerFindMock.mock.calls[0]![0];
-        expect(filter.user_id).toEqual({ $in: reports });
+        expect(filter.user_id).toEqual({ $in: team });
     });
 
     it('gives an ADMIN the org-wide ledger (no user_id filter)', async () => {

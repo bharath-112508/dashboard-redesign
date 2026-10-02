@@ -88,13 +88,17 @@ vi.mock('./settings.service.js', () => ({
     getOrInitSettings: getOrInitSettingsMock,
 }));
 
-// User model — only needed for reporting-chain scoping (directReportIdsOf).
+// User + Project models — only needed for team scoping (`teamScopeIdsOf`),
+// which reads the caller's project rosters before resolving the user set.
 const userFindMock = vi.hoisted(() => vi.fn());
 vi.mock('../models/user.model.js', () => ({
     User: { find: userFindMock, findById: vi.fn() },
 }));
-/** Stub `User.find(...).distinct('_id')` → the given direct-report ids. */
-const stubReports = (ids: unknown[]) => userFindMock.mockReturnValue({ distinct: () => Promise.resolve(ids) });
+vi.mock('../models/project.model.js', () => ({
+    Project: { find: () => ({ select: () => ({ lean: () => Promise.resolve([]) }) }) },
+}));
+/** Stub `User.find(...).distinct('_id')` → the ids the caller's team resolves to. */
+const stubTeam = (ids: unknown[]) => userFindMock.mockReturnValue({ distinct: () => Promise.resolve(ids) });
 
 const svc = await import('./timesheet.service.js');
 import { AppError } from '../utils/app-error.js';
@@ -747,16 +751,16 @@ describe('list & summary RBAC', () => {
     });
 
     it('listAllEntries allows a team lead (holds timesheet.read — matches the route gate)', async () => {
-        stubReports([]);
+        stubTeam([]);
         stubFind([]);
         await expect(svc.listAllEntries({ page: 1, limit: 20 }, teamLeadCaller())).resolves.toMatchObject({
             data: [],
         });
     });
 
-    it('listAllEntries scopes a manager to ONLY their direct reports', async () => {
+    it('listAllEntries scopes a manager to ONLY their team', async () => {
         const reports = [new Types.ObjectId(), new Types.ObjectId()];
-        stubReports(reports);
+        stubTeam(reports);
         let filter: Record<string, unknown> = {};
         entryFindMock.mockImplementation((f: Record<string, unknown>) => {
             filter = f;
@@ -781,7 +785,7 @@ describe('list & summary RBAC', () => {
     });
 
     it('summary allows a team lead', async () => {
-        stubReports([]);
+        stubTeam([]);
         entryAggregateMock.mockResolvedValueOnce([]);
         await expect(svc.summary({ group_by: 'project' }, teamLeadCaller())).resolves.toEqual([]);
     });
@@ -790,15 +794,16 @@ describe('list & summary RBAC', () => {
     //
     // This endpoint had none, so a Team Lead whose `listAllEntries` returned
     // nothing still got every employee's totals from here. The two now agree.
+    // Both read the same team set: direct reports ∪ project peers.
 
     const summaryMatch = () => {
         const pipeline = entryAggregateMock.mock.calls.at(-1)![0] as Array<Record<string, unknown>>;
         return (pipeline.find((st) => '$match' in st) as { $match: Record<string, unknown> }).$match;
     };
 
-    it('summary scopes a manager to their direct reports, exactly as the list does', async () => {
+    it('summary scopes a manager to their team, exactly as the list does', async () => {
         const reports = [new Types.ObjectId(), new Types.ObjectId()];
-        stubReports(reports);
+        stubTeam(reports);
         entryAggregateMock.mockResolvedValueOnce([]);
 
         await svc.summary({ group_by: 'user' }, managerCaller());
