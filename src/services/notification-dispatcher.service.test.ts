@@ -313,6 +313,27 @@ describe('notifyLeaveSubmitted', () => {
         expect(notified.sort()).toEqual([String(managerId), String(adminId)].sort());
     });
 
+    // Admins are on EVERY request in the org, so the reviewer mail was the
+    // bulk of their inbox. The Slack DM and the bell still carry it.
+    it('sends no email to an admin reviewer, but still mails the manager', async () => {
+        sendEmailMock.mockClear();
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
+            id.equals(requesterId)
+                ? queryReturning({ ...requester, internal_profile: { reporting_manager_id: managerId } })
+                : queryReturning(requester)
+        );
+        userFindOneMock.mockReturnValue(queryReturning(manager));
+        userFindMock.mockReturnValue(queryReturning([admin]));
+
+        await dispatcher.notifyLeaveSubmitted(baseInput);
+
+        const mailed = sendEmailMock.mock.calls.map((c) => c[0].to);
+        expect(mailed).toEqual([manager.email]);
+        // The bell is the full record either way.
+        const notified = notificationCreateMock.mock.calls.map((c) => String(c[0].user_id));
+        expect(notified.sort()).toEqual([String(managerId), String(adminId)].sort());
+    });
+
     it('de-dupes when the reporting manager IS an admin', async () => {
         userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
             id.equals(requesterId)
@@ -342,8 +363,9 @@ describe('notifyLeaveSubmitted', () => {
     it('still notifies the admins when no reporting manager is set', async () => {
         await dispatcher.notifyLeaveSubmitted(baseInput);
 
+        // Both reviewers get the bell; only the non-admin is mailed.
         expect(notificationCreateMock).toHaveBeenCalledTimes(2);
-        expect(sendEmailMock).toHaveBeenCalledTimes(2);
+        expect(sendEmailMock).toHaveBeenCalledTimes(1);
 
         // Admins are queried unfiltered now; the requester is removed after
         // the query so the same exclusion also covers the manager branch.
@@ -373,10 +395,10 @@ describe('notifyLeaveSubmitted', () => {
         notificationCreateMock.mockRejectedValueOnce(new Error('mongo down'));
 
         await expect(dispatcher.notifyLeaveSubmitted(baseInput)).resolves.toBeUndefined();
-        // 2 reviewers → 2 attempts each side; in-app's first call rejected,
-        // but the second still happened, and both emails went out.
+        // 2 reviewers → 2 in-app attempts; the first rejected, the second
+        // still happened. Email runs for the one reviewer who gets mail.
         expect(notificationCreateMock).toHaveBeenCalledTimes(2);
-        expect(sendEmailMock).toHaveBeenCalledTimes(2);
+        expect(sendEmailMock).toHaveBeenCalledTimes(1);
     });
 
     it('never throws when sendEmail fails', async () => {
@@ -384,7 +406,7 @@ describe('notifyLeaveSubmitted', () => {
 
         await expect(dispatcher.notifyLeaveSubmitted(baseInput)).resolves.toBeUndefined();
         expect(notificationCreateMock).toHaveBeenCalledTimes(2); // in-app still wrote
-        expect(sendEmailMock).toHaveBeenCalledTimes(2);
+        expect(sendEmailMock).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -737,8 +759,16 @@ describe('Slack integration', () => {
         // dispatcher proceeds to the next step regardless.
         postSlackMessageMock.mockResolvedValue({ success: false });
         postOrUpdateSlackMessageMock.mockResolvedValue({ success: false });
-        userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
-        userFindMock.mockReturnValue(queryReturning([adminWithSlack]));
+        // Reviewer is the reporting MANAGER here: an admin reviewer is
+        // deliberately not mailed, which would make "email still happens"
+        // untestable on this path.
+        userFindByIdMock.mockReturnValue(
+            queryReturning({ ...requesterWithSlack, internal_profile: { reporting_manager_id: managerId } })
+        );
+        userFindOneMock.mockReturnValue(
+            queryReturning({ ...manager, slack_user_id: 'U-MGR', slack_notifications_enabled: true })
+        );
+        userFindMock.mockReturnValue(queryReturning([]));
 
         await dispatcher.notifyLeaveSubmitted({
             request_id: requestId,
@@ -775,6 +805,38 @@ describe('Slack integration', () => {
 
         // Admins only — a blanket pool query would also ask for MANAGER.
         expect(userFindMock.mock.calls[0][0].role).toEqual(ROLES.ADMIN);
+        const notified = notificationCreateMock.mock.calls.map((c) => String(c[0].user_id));
+        expect(notified.sort()).toEqual([String(managerId), String(adminId)].sort());
+    });
+
+    // Corrections go quieter still for an admin: no mail AND no DM. The
+    // channel broadcast is not addressed to them, so it stays.
+    it('sends an admin reviewer neither an email nor a Slack DM on a correction', async () => {
+        sendEmailMock.mockClear();
+        postSlackMessageMock.mockClear();
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
+            id.equals(requesterId)
+                ? queryReturning({ ...requester, internal_profile: { reporting_manager_id: managerId } })
+                : queryReturning(requesterWithSlack)
+        );
+        userFindOneMock.mockReturnValue(
+            queryReturning({ ...manager, slack_user_id: 'U-MGR', slack_notifications_enabled: true })
+        );
+        userFindMock.mockReturnValue(queryReturning([adminWithSlack]));
+
+        await dispatcher.notifyAttendanceCorrectionSubmitted({
+            request_id: requestId,
+            requester_id: requesterId,
+            local_date: '2026-04-22',
+        });
+
+        expect(sendEmailMock.mock.calls.map((c) => c[0].to)).toEqual([manager.email]);
+        const dmChannels = postSlackMessageMock.mock.calls
+            .map((c) => (c[1] as { channel: string }).channel)
+            .filter((ch) => !ch.startsWith('#'));
+        expect(dmChannels).toEqual(['U-MGR']);
+        // Still on the bell for both.
         const notified = notificationCreateMock.mock.calls.map((c) => String(c[0].user_id));
         expect(notified.sort()).toEqual([String(managerId), String(adminId)].sort());
     });
