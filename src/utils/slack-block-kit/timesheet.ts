@@ -178,13 +178,17 @@ export const buildLogTimeModal = (
             element: {
                 type: 'static_select',
                 action_id: SLACK_BLOCK_TS_TYPE,
+                // The LABEL is "Text", the VALUE stays `general`: the web app
+                // renamed the mode after what you do, and the two surfaces have
+                // to read the same, but the value is the wire type that the
+                // submission parser and the BE validator both key off.
                 options: [
-                    { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
+                    { text: plain('Text'), value: SLACK_TS_TYPE_GENERAL },
                     { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET },
                 ],
                 initial_option: isTicket
                     ? { text: plain('Ticket'), value: SLACK_TS_TYPE_TICKET }
-                    : { text: plain('General'), value: SLACK_TS_TYPE_GENERAL },
+                    : { text: plain('Text'), value: SLACK_TS_TYPE_GENERAL },
             },
         },
         {
@@ -244,7 +248,7 @@ export const buildLogTimeModal = (
                 text: {
                     type: 'mrkdwn',
                     text: state.project_id
-                        ? 'No open tickets assigned to you on this project. Switch to *General*, or pick another project.'
+                        ? 'No open tickets assigned to you on this project. Switch to *Text*, or pick another project.'
                         : 'Choose a project first and your open tickets will appear here.',
                 },
             });
