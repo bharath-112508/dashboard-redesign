@@ -35,21 +35,25 @@ describe('createTimesheetBodySchema — general entries', () => {
         expect(parsed.success).toBe(true);
     });
 
-    it('accepts a category with no project — that is what attributes the hour', () => {
+    // Reversed: every new entry names a project, internal time included. These
+    // two are kept pointing the other way rather than deleted — the rule has
+    // moved in both directions once already, and a bare "rejects" leaves no
+    // record of which shapes used to be legal.
+    it('rejects a category with no project', () => {
         const parsed = createTimesheetBodySchema.safeParse({ ...base, general_category: 'Meeting' });
-        expect(parsed.success).toBe(true);
+        expect(parsed.success).toBe(false);
     });
 
-    it('accepts a category with an explicitly null project', () => {
+    it('rejects an explicitly null project', () => {
         const parsed = createTimesheetBodySchema.safeParse({
             ...base,
             project_id: null,
             general_category: 'Support',
         });
-        expect(parsed.success).toBe(true);
+        expect(parsed.success).toBe(false);
     });
 
-    it('rejects an entry with neither a project nor a category', () => {
+    it('rejects an entry with no project at all', () => {
         const parsed = createTimesheetBodySchema.safeParse(base);
         expect(parsed.success).toBe(false);
     });
@@ -65,12 +69,16 @@ describe('createTimesheetBodySchema — general entries', () => {
         expect(parsed.success).toBe(true);
     });
 
-    it('rejects a category outside the managed list', () => {
-        // Only on the PROJECT-LESS path, where this field is the sole
-        // attribution: free text there can't be grouped or charted, which is
-        // the whole reason the list exists.
-        const parsed = createTimesheetBodySchema.safeParse({ ...base, general_category: 'Standup' });
-        expect(parsed.success).toBe(false);
+    it('takes any free text as the category now the list is gone from writes', () => {
+        // The managed list only ever governed the project-less path, which no
+        // longer exists. `TIMESHEET_GENERAL_CATEGORIES` still groups the rows
+        // that already carry one.
+        const parsed = createTimesheetBodySchema.safeParse({
+            ...base,
+            project_id: projectId,
+            general_category: 'Standup',
+        });
+        expect(parsed.success).toBe(true);
     });
 
     it('rejects an entry with no note', () => {

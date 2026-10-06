@@ -3,12 +3,7 @@ import { Types } from 'mongoose';
 import { Project } from '../models/project.model.js';
 import { Task } from '../models/task.model.js';
 import { TimesheetEntry } from '../models/timesheet-entry.model.js';
-import {
-    TIMESHEET_ENTRY_TYPES,
-    TIMESHEET_GENERAL_CATEGORIES,
-    TIMESHEET_HOURS_MAX,
-    TIMESHEET_NO_PROJECT_LABEL,
-} from '../constants/timesheet.js';
+import { TIMESHEET_ENTRY_TYPES, TIMESHEET_HOURS_MAX } from '../constants/timesheet.js';
 import type { TimesheetImportRow } from '../validators/timesheet.validator.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { buildProjectVisibilityFilter } from './project.service.js';
@@ -41,22 +36,6 @@ import type { ProjectCaller } from './project.service.js';
 /** `TEM2-142` → the project code and the per-project task number. */
 const TICKET_KEY = /^([A-Za-z0-9_]+)-(\d+)$/;
 
-/**
- * Match a category cell against the managed list, returning the CANONICAL
- * spelling, or null when it isn't one of them.
- *
- * Case- and space-insensitive, unlike the single-entry path: there the value
- * comes from a `<Select>` and can only be exact, here somebody typed it into
- * a spreadsheet. Blocking a file over "meeting" versus "Meeting" would be
- * pedantry. The canonical value is what gets stored, so the hour still groups
- * with every other one of its kind.
- */
-const canonicalGeneralCategory = (raw: string | null): string | null => {
-    if (!raw) return null;
-    const needle = raw.trim().toLowerCase();
-    return TIMESHEET_GENERAL_CATEGORIES.find((c) => c.toLowerCase() === needle) ?? null;
-};
-
 export interface ResolvedImportRow {
     local_date: string;
     entry_type: string;
@@ -64,6 +43,8 @@ export interface ResolvedImportRow {
      *  in `validateImportRows`. */
     project_id: Types.ObjectId | null;
     task_id: Types.ObjectId | null;
+    /** The ticket's current sprint, exactly as `createEntry` records it. */
+    sprint_id: Types.ObjectId | null;
     general_category: string | null;
     billable_hours: number;
     billable_minutes: number;
@@ -190,8 +171,13 @@ export const validateImportRows = async (
     const taskNumbers = [...new Set(wantedTickets.map((m) => Number(m[2])))];
     const tasks = taskNumbers.length
         ? ((await Task.find({ project_id: { $in: index.ids }, task_number: { $in: taskNumbers } })
-              .select('task_number project_id')
-              .lean()) as unknown as { _id: Types.ObjectId; task_number: number; project_id: Types.ObjectId }[])
+              .select('task_number project_id sprint_id')
+              .lean()) as unknown as {
+              _id: Types.ObjectId;
+              task_number: number;
+              project_id: Types.ObjectId;
+              sprint_id: Types.ObjectId | null;
+          }[])
         : [];
     const taskKey = (projectId: Types.ObjectId, num: number) => `${String(projectId)}:${num}`;
     const taskByKey = new Map(tasks.map((t) => [taskKey(t.project_id, t.task_number), t]));
@@ -203,29 +189,26 @@ export const validateImportRows = async (
 
         if (r.date > today) return blocked(`${r.date} is in the future.`);
 
-        // OPTIONAL. An hour is attributed to a project OR to a category, at
-        // least one of the two — so a row for a meeting, training or support
-        // legitimately names no project. This importer was written when a
-        // project was mandatory on every row, which made internal time
-        // impossible to import at all. Empty means "general"; filled in but
-        // unmatched is still an error, since optional is not the same as
-        // ignored when wrong.
+        // REQUIRED on every row, matching `createEntry`. Internal time —
+        // meetings, training, 1:1s — goes to an internal project rather than
+        // to no project; a sheet that leaves the cell blank is missing the
+        // one thing that attributes the hour.
         const projectCell = (r.project ?? '').trim();
-        let project: ProjectRow | null = null;
-        if (projectCell) {
-            const resolved = resolveProject(r.project, index);
-            if ('reason' in resolved) return blocked(resolved.reason);
-            project = resolved.project;
+        if (!projectCell) {
+            return blocked('Every row needs a project — use your internal project for meetings and training.');
         }
-        const label = project ? (project.name ?? project.code ?? '') : TIMESHEET_NO_PROJECT_LABEL;
+        const resolved = resolveProject(r.project, index);
+        if ('reason' in resolved) return blocked(resolved.reason);
+        const project: ProjectRow = resolved.project;
+        const label = project.name ?? project.code ?? '';
 
         let task: Types.ObjectId | null = null;
-        if (r.ticket && !project) {
-            // A ticket belongs to a project. Naming one without the other is
-            // a gap in the sheet, not an intent to log general time.
-            return blocked(`Ticket "${r.ticket}" needs its project — fill in the project column.`);
-        }
-        if (r.ticket && project) {
+        // Carried from the ticket, as `createEntry` does. Dropping it put
+        // imported hours outside any sprint while the same ticket logged from
+        // the web or Slack sat inside one — the same work, two different
+        // answers, depending on how it was entered.
+        let sprint: Types.ObjectId | null = null;
+        if (r.ticket) {
             const m = TICKET_KEY.exec(r.ticket.trim());
             if (!m) return blocked(`"${r.ticket}" is not a ticket key — expected something like NMF-142.`);
             const hit = taskByKey.get(taskKey(project._id, Number(m[2])));
@@ -236,6 +219,7 @@ export const validateImportRows = async (
                 return blocked(`Ticket "${r.ticket}" is not on ${label}.`);
             }
             task = hit._id;
+            sprint = hit.sprint_id ?? null;
         }
 
         const billable = toHoursMinutes(r.billable);
@@ -250,23 +234,11 @@ export const validateImportRows = async (
         // The validator's discriminated union refuses a category on a
         // task-linked entry, so a ticket row drops it rather than failing at
         // write time with an error about a field the user never saw.
-        const rawCategory = task ? null : r.context?.trim() || null;
-        let category = rawCategory;
-        if (!task && !project) {
-            // With no project the category is the ONLY thing attributing the
-            // hour, so it has to be groupable — free text can't be charted or
-            // filtered, and internal time would be as invisible as it was
-            // when it had no project either. Mirrors `isGeneralCategoryValid`
-            // on the single-entry path.
-            category = canonicalGeneralCategory(rawCategory);
-            if (!category) {
-                return blocked(
-                    rawCategory
-                        ? `"${rawCategory}" is not a category. With no project, use one of: ${TIMESHEET_GENERAL_CATEGORIES.join(', ')}.`
-                        : `Give a project, or a category — one of: ${TIMESHEET_GENERAL_CATEGORIES.join(', ')}.`
-                );
-            }
-        }
+        //
+        // On a project row `context` is free text — the area worked on. The
+        // managed-category branch that used to live here existed only for
+        // project-less rows, which no longer exist.
+        const category = task ? null : r.context?.trim() || null;
 
         return {
             row_number: r.row_number,
@@ -275,8 +247,9 @@ export const validateImportRows = async (
             resolved: {
                 local_date: r.date,
                 entry_type: task ? TIMESHEET_ENTRY_TYPES.TASK_LINKED : TIMESHEET_ENTRY_TYPES.GENERAL,
-                project_id: project ? project._id : null,
+                project_id: project._id,
                 task_id: task,
+                sprint_id: sprint,
                 general_category: category,
                 billable_hours: billable.hours,
                 billable_minutes: billable.minutes,
@@ -436,7 +409,7 @@ export const commitImport = async (
                 local_date: r.local_date,
                 entry_type: r.entry_type,
                 project_id: r.project_id,
-                sprint_id: null,
+                sprint_id: r.sprint_id,
                 task_id: r.task_id,
                 general_category: r.general_category,
                 billable_hours: r.billable_hours,

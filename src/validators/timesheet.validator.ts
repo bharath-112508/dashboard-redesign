@@ -4,7 +4,6 @@ import {
     TIMESHEET_DESCRIPTION_MAX,
     TIMESHEET_ENTRY_TYPES,
     TIMESHEET_GENERAL_CATEGORY_MAX,
-    isGeneralCategoryValid,
     TIMESHEET_HOURS_MAX,
     TIMESHEET_LIST_DEFAULT_LIMIT,
     TIMESHEET_LIST_MAX_LIMIT,
@@ -83,46 +82,39 @@ const taskLinkedCreateSchema = z
     })
     .extend(durationSchema.shape);
 
-// An hour is attributed to a PROJECT or to a CATEGORY, at least one of the two.
-// Requiring a project on every row (the rule this replaces) meant meetings,
-// internal discussion, support and training either got charged to a client
-// project nobody was working on, or went unlogged. Making the category a
-// closed list is the other half: free text could not be grouped or charted,
-// so it drifted into a second description box.
+// EVERY new entry names a project.
+//
+// This reverses "a project OR a category". That rule existed because meetings,
+// training and internal discussion belong to no client project, and forcing
+// one on them meant the hours were either charged to a project nobody was
+// working on, or went unlogged — so the replacement is not "log it anyway",
+// it is an INTERNAL PROJECT those hours are logged against. Without one this
+// schema has no answer for a 1:1, which is the regression to watch for.
+//
+// It applies to creation only. An entry that already has no project predates
+// this and stays editable as it is — `updateEntry` judges the merged row with
+// `isGeneralCategoryValid`, which still accepts a project-less row carrying a
+// managed category. Locking people out of fixing their own history would be a
+// second, worse problem.
 const generalCreateSchema = z
     .object({
         local_date: isoDateSchema,
         entry_type: z.literal(TIMESHEET_ENTRY_TYPES.GENERAL),
-        /**
-         * OPTIONAL on a general entry. Meetings, internal discussion, support
-         * and training are real work that belongs to no project, and forcing
-         * a project on them meant people either attributed the hours to a
-         * client project they were not working on, or did not log them.
-         *
-         * The category below is what keeps the hour attributable when this is
-         * absent — see the refine.
-         */
-        project_id: objectIdSchema.nullable().optional(),
+        /** Required. See the note above. */
+        project_id: objectIdSchema,
         sprint_id: z.null().optional(),
         task_id: z.null().optional(),
         /**
-         * Free text WITH a project (the area worked on — "Payroll module"),
-         * one of `TIMESHEET_GENERAL_CATEGORIES` WITHOUT one. The refine below
-         * is what enforces the difference; the string bounds here are the
-         * column's, and apply either way.
+         * Free text — the area worked on ("Payroll module"). It was ALSO the
+         * managed-category field on a project-less row; with a project now
+         * mandatory that branch is unreachable on create, so the closed list
+         * no longer appears in any write UI. `TIMESHEET_GENERAL_CATEGORIES`
+         * stays for reading and grouping the rows that already carry it.
          */
         general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable().optional(),
         description: descriptionSchema,
     })
-    .extend(durationSchema.shape)
-    .refine((d) => isGeneralCategoryValid(d.general_category, Boolean(d.project_id)), {
-        // The invariant that replaces "project is mandatory": an hour is
-        // attributable to a PROJECT or to a CATEGORY. Dropping both would put
-        // the row outside every rollup, findable only by listing timesheets —
-        // and a free-text category could not carry that load alone.
-        message: 'Pick a project, or choose what this time was for.',
-        path: ['general_category'],
-    });
+    .extend(durationSchema.shape);
 
 export const createTimesheetBodySchema = z.discriminatedUnion('entry_type', [
     taskLinkedCreateSchema,

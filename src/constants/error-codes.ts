@@ -168,6 +168,8 @@ export const ERROR_CODES = {
     TIMESHEET_ZERO_DURATION: 'TIMESHEET_ZERO_DURATION',
     TIMESHEET_DURATION_TOO_LARGE: 'TIMESHEET_DURATION_TOO_LARGE',
     TIMESHEET_TASK_REQUIRED: 'TIMESHEET_TASK_REQUIRED',
+    /** A new entry named no project. Creation only — legacy rows keep theirs empty. */
+    TIMESHEET_PROJECT_REQUIRED: 'TIMESHEET_PROJECT_REQUIRED',
     /** One or more rows in a bulk import failed validation. The response
      *  carries per-row reasons; nothing was written. */
     TIMESHEET_IMPORT_INVALID: 'TIMESHEET_IMPORT_INVALID',

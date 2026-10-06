@@ -55,14 +55,21 @@ const GUARDS: Array<{ name: string; inCreateEntry: RegExp; inImport: RegExp; why
         why: 'THE authorization boundary — typing a code must not reach a project the caller cannot open',
     },
     {
-        name: 'a project-less general entry carries a managed category',
-        inCreateEntry: /isGeneralCategoryValid\(/,
-        inImport: /canonicalGeneralCategory\(/,
+        name: 'every new entry names a project',
+        inCreateEntry: /TIMESHEET_PROJECT_REQUIRED/,
+        inImport: /Every row needs a project/,
         why:
-            'without a project the category is the only thing attributing the hour, so free text ' +
-            'there cannot be grouped or charted — and this is the rule that caught the list out: ' +
-            'the single-entry path moved to "a project OR a category" while import still demanded ' +
-            'a project on every row, and every test here passed throughout',
+            'this rule has now moved in BOTH directions — "project mandatory", then "a project OR ' +
+            'a category", then back — and each time the two paths took a release to agree again. ' +
+            'Internal time goes to an internal project; a blank cell is a gap in the sheet',
+    },
+    {
+        name: "a ticket row carries the ticket's sprint",
+        inCreateEntry: /sprintId = input\.sprint_id \? new Types\.ObjectId\(input\.sprint_id\) : task\.sprint_id/,
+        inImport: /sprint = hit\.sprint_id/,
+        why:
+            'import wrote `sprint_id: null` on every row, so the same ticket logged from a sheet ' +
+            'sat outside the sprint it sat inside when logged from the web or Slack',
     },
     {
         name: 'task belongs to the named project',
@@ -89,12 +96,11 @@ describe('import rules track single-entry rules', () => {
         });
     }
 
-    it('import does not demand a project on every row', () => {
-        // The inverse of the guard above, and the one a structural checklist
-        // cannot express as a pattern: this is about the ABSENCE of a rule.
-        // `resolveProject` must be reached conditionally, or internal time —
-        // meetings, training, support — cannot be imported at all.
-        expect(importSvc).toMatch(/if \(projectCell\) \{[\s\S]{0,200}resolveProject\(/);
+    it('the project guard runs before anything can skip it', () => {
+        // The blank check has to come first and RETURN. Reached conditionally
+        // — the shape this had while the rule was "a project OR a category" —
+        // a blank cell falls through to a row with no project at all.
+        expect(importSvc).toMatch(/if \(!projectCell\) \{[\s\S]{0,200}return blocked\(/);
     });
 
     it('the commit does not trust the preview', () => {

@@ -329,9 +329,11 @@ describe('buildLogTimeModal — entry type', () => {
         expect(ids).not.toContain(SLACK_BLOCK_TS_CONTEXT);
     });
 
-    it('with no project chosen, the category is REQUIRED — it is the only attribution', () => {
-        const view = buildLogTimeModal(PROJECTS, '2026-09-09');
-        expect(blockById(view, SLACK_BLOCK_TS_CONTEXT)?.optional).toBe(false);
+    it('the area field is optional, with or without a project', () => {
+        // It was required when no project was chosen, because the category
+        // was then the only attribution. A project is mandatory now, so it
+        // never has to carry that load.
+        expect(blockById(buildLogTimeModal(PROJECTS, '2026-09-09'), SLACK_BLOCK_TS_CONTEXT)?.optional).toBe(true);
     });
 
     it('leads with Type — it decides what every field under it means', () => {
@@ -363,12 +365,12 @@ describe('buildLogTimeModal — entry type', () => {
         expect(el.type).toBe('plain_text_input');
     });
 
-    it('with no project, it is the managed select instead', () => {
+    it('is free text even with no project — the managed select is gone', () => {
         const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
             state: { entry_type: SLACK_TS_TYPE_GENERAL },
         });
         const el = blockById(view, SLACK_BLOCK_TS_CONTEXT)?.element as { type?: string };
-        expect(el.type).toBe('static_select');
+        expect(el.type).toBe('plain_text_input');
     });
 
     it('with a project chosen, the category relaxes to optional', () => {
@@ -378,9 +380,11 @@ describe('buildLogTimeModal — entry type', () => {
         expect(blockById(view, SLACK_BLOCK_TS_CONTEXT)?.optional).toBe(true);
     });
 
-    it('the project itself is optional on a general entry', () => {
+    it('the project is required on a general entry too', () => {
+        // Internal time goes to an internal project. Leaving this optional in
+        // Slack would be the one way left to create a project-less row.
         const view = buildLogTimeModal(PROJECTS, '2026-09-09');
-        expect(blockById(view, SLACK_BLOCK_TS_PROJECT)?.optional).toBe(true);
+        expect(blockById(view, SLACK_BLOCK_TS_PROJECT)?.optional).toBe(false);
     });
 
     it('but required on a ticket entry — a ticket implies its project', () => {
@@ -475,14 +479,12 @@ describe('buildLogTimeModal — re-seeding on views.update', () => {
         expect(tic.initial_option).toBeUndefined();
     });
 
-    it('keeps the chosen category when the type is General', () => {
+    it('keeps what was typed in the area field when the type is General', () => {
         const view = buildLogTimeModal(PROJECTS, '2026-09-09', {
             state: { entry_type: SLACK_TS_TYPE_GENERAL, context: 'Meeting' },
         });
-        const el = blockById(view, SLACK_BLOCK_TS_CONTEXT)?.element as {
-            initial_option?: { value?: string };
-        };
-        expect(el.initial_option?.value).toBe('Meeting');
+        const el = blockById(view, SLACK_BLOCK_TS_CONTEXT)?.element as { initial_value?: string };
+        expect(el.initial_value).toBe('Meeting');
     });
 
     it('re-seeds free text typed on the project path', () => {

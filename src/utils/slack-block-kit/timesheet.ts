@@ -1,5 +1,5 @@
 import { ERROR_CODES } from '../../constants/error-codes.js';
-import { TIMESHEET_GENERAL_CATEGORIES, TIMESHEET_GENERAL_CATEGORY_MAX } from '../../constants/timesheet.js';
+import { TIMESHEET_GENERAL_CATEGORY_MAX } from '../../constants/timesheet.js';
 import {
     SLACK_BLOCK_TS_BILLABLE,
     SLACK_BLOCK_TS_CONTEXT,
@@ -222,10 +222,11 @@ export const buildLogTimeModal = (
             // Changing the project has to re-load the ticket list, so this
             // block reports changes instead of staying silent until submit.
             dispatch_action: true,
-            // A ticket always implies its project; general time need not have
-            // one at all (a meeting, support, training), and then the Context
-            // select below turns required instead.
-            optional: !isTicket,
+            // Required on both types now. A ticket always implied its
+            // project; general time used to be allowed without one, with the
+            // category carrying the attribution instead — internal hours go to
+            // an internal project now, so there is no project-less shape left.
+            optional: false,
             label: plain('Project'),
             element: {
                 type: 'static_select',
@@ -267,47 +268,24 @@ export const buildLogTimeModal = (
             });
         }
     } else {
-        // Two different fields behind one block id, chosen by whether a
-        // project is carrying the attribution. WITH a project the value only
-        // refines it, so free text naming the area worked on is fine; WITHOUT
-        // one it IS the attribution, so it must come off a list that can be
-        // grouped and charted. The project select already dispatches its
-        // changes, so the swap rides the `views.update` that re-renders the
-        // rest of the modal — no extra round-trip.
-        const categoryOptions = TIMESHEET_GENERAL_CATEGORIES.map((c) => ({ text: plain(c), value: c }));
-        const initialCategory = categoryOptions.find((o) => o.value === state.context);
-        blocks.push(
-            state.project_id
-                ? {
-                      type: 'input',
-                      block_id: SLACK_BLOCK_TS_CONTEXT,
-                      optional: true,
-                      label: plain('Area worked on'),
-                      element: {
-                          type: 'plain_text_input',
-                          action_id: SLACK_BLOCK_TS_CONTEXT,
-                          max_length: TIMESHEET_GENERAL_CATEGORY_MAX,
-                          placeholder: plain('Payroll module, Login flow, …'),
-                          ...(state.context ? { initial_value: state.context } : {}),
-                      },
-                  }
-                : {
-                      type: 'input',
-                      block_id: SLACK_BLOCK_TS_CONTEXT,
-                      optional: false,
-                      label: plain('What for?'),
-                      element: {
-                          type: 'static_select',
-                          action_id: SLACK_BLOCK_TS_CONTEXT,
-                          placeholder: plain('Meeting, Support, …'),
-                          options: categoryOptions,
-                          // Slack rejects an `initial_option` absent from
-                          // `options`, so a free-text value carried over from
-                          // the project path is dropped, not re-seeded.
-                          ...(initialCategory ? { initial_option: initialCategory } : {}),
-                      },
-                  }
-        );
+        // One field, always free text: the area worked on. It used to swap to
+        // a managed-category SELECT when no project was chosen, because the
+        // category then carried the attribution on its own. A project is now
+        // required, so that branch is unreachable — and with it goes the only
+        // reason this block had to change shape mid-edit.
+        blocks.push({
+            type: 'input',
+            block_id: SLACK_BLOCK_TS_CONTEXT,
+            optional: true,
+            label: plain('Area worked on'),
+            element: {
+                type: 'plain_text_input',
+                action_id: SLACK_BLOCK_TS_CONTEXT,
+                max_length: TIMESHEET_GENERAL_CATEGORY_MAX,
+                placeholder: plain('Payroll module, Login flow, …'),
+                ...(state.context ? { initial_value: state.context } : {}),
+            },
+        });
     }
 
     blocks.push(

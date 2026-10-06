@@ -360,36 +360,32 @@ describe('createEntry', () => {
         expect(taskFindByIdMock).not.toHaveBeenCalled();
     });
 
-    // Meetings, internal discussion, support and training belong to no
-    // project. The category is what attributes them; nothing to scope-check.
-    it('persists a general entry with NO project, attributed by its category', async () => {
-        entryCreateMock.mockResolvedValueOnce(makeEntry({ entry_type: 'general' }));
-        stubAggregate(60);
+    // Reversed by the "every entry names a project" rule. Kept as a test
+    // rather than deleted: this is the one path Slack takes, where the Zod
+    // schema never runs, so the guard has to be the SERVICE's or Slack keeps
+    // creating the rows the web form can no longer make.
+    it('refuses a general entry with no project', async () => {
+        await expect(
+            svc.createEntry(
+                {
+                    local_date: today(),
+                    entry_type: 'general',
+                    sprint_id: null,
+                    task_id: null,
+                    general_category: 'Meeting',
+                    billable_hours: 1,
+                    billable_minutes: 0,
+                    non_billable_hours: 0,
+                    non_billable_minutes: 0,
+                    idle_hours: 0,
+                    idle_minutes: 0,
+                    description: 'Sprint planning with the whole team',
+                } as never,
+                employeeCaller()
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.TIMESHEET_PROJECT_REQUIRED });
 
-        await svc.createEntry(
-            {
-                local_date: today(),
-                entry_type: 'general',
-                sprint_id: null,
-                task_id: null,
-                general_category: 'Meeting',
-                billable_hours: 1,
-                billable_minutes: 0,
-                non_billable_hours: 0,
-                non_billable_minutes: 0,
-                idle_hours: 0,
-                idle_minutes: 0,
-                description: 'Sprint planning with the whole team',
-            },
-            employeeCaller()
-        );
-
-        expect(entryCreateMock).toHaveBeenCalledWith(
-            expect.objectContaining({ project_id: null, general_category: 'Meeting' })
-        );
-        // No project id to check, so the ACL must not be consulted at all —
-        // calling it with `undefined` would 404 the whole entry.
-        expect(loadProjectForCallerMock).not.toHaveBeenCalled();
+        expect(entryCreateMock).not.toHaveBeenCalled();
     });
 
     // The project is what a general entry is attributed to, so it goes through

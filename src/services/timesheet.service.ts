@@ -326,9 +326,10 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
     assertNonZero(input);
     assertEntryUnderDailyCap(input);
 
-    // Task-linked always resolves one; a general entry may have none, in which
-    // case `general_category` carries the attribution instead (validator-enforced).
-    let projectId: Types.ObjectId | null = null;
+    // Both branches resolve one — a task's parent, or the project the general
+    // entry names. Nullable only because the column still holds rows created
+    // before a project was required.
+    let projectId: Types.ObjectId | null;
     let sprintId: Types.ObjectId | null = null;
     let taskId: Types.ObjectId | null = null;
     let generalCategory: string | null = null;
@@ -350,16 +351,25 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
         // to the task's current sprint to keep summaries clean.
         sprintId = input.sprint_id ? new Types.ObjectId(input.sprint_id) : task.sprint_id;
     } else {
-        // General entry. A project is OPTIONAL here — meetings, internal
-        // discussion, support and training belong to no project, and the
-        // validator requires a category instead when one is absent. When a
-        // project IS given, verify the caller can see it so the row doesn't
-        // quietly land against a project they have no access to.
-        if (input.project_id) {
-            const pOid = new Types.ObjectId(input.project_id);
-            await loadProjectForCaller(pOid, caller);
-            projectId = pOid;
+        // General entry. Every NEW one names a project — internal time goes to
+        // an internal project rather than to no project at all.
+        //
+        // 🔴 Enforced HERE, not only in the Zod schema, because the Slack
+        // "Log time" modal calls this function directly and never passes
+        // through Express validation. A rule that lives only in the validator
+        // is a rule Slack does not have.
+        //
+        // Creation only: rows that predate this keep their category-only
+        // attribution and stay editable through `updateEntry`.
+        if (!input.project_id) {
+            throw AppError.unprocessable(
+                'Pick a project — every timesheet entry belongs to one.',
+                ERROR_CODES.TIMESHEET_PROJECT_REQUIRED
+            );
         }
+        const pOid = new Types.ObjectId(input.project_id);
+        await loadProjectForCaller(pOid, caller);
+        projectId = pOid;
         // Omitted is stored as `null`, not `undefined` — the column is
         // `String | null` and an undefined would leave the key off the doc,
         // so `{ general_category: null }` grouping in the summary would miss it.
