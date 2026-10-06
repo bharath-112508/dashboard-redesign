@@ -14,6 +14,9 @@ import {
 import { OfficeLocation } from '../models/office-location.model.js';
 import { TimesheetEntry } from '../models/timesheet-entry.model.js';
 import { User } from '../models/user.model.js';
+import { LeaveRequest } from '../models/leave-request.model.js';
+import { LeaveType } from '../models/leave-type.model.js';
+import { LEAVE_REQUEST_STATUSES } from '../constants/leave.js';
 import { CLIENT_SIDE_ROLES, ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { visibleUserIdsForReviewer } from './reporting-scope.service.js';
@@ -21,6 +24,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { AppError } from '../utils/app-error.js';
 import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
 import { getOrInitSettings } from './settings.service.js';
+import { clearBreakFromSlack, showBreakOnSlack } from './slack-status-publish.service.js';
 import {
     notifyAttendanceCorrectionDecided,
     notifyAttendanceCorrectionSubmitted,
@@ -355,6 +359,7 @@ export const checkOut = async (
     record.markModified('segments');
 
     await record.save();
+    if (openB) void clearBreakFromSlack(user_id);
     return record.toJSON() as unknown as Record<string, unknown>;
 };
 
@@ -390,26 +395,32 @@ export const startBreak = async (
     record.markModified('segments');
     await persistTotals(record); // open break → totals unchanged, but keeps fields fresh
     await record.save();
+    // A status-started break already shows on Slack — the user set it.
+    if (source !== 'slack_status') void showBreakOnSlack(user_id, break_type);
     return record.toJSON() as unknown as Record<string, unknown>;
 };
+
+/** Latest open break across today's segments (scan from the end), or null. */
+const findOpenBreak = (record: AttendanceRecordDocument | null): BreakSession | null => {
+    const segs = record?.segments ?? [];
+    for (let i = segs.length - 1; i >= 0; i -= 1) {
+        const bs = segs[i]!.breaks ?? [];
+        for (let j = bs.length - 1; j >= 0; j -= 1) {
+            if (!bs[j]!.end) return bs[j]!;
+        }
+    }
+    return null;
+};
+
+/** The caller's currently open break today, or null. */
+export const getOpenBreak = async (user_id: Types.ObjectId): Promise<BreakSession | null> =>
+    findOpenBreak(await AttendanceRecord.findOne({ user_id, local_date: todayLocalDate() }));
 
 // ─── POST /attendance/break/end ──────────────────────────────────────────
 
 export const endBreak = async (user_id: Types.ObjectId, source: BreakSource): Promise<Record<string, unknown>> => {
-    const local_date = todayLocalDate();
-    const record = await AttendanceRecord.findOne({ user_id, local_date });
-    const segs = record?.segments ?? [];
-    // Find the latest open break across segments (scan from the end).
-    let openBreak: { end: { time: Date; source: BreakSource } | null } | null = null;
-    for (let i = segs.length - 1; i >= 0 && !openBreak; i -= 1) {
-        const bs = segs[i]!.breaks ?? [];
-        for (let j = bs.length - 1; j >= 0; j -= 1) {
-            if (!bs[j]!.end) {
-                openBreak = bs[j]!;
-                break;
-            }
-        }
-    }
+    const record = await AttendanceRecord.findOne({ user_id, local_date: todayLocalDate() });
+    const openBreak = findOpenBreak(record);
     if (!record || !openBreak) {
         throw AppError.conflict('Not on a break', ERROR_CODES.NOT_ON_BREAK);
     }
@@ -417,6 +428,8 @@ export const endBreak = async (user_id: Types.ObjectId, source: BreakSource): Pr
     record.markModified('segments');
     await persistTotals(record);
     await record.save();
+    // Ended by clearing the Slack status → Slack is already right.
+    if (source !== 'slack_status') void clearBreakFromSlack(user_id);
     return record.toJSON() as unknown as Record<string, unknown>;
 };
 
@@ -1430,64 +1443,102 @@ export const cancelCorrection = async (
 
 // ─── Slack Home dashboard — today's attendance snapshot ──────────────────
 
+export interface AttendancePerson {
+    id: string;
+    full_name: string | null;
+}
+
+/** Today's workforce, one bucket per person — every active internal user lands in exactly one. */
 export interface TodayAttendanceSummary {
     headcount: number;
-    present: number;
-    incomplete: number;
-    on_leave: number;
-    not_in_count: number;
-    not_in_roster: Array<{ id: string; full_name: string | null }>;
+    /** Checked in, last session open, no open break. */
+    working: AttendancePerson[];
+    on_break: AttendancePerson[];
+    /** Every session today closed. */
+    checked_out: AttendancePerson[];
+    /** Approved leave covering today and not checked in. `leave_type` is the type's display name. */
+    on_leave: Array<AttendancePerson & { leave_type: string; half_day: boolean }>;
+    /** No check-in and no leave. */
+    not_in: AttendancePerson[];
+    /** Finalized as missing a check-out (set by the EOD finalizer). */
+    incomplete: AttendancePerson[];
 }
 
 /**
- * Org-wide snapshot of *today's* attendance for the Slack Home dashboard
+ * Snapshot of *today's* attendance with names, for the Slack Home dashboard
  * (read_team viewers only — the caller gates on the permission).
  *
- * Counts come from the AttendanceRecord rows that exist for today; "not in"
- * is the set of active internal users (role != client) with no row yet. The
- * on_leave/incomplete counts reflect finalized rows (the EOD finalizer fills
- * placeholders), so during the day on_leave may read 0 — the dashboard's
- * separate "Who's out" section is the authoritative leave view.
+ * Leave comes from approved LeaveRequests covering today rather than the
+ * record's `on_leave` status, which the EOD finalizer only writes at night —
+ * so the leave bucket is right during the day. Someone on leave who checked
+ * in anyway (a half day, WFH logged as leave) counts by their attendance.
  */
 export const getTodayAttendanceSummary = async (
-    rosterCap: number,
     // Reporting-chain scope: `null`/omitted → whole workforce (admin); an array
-    // → only those user_ids (a reviewer's direct reports). Optional so existing
-    // org-wide callers are unaffected.
+    // → only those user_ids (a reviewer's direct reports).
     scopeIds?: Types.ObjectId[] | null
 ): Promise<TodayAttendanceSummary> => {
     const local_date = todayLocalDate();
     const userScope = scopeIds ? { _id: { $in: scopeIds } } : {};
     const recordScope = scopeIds ? { user_id: { $in: scopeIds } } : {};
 
-    const [users, rows] = await Promise.all([
+    const [users, rows, leaves] = await Promise.all([
         User.find({ status: USER_STATUSES.ACTIVE, role: { $nin: CLIENT_SIDE_ROLES }, ...userScope })
             .select('_id full_name')
-            .lean<{ _id: Types.ObjectId; full_name: string }[]>(),
+            .lean<{ _id: Types.ObjectId; full_name: string | null }[]>(),
         AttendanceRecord.find({ local_date, ...recordScope })
-            .select('user_id status check_in')
-            .lean<{ user_id: Types.ObjectId; status: string; check_in: { time: Date } | null }[]>(),
+            .select('user_id status segments')
+            .lean<{ user_id: Types.ObjectId; status: string; segments?: AttendanceRecordDocument['segments'] }[]>(),
+        LeaveRequest.find({
+            status: LEAVE_REQUEST_STATUSES.APPROVED,
+            start_date: { $lte: local_date },
+            end_date: { $gte: local_date },
+            ...recordScope,
+        })
+            .select('user_id leave_type_id is_half_day')
+            .lean<{ user_id: Types.ObjectId; leave_type_id: Types.ObjectId; is_half_day: boolean }[]>(),
     ]);
 
-    const byUser = new Map(rows.map((r) => [r.user_id.toString(), r]));
-    let present = 0;
-    let incomplete = 0;
-    let on_leave = 0;
-    for (const r of rows) {
-        if (r.status === 'incomplete') incomplete += 1;
-        else if (r.status === 'on_leave') on_leave += 1;
-        else if (r.check_in) present += 1;
-    }
+    // Case-insensitive A→Z (a Mongo sort puts "ganesh" after "Vivek").
+    users.sort((a, b) => (a.full_name ?? '').localeCompare(b.full_name ?? '', 'en', { sensitivity: 'base' }));
+    const typeIds = [...new Set(leaves.map((l) => l.leave_type_id.toString()))];
+    const types = typeIds.length
+        ? await LeaveType.find({ _id: { $in: typeIds } })
+              .select('name')
+              .lean<{ _id: Types.ObjectId; name: string }[]>()
+        : [];
+    const typeName = new Map(types.map((t) => [t._id.toString(), t.name]));
+    const leaveByUser = new Map(leaves.map((l) => [l.user_id.toString(), l]));
+    const recordByUser = new Map(rows.map((r) => [r.user_id.toString(), r]));
 
-    const not_in = users.filter((u) => !byUser.has(u._id.toString()));
-    return {
+    const summary: TodayAttendanceSummary = {
         headcount: users.length,
-        present,
-        incomplete,
-        on_leave,
-        not_in_count: not_in.length,
-        not_in_roster: not_in.slice(0, rosterCap).map((u) => ({ id: u._id.toString(), full_name: u.full_name })),
+        working: [],
+        on_break: [],
+        checked_out: [],
+        on_leave: [],
+        not_in: [],
+        incomplete: [],
     };
+    for (const u of users) {
+        const person = { id: u._id.toString(), full_name: u.full_name };
+        const rec = recordByUser.get(person.id);
+        const last = rec?.segments?.length ? rec.segments[rec.segments.length - 1] : null;
+        const leave = leaveByUser.get(person.id);
+        if (rec?.status === 'incomplete') summary.incomplete.push(person);
+        else if (last?.check_in) {
+            if (last.check_out) summary.checked_out.push(person);
+            else if ((last.breaks ?? []).some((b) => !b.end)) summary.on_break.push(person);
+            else summary.working.push(person);
+        } else if (leave || rec?.status === 'on_leave') {
+            summary.on_leave.push({
+                ...person,
+                leave_type: (leave && typeName.get(leave.leave_type_id.toString())) ?? 'Leave',
+                half_day: leave?.is_half_day ?? false,
+            });
+        } else summary.not_in.push(person);
+    }
+    return summary;
 };
 
 // Re-exports for the helper callers (test fixtures, future cron).

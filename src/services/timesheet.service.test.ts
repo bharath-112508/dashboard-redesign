@@ -88,13 +88,17 @@ vi.mock('./settings.service.js', () => ({
     getOrInitSettings: getOrInitSettingsMock,
 }));
 
-// User model — only needed for reporting-chain scoping (directReportIdsOf).
+// User + Project models — only needed for team scoping (`teamScopeIdsOf`),
+// which reads the caller's project rosters before resolving the user set.
 const userFindMock = vi.hoisted(() => vi.fn());
 vi.mock('../models/user.model.js', () => ({
     User: { find: userFindMock, findById: vi.fn() },
 }));
-/** Stub `User.find(...).distinct('_id')` → the given direct-report ids. */
-const stubReports = (ids: unknown[]) => userFindMock.mockReturnValue({ distinct: () => Promise.resolve(ids) });
+vi.mock('../models/project.model.js', () => ({
+    Project: { find: () => ({ select: () => ({ lean: () => Promise.resolve([]) }) }) },
+}));
+/** Stub `User.find(...).distinct('_id')` → the ids the caller's team resolves to. */
+const stubTeam = (ids: unknown[]) => userFindMock.mockReturnValue({ distinct: () => Promise.resolve(ids) });
 
 const svc = await import('./timesheet.service.js');
 import { AppError } from '../utils/app-error.js';
@@ -493,6 +497,107 @@ describe('patchEntry', () => {
         expect(auditActions).toContain('timesheet.edit_out_of_window');
     });
 
+    it('moves an entry to a different date', async () => {
+        // Picking the wrong date is the most common mistake on this form and
+        // deleting the row was previously the only way out of it.
+        const owner = new Types.ObjectId();
+        const entry = makeEntry({ user_id: owner, local_date: daysAgo(1) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+        stubAggregate(120);
+        leaveExistsMock.mockResolvedValueOnce(null);
+
+        await svc.patchEntry(entry._id, { local_date: daysAgo(3) }, employeeCaller(owner));
+
+        expect(entry.local_date).toBe(daysAgo(3));
+        expect(entry.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('judges the edit window on the date the entry ALREADY has', async () => {
+        // The decided rule. A mistyped date is often outside the window
+        // BECAUSE it is wrong — somebody who meant yesterday and typed last
+        // month would otherwise be locked out of fixing it. So the question
+        // "may you touch this entry" is answered before the move, and the
+        // new date is free to be any non-future day.
+        const owner = new Types.ObjectId();
+        const entry = makeEntry({ user_id: owner, local_date: daysAgo(1) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+        stubAggregate(120);
+        leaveExistsMock.mockResolvedValueOnce(null);
+
+        // Target date is far outside the window; the entry's own date is not.
+        await svc.patchEntry(entry._id, { local_date: daysAgo(90) }, employeeCaller(owner));
+
+        expect(entry.local_date).toBe(daysAgo(90));
+        expect(entry.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('still refuses the move when the entry itself is out of window', async () => {
+        // The converse: the existing date governs, so an entry already past
+        // the window cannot be dragged into it to dodge the rule.
+        const owner = new Types.ObjectId();
+        const entry = makeEntry({ user_id: owner, local_date: daysAgo(30) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+
+        await expect(
+            svc.patchEntry(entry._id, { local_date: daysAgo(1) }, employeeCaller(owner))
+        ).rejects.toMatchObject({ code: ERROR_CODES.TIMESHEET_EDIT_WINDOW_EXPIRED });
+        expect(entry.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a move to a future date', async () => {
+        const owner = new Types.ObjectId();
+        const entry = makeEntry({ user_id: owner, local_date: daysAgo(1) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+
+        await expect(
+            svc.patchEntry(entry._id, { local_date: daysAgo(-5) }, employeeCaller(owner))
+        ).rejects.toMatchObject({ code: ERROR_CODES.TIMESHEET_FUTURE_DATE });
+        expect(entry.save).not.toHaveBeenCalled();
+    });
+
+    it('recomputes the day warnings against the NEW date', async () => {
+        // The warnings describe the day the hours now land on, not the one
+        // they left — otherwise moving a row onto an already-full day would
+        // report the old day's total.
+        const owner = new Types.ObjectId();
+        const entry = makeEntry({ user_id: owner, local_date: daysAgo(1) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+        stubAggregate(600); // 10h already on the destination day
+        leaveExistsMock.mockResolvedValueOnce(null);
+
+        const out = await svc.patchEntry(entry._id, { local_date: daysAgo(2) }, employeeCaller(owner));
+
+        expect(out.warnings.exceeds_daily_threshold).toBe(true);
+        // And prove it asked about the DESTINATION day, not the one the entry
+        // left — the stub answers any date, so the assertion above alone
+        // would pass even if the old date were still being used.
+        const match = (entryAggregateMock.mock.calls.at(-1)?.[0] as Array<{ $match?: { local_date?: string } }>)?.find(
+            (stage) => stage.$match
+        )?.$match;
+        expect(match?.local_date).toBe(daysAgo(2));
+    });
+
+    it('records the date the window was judged on in the out-of-window audit row', async () => {
+        // The compliance record has to say which date allowed the override,
+        // and after a move `entry.local_date` is the new one.
+        const admin = {
+            id: new Types.ObjectId(),
+            role: ROLES.ADMIN,
+            audit: { actor_id: new Types.ObjectId(), actor_role: ROLES.ADMIN, ip: null, user_agent: null },
+        };
+        const entry = makeEntry({ local_date: daysAgo(30) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+        stubAggregate(120);
+        leaveExistsMock.mockResolvedValueOnce(null);
+
+        await svc.patchEntry(entry._id, { local_date: daysAgo(2) }, admin);
+
+        const row = recordAuditMock.mock.calls
+            .map((c) => c[1] as { action: string; metadata?: Record<string, unknown> })
+            .find((r) => r.action === 'timesheet.edit_out_of_window');
+        expect(row?.metadata?.local_date).toBe(daysAgo(30));
+    });
+
     it('rejects a patch that zeroes both billable and non-billable splits', async () => {
         const owner = new Types.ObjectId();
         const entry = makeEntry({ user_id: owner, local_date: daysAgo(1) });
@@ -646,16 +751,16 @@ describe('list & summary RBAC', () => {
     });
 
     it('listAllEntries allows a team lead (holds timesheet.read — matches the route gate)', async () => {
-        stubReports([]);
+        stubTeam([]);
         stubFind([]);
         await expect(svc.listAllEntries({ page: 1, limit: 20 }, teamLeadCaller())).resolves.toMatchObject({
             data: [],
         });
     });
 
-    it('listAllEntries scopes a manager to ONLY their direct reports', async () => {
+    it('listAllEntries scopes a manager to ONLY their team', async () => {
         const reports = [new Types.ObjectId(), new Types.ObjectId()];
-        stubReports(reports);
+        stubTeam(reports);
         let filter: Record<string, unknown> = {};
         entryFindMock.mockImplementation((f: Record<string, unknown>) => {
             filter = f;
@@ -680,7 +785,7 @@ describe('list & summary RBAC', () => {
     });
 
     it('summary allows a team lead', async () => {
-        stubReports([]);
+        stubTeam([]);
         entryAggregateMock.mockResolvedValueOnce([]);
         await expect(svc.summary({ group_by: 'project' }, teamLeadCaller())).resolves.toEqual([]);
     });
@@ -689,15 +794,16 @@ describe('list & summary RBAC', () => {
     //
     // This endpoint had none, so a Team Lead whose `listAllEntries` returned
     // nothing still got every employee's totals from here. The two now agree.
+    // Both read the same team set: direct reports ∪ project peers.
 
     const summaryMatch = () => {
         const pipeline = entryAggregateMock.mock.calls.at(-1)![0] as Array<Record<string, unknown>>;
         return (pipeline.find((st) => '$match' in st) as { $match: Record<string, unknown> }).$match;
     };
 
-    it('summary scopes a manager to their direct reports, exactly as the list does', async () => {
+    it('summary scopes a manager to their team, exactly as the list does', async () => {
         const reports = [new Types.ObjectId(), new Types.ObjectId()];
-        stubReports(reports);
+        stubTeam(reports);
         entryAggregateMock.mockResolvedValueOnce([]);
 
         await svc.summary({ group_by: 'user' }, managerCaller());

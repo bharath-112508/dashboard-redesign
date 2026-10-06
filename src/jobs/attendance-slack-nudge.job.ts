@@ -23,7 +23,8 @@ import { buildCheckinNudgeMessage, buildCheckoutReminderMessage } from '../utils
  *    weekend/holiday) and they're not on approved leave, and they have no
  *    check-in yet today.
  *  - Checkout reminder (20:00 IST default): DM anyone with an OPEN segment
- *    today a Check Out button.
+ *    today a Check Out button. An admin with an open segment is skipped —
+ *    see `NUDGE_ROLES`.
  *
  * Eager mapping: a user without `slack_user_id` is resolved by email via
  * users.lookupByEmail and the id persisted, so new employees are reachable
@@ -53,10 +54,15 @@ interface CheckoutReminderSummary extends Record<string, unknown> {
     reminded: number;
 }
 
+// Admins are out of both nudges, same call as the 20:00 timesheet reminder:
+// they run the platform rather than keep attendance against it, so a Check In
+// / Check Out DM is noise. Everyone who actually works a tracked day stays in.
+const NUDGE_ROLES = [ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE];
+
 const loadInternalUsers = (): Promise<UserDocument[]> =>
     User.find({
         status: USER_STATUSES.ACTIVE,
-        role: { $in: [ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE] },
+        role: { $in: NUDGE_ROLES },
     }).select('_id email full_name role slack_user_id slack_avatar_url');
 
 const onLeaveUserIds = async (localDate: string): Promise<Set<string>> => {
@@ -207,9 +213,11 @@ export const sendCheckoutReminders = async (now: Date, log: JobContext['log']): 
     }
 
     const userIds = records.map((r) => r.user_id as Types.ObjectId);
-    const users = await User.find({ _id: { $in: userIds }, status: USER_STATUSES.ACTIVE }).select(
-        '_id email full_name slack_user_id slack_avatar_url'
-    );
+    const users = await User.find({
+        _id: { $in: userIds },
+        status: USER_STATUSES.ACTIVE,
+        role: { $in: NUDGE_ROLES },
+    }).select('_id email full_name slack_user_id slack_avatar_url');
     const userById = new Map(users.map((u) => [u._id.toString(), u]));
 
     for (const rec of records) {

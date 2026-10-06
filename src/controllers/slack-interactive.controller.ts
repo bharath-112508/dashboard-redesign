@@ -21,10 +21,14 @@ import {
 import { approveLeave, rejectLeave, applyLeave } from '../services/leave-request.service.js';
 import { handleLogTimeModalChange, handleLogTimeSubmission, openLogTimeModal } from './slack-log-time.controller.js';
 import { callerCanLogTime } from '../services/slack-timesheet.service.js';
-import { callerCanCheckInOut } from '../services/slack-attendance.service.js';
+import {
+    breakTypeFromSlackStatus,
+    callerCanCheckInOut,
+    syncBreakFromSlackStatus,
+} from '../services/slack-attendance.service.js';
 import { checkIn, checkOut, getMyToday, startBreak, endBreak } from '../services/attendance.service.js';
 import { getOrInitSettings } from './../services/settings.service.js';
-import { resolveSlackCaller } from '../services/slack-user-mapping.service.js';
+import { resolveSlackCaller, resolveSlackStatusUser } from '../services/slack-user-mapping.service.js';
 import { slackContextFrom, publishHomeView, openSlackModal, postSlackMessage } from '../utils/slack.js';
 import { buildHomeDashboardData } from '../services/slack-home.service.js';
 import { buildHomeDashboardView, SLACK_ACTION_HOME_REFRESH } from '../utils/slack-home-blocks.js';
@@ -807,19 +811,27 @@ export const handleSlashCommand: RequestHandler = async (req, res) => {
 interface SlackEventEnvelope {
     type?: string;
     challenge?: string;
-    event?: { type?: string; user?: string; tab?: string };
+    event?: {
+        type?: string;
+        /** A Slack user ID for `app_home_opened`; a user object for profile events. */
+        user?: string | { id?: string; profile?: { status_text?: string; status_emoji?: string; email?: string } };
+        tab?: string;
+    };
 }
 
 /**
  * POST /api/v1/slack/events — Slack Events API.
  *
- * Two cases:
+ * Three cases:
  *   - `url_verification` — echo the `challenge` so Slack can verify the
  *     request URL when the admin first registers it.
  *   - `event_callback` → `app_home_opened` — ack 200 immediately, then
  *     render the user's Home tab asynchronously (Slack publishes the view
- *     via views.publish, not in the HTTP response). Any other event is a
- *     200 no-op so future subscriptions don't error.
+ *     via views.publish, not in the HTTP response).
+ *   - `event_callback` → `user_profile_changed` / `user_change` — ack, then
+ *     start/end a break from the user's Slack status (🍔 lunch, ☕ tea,
+ *     "break" → other). See `syncBreakFromSlackStatus`.
+ * Any other event is a 200 no-op so future subscriptions don't error.
  *
  * Signature verification + raw-body capture happen upstream in
  * slack-webhook.middleware.ts (content-type application/json).
@@ -839,7 +851,7 @@ export const handleSlackEvents: RequestHandler = async (req, res) => {
     if (
         body.type === 'event_callback' &&
         body.event?.type === 'app_home_opened' &&
-        body.event.user &&
+        typeof body.event.user === 'string' &&
         (body.event.tab === undefined || body.event.tab === 'home')
     ) {
         res.status(200).json({});
@@ -851,6 +863,33 @@ export const handleSlackEvents: RequestHandler = async (req, res) => {
             logger.warn(
                 { err, code: ERROR_CODES.SLACK_INTERACTIVE_REJECTED, reason: 'app_home_render_failed' },
                 'Slack app_home_opened render failed'
+            );
+        }
+        return;
+    }
+
+    // Slack status → break. `user_change` is the legacy name of the same
+    // event; both carry the full user object with the current status.
+    const eventUser = body.event?.user;
+    if (
+        body.type === 'event_callback' &&
+        (body.event?.type === 'user_profile_changed' || body.event?.type === 'user_change') &&
+        typeof eventUser === 'object' &&
+        eventUser.id
+    ) {
+        res.status(200).json({});
+        try {
+            // Every workspace member's profile edit lands here (guests and
+            // Slack Connect users too) — match on the payload's email, no
+            // users.info call, and skip non-employees silently.
+            const user = await resolveSlackStatusUser(eventUser.id, eventUser.profile?.email);
+            if (!user || !(await callerCanCheckInOut(user._id))) return;
+            const breakType = breakTypeFromSlackStatus(eventUser.profile?.status_emoji, eventUser.profile?.status_text);
+            if (await syncBreakFromSlackStatus(user._id, breakType)) publish([REALTIME_TOPICS.ATTENDANCE]);
+        } catch (err) {
+            logger.warn(
+                { err, code: ERROR_CODES.SLACK_INTERACTIVE_REJECTED, reason: 'slack_status_sync_failed' },
+                'Slack status → break sync failed'
             );
         }
         return;

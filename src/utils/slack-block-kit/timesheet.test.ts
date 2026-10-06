@@ -293,6 +293,22 @@ describe('buildLogTimeModal — entry type', () => {
         expect(ids).not.toContain(SLACK_BLOCK_TS_TICKET);
     });
 
+    // The web app renamed this mode to "Text"; Slack has to read the same. The
+    // VALUE must not follow the label — it is the wire type the submission
+    // parser and the BE validator both key off.
+    it('labels the general mode "Text" while keeping the value `general`', () => {
+        const view = buildLogTimeModal(PROJECTS, '2026-09-09');
+        const el = blockById(view, SLACK_BLOCK_TS_TYPE)?.element as {
+            options: { text: { text: string }; value: string }[];
+            initial_option: { text: { text: string }; value: string };
+        };
+        const general = el.options.find((o) => o.value === SLACK_TS_TYPE_GENERAL);
+        expect(general?.text.text).toBe('Text');
+        expect(el.options.map((o) => o.text.text)).not.toContain('General');
+        expect(el.initial_option.text.text).toBe('Text');
+        expect(el.initial_option.value).toBe(SLACK_TS_TYPE_GENERAL);
+    });
+
     it('the type select dispatches, or changing it would never reach the server', () => {
         const view = buildLogTimeModal(PROJECTS, '2026-09-09');
         expect(blockById(view, SLACK_BLOCK_TS_TYPE)?.dispatch_action).toBe(true);

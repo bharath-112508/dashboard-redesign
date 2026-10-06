@@ -38,7 +38,8 @@ export type CheckMethod = (typeof CHECK_METHODS)[number];
 export const BREAK_TYPES = ['lunch', 'tea', 'other'] as const;
 export type BreakType = (typeof BREAK_TYPES)[number];
 
-export const BREAK_SOURCES = ['slack', 'app'] as const;
+/** `slack_status` = started/ended by the user's Slack profile status (🍔/☕/break). */
+export const BREAK_SOURCES = ['slack', 'app', 'slack_status'] as const;
 export type BreakSource = (typeof BREAK_SOURCES)[number];
 
 /** Default soft daily break allowance (minutes). Admin-configurable in settings. */

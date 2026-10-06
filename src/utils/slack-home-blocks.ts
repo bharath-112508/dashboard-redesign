@@ -154,26 +154,51 @@ const whosOutBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> 
     ];
 };
 
+/** Slack mrkdwn treats & < > as control characters — escape user-entered names. */
+const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** "Asha, Ravi, … +3 more" — capped so a big group can't blow the 3000-char section limit. */
+const nameList = (names: string[]): string => {
+    const shown = names.slice(0, ATT_ROSTER_CAP).map(esc).join(', ');
+    return names.length > ATT_ROSTER_CAP ? `${shown} +${names.length - ATT_ROSTER_CAP} more` : shown;
+};
+
+const personName = (p: { full_name: string | null }) => p.full_name ?? 'Someone';
+
 const teamAttendanceBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {
     const t = data.team_attendance;
     if (!t) return [];
-    const roster = t.not_in_roster.map((u) => u.full_name ?? 'Someone').join(', ');
-    const blocks: Array<Record<string, unknown>> = [
-        header('Today'),
-        // One stat per line — Slack mrkdwn can't align columns (whitespace
-        // collapses, no tabs), so side-by-side stats either crowd (`fields`)
-        // or sit ragged. A vertical list is clean and unambiguous.
-        section(
-            `🟢 *Present* ${t.present}\n\n` +
-                `⚪ *Not checked in* ${t.not_in_count}\n\n` +
-                `🌴 *On leave* ${t.on_leave}\n\n` +
-                `🟡 *Missing check-out* ${t.incomplete}`
-        ),
+    // One section per group, names under the count. `always` groups show even
+    // at 0 (the answer "nobody is on leave" is itself useful); the rest only
+    // appear when someone is in them.
+    const group = (icon: string, label: string, people: { full_name: string | null }[], always = false) =>
+        people.length || always
+            ? [
+                  section(
+                      `${icon} *${label} · ${people.length}*${people.length ? `\n${nameList(people.map(personName))}` : ''}`
+                  ),
+              ]
+            : [];
+
+    // On leave, grouped by type so "Sick/Personal Leave" vs "Work From Home" is visible.
+    const byType = new Map<string, string[]>();
+    for (const p of t.on_leave) {
+        const list = byType.get(p.leave_type) ?? [];
+        list.push(p.half_day ? `${personName(p)} (½ day)` : personName(p));
+        byType.set(p.leave_type, list);
+    }
+    const leaveLines = [...byType].map(([type, names]) => `*${esc(type)}:* ${nameList(names)}`);
+
+    return [
+        header(`Today · ${t.headcount} people`),
+        ...group('🟢', 'Working', t.working, true),
+        ...group('☕', 'On break', t.on_break),
+        ...group('🏁', 'Checked out', t.checked_out),
+        section(`🌴 *On leave · ${t.on_leave.length}*${leaveLines.length ? `\n${leaveLines.join('\n')}` : ''}`),
+        ...group('⚪', 'Not checked in', t.not_in, true),
+        ...group('🟡', 'Missing check-out', t.incomplete),
+        linkButton('View attendance →', appUrl('/attendance')),
     ];
-    if (roster) blocks.push(section(`*Not checked in:* ${roster}`));
-    blocks.push(...moreLine(t.not_in_count, ATT_ROSTER_CAP));
-    blocks.push(linkButton('View attendance →', appUrl('/attendance')));
-    return blocks;
 };
 
 const pendingApprovalBlocks = (data: HomeDashboardData): Array<Record<string, unknown>> => {

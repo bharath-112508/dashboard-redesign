@@ -15,8 +15,8 @@ import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
 /**
  * 14.5 / 23.x Timesheet reminder (Plan §8 row 5; BUILD_PROGRESS Step 23).
  *
- * Fires daily at 20:00 IST. For each active **internal** user (admin /
- * manager / employee — clients don't log time):
+ * Fires daily at 20:00 IST. For each active manager / employee (clients
+ * don't log time; admins are exempt — see `loadInternalUsers`):
  *
  *   0. Skip the whole run if today is a non-working day (weekend per
  *      `work_schedule.working_days`) or a holiday — nobody is expected to
@@ -55,8 +55,16 @@ const todayIst = (now: Date): string => dayjs(now).tz(DEFAULT_TIMEZONE).format(D
 const loadInternalUsers = async (): Promise<UserDocument[]> => {
     return User.find({
         status: USER_STATUSES.ACTIVE,
-        role: { $in: [ROLES.ADMIN, ROLES.MANAGER, ROLES.EMPLOYEE] },
-    }).select('_id email full_name role slack_user_id slack_notifications_enabled');
+        // Admins are deliberately out. They run the platform rather than
+        // deliver against a timesheet, so the 20:00 "log your time" nudge was
+        // noise on every channel at once — in-app, email AND a Slack DM. The
+        // per-user `*_notifications_enabled` flags can't express this: they
+        // silence a whole channel, which would also drop the leave-approval
+        // DMs an admin acts on. Role is the only thing that separates them.
+        role: { $in: [ROLES.MANAGER, ROLES.EMPLOYEE] },
+    }).select(
+        '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+    );
 };
 
 const loadOnLeaveUserIds = async (localDate: string): Promise<Set<string>> => {
@@ -142,6 +150,7 @@ export const remindUnloggedUsers = async (now: Date, log: JobContext['log']): Pr
                 role: u.role,
                 slack_user_id: u.slack_user_id,
                 slack_notifications_enabled: u.slack_notifications_enabled,
+                email_notifications_enabled: u.email_notifications_enabled,
                 push_notifications_enabled: u.push_notifications_enabled,
             },
             local_date: targetDate,

@@ -273,6 +273,7 @@ export const updateUserBodySchema = z
         timezone: timezoneSchema,
         slack_user_id: z.string().trim().nullable().optional(),
         slack_notifications_enabled: z.boolean().optional(),
+        email_notifications_enabled: z.boolean().optional(),
         internal_profile: internalProfilePatchSchema.optional(),
         client_profile: clientProfilePatchSchema.optional(),
     })

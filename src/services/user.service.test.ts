@@ -5,14 +5,14 @@ import { Types } from 'mongoose';
  * Unit tests for `user.service` (F7).
  *
  * Coverage focus — the security-sensitive lifecycle invariants:
- *   - createUser: single-admin enforcement (R6 friendly path AND
+ *   - createUser: a second admin is allowed (was single-admin, R6; AND
  *     E11000 backstop), email-exists 409, password-policy gate.
  *   - updateUser: R4 admin recognition via `role_keys` (multi-role
  *     admin who's `role_keys` contains 'admin' but legacy `role` is
  *     'manager' still passes the admin branch).
  *   - deactivateUser: self-block, idempotent on already-deactivated.
- *   - reactivateUser: single-admin re-check via R6 backstop.
- *   - changeUserRole: self-block, single-admin re-check, role_ids
+ *   - reactivateUser: no admin ceiling; the last-admin floor instead.
+ *   - changeUserRole: self-block, last-admin floor, role_ids
  *     re-sync.
  */
 
@@ -167,7 +167,7 @@ beforeEach(() => {
 
 // ─── createUser ────────────────────────────────────────────────────────
 
-describe('createUser — single-admin enforcement (R6)', () => {
+describe('createUser — admin creation', () => {
     const baseInput = {
         email: 'admin@example.com',
         full_name: 'Admin',
@@ -181,30 +181,19 @@ describe('createUser — single-admin enforcement (R6)', () => {
         },
     };
 
-    it('rejects with ADMIN_ALREADY_EXISTS via the friendly assertSingleAdmin path', async () => {
-        userExistsMock.mockResolvedValueOnce({ _id: new Types.ObjectId() }); // an admin already exists
+    // The old ceiling ("exactly one active admin") is gone: administration
+    // shouldn't bottleneck on one person. Creating another admin is now an
+    // ordinary create, and the only remaining check is the email.
+    it('creates a second admin without complaint', async () => {
+        userExistsMock.mockResolvedValueOnce(null); // email free
+        userCreateMock.mockResolvedValueOnce([sampleUser({ role: ROLES.ADMIN })]);
 
-        await expect(svc.createUser(baseInput as never, new Types.ObjectId())).rejects.toMatchObject({
-            code: ERROR_CODES.ADMIN_ALREADY_EXISTS,
-        });
-        expect(userCreateMock).not.toHaveBeenCalled();
-    });
+        await svc.createUser(baseInput as never, new Types.ObjectId());
 
-    it('R6 backstop: translates the partial-unique-index E11000 to ADMIN_ALREADY_EXISTS', async () => {
-        // Friendly check passes (race window — some other admin slipped in
-        // between assertSingleAdmin and User.create).
-        userExistsMock.mockResolvedValueOnce(null); // no existing admin (yet)
-        userExistsMock.mockResolvedValueOnce(null); // no existing email
-        const e11000 = Object.assign(new Error('dup'), { code: 11000, keyPattern: { role: 1 } });
-        userCreateMock.mockRejectedValueOnce(e11000);
-
-        await expect(svc.createUser(baseInput as never, new Types.ObjectId())).rejects.toMatchObject({
-            code: ERROR_CODES.ADMIN_ALREADY_EXISTS,
-        });
+        expect(userCreateMock).toHaveBeenCalled();
     });
 
     it('rejects with EMAIL_ALREADY_EXISTS when the email is taken', async () => {
-        userExistsMock.mockResolvedValueOnce(null); // no admin
         userExistsMock.mockResolvedValueOnce({ _id: new Types.ObjectId() }); // email taken
 
         await expect(svc.createUser(baseInput as never, new Types.ObjectId())).rejects.toMatchObject({
@@ -439,17 +428,80 @@ describe('reactivateUser', () => {
         expect(target.save).not.toHaveBeenCalled();
     });
 
-    it('R6: re-checks single-admin via assertSingleAdmin when the target is an admin', async () => {
+    it('reactivates a deactivated admin even when another admin is active', async () => {
         const target = sampleUser({ status: 'deactivated', role: ROLES.ADMIN });
         userFindByIdMock.mockResolvedValueOnce(target);
-        // Simulate another active admin already exists (slipped in while the
-        // target was deactivated).
-        userExistsMock.mockResolvedValueOnce({ _id: new Types.ObjectId() });
 
-        await expect(svc.reactivateUser(target._id as Types.ObjectId)).rejects.toMatchObject({
-            code: ERROR_CODES.ADMIN_ALREADY_EXISTS,
-        });
+        await svc.reactivateUser(target._id as Types.ObjectId);
+
+        expect(target.save).toHaveBeenCalled();
+        expect(target.status).toBe('active');
+    });
+});
+
+// ─── the last-admin floor ──────────────────────────────────────────────
+//
+// Several admins are allowed; zero are not. An org with no admin can't manage
+// roles, settings or users again without database access, so both paths that
+// could empty the set refuse to take the final one.
+
+describe('assertNotLastAdmin', () => {
+    it('refuses to deactivate the last active admin', async () => {
+        const target = sampleUser({ role: ROLES.ADMIN });
+        userFindByIdMock.mockResolvedValueOnce(target);
+        userExistsMock.mockResolvedValueOnce(null); // no other active admin
+
+        await expect(
+            svc.deactivateUser({
+                target_id: target._id as Types.ObjectId,
+                caller_id: new Types.ObjectId(),
+            })
+        ).rejects.toMatchObject({ code: ERROR_CODES.LAST_ADMIN });
         expect(target.save).not.toHaveBeenCalled();
+    });
+
+    it('allows deactivating an admin while another one is active', async () => {
+        const target = sampleUser({ role: ROLES.ADMIN });
+        userFindByIdMock.mockResolvedValueOnce(target);
+        userExistsMock.mockResolvedValueOnce({ _id: new Types.ObjectId() }); // another admin
+
+        await svc.deactivateUser({
+            target_id: target._id as Types.ObjectId,
+            caller_id: new Types.ObjectId(),
+        });
+
+        expect(target.save).toHaveBeenCalled();
+    });
+
+    it('refuses to demote the last active admin', async () => {
+        const target = sampleUser({ role: ROLES.ADMIN });
+        userFindByIdMock.mockResolvedValueOnce(target);
+        userExistsMock.mockResolvedValueOnce(null); // no other active admin
+
+        await expect(
+            svc.changeUserRole({
+                target_id: target._id as Types.ObjectId,
+                caller_id: new Types.ObjectId(),
+                new_role: ROLES.MANAGER,
+            })
+        ).rejects.toMatchObject({ code: ERROR_CODES.LAST_ADMIN });
+        expect(target.save).not.toHaveBeenCalled();
+    });
+
+    // Promotion is unrestricted — that's the whole point of the change.
+    it('promotes another user to admin with no ceiling check', async () => {
+        const target = sampleUser({ role: ROLES.MANAGER });
+        userFindByIdMock.mockResolvedValueOnce(target);
+        getSystemRoleByKeyMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), key: ROLES.ADMIN });
+
+        await svc.changeUserRole({
+            target_id: target._id as Types.ObjectId,
+            caller_id: new Types.ObjectId(),
+            new_role: ROLES.ADMIN,
+        });
+
+        expect(target.role).toBe(ROLES.ADMIN);
+        expect(userExistsMock).not.toHaveBeenCalled();
     });
 });
 
@@ -490,20 +542,6 @@ describe('changeUserRole', () => {
         });
 
         expect(target.save).not.toHaveBeenCalled();
-    });
-
-    it('R6: re-checks single-admin when promoting to admin', async () => {
-        const target = sampleUser({ role: ROLES.MANAGER });
-        userFindByIdMock.mockResolvedValueOnce(target);
-        userExistsMock.mockResolvedValueOnce({ _id: new Types.ObjectId() }); // an admin exists
-
-        await expect(
-            svc.changeUserRole({
-                target_id: target._id as Types.ObjectId,
-                caller_id: new Types.ObjectId(),
-                new_role: ROLES.ADMIN,
-            })
-        ).rejects.toMatchObject({ code: ERROR_CODES.ADMIN_ALREADY_EXISTS });
     });
 
     it('rejects swap across the client/internal axis with VALIDATION_ERROR', async () => {

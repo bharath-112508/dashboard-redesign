@@ -105,6 +105,18 @@ describe('remindUnloggedUsers', () => {
         expect(notifyTimesheetReminderMock.mock.calls[0]![0].recipient._id).toBe(otherUser._id);
     });
 
+    it('never queries admins — they asked to stop being nudged at 20:00', async () => {
+        userFindMock.mockReturnValueOnce({ select: () => Promise.resolve([]) });
+        leaveRequestFindMock.mockReturnValueOnce({ distinct: () => Promise.resolve([]) });
+        userIdsWithEntriesOnMock.mockResolvedValueOnce(new Set<string>());
+
+        await job.remindUnloggedUsers(WEEKDAY, stubLogger() as never);
+
+        const filter = userFindMock.mock.calls[0]![0] as { role: { $in: string[] } };
+        expect(filter.role.$in).not.toContain(ROLES.ADMIN);
+        expect(filter.role.$in).toContain(ROLES.EMPLOYEE);
+    });
+
     it('skips users who already logged at least one entry today', async () => {
         const loggedUser = makeUser();
         const otherUser = makeUser();

@@ -12,6 +12,7 @@ import {
     type UserStatus,
 } from '../constants/user-statuses.js';
 import { PERMISSION_VALUES } from '../constants/permissions.js';
+import { BREAK_TYPES, type BreakType } from '../constants/attendance.js';
 import { DEFAULT_TIMEZONE } from '../utils/date.js';
 
 /**
@@ -112,6 +113,12 @@ export interface UserDocument extends Document {
      *  users.lookupByEmail / users.info. Null until warmed; the Slack Home
      *  dashboard falls back to an emoji. */
     slack_avatar_url: string | null;
+    /** Break type the user's Slack status last mapped to (null = none) —
+     *  lets the status sync act only on transitions. */
+    slack_status_break: BreakType | null;
+    /** The user's own Slack status, saved when the app put up a break status,
+     *  to put back when the break ends. */
+    slack_status_restore: { status_text: string; status_emoji: string; status_expiration: number } | null;
     /**
      * Step 25 — global Slack DM opt-in. Defaults to `true` so a user
      * who provides their `slack_user_id` automatically receives Slack
@@ -120,6 +127,10 @@ export interface UserDocument extends Document {
      * fan-out.
      */
     slack_notifications_enabled: boolean;
+    /** Per-user opt-out for NOTIFICATION emails. Account mail (password reset,
+     *  the invite with the first password) ignores it — those carry a link
+     *  nothing else delivers. */
+    email_notifications_enabled: boolean;
     /**
      * V2-BE-10 — global Web Push opt-in. Defaults to `true` so a user
      * who registers a browser subscription gets push automatically.
@@ -270,7 +281,13 @@ const userSchema = new Schema<UserDocument>(
         timezone: { type: String, default: DEFAULT_TIMEZONE },
         slack_user_id: { type: String, default: null },
         slack_avatar_url: { type: String, default: null },
+        slack_status_break: { type: String, enum: [...BREAK_TYPES, null], default: null },
+        slack_status_restore: {
+            type: new Schema({ status_text: String, status_emoji: String, status_expiration: Number }, { _id: false }),
+            default: null,
+        },
         slack_notifications_enabled: { type: Boolean, required: true, default: true },
+        email_notifications_enabled: { type: Boolean, required: true, default: true },
         push_notifications_enabled: { type: Boolean, required: true, default: true },
         comp_off_balance: { type: Number, default: 0, min: 0 },
         comp_off_overtime_bank_minutes: { type: Number, default: 0, min: 0 },
@@ -331,33 +348,17 @@ userSchema.index({ 'internal_profile.employee_id': 1 }, { unique: true, sparse: 
 // sorted. This compound serves the default list path directly.
 userSchema.index({ status: 1, created_at: -1 });
 
-/**
- * R6 — single-active-admin invariant backstop.
+/*
+ * The `one_active_admin` partial-unique index that used to live here is GONE.
+ * The platform now allows several active admins so administration isn't one
+ * person's bottleneck. Removing it from the schema does NOT drop it from a
+ * database that already has it — run `scripts/drop-one-active-admin-index.ts`
+ * against each environment, or writes still collide with E11000.
  *
- * The single-tenancy contract is "exactly one active admin user per
- * deployment". `assertSingleAdmin` checks for an existing admin before
- * `User.create` / `reactivateUser` / `changeUserRole` set role=admin,
- * but two concurrent calls can both observe no existing admin and
- * both insert — a TOCTOU race the friendly check can't close on its
- * own.
- *
- * This partial unique index makes the database the source of truth.
- * Two concurrent inserts/updates with `(role: 'admin', status: 'active')`
- * collide on E11000; the second one is caught and re-thrown as
- * `ADMIN_ALREADY_EXISTS` by the service layer.
- *
- * Partial filter: only the (admin, active) tuple is unique. A
- * `deactivated` admin doesn't block a fresh admin promotion;
- * non-admin users have no constraint here.
+ * What replaces it: `assertNotLastAdmin` in user.service.ts, which refuses to
+ * deactivate or demote the final active admin. One admin is the floor now,
+ * not the ceiling.
  */
-userSchema.index(
-    { role: 1 },
-    {
-        unique: true,
-        partialFilterExpression: { role: 'admin', status: 'active' },
-        name: 'one_active_admin',
-    }
-);
 
 /**
  * A Slack user id identifies exactly one human, so at most one Viljetech

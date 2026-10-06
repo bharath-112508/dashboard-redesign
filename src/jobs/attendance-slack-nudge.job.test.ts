@@ -24,6 +24,7 @@ import { LeaveRequest } from '../models/leave-request.model.js';
 import { getOrInitSettings } from '../services/settings.service.js';
 import { postOrUpdateSlackMessage } from '../utils/slack.js';
 import { resolveSlackIdByEmail, fetchSlackAvatarUrl } from '../services/slack-user-mapping.service.js';
+import { ROLES } from '../constants/roles.js';
 import { sendCheckinNudges, sendCheckoutReminders } from './attendance-slack-nudge.job.js';
 
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
@@ -69,6 +70,22 @@ describe('sendCheckinNudges', () => {
         const summary = await sendCheckinNudges(new Date('2026-06-16T04:00:00Z'), log);
         expect(summary.notified).toBe(1);
         expect(postOrUpdateSlackMessage).toHaveBeenCalledOnce();
+    });
+
+    it('leaves admins out of the audience', async () => {
+        enableSlack();
+        (User.find as ReturnType<typeof vi.fn>).mockReturnValue(selectStub([]));
+        (Holiday.exists as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+        (LeaveRequest.find as ReturnType<typeof vi.fn>).mockReturnValue(distinctStub([]));
+        (AttendanceRecord.find as ReturnType<typeof vi.fn>).mockReturnValue(distinctStub([]));
+
+        await sendCheckinNudges(new Date('2026-06-16T04:00:00Z'), log);
+
+        const filter = (User.find as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+            role: { $in: string[] };
+        };
+        expect(filter.role.$in).not.toContain(ROLES.ADMIN);
+        expect(filter.role.$in).toContain(ROLES.EMPLOYEE);
     });
 
     it('does not DM a user who already checked in', async () => {
@@ -183,5 +200,25 @@ describe('sendCheckoutReminders', () => {
         const summary = await sendCheckoutReminders(new Date('2026-06-16T14:30:00Z'), log);
         expect(summary.reminded).toBe(1);
         expect(postOrUpdateSlackMessage).toHaveBeenCalledOnce();
+    });
+
+    // The checkout list starts from open attendance records, not from a role
+    // query — so without its own role filter an admin with an open segment
+    // still got the 20:00 DM.
+    it('leaves admins out of the recipient lookup', async () => {
+        enableSlack();
+        (AttendanceRecord.find as ReturnType<typeof vi.fn>).mockReturnValue(
+            selectStub([{ user_id: new Types.ObjectId(), segments: [] }])
+        );
+        (User.find as ReturnType<typeof vi.fn>).mockReturnValue(selectStub([]));
+
+        const summary = await sendCheckoutReminders(new Date('2026-06-16T14:30:00Z'), log);
+
+        const filter = (User.find as ReturnType<typeof vi.fn>).mock.calls[0]![0] as {
+            role: { $in: string[] };
+        };
+        expect(filter.role.$in).not.toContain(ROLES.ADMIN);
+        expect(summary.reminded).toBe(0);
+        expect(postOrUpdateSlackMessage).not.toHaveBeenCalled();
     });
 });

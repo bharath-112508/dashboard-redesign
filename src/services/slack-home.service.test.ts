@@ -5,12 +5,13 @@ import { Types } from 'mongoose';
 vi.mock('./attendance.service.js', () => ({
     getMyToday: vi.fn(async () => null),
     getTodayAttendanceSummary: vi.fn(async () => ({
-        headcount: 3,
-        present: 1,
-        incomplete: 0,
-        on_leave: 0,
-        not_in_count: 2,
-        not_in_roster: [{ id: 'x', full_name: 'Meera' }],
+        headcount: 1,
+        working: [],
+        on_break: [],
+        checked_out: [],
+        on_leave: [],
+        not_in: [{ id: 'x', full_name: 'Meera' }],
+        incomplete: [],
     })),
 }));
 vi.mock('./leave-balance.service.js', () => ({ listOwnBalances: vi.fn(async () => []) }));

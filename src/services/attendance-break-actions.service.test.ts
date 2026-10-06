@@ -27,6 +27,12 @@ vi.mock('../models/attendance-record.model.js', async (orig) => {
     };
 });
 
+const { showBreakOnSlack, clearBreakFromSlack } = vi.hoisted(() => ({
+    showBreakOnSlack: vi.fn(async () => {}),
+    clearBreakFromSlack: vi.fn(async () => {}),
+}));
+vi.mock('./slack-status-publish.service.js', () => ({ showBreakOnSlack, clearBreakFromSlack }));
+
 import { startBreak, endBreak } from './attendance.service.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 
@@ -71,6 +77,17 @@ describe('startBreak', () => {
         expect((seg.breaks[0] as { end: unknown }).end).toBeNull();
     });
 
+    it('mirrors the break onto the Slack status — except one the Slack status started', async () => {
+        showBreakOnSlack.mockClear();
+        todayDoc = makeDoc([openSeg()]);
+        await startBreak(uid, 'lunch', 'app');
+        expect(showBreakOnSlack).toHaveBeenCalledWith(uid, 'lunch');
+        showBreakOnSlack.mockClear();
+        todayDoc = makeDoc([openSeg()]);
+        await startBreak(uid, 'lunch', 'slack_status');
+        expect(showBreakOnSlack).not.toHaveBeenCalled();
+    });
+
     it('ALREADY_ON_BREAK when a break is already open', async () => {
         const seg = { check_in: punch(t(11)), check_out: null, breaks: [brk('lunch', t(12), null)] };
         todayDoc = makeDoc([seg]);
@@ -93,5 +110,16 @@ describe('endBreak', () => {
         expect((seg.breaks[0] as { end: unknown }).end).not.toBeNull();
         // open segment → worked stays 0, but break total reflects the closed break
         expect((todayDoc as { total_break_minutes: number }).total_break_minutes).toBeGreaterThan(0);
+    });
+
+    it('restores the Slack status — except when the Slack status itself ended the break', async () => {
+        clearBreakFromSlack.mockClear();
+        todayDoc = makeDoc([{ check_in: punch(t(3)), check_out: null, breaks: [brk('tea', t(3), null)] }]);
+        await endBreak(uid, 'app');
+        expect(clearBreakFromSlack).toHaveBeenCalledWith(uid);
+        clearBreakFromSlack.mockClear();
+        todayDoc = makeDoc([{ check_in: punch(t(3)), check_out: null, breaks: [brk('tea', t(3), null)] }]);
+        await endBreak(uid, 'slack_status');
+        expect(clearBreakFromSlack).not.toHaveBeenCalled();
     });
 });

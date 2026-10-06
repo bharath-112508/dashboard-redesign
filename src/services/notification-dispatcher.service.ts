@@ -100,6 +100,7 @@ type RecipientUser = Pick<
     | 'role'
     | 'slack_user_id'
     | 'slack_notifications_enabled'
+    | 'email_notifications_enabled'
     | 'push_notifications_enabled'
 >;
 
@@ -153,7 +154,10 @@ const dispatchToRecipient = async (
     }
 
     // 2. Email — best effort. Failure here does not affect the in-app row.
-    if (email) {
+    // Opted out (`email_notifications_enabled: false`) means the person reads
+    // these in Slack or the bell; account mail doesn't come through here, so
+    // nothing they need to log in is affected.
+    if (email && recipient.email_notifications_enabled !== false) {
         try {
             await sendEmail({
                 to: recipient.email,
@@ -311,6 +315,21 @@ const dispatchSlackBroadcast = async (
 // ─── Internal: recipient resolution ──────────────────────────────────────
 
 /**
+ * Admins are on EVERY leave and correction request in the org (see
+ * `findRequestReviewersFor` — they're added unconditionally, not as a fallback
+ * when somebody has no reporting manager). At company scale that is the single
+ * largest source of mail they receive, about requests another reviewer is
+ * usually handling, so the reviewer copy is dropped for them per channel:
+ * mail for both events, and the Slack DM for corrections as well.
+ *
+ * It is suppression of the REVIEWER copy only. Anything addressed to an admin
+ * as the subject — the outcome of their own leave, a password reset, an invite
+ * — is a different recipient path and still sends. The in-app bell always
+ * keeps the full record.
+ */
+const isAdminRecipient = (r: RecipientUser): boolean => r.role === ROLES.ADMIN;
+
+/**
  * Active managers + admins, optionally excluding a single user (typically
  * the actor of the triggering event). Returns the minimal projection the
  * dispatcher needs.
@@ -323,7 +342,9 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
     if (excludeUserId) filter._id = { $ne: excludeUserId };
 
     const rows = await User.find(filter)
-        .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+        .select(
+            '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+        )
         .lean<RecipientUser[]>();
     return rows ?? [];
 };
@@ -349,7 +370,7 @@ const findReviewerPool = async (excludeUserId?: Types.ObjectId): Promise<Recipie
 const istToday = (): string => dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
 
 const RECIPIENT_SELECT =
-    '_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled';
+    '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled';
 
 const findRequestReviewersFor = async (requesterId: Types.ObjectId): Promise<RecipientUser[]> => {
     const requester = await User.findById(requesterId)
@@ -377,7 +398,9 @@ const findRequestReviewersFor = async (requesterId: Types.ObjectId): Promise<Rec
 const findUserById = async (id: Types.ObjectId): Promise<RecipientUser | null> => {
     return (
         (await User.findById(id)
-            .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+            .select(
+                '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+            )
             .lean<RecipientUser>()) ?? null
     );
 };
@@ -491,15 +514,17 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
                     title: `Leave request from ${requester.full_name}`,
                     body: broadcastBody,
                 },
-                renderLeaveSubmittedEmail({
-                    recipient_full_name: r.full_name,
-                    requester_full_name: requester.full_name,
-                    leave_type_label: input.leave_type_label,
-                    start_date: input.start_date,
-                    end_date: input.end_date,
-                    total_days: input.total_days,
-                    request_id: input.request_id.toString(),
-                }),
+                isAdminRecipient(r)
+                    ? null
+                    : renderLeaveSubmittedEmail({
+                          recipient_full_name: r.full_name,
+                          requester_full_name: requester.full_name,
+                          leave_type_label: input.leave_type_label,
+                          start_date: input.start_date,
+                          end_date: input.end_date,
+                          total_days: input.total_days,
+                          request_id: input.request_id.toString(),
+                      }),
                 context,
                 slack
             )
@@ -720,14 +745,16 @@ export const notifyAttendanceCorrectionSubmitted = async (input: CorrectionSubmi
                         id: input.request_id,
                     },
                 },
-                renderCorrectionSubmittedEmail({
-                    recipient_full_name: r.full_name,
-                    requester_full_name: requester.full_name,
-                    local_date: input.local_date,
-                    request_id: input.request_id.toString(),
-                }),
+                isAdminRecipient(r)
+                    ? null
+                    : renderCorrectionSubmittedEmail({
+                          recipient_full_name: r.full_name,
+                          requester_full_name: requester.full_name,
+                          local_date: input.local_date,
+                          request_id: input.request_id.toString(),
+                      }),
                 context,
-                slack
+                isAdminRecipient(r) ? null : slack
             )
         );
     } catch (err) {
@@ -1078,7 +1105,9 @@ export const notifyTaskAssigned = async (input: TaskAssignedDispatchInput): Prom
             _id: { $in: recipientIds },
             status: USER_STATUSES.ACTIVE,
         })
-            .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+            .select(
+                '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+            )
             .lean<RecipientUser[]>();
 
         if (recipients.length === 0) {
@@ -1134,7 +1163,9 @@ export const notifyTaskCommentWatchers = async (input: TaskCommentWatcherDispatc
         const [author, recipients] = await Promise.all([
             findUserById(input.author_id),
             User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
-                .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+                .select(
+                    '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+                )
                 .lean<RecipientUser[]>(),
         ]);
 
@@ -1194,7 +1225,9 @@ export const notifyTaskCommentMention = async (input: TaskCommentMentionDispatch
         const [author, recipients] = await Promise.all([
             findUserById(input.author_id),
             User.find({ _id: { $in: recipientIds }, status: USER_STATUSES.ACTIVE })
-                .select('_id email full_name role slack_user_id slack_notifications_enabled push_notifications_enabled')
+                .select(
+                    '_id email full_name role slack_user_id slack_notifications_enabled email_notifications_enabled push_notifications_enabled'
+                )
                 .lean<RecipientUser[]>(),
         ]);
 

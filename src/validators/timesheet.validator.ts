@@ -133,8 +133,8 @@ export type CreateTimesheetBody = z.infer<typeof createTimesheetBodySchema>;
 // ─── PATCH /timesheets/:id ───────────────────────────────────────────────
 //
 // PATCH does NOT allow swapping `entry_type` — that's effectively a
-// different row. Edits cover hours/minutes, description, and (for
-// task_linked) sprint/task drift.
+// different row. Edits cover the date, hours/minutes, description, the
+// project/category attribution, and (for task_linked) sprint/task drift.
 
 export const patchTimesheetBodySchema = z
     .object({
@@ -144,6 +144,19 @@ export const patchTimesheetBodySchema = z
         non_billable_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
         idle_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
         idle_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
+        /**
+         * Moving an entry to a different day. Picking the wrong date is the
+         * most common mistake on this form, and deleting the row used to be
+         * the only way out of it.
+         *
+         * 🔴 The self-edit window is judged on the date the entry ALREADY
+         * has, not this one — `patchEntry` answers "may you touch this entry"
+         * before the move. A mistyped date is often outside the window
+         * BECAUSE it is wrong, so judging the target would lock people out of
+         * fixing exactly the mistake this exists for. The new date still has
+         * to be a real, non-future day.
+         */
+        local_date: isoDateSchema,
         description: descriptionSchema,
         // Both nullable: on a general entry either one may be cleared, as long
         // as the OTHER still attributes the time. That pairwise rule needs the
