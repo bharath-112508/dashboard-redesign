@@ -38,6 +38,7 @@ vi.mock('../models/attendance-record.model.js', () => ({
         find: attendanceRecordFindMock,
         countDocuments: vi.fn(),
         findById: vi.fn(),
+        exists: vi.fn(),
     },
 }));
 
@@ -91,6 +92,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { haversineDistanceMeters } from '../constants/attendance.js';
 import { ROLES } from '../constants/roles.js';
 import { AttendanceCorrectionRequest } from '../models/attendance-correction-request.model.js';
+import { AttendanceRecord } from '../models/attendance-record.model.js';
 
 const defaultSettings = (overrides: Record<string, unknown> = {}) => ({
     work_schedule: { working_days: [1, 2, 3, 4, 5], daily_expected_hours: 8 },
@@ -745,6 +747,68 @@ describe('correction review — reviewer cannot action their own request', () =>
                 role: ROLES.TEAM_LEAD,
             })
         ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+    });
+
+    /**
+     * `local_date` follows the first proposed check-in, and `{user_id,
+     * local_date}` is unique — so a proposal whose times fall on a day the
+     * person already has a record for used to reach `record.save()` and come
+     * back as the bare "This already exists. Try a different value.", naming
+     * neither the day nor the record it hit.
+     */
+    it('submitCorrection refuses times that would land on a day already recorded', async () => {
+        const requester = new Types.ObjectId();
+        const recordId = new Types.ObjectId();
+        vi.mocked(AttendanceRecord.findById).mockResolvedValue({
+            _id: recordId,
+            user_id: requester,
+            local_date: '2026-10-03',
+        } as never);
+        vi.mocked(AttendanceCorrectionRequest.findOne).mockResolvedValue(null as never);
+        // A record already sits on the day the proposal would move this to.
+        vi.mocked(AttendanceRecord.exists).mockResolvedValue({ _id: new Types.ObjectId() } as never);
+
+        await expect(
+            svc.submitCorrection(
+                {
+                    attendance_record_id: recordId.toString(),
+                    requested_changes: {
+                        segments: [{ check_in: '2026-10-02T04:00:00.000Z' }],
+                        reason: 'Mistyped the date',
+                    },
+                } as never,
+                { id: requester, role: ROLES.EMPLOYEE }
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.CORRECTION_DATE_CONFLICT });
+    });
+
+    it('submitCorrection allows a correction that stays on its own day', async () => {
+        const requester = new Types.ObjectId();
+        const recordId = new Types.ObjectId();
+        vi.mocked(AttendanceRecord.findById).mockResolvedValue({
+            _id: recordId,
+            user_id: requester,
+            local_date: '2026-10-03',
+        } as never);
+        vi.mocked(AttendanceCorrectionRequest.findOne).mockResolvedValue(null as never);
+        const existsSpy = vi.mocked(AttendanceRecord.exists).mockResolvedValue(null as never);
+        vi.mocked(AttendanceCorrectionRequest.create).mockResolvedValue({
+            toJSON: () => ({ id: 'c1' }),
+        } as never);
+
+        await svc.submitCorrection(
+            {
+                attendance_record_id: recordId.toString(),
+                requested_changes: {
+                    segments: [{ check_in: '2026-10-03T04:00:00.000Z' }],
+                    reason: 'Forgot to check out',
+                },
+            } as never,
+            { id: requester, role: ROLES.EMPLOYEE }
+        );
+
+        // Same day — the collision query must not even run.
+        expect(existsSpy).not.toHaveBeenCalled();
     });
 
     it("approveCorrection does NOT short-circuit on someone else's request (passes the self-guard)", async () => {

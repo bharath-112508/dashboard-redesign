@@ -992,6 +992,56 @@ export const verifyQr = async (qr_token: string): Promise<Record<string, unknown
 
 // ─── POST /attendance/correction-requests ────────────────────────────────
 
+/**
+ * A correction's times decide which DAY the record lives on — `local_date`
+ * follows the first check-in — and `{user_id, local_date}` is unique. So a
+ * proposal whose times fall on a day the person already has a record for
+ * cannot be applied: `record.save()` throws E11000, which surfaced to the
+ * reviewer as the bare "This already exists. Try a different value." —
+ * naming neither the day nor the record it collided with.
+ *
+ * Checked when the request is FILED (so the employee fixes their own typo,
+ * while they still have the dialog open) and again at APPROVAL (an intervening
+ * check-in can create the clash in between, and requests filed before this
+ * guard existed are still sitting in the queue).
+ *
+ * Merging the two days would be the other answer. It is not obviously right —
+ * two sets of segments, breaks and totals — and it is a product decision, not
+ * a bug fix.
+ */
+const assertNoRecordOnDay = async (
+    userId: Types.ObjectId,
+    localDate: string,
+    recordId: Types.ObjectId
+): Promise<void> => {
+    const clash = await AttendanceRecord.exists({
+        user_id: userId,
+        local_date: localDate,
+        _id: { $ne: recordId },
+    });
+    if (clash) {
+        throw AppError.conflict(
+            `${localDate} already has an attendance record for this person, so these times can't move the day there. Request a correction on ${localDate} itself instead.`,
+            ERROR_CODES.CORRECTION_DATE_CONFLICT
+        );
+    }
+};
+
+/**
+ * The day a proposal would move the record to, or null when it moves nothing.
+ *
+ * Takes `Date | string` because the two callers hold different shapes: the
+ * validator hands `submitCorrection` ISO strings, while the stored request the
+ * approve path reads back carries real Dates.
+ */
+const proposedLocalDate = (changes: {
+    segments?: { check_in: Date | string }[] | null;
+    check_in?: Date | string | null;
+}): string | null => {
+    const first = changes.segments?.[0]?.check_in ?? changes.check_in ?? null;
+    return first ? utcDateToLocalDate(new Date(first)) : null;
+};
+
 export const submitCorrection = async (
     body: SubmitCorrectionBody,
     caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
@@ -1016,6 +1066,13 @@ export const submitCorrection = async (
             'A pending correction request already exists for this record',
             ERROR_CODES.CORRECTION_REQUEST_ALREADY_PENDING
         );
+    }
+
+    // Refuse a proposal that would land on another day's record now, rather
+    // than letting it sit in the queue until a reviewer meets the collision.
+    const wouldMoveTo = proposedLocalDate(body.requested_changes);
+    if (wouldMoveTo && wouldMoveTo !== record.local_date) {
+        await assertNoRecordOnDay(user_id, wouldMoveTo, record._id);
     }
 
     // BUG-040 — preserve `segments` when the client sends it. Legacy
@@ -1284,6 +1341,12 @@ export const approveCorrection = async (
     }
     record.last_corrected_by = reviewer_id;
     record.last_corrected_at = new Date();
+    // The day may have moved above. Checked here too — a request filed before
+    // the submit-time guard, or a record created on the target day since, both
+    // reach this line and would otherwise fail as a bare duplicate-key error.
+    if (record.isModified('local_date')) {
+        await assertNoRecordOnDay(record.user_id, record.local_date, record._id);
+    }
     await record.save();
 
     reqDoc.status = 'approved';
