@@ -1501,3 +1501,63 @@ describe('listTasks sort order', () => {
         expect(cap.sort).toEqual({ position: 1, created_at: 1 });
     });
 });
+
+// ─── Employee patch scope ────────────────────────────────────────────────
+//
+// Who may change what on a task, for an employee. A pure guard, so it is
+// exercised directly rather than through the whole patch path.
+describe('assertEmployeePatchScope', () => {
+    const taskOwnedBy = (creator: Types.ObjectId, assignees: Types.ObjectId[] = []) =>
+        ({
+            created_by: creator,
+            assignee_ids: assignees,
+            source: 'internal',
+            status: DEFAULT_TASK_STATUSES.TO_DO,
+        }) as never;
+
+    it('lets the CREATOR change priority and due date on their own task', () => {
+        // Raising a task and then needing a manager to fix a date you typed
+        // yourself is friction with nothing behind it.
+        const me = new Types.ObjectId();
+        expect(() =>
+            svc.assertEmployeePatchScope(
+                { priority: TASK_PRIORITIES.HIGH, due_date: '2026-10-20' } as never,
+                taskOwnedBy(me),
+                employeeCaller(me)
+            )
+        ).not.toThrow();
+    });
+
+    it('refuses priority and due date to a non-creator ASSIGNEE', () => {
+        // Re-ranking someone else's task, or moving its deadline, is a
+        // planning decision — not a note about your own work.
+        const me = new Types.ObjectId();
+        const someoneElse = new Types.ObjectId();
+        expect(() =>
+            svc.assertEmployeePatchScope(
+                { priority: TASK_PRIORITIES.LOW } as never,
+                taskOwnedBy(someoneElse, [me]),
+                employeeCaller(me)
+            )
+        ).toThrow(/may only update/i);
+    });
+
+    it('still lets a non-creator assignee update their own work fields', () => {
+        const me = new Types.ObjectId();
+        const someoneElse = new Types.ObjectId();
+        expect(() =>
+            svc.assertEmployeePatchScope(
+                { status: DEFAULT_TASK_STATUSES.IN_PROGRESS, estimated_hours: 3 } as never,
+                taskOwnedBy(someoneElse, [me]),
+                employeeCaller(me)
+            )
+        ).not.toThrow();
+    });
+
+    it('still refuses fields no employee may touch, creator or not', () => {
+        const me = new Types.ObjectId();
+        expect(() =>
+            svc.assertEmployeePatchScope({ title: 'Renamed' } as never, taskOwnedBy(me), employeeCaller(me))
+        ).toThrow(/may only update/i);
+    });
+});

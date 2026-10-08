@@ -172,6 +172,17 @@ export const TASK_EMPLOYEE_PATCH_FIELDS: readonly string[] = [
 ];
 
 /**
+ * What the CREATOR of a task may change on top of the list above.
+ *
+ * Raising a task and then needing a manager to correct a mistyped due date or
+ * a priority you chose yourself is friction with nothing behind it — you set
+ * these values at create time, unprompted. A non-creator assignee still
+ * cannot: re-ranking someone else's task, or moving its deadline, is a
+ * planning decision rather than a note about your own work.
+ */
+export const TASK_CREATOR_PATCH_FIELDS: readonly string[] = ['priority', 'due_date'];
+
+/**
  * What a client-side reporter may change on their OWN report
  * (`source: 'client'` && `created_by === caller`).
  *

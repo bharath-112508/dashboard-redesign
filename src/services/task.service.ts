@@ -17,6 +17,7 @@ import {
     DEFAULT_TASK_STATUS_VALUES,
     TASK_DEPENDENCIES_MAX,
     TASK_CLIENT_PATCH_FIELDS,
+    TASK_CREATOR_PATCH_FIELDS,
     TASK_EMPLOYEE_PATCH_FIELDS,
     TASK_ISSUE_TYPES,
     TASK_REPORT_KINDS,
@@ -157,7 +158,12 @@ const assertSelfAddOnly = (patch: PatchTaskBody, task: TaskDocument, caller: Pro
     }
 };
 
-const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
+/** Exported for unit tests — a pure guard, worth covering on its own. */
+export const assertEmployeePatchScope = (
+    patch: PatchTaskBody,
+    task: TaskDocument,
+    caller: ProjectCaller
+): void => {
     if (isManagerOrAdmin(caller)) return;
     if (!INTERNAL_ROLES.includes(caller.role)) {
         // Client-side callers reach this route via TASK_REPORT (the route gate
@@ -191,16 +197,23 @@ const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, call
         return;
     }
     // Fields outside the employee whitelist are never allowed for any employee.
-    const offending = Object.keys(patch).filter((k) => !TASK_EMPLOYEE_PATCH_FIELDS.includes(k));
+    // The creator gets a wider set — see `TASK_CREATOR_PATCH_FIELDS`.
+    const isCreator = task.created_by.equals(caller.id);
+    const allowed = isCreator
+        ? [...TASK_EMPLOYEE_PATCH_FIELDS, ...TASK_CREATOR_PATCH_FIELDS]
+        : TASK_EMPLOYEE_PATCH_FIELDS;
+    const offending = Object.keys(patch).filter((k) => !allowed.includes(k));
     if (offending.length > 0) {
         throw AppError.forbidden(
-            `Employees may only update: ${TASK_EMPLOYEE_PATCH_FIELDS.join(', ')}`,
+            isCreator
+                ? `You may only update: ${allowed.join(', ')}`
+                : `On a task you did not create you may only update: ${TASK_EMPLOYEE_PATCH_FIELDS.join(', ')}`,
             ERROR_CODES.TASK_WRITE_FORBIDDEN
         );
     }
 
     // The CREATOR fully owns the task they made — they can (re)assign anyone.
-    if (task.created_by.equals(caller.id)) return;
+    if (isCreator) return;
 
     // Non-creator employee:
     //  - work-field edits (status/description/estimate) require being an assignee;
