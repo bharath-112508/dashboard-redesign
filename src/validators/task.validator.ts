@@ -36,7 +36,18 @@ import {
  */
 
 const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId');
-const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD');
+/**
+ * A due date is REQUIRED on every task — the model says so, and the product
+ * rule is that every piece of work carries a deadline.
+ *
+ * The message matters because this is the one field people meet it on. A
+ * missing or empty value used to come back as "Must be YYYY-MM-DD", which
+ * reads as "you formatted it wrong" when in fact nothing was sent at all —
+ * exactly the confusion behind the subtask reports.
+ */
+const isoDateSchema = z
+    .string({ error: 'A due date is required' })
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'A due date is required (YYYY-MM-DD)');
 
 /**
  * BUG-041 — Done tasks can't have a future due date. The user picks the
