@@ -267,6 +267,12 @@ const resolveCompletedAt = (completedOn: string | null | undefined): Date | null
 
 const toPublic = (doc: ProjectDocument): Record<string, unknown> => ({
     ...(doc.toJSON() as Record<string, unknown>),
+    // Sub-docs skip the base `_id` → `id` transform; map so the FE sees `id`.
+    board_quick_filters: (doc.board_quick_filters ?? []).map((q) => ({
+        id: q._id.toString(),
+        name: q.name,
+        criteria: q.criteria ?? {},
+    })),
     completed_on: doc.completed_at ? dayjs(doc.completed_at).tz(DEFAULT_TIMEZONE).format(DATE_FORMAT) : null,
 });
 
@@ -956,6 +962,18 @@ export const updateProject = async (
     if (patch.end_date !== undefined) doc.end_date = patch.end_date;
     if (patch.status !== undefined) doc.status = patch.status as ProjectStatus;
     if (patch.is_archived !== undefined) doc.is_archived = patch.is_archived;
+    if (patch.board_wip_limits !== undefined) doc.set('board_wip_limits', patch.board_wip_limits);
+    if (patch.board_quick_filters !== undefined) {
+        // Entries without an id are new (Mongoose assigns `_id`); existing ids are kept.
+        doc.set(
+            'board_quick_filters',
+            patch.board_quick_filters.map((q) => ({
+                ...(q.id ? { _id: q.id } : {}),
+                name: q.name,
+                criteria: q.criteria,
+            }))
+        );
+    }
 
     // Re-assigning the company invalidates the whole client-side roster:
     // every representative_id must belong to THIS project's company, so the

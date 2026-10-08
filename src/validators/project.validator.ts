@@ -179,6 +179,45 @@ export const patchProjectBodySchema = z
          * belong to the OLD company and would violate the roster invariant.
          */
         company_id: objectIdSchema.nullable(),
+        /** Board column limits (Jira WIP). Whole array replaced on write. */
+        board_wip_limits: z
+            .array(
+                z
+                    .object({
+                        status_key: z.string().trim().min(1).max(64),
+                        limit: z.number().int().min(1).max(999),
+                    })
+                    .strict()
+            )
+            .max(50)
+            .refine((a) => new Set(a.map((w) => w.status_key)).size === a.length, {
+                message: 'Each column can have only one limit',
+            }),
+        /** Shared board quick filters. Whole array replaced; entries without
+         *  an id are new. `story_ids` is plain text so the "no epic" sentinel
+         *  survives. */
+        board_quick_filters: z
+            .array(
+                z
+                    .object({
+                        id: objectIdSchema.optional(),
+                        name: z.string().trim().min(1).max(40),
+                        criteria: z
+                            .object({
+                                issue_types: z.array(z.string().max(32)).max(10).optional(),
+                                priorities: z.array(z.string().max(16)).max(5).optional(),
+                                labels: z.array(z.string().max(64)).max(20).optional(),
+                                story_ids: z.array(z.string().max(32)).max(50).optional(),
+                                assignee_ids: z.array(objectIdSchema).max(50).optional(),
+                                only_mine: z.boolean().optional(),
+                                flagged: z.boolean().optional(),
+                                due: z.enum(['overdue', 'this_week']).optional(),
+                            })
+                            .strict(),
+                    })
+                    .strict()
+            )
+            .max(20),
     })
     .partial()
     .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be supplied' })

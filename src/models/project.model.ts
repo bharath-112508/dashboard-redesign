@@ -110,6 +110,36 @@ const customTaskStatusSchema = new Schema<CustomTaskStatus>(
     { _id: true, timestamps: false, versionKey: false }
 );
 
+// ─── Sub-docs: board settings (column limits, quick filters) ─────────────
+
+export interface BoardWipLimit {
+    status_key: string;
+    limit: number;
+}
+
+export interface BoardQuickFilter {
+    _id: Types.ObjectId;
+    name: string;
+    /** Shape validated by `patchProjectBodySchema` (filter dimensions). */
+    criteria: Record<string, unknown>;
+}
+
+const boardWipLimitSchema = new Schema<BoardWipLimit>(
+    {
+        status_key: { type: String, required: true, trim: true },
+        limit: { type: Number, required: true, min: 1, max: 999 },
+    },
+    { _id: false, versionKey: false }
+);
+
+const boardQuickFilterSchema = new Schema<BoardQuickFilter>(
+    {
+        name: { type: String, required: true, trim: true, maxlength: 40 },
+        criteria: { type: Schema.Types.Mixed, default: {} },
+    },
+    { _id: true, versionKey: false, minimize: false }
+);
+
 // ─── Sub-doc: default-status ordering ────────────────────────────────────
 //
 // Each project carries an `order` value for each of the four built-in
@@ -156,6 +186,8 @@ export interface ProjectDocument extends Document {
     representative_ids: Types.ObjectId[];
     custom_task_statuses: Types.DocumentArray<CustomTaskStatus>;
     default_status_orders: Types.DocumentArray<DefaultStatusOrder>;
+    board_wip_limits: BoardWipLimit[];
+    board_quick_filters: Types.DocumentArray<BoardQuickFilter>;
     /** Monotonic per-project issue-key counter. Incremented atomically on task
      *  create (task.service); never decremented, so keys are never reused. */
     task_seq: number;
@@ -280,6 +312,8 @@ const projectSchema = new Schema<ProjectDocument>(
                 message: 'Each built-in status must appear exactly once in the order.',
             },
         },
+        board_wip_limits: { type: [boardWipLimitSchema], default: [] },
+        board_quick_filters: { type: [boardQuickFilterSchema], default: [] },
         task_seq: { type: Number, required: true, default: 0, min: 0 },
         // No index: read only on rows the list/detail queries already loaded,
         // never used as a filter predicate.
