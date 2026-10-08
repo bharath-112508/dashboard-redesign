@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 
 import { Task, type TaskDocument } from '../models/task.model.js';
+import { coverUrlsForTasks } from './task-attachment.service.js';
 import { Story } from '../models/story.model.js';
 import { Sprint } from '../models/sprint.model.js';
 import { User } from '../models/user.model.js';
@@ -722,8 +723,15 @@ export const listTasks = async (
         Task.countDocuments(filter),
     ]);
 
+    let covers: Map<string, string> | null = null;
+    if (query.include_cover) {
+        covers = await coverUrlsForTasks(rows.map((r) => r._id));
+    }
+
     return {
-        data: rows.map(toPublic),
+        data: rows.map((r) =>
+            covers ? { ...toPublic(r), cover_url: covers.get(r._id.toString()) ?? null } : toPublic(r)
+        ),
         meta: {
             page: query.page,
             limit: query.limit,

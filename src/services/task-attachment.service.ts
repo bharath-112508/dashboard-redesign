@@ -508,6 +508,66 @@ export const mintDownloadUrl = async (
     };
 };
 
+// ─── Board card covers ───────────────────────────────────────────────────
+//
+// Jira shows a task's newest image attachment across the top of its board
+// card. Raster formats only: SVG can carry script and isn't worth the risk
+// on an inline <img> served from blob storage.
+
+const COVER_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+/** Covers are re-minted on every board fetch; an hour outlives any view. */
+const COVER_SAS_TTL_MINUTES = 60;
+
+interface CoverCandidate {
+    task_id: Types.ObjectId;
+    mime_type: string;
+    created_at: Date;
+    blob_container: string;
+    blob_key: string;
+}
+
+/** Newest renderable image per task id. Pure — exported for tests. */
+export const pickCoverAttachments = <T extends CoverCandidate>(rows: T[]): Map<string, T> => {
+    const m = new Map<string, T>();
+    for (const r of rows) {
+        if (!COVER_MIME_TYPES.has(r.mime_type)) continue;
+        const k = r.task_id.toString();
+        const cur = m.get(k);
+        if (!cur || r.created_at > cur.created_at) m.set(k, r);
+    }
+    return m;
+};
+
+/**
+ * Read-only SAS URLs for the cover image of each task, keyed by task id.
+ * One query for the whole page. The caller has already been scoped to these
+ * tasks by `listTasks`, so no per-task access check is repeated here. Empty
+ * when Azure isn't configured — the board simply shows no covers.
+ */
+export const coverUrlsForTasks = async (taskIds: Types.ObjectId[]): Promise<Map<string, string>> => {
+    const out = new Map<string, string>();
+    if (taskIds.length === 0 || !isAzureConfigured()) return out;
+    const rows = await TaskAttachment.find({
+        task_id: { $in: taskIds },
+        deleted_at: null,
+        mime_type: { $in: [...COVER_MIME_TYPES] },
+    })
+        .select('task_id mime_type created_at blob_container blob_key')
+        .lean<CoverCandidate[]>();
+    for (const [taskId, a] of pickCoverAttachments(rows)) {
+        try {
+            out.set(
+                taskId,
+                mintDownloadSas({ container: a.blob_container, blobKey: a.blob_key, ttlMinutes: COVER_SAS_TTL_MINUTES })
+                    .url
+            );
+        } catch {
+            // A cover is decoration — never fail the board over one.
+        }
+    }
+    return out;
+};
+
 // ─── DELETE /attachments/:id ─────────────────────────────────────────────
 //
 // Uploader OR admin/manager — same moderator pattern as comments.

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { booleanish } from './_shared.js';
+
 import {
     DEFAULT_TASK_STATUSES,
     TASK_COLLABORATORS_MAX,
@@ -287,6 +289,8 @@ export const listTasksQuerySchema = z
         parent_task_id: z.union([objectIdSchema, z.literal('null')]).optional(),
         // R15 — minimum 2 chars to avoid full-collection regex scans on `?q=a`.
         q: z.string().trim().min(2, 'q must be at least 2 characters').max(100).optional(),
+        /** Board only: add `cover_url` (newest image attachment, signed). */
+        include_cover: booleanish.optional(),
     })
     .strict();
 export type ListTasksQuery = z.infer<typeof listTasksQuerySchema>;

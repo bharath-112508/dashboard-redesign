@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { createTaskBodySchema, labelsSchema, patchTaskBodySchema, rankTaskBodySchema } from './task.validator.js';
+import {
+    createTaskBodySchema,
+    labelsSchema,
+    listTasksQuerySchema,
+    patchTaskBodySchema,
+    rankTaskBodySchema,
+} from './task.validator.js';
 import { TASK_LABELS_MAX, TASK_LABEL_MAX_LEN } from '../constants/task.js';
 
 /**
@@ -285,5 +291,13 @@ describe('is_flagged', () => {
     it('patch accepts a boolean flag', () => {
         expect(patchTaskBodySchema.safeParse({ is_flagged: true }).success).toBe(true);
         expect(patchTaskBodySchema.safeParse({ is_flagged: 'yes' }).success).toBe(false);
+    });
+});
+
+describe('listTasksQuerySchema include_cover', () => {
+    it('accepts "true"/"false" strings and rejects junk', () => {
+        expect(listTasksQuerySchema.parse({ include_cover: 'true' }).include_cover).toBe(true);
+        expect(listTasksQuerySchema.parse({ include_cover: 'false' }).include_cover).toBe(false);
+        expect(listTasksQuerySchema.safeParse({ include_cover: 'yes' }).success).toBe(false);
     });
 });
