@@ -1178,9 +1178,43 @@ export const listCorrections = async (
         : [];
     const nameById = new Map(userRows.map((u) => [u._id.toString(), u.full_name]));
 
+    /**
+     * The day's CURRENT times, batch-loaded the same way as the name.
+     *
+     * A proposal carries the whole day — approving replaces the segments
+     * wholesale — so a request that only moves session 2 still lists session 1
+     * exactly as it already is. Without the current times beside it, the queue
+     * cannot tell the two apart, and the reviewer sees "sessions 1 and 2" for
+     * a request that changes one of them. This is what lets the queue show
+     * only what is actually being asked for.
+     */
+    const recordIds = Array.from(new Set(rows.map((r) => r.attendance_record_id.toString()))).map(
+        (id) => new Types.ObjectId(id)
+    );
+    const recordRows = recordIds.length
+        ? await AttendanceRecord.find({ _id: { $in: recordIds } })
+              .select('_id segments')
+              .lean<
+                  {
+                      _id: Types.ObjectId;
+                      segments?: { check_in?: { time?: Date }; check_out?: { time?: Date } | null }[];
+                  }[]
+              >()
+        : [];
+    const currentById = new Map(
+        recordRows.map((rec) => [
+            rec._id.toString(),
+            (rec.segments ?? []).map((seg) => ({
+                check_in: seg.check_in?.time ?? null,
+                check_out: seg.check_out?.time ?? null,
+            })),
+        ])
+    );
+
     const data = rows.map((r) => {
         const json = r.toJSON() as unknown as Record<string, unknown>;
         json.user_full_name = nameById.get(r.user_id.toString()) ?? null;
+        json.current_segments = currentById.get(r.attendance_record_id.toString()) ?? [];
         return json;
     });
 
