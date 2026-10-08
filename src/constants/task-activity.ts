@@ -50,6 +50,8 @@ export const TASK_ACTIVITY_TYPES = {
     ATTACHMENT_ADDED: 'attachment_added',
     ATTACHMENT_REMOVED: 'attachment_removed',
     COMMENT_ADDED: 'comment_added',
+    FLAG_ADDED: 'flag_added',
+    FLAG_REMOVED: 'flag_removed',
     COMMENT_EDITED: 'comment_edited',
     COMMENT_DELETED: 'comment_deleted',
 } as const;

@@ -149,6 +149,7 @@ const makeTask = (overrides: Record<string, unknown> = {}) => {
         labels: [] as string[],
         due_date: '2026-05-10',
         estimated_hours: 0,
+        is_flagged: false,
         assignee_ids: [] as Types.ObjectId[],
         primary_assignee_id: null as Types.ObjectId | null,
         collaborator_ids: [] as Types.ObjectId[],
@@ -1559,5 +1560,28 @@ describe('assertEmployeePatchScope', () => {
         expect(() =>
             svc.assertEmployeePatchScope({ title: 'Renamed' } as never, taskOwnedBy(me), employeeCaller(me))
         ).toThrow(/may only update/i);
+    });
+});
+
+// ─── updateTask — flag activity ──────────────────────────────────────────
+
+describe('updateTask — flag', () => {
+    it('records flag_added when a task is flagged and flag_removed when cleared', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, is_flagged: false });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await svc.updateTask(task._id, { is_flagged: true }, adminCaller());
+
+        expect(task.is_flagged).toBe(true);
+        expect(recordActivityMock).toHaveBeenCalledWith(
+            expect.objectContaining({ activity_type: 'flag_added', from_value: false, to_value: true })
+        );
+
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        await svc.updateTask(task._id, { is_flagged: false }, adminCaller());
+        expect(recordActivityMock).toHaveBeenCalledWith(expect.objectContaining({ activity_type: 'flag_removed' }));
     });
 });

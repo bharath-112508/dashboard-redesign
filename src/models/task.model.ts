@@ -67,6 +67,8 @@ export interface TaskDocument extends Document {
     /** Local-calendar `YYYY-MM-DD` per Data_Model §5.4; `null` = no due date. */
     due_date: string | null;
     estimated_hours: number;
+    /** Jira-style flag (blocked / needs attention). */
+    is_flagged: boolean;
     /**
      * Everyone the task is assigned to — the source of truth for assignment
      * (a task can be assigned to several people). `primary_assignee_id` is a
@@ -164,6 +166,7 @@ const taskSchema = new Schema<TaskDocument>(
             default: [],
         },
         due_date: { type: String, default: null },
+        is_flagged: { type: Boolean, default: false },
         estimated_hours: { type: Number, required: true, default: 0, min: 0, max: TASK_ESTIMATED_HOURS_MAX },
         // Multi-assignee source of truth. `primary_assignee_id` is kept in sync
         // by the service as `assignee_ids[0] ?? null` (see task.service).

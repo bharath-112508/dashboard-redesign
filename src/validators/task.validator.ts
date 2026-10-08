@@ -194,6 +194,7 @@ export const patchTaskBodySchema = z
         // `null` clears the due date.
         due_date: isoDateSchema.nullable(),
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX),
+        is_flagged: z.boolean(),
         assignee_ids: z.array(objectIdSchema).max(TASK_MAX_ASSIGNEES),
         primary_assignee_id: optionalNullableObjectId,
         collaborator_ids: z.array(objectIdSchema).max(TASK_COLLABORATORS_MAX),

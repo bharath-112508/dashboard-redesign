@@ -169,6 +169,8 @@ export const TASK_EMPLOYEE_PATCH_FIELDS: readonly string[] = [
     'description',
     'estimated_hours',
     'assignee_ids',
+    // Flagging your own work as blocked is a note about it, not planning.
+    'is_flagged',
 ];
 
 /**

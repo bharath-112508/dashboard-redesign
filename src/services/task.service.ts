@@ -796,6 +796,7 @@ export const updateTask = async (
         labels: [...task.labels],
         due_date: task.due_date,
         estimated_hours: task.estimated_hours,
+        is_flagged: task.is_flagged,
         sprint_id: task.sprint_id,
         story_id: task.story_id,
         primary_assignee_id: task.primary_assignee_id,
@@ -810,6 +811,7 @@ export const updateTask = async (
     if (patch.labels !== undefined) task.labels = patch.labels;
     if (patch.due_date !== undefined) task.due_date = patch.due_date;
     if (patch.estimated_hours !== undefined) task.estimated_hours = patch.estimated_hours;
+    if (patch.is_flagged !== undefined) task.is_flagged = patch.is_flagged;
 
     if (patch.sprint_id !== undefined) {
         const sid = patch.sprint_id ? new Types.ObjectId(patch.sprint_id) : null;
@@ -929,6 +931,7 @@ const emitPatchActivities = async (
         labels: string[];
         due_date: string | null;
         estimated_hours: number;
+        is_flagged: boolean;
         sprint_id: Types.ObjectId | null;
         story_id: Types.ObjectId | null;
         primary_assignee_id: Types.ObjectId | null;
@@ -983,6 +986,15 @@ const emitPatchActivities = async (
             activity_type: TASK_ACTIVITY_TYPES.PRIORITY_CHANGED,
             from_value: prev.priority,
             to_value: task.priority,
+        });
+    }
+    if (task.is_flagged !== prev.is_flagged) {
+        await recordActivity({
+            task_id: task._id,
+            actor_id: actorId,
+            activity_type: task.is_flagged ? TASK_ACTIVITY_TYPES.FLAG_ADDED : TASK_ACTIVITY_TYPES.FLAG_REMOVED,
+            from_value: prev.is_flagged,
+            to_value: task.is_flagged,
         });
     }
     if (task.due_date !== prev.due_date) {

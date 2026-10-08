@@ -280,3 +280,10 @@ describe('due_date is optional', () => {
         ).toBe(false);
     });
 });
+
+describe('is_flagged', () => {
+    it('patch accepts a boolean flag', () => {
+        expect(patchTaskBodySchema.safeParse({ is_flagged: true }).success).toBe(true);
+        expect(patchTaskBodySchema.safeParse({ is_flagged: 'yes' }).success).toBe(false);
+    });
+});
