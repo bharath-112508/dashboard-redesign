@@ -261,3 +261,22 @@ describe('rankTaskBodySchema — Phase 2 Backlog', () => {
         expect(rankTaskBodySchema.safeParse({ after_task_id: 'not-an-id' }).success).toBe(false);
     });
 });
+
+describe('due_date is optional', () => {
+    it('create accepts an omitted or null due_date', () => {
+        expect(createTaskBodySchema.safeParse({ project_id: VALID_OID, title: 'no date' }).success).toBe(true);
+        expect(
+            createTaskBodySchema.safeParse({ project_id: VALID_OID, title: 'no date', due_date: null }).success
+        ).toBe(true);
+    });
+
+    it('patch accepts null to clear the due date', () => {
+        expect(patchTaskBodySchema.safeParse({ due_date: null }).success).toBe(true);
+    });
+
+    it('still rejects a malformed date', () => {
+        expect(
+            createTaskBodySchema.safeParse({ project_id: VALID_OID, title: 'x', due_date: '12/10/2026' }).success
+        ).toBe(false);
+    });
+});

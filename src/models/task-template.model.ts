@@ -26,7 +26,7 @@ import { TASK_PRIORITIES, type TaskPriority } from '../constants/task.js';
  *    of the instantiated task.
  *  - `default_due_offset_days` — when set, the instantiated task's
  *    `due_date` = (instantiation_date + offset). When null, the task
- *    inherits the project default (today, per task.service).
+ *    has no due date.
  *  - `default_collaborator_ids` / `default_assignee_id` — captured at
  *    template-creation time. The instantiation flow re-validates
  *    project membership and silently drops references that no longer

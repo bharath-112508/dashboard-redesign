@@ -1,7 +1,5 @@
 import { Types } from 'mongoose';
 
-import dayjs, { DEFAULT_TIMEZONE, DATE_FORMAT } from '../utils/date.js';
-
 import { Task, type TaskDocument } from '../models/task.model.js';
 import { Story } from '../models/story.model.js';
 import { Sprint } from '../models/sprint.model.js';
@@ -577,7 +575,7 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
         issue_type: input.issue_type ?? TASK_ISSUE_TYPES.TASK,
         story_points: input.story_points ?? null,
         labels: input.labels ?? [],
-        due_date: input.due_date,
+        due_date: input.due_date ?? null,
         estimated_hours: input.estimated_hours ?? 0,
         assignee_ids: assigneeIds,
         primary_assignee_id: primaryAssignee,
@@ -929,7 +927,7 @@ const emitPatchActivities = async (
         issue_type: string;
         story_points: number | null;
         labels: string[];
-        due_date: string;
+        due_date: string | null;
         estimated_hours: number;
         sprint_id: Types.ObjectId | null;
         story_id: Types.ObjectId | null;
@@ -1509,8 +1507,7 @@ const REPORTER_ROLES: readonly string[] = [ROLES.CLIENT, ROLES.REPRESENTATIVE];
  *   source     = client → survives every later status/priority change, so
  *                         "what did the client raise" stays answerable.
  *
- * `due_date` is required by the model but meaningless on an unread report, so
- * it starts at today (IST) and triage re-dates it.
+ * `due_date` = null → meaningless on an unread report; triage dates it.
  */
 export const createTaskReport = async (
     input: { project_id: string; title: string; description?: string; priority?: string; kind?: string },
@@ -1573,13 +1570,8 @@ export const createTaskReport = async (
         issue_type: isFeature ? TASK_ISSUE_TYPES.IMPROVEMENT : TASK_ISSUE_TYPES.BUG,
         story_points: null,
         labels: impactLabel ? [impactLabel] : [],
-        // Same-day, as for issue reports. A feature request nobody has accepted
-        // yet arguably shouldn't carry a due date at all, but `due_date` is
-        // `required: true` on the model and on every create validator — no task
-        // in the system has a null one — so a null here would be a schema
-        // migration touching the indexes and the Gantt's right edge, not a
-        // one-line default. Left consistent with every other task instead.
-        due_date: dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT),
+        // Nobody has triaged it yet, so it has no due date.
+        due_date: null,
         estimated_hours: 0,
         assignee_ids: [],
         primary_assignee_id: null,

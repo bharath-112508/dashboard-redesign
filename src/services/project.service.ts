@@ -812,6 +812,7 @@ export const listProjects = async (
                                     {
                                         $and: [
                                             { $ne: ['$completed_at', null] },
+                                            { $eq: [{ $type: '$due_date' }, 'string'] },
                                             { $gt: [completedOnIst, '$due_date'] },
                                         ],
                                     },
@@ -820,7 +821,22 @@ export const listProjects = async (
                                 ],
                             },
                         },
-                        overdue: { $sum: { $cond: [{ $lt: ['$due_date', today] }, 1, 0] } },
+                        // Same BSON trap: a null/missing due date is "less than"
+                        // any string, so guard on type or undated tasks read overdue.
+                        overdue: {
+                            $sum: {
+                                $cond: [
+                                    {
+                                        $and: [
+                                            { $eq: [{ $type: '$due_date' }, 'string'] },
+                                            { $lt: ['$due_date', today] },
+                                        ],
+                                    },
+                                    1,
+                                    0,
+                                ],
+                            },
+                        },
                     },
                 },
             ]);
@@ -837,11 +853,8 @@ export const listProjects = async (
                 // card's timeliness line describes the delivery, not the
                 // support tail). It surfaces on its own as a support badge.
                 //
-                // This matters more than it looks: `createTaskReport` dates a
-                // fresh report `due_date = today`, so an untriaged client
-                // ticket turns "overdue" tomorrow by itself. Counting those in
-                // would put permanent phantom overdue numbers on every
-                // delivered project.
+                // Counting support tickets in would put permanent phantom
+                // overdue numbers on every delivered project once triaged.
                 if (b._id.post) {
                     acc.post_delivery_task_count += b.count;
                     if (!isTerminal) acc.post_delivery_open_count += b.count;

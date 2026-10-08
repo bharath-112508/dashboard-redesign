@@ -45,9 +45,7 @@ const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid Obje
  * reads as "you formatted it wrong" when in fact nothing was sent at all —
  * exactly the confusion behind the subtask reports.
  */
-const isoDateSchema = z
-    .string({ error: 'A due date is required' })
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'A due date is required (YYYY-MM-DD)');
+const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a YYYY-MM-DD date');
 
 /**
  * BUG-041 — Done tasks can't have a future due date. The user picks the
@@ -66,7 +64,7 @@ const todayIso = (): string => {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 };
 
-const enforceNoFutureDoneDate = <T extends { status?: string | undefined; due_date?: string | undefined }>(
+const enforceNoFutureDoneDate = <T extends { status?: string | undefined; due_date?: string | null | undefined }>(
     data: T,
     ctx: z.RefinementCtx
 ): void => {
@@ -161,7 +159,8 @@ export const createTaskBodySchema = z
         issue_type: issueTypeSchema.optional(),
         story_points: storyPointsSchema.optional(),
         labels: labelsSchema.optional(),
-        due_date: isoDateSchema,
+        // Optional: `null`/omitted = no due date.
+        due_date: isoDateSchema.nullable().optional(),
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX).optional(),
         // Multi-assignee. `primary_assignee_id` is still accepted for backward
         // compatibility (older clients); the service merges it into the assignee
@@ -192,7 +191,8 @@ export const patchTaskBodySchema = z
         issue_type: issueTypeSchema,
         story_points: storyPointsSchema,
         labels: labelsSchema,
-        due_date: isoDateSchema,
+        // `null` clears the due date.
+        due_date: isoDateSchema.nullable(),
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX),
         assignee_ids: z.array(objectIdSchema).max(TASK_MAX_ASSIGNEES),
         primary_assignee_id: optionalNullableObjectId,

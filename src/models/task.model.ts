@@ -64,8 +64,8 @@ export interface TaskDocument extends Document {
     story_points: number | null;
     /** Freeform Jira-style labels — trimmed, deduped, capped by the validator. */
     labels: string[];
-    /** Local-calendar `YYYY-MM-DD` per Data_Model §5.4. */
-    due_date: string;
+    /** Local-calendar `YYYY-MM-DD` per Data_Model §5.4; `null` = no due date. */
+    due_date: string | null;
     estimated_hours: number;
     /**
      * Everyone the task is assigned to — the source of truth for assignment
@@ -163,7 +163,7 @@ const taskSchema = new Schema<TaskDocument>(
             type: [{ type: String, trim: true, maxlength: TASK_LABEL_MAX_LEN }],
             default: [],
         },
-        due_date: { type: String, required: true },
+        due_date: { type: String, default: null },
         estimated_hours: { type: Number, required: true, default: 0, min: 0, max: TASK_ESTIMATED_HOURS_MAX },
         // Multi-assignee source of truth. `primary_assignee_id` is kept in sync
         // by the service as `assignee_ids[0] ?? null` (see task.service).

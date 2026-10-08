@@ -345,14 +345,12 @@ const materialiseTaskFromTemplate = async (
         }
     }
 
-    // 5. Due date — explicit override > offset from today > today.
-    let dueDate: string;
+    // 5. Due date — explicit override > offset from today > none.
+    let dueDate: string | null = null;
     if (overrides.due_date) {
         dueDate = overrides.due_date;
     } else if (doc.default_due_offset_days !== null) {
         dueDate = dayjs().tz(DEFAULT_TIMEZONE).add(doc.default_due_offset_days, 'day').format(DATE_FORMAT);
-    } else {
-        dueDate = dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT);
     }
 
     // 6. Hand off to the existing createTask, which re-validates
