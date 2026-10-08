@@ -98,13 +98,14 @@ describe('createUserBodySchema — BUG-044 phone validation', () => {
         if (r.success) expect(r.data.phone).toBeUndefined();
     });
 
-    it('treats empty-string phone as not supplied', () => {
+    it('treats empty-string phone as "no phone" on create', () => {
         const r = createUserBodySchema.safeParse({
             ...baseCreatePayload,
             phone: '',
         });
         expect(r.success).toBe(true);
-        if (r.success) expect(r.data.phone).toBeUndefined();
+        // `null` on create and absent mean the same thing — nobody to clear.
+        if (r.success) expect(r.data.phone ?? undefined).toBeUndefined();
     });
 });
 
@@ -119,13 +120,29 @@ describe('updateUserBodySchema — BUG-044 phone validation', () => {
         expect(r.success).toBe(false);
     });
 
-    it('accepts empty-string phone on patch (no change after refinement → omitted)', () => {
-        // Empty string is the FE "user cleared the field" representation; the
-        // refinement no-ops and the field falls through as undefined. The
-        // partial-patch refine still passes because the patch carries this
-        // field name.
+    /**
+     * The three states have to stay distinct, because `updateUser` keys off
+     * them: absent leaves the stored number alone, `null` removes it. They
+     * used to collapse — '' became `undefined`, the patch looked like it never
+     * mentioned phone, and clearing the field reported success while the old
+     * number stayed. It then reappeared on the next refresh.
+     */
+    it('reads an empty-string phone as CLEAR, not as "not supplied"', () => {
         const r = updateUserBodySchema.safeParse({ phone: '' });
         expect(r.success).toBe(true);
+        if (r.success) expect(r.data.phone).toBeNull();
+    });
+
+    it('reads an explicit null as CLEAR', () => {
+        const r = updateUserBodySchema.safeParse({ phone: null });
+        expect(r.success).toBe(true);
+        if (r.success) expect(r.data.phone).toBeNull();
+    });
+
+    it('leaves phone untouched when the patch omits it', () => {
+        const r = updateUserBodySchema.safeParse({ full_name: 'No phone here' });
+        expect(r.success).toBe(true);
+        if (r.success) expect(r.data.phone).toBeUndefined();
     });
 });
 

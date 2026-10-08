@@ -150,7 +150,8 @@ export const createUser = async (
         email: input.email,
         password_hash,
         full_name: input.full_name,
-        phone: input.phone,
+        // `null` (cleared) and absent both mean "no phone" on create.
+        phone: input.phone ?? undefined,
         role: input.role,
         status: USER_STATUSES.ACTIVE,
         created_by,
@@ -469,7 +470,10 @@ export const updateUser = async (input: {
     }
 
     if (patch.full_name !== undefined) target.full_name = patch.full_name;
-    if (patch.phone !== undefined) target.phone = patch.phone;
+    // `null` is an explicit clear — `undefined` unsets the path on save,
+    // where leaving the key out would keep the old number. Absent means the
+    // patch never mentioned phone, so the stored value stands.
+    if (patch.phone !== undefined) target.phone = patch.phone ?? undefined;
     if (patch.timezone !== undefined) target.timezone = patch.timezone;
     if (patch.slack_user_id !== undefined) target.slack_user_id = patch.slack_user_id;
     if (patch.email_notifications_enabled !== undefined) {

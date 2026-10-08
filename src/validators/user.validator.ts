@@ -15,14 +15,25 @@ import { EMPLOYMENT_TYPES, USER_STATUSES } from '../constants/user-statuses.js';
 //
 // The transform normalises the value to canonical E.164 (`+15555550123`),
 // so downstream callers don't have to deal with whitespace/dashes/parens.
+/**
+ * `undefined` = not supplied, `null` = clear it, anything else = a phone.
+ *
+ * The three used to collapse into two: an empty string was transformed to
+ * `undefined`, which `updateUser` reads as "the patch didn't mention phone"
+ * and skips. So clearing the field in the UI returned 200, said "saved", and
+ * left the old number in the database — it reappeared on the next refresh.
+ * `null` was refused outright by the bare `z.string()`, so there was no way
+ * to remove a number once it had been set, from the UI or the API.
+ */
 const phoneSchema = z
     .string()
     .trim()
+    .nullable()
     .optional()
-    .transform((v) => (v ? v : undefined))
+    .transform((v) => (v === undefined ? undefined : v ? v : null))
     .refine(
         (v) => {
-            if (v === undefined) return true;
+            if (v === undefined || v === null) return true;
             const parsed = parsePhoneNumberFromString(v);
             return parsed?.isValid() ?? false;
         },
@@ -32,7 +43,7 @@ const phoneSchema = z
         }
     )
     .transform((v) => {
-        if (v === undefined) return undefined;
+        if (v === undefined || v === null) return v;
         const parsed = parsePhoneNumberFromString(v);
         return parsed?.number ?? v;
     });
