@@ -159,11 +159,7 @@ const assertSelfAddOnly = (patch: PatchTaskBody, task: TaskDocument, caller: Pro
 };
 
 /** Exported for unit tests — a pure guard, worth covering on its own. */
-export const assertEmployeePatchScope = (
-    patch: PatchTaskBody,
-    task: TaskDocument,
-    caller: ProjectCaller
-): void => {
+export const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
     if (isManagerOrAdmin(caller)) return;
     if (!INTERNAL_ROLES.includes(caller.role)) {
         // Client-side callers reach this route via TASK_REPORT (the route gate
