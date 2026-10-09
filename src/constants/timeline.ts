@@ -39,3 +39,6 @@ export const TIMELINE_RANGE_MAX_DAYS = 365;
 // can prompt the user to narrow the date range.
 
 export const TIMELINE_TASK_CAP = 2_000;
+
+/** Tasks with no due date listed under the chart (they have no bar). */
+export const TIMELINE_UNDATED_CAP = 100;

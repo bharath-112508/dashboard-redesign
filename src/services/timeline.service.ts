@@ -2,7 +2,7 @@ import { Types } from 'mongoose';
 
 import { Sprint } from '../models/sprint.model.js';
 import { Task } from '../models/task.model.js';
-import { TIMELINE_TASK_CAP } from '../constants/timeline.js';
+import { TIMELINE_TASK_CAP, TIMELINE_UNDATED_CAP } from '../constants/timeline.js';
 import { DEFAULT_TASK_STATUSES } from '../constants/task.js';
 import { loadProjectForCaller } from './project.service.js';
 import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
@@ -74,6 +74,16 @@ export interface TimelineResult {
     project: TimelineProject;
     sprints: TimelineSprint[];
     tasks: TimelineTask[];
+    /** Tasks with no due date (no bar), capped at `TIMELINE_UNDATED_CAP`. */
+    undated: Array<{
+        id: string;
+        title: string;
+        status: string;
+        priority: string;
+        sprint_id: string | null;
+        story_id: string | null;
+        primary_assignee_id: string | null;
+    }>;
     /** True when the task list was truncated at `TIMELINE_TASK_CAP`. */
     truncated: boolean;
 }
@@ -154,6 +164,25 @@ export const buildTimeline = async (
             }[]
         >();
 
+    // Tasks with no due date can't be drawn as bars; list them separately so
+    // they don't vanish from the timeline (same sprint/epic/done filters).
+    const { due_date: _ignored, ...undatedFilter } = taskFilter;
+    const undatedRows = await Task.find({ ...undatedFilter, due_date: null })
+        .select('_id title status priority sprint_id story_id primary_assignee_id')
+        .sort({ position: 1, created_at: 1 })
+        .limit(TIMELINE_UNDATED_CAP)
+        .lean<
+            {
+                _id: Types.ObjectId;
+                title: string;
+                status: string;
+                priority: string;
+                sprint_id: Types.ObjectId | null;
+                story_id: Types.ObjectId | null;
+                primary_assignee_id: Types.ObjectId | null;
+            }[]
+        >();
+
     const truncated = taskRows.length > TIMELINE_TASK_CAP;
     const candidates = truncated ? taskRows.slice(0, TIMELINE_TASK_CAP) : taskRows;
 
@@ -203,5 +232,14 @@ export const buildTimeline = async (
         })),
         tasks,
         truncated,
+        undated: (undatedRows ?? []).map((t) => ({
+            id: t._id.toString(),
+            title: t.title,
+            status: t.status,
+            priority: t.priority,
+            sprint_id: t.sprint_id?.toString() ?? null,
+            story_id: t.story_id?.toString() ?? null,
+            primary_assignee_id: t.primary_assignee_id?.toString() ?? null,
+        })),
     };
 };

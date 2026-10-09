@@ -317,3 +317,32 @@ describe('buildTimeline (truncation)', () => {
         expect(result.truncated).toBe(false);
     });
 });
+
+// ─── Undated tasks ─────────────────────────────────────────────────────
+
+describe('buildTimeline (undated tasks)', () => {
+    it('queries tasks with no due date using the same sprint/story/done filters', async () => {
+        loadProjectForCallerMock.mockResolvedValueOnce(projectFixture());
+        const sprintId = new Types.ObjectId().toString();
+
+        await svc.buildTimeline(new Types.ObjectId(), baseQuery({ sprint_id: sprintId }) as never, adminCaller());
+
+        const undatedFilter = taskFindMock.mock.calls[1][0] as Record<string, unknown>;
+        expect(undatedFilter.due_date).toBeNull();
+        expect(String(undatedFilter.sprint_id)).toBe(sprintId);
+        expect(undatedFilter.status).toEqual({ $ne: DEFAULT_TASK_STATUSES.DONE });
+    });
+
+    it('returns them as `undated` (not as bars)', async () => {
+        loadProjectForCallerMock.mockResolvedValueOnce(projectFixture());
+        const undated = taskFixture({ title: 'No date yet', due_date: null });
+        taskFindMock.mockReturnValueOnce(queryStub([])).mockReturnValueOnce(queryStub([undated]));
+
+        const result = await svc.buildTimeline(new Types.ObjectId(), baseQuery() as never, adminCaller());
+
+        expect(result.tasks).toEqual([]);
+        expect(result.undated).toEqual([
+            expect.objectContaining({ id: undated._id.toString(), title: 'No date yet', status: undated.status }),
+        ]);
+    });
+});
