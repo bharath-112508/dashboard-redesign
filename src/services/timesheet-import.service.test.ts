@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ROLES } from '../constants/roles.js';
 import { TIMESHEET_ENTRY_TYPES } from '../constants/timesheet.js';
+import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
 
 /**
  * Bulk timesheet import — resolution and validation.
@@ -225,10 +226,18 @@ describe('validateImportRows — tickets', () => {
 
 describe('validateImportRows — row rules', () => {
     it('blocks a future date', async () => {
-        const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-        const out = await svc.validateImportRows([row({ date: tomorrow })], caller as never);
-        expect(out.rows[0]!.ok).toBe(false);
-        expect(out.rows[0]!.reason).toMatch(/future/i);
+        // 18:50 UTC is already the next day in IST — the window CI hit.
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date('2026-10-09T18:50:00Z'));
+        try {
+            // "Tomorrow" in IST, the zone the service judges "future" in (not UTC).
+            const tomorrow = dayjs().tz(DEFAULT_TIMEZONE).add(1, 'day').format(DATE_FORMAT);
+            const out = await svc.validateImportRows([row({ date: tomorrow })], caller as never);
+            expect(out.rows[0]!.ok).toBe(false);
+            expect(out.rows[0]!.reason).toMatch(/future/i);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('blocks a row with no time on either side', async () => {
