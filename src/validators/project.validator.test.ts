@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { patchProjectBodySchema } from './project.validator.js';
+import { patchDefaultStatusOrdersBodySchema, patchProjectBodySchema } from './project.validator.js';
 
 describe('patchProjectBodySchema — board settings', () => {
     it('accepts wip limits and rejects duplicates / bad limits', () => {
@@ -32,5 +32,16 @@ describe('patchProjectBodySchema — board settings', () => {
         expect(
             patchProjectBodySchema.safeParse({ board_quick_filters: [{ ...qf, criteria: { jql: 'x' } }] }).success
         ).toBe(false);
+    });
+});
+
+describe('patchDefaultStatusOrdersBodySchema with bug', () => {
+    const five = ['to_do', 'in_progress', 'bug', 'review', 'done'].map((key, i) => ({ key, order: (i + 1) * 100 }));
+    it('accepts all five built-ins', () => {
+        expect(patchDefaultStatusOrdersBodySchema.safeParse({ orders: five }).success).toBe(true);
+    });
+    it('rejects the old four', () => {
+        const four = five.filter((o) => o.key !== 'bug');
+        expect(patchDefaultStatusOrdersBodySchema.safeParse({ orders: four }).success).toBe(false);
     });
 });

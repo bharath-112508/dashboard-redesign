@@ -18,6 +18,7 @@ import {
     PROJECT_STATUSES,
     PROJECT_STATUS_VALUES,
     type ProjectStatus,
+    withAllDefaultStatuses,
 } from '../constants/project.js';
 import { ISO_DATE_REGEX } from '../constants/holiday.js';
 
@@ -284,7 +285,7 @@ const projectSchema = new Schema<ProjectDocument>(
                 message: `You can add at most ${CUSTOM_STATUSES_PER_PROJECT_MAX} custom statuses to a project.`,
             },
         },
-        // Project-scoped ordering of the four built-in statuses. Seeded
+        // Project-scoped ordering of the five built-in statuses. Seeded
         // with the canonical 100/200/300/400 values on create; admins
         // re-order via the dedicated PATCH endpoint. Customs already
         // carry their own `order`; the FE merges the two arrays and
@@ -293,7 +294,7 @@ const projectSchema = new Schema<ProjectDocument>(
             type: [defaultStatusOrderSchema],
             default: buildCanonicalDefaultOrders,
             validate: {
-                // Each of the four canonical keys must appear exactly once.
+                // Each of the five canonical keys must appear exactly once.
                 // Prevents drift (e.g. a key disappearing or a duplicate
                 // entry that would cause the board to render two columns
                 // for the same key).
@@ -358,5 +359,18 @@ projectSchema.index(
  * upgrade-path note); this lands the index ahead of that migration.
  */
 projectSchema.index({ name: 'text', code: 'text', description: 'text' });
+
+// Safety net for the `bug` built-in: a project stored before the migration has
+// four entries, which the exactly-the-built-ins validator would reject on ANY
+// save. Fill missing built-ins in before validation.
+projectSchema.pre('validate', function normaliseDefaultStatusOrders() {
+    const current = (this.default_status_orders ?? []) as unknown as Array<{
+        key: string;
+        order: number;
+        is_active: boolean;
+    }>;
+    if (current.length >= DEFAULT_TASK_STATUS_KEYS.length) return;
+    this.set('default_status_orders', withAllDefaultStatuses(current));
+});
 
 export const Project: Model<ProjectDocument> = model<ProjectDocument>(COLLECTIONS.PROJECTS, projectSchema);

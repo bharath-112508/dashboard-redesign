@@ -22,6 +22,7 @@ import {
     PROJECT_REPRESENTATIVE_SCOPED_ROLES,
     PROJECT_STATUSES,
     type ProjectStatus,
+    withAllDefaultStatuses,
 } from '../constants/project.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
@@ -1311,17 +1312,9 @@ export const listCustomStatuses = async (
     // values so the FE can merge defaults + customs into a single sorted
     // column list and filter hidden columns out. Fall-back values keep
     // the API safe during the migration window for pre-existing projects.
-    const orderByKey = new Map<string, number>();
-    const activeByKey = new Map<string, boolean>();
-    for (const o of doc.default_status_orders ?? []) {
-        orderByKey.set(o.key, o.order);
-        activeByKey.set(o.key, o.is_active);
-    }
-    const defaults = DEFAULT_TASK_STATUS_KEYS.map((k, i) => ({
-        key: k,
-        order: orderByKey.get(k) ?? (i + 1) * 100,
-        is_active: activeByKey.get(k) ?? true,
-    })).sort((a, b) => a.order - b.order);
+    const defaults = withAllDefaultStatuses(
+        (doc.default_status_orders ?? []).map((o) => ({ key: o.key, order: o.order, is_active: o.is_active }))
+    ).sort((a, b) => a.order - b.order);
 
     return {
         defaults,

@@ -47,7 +47,7 @@ export type StoryDerivedStatus = (typeof STORY_DERIVED_STATUSES)[keyof typeof ST
 export const STORY_DERIVED_STATUS_VALUES: readonly StoryDerivedStatus[] = Object.values(STORY_DERIVED_STATUSES);
 
 /** Task status keys that trigger the "in_progress" derived rule. */
-export const IN_PROGRESS_TASK_STATUS_KEYS: readonly string[] = ['in_progress', 'review'];
+export const IN_PROGRESS_TASK_STATUS_KEYS: readonly string[] = ['in_progress', 'bug', 'review'];
 
 /** Task status key that triggers the "blocked" derived rule. */
 export const BLOCKED_TASK_STATUS_KEY = 'blocked';

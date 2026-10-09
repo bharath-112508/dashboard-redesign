@@ -23,6 +23,7 @@
 export const DEFAULT_TASK_STATUSES = {
     TO_DO: 'to_do',
     IN_PROGRESS: 'in_progress',
+    BUG: 'bug',
     REVIEW: 'review',
     DONE: 'done',
 } as const;

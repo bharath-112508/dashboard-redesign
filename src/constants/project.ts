@@ -56,18 +56,19 @@ export const SPRINT_STATUS_VALUES: readonly SprintStatus[] = Object.values(SPRIN
 //
 // These keys are reserved — a project's `custom_task_statuses[].key` MUST NOT
 // equal any of them. The implicit-default contract means tasks created without
-// a `status` get `"to_do"` and the four are always selectable in the FE
+// a `status` get `"to_do"` and the five are always selectable in the FE
 // dropdown without server roundtrips.
 
-export const DEFAULT_TASK_STATUS_KEYS = ['to_do', 'in_progress', 'review', 'done'] as const;
+export const DEFAULT_TASK_STATUS_KEYS = ['to_do', 'in_progress', 'bug', 'review', 'done'] as const;
 
-// Canonical board ordering of the four built-in statuses. Project create
+// Canonical board ordering of the five built-in statuses. Project create
 // seeds `default_status_orders[]` with these values; admins can re-arrange
 // per project via `PATCH /projects/:id/default-status-orders`. Values are
 // spaced by 100 so customs can be interleaved without renumbering.
 export const DEFAULT_STATUS_ORDER_VALUES: Record<(typeof DEFAULT_TASK_STATUS_KEYS)[number], number> = {
     to_do: 100,
     in_progress: 200,
+    bug: 250,
     review: 300,
     done: 400,
 };
@@ -82,6 +83,23 @@ export const buildCanonicalDefaultOrders = (): Array<{
         order: DEFAULT_STATUS_ORDER_VALUES[k],
         is_active: true,
     }));
+
+/**
+ * Every built-in present: `orders` plus any missing built-in at its canonical
+ * order, active. Projects saved before a built-in was introduced (e.g. `bug`)
+ * stay valid and render it in place until the migration stores it.
+ */
+export const withAllDefaultStatuses = (
+    orders: ReadonlyArray<{ key: string; order: number; is_active: boolean }>
+): Array<{ key: string; order: number; is_active: boolean }> => {
+    const have = new Set(orders.map((o) => o.key));
+    const missing = DEFAULT_TASK_STATUS_KEYS.filter((k) => !have.has(k)).map((k) => ({
+        key: k,
+        order: DEFAULT_STATUS_ORDER_VALUES[k],
+        is_active: true,
+    }));
+    return [...orders.map((o) => ({ key: o.key, order: o.order, is_active: o.is_active })), ...missing];
+};
 
 // ─── Custom-task-status caps ─────────────────────────────────────────────
 

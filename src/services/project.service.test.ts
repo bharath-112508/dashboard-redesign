@@ -1093,8 +1093,23 @@ describe('custom statuses', () => {
         projectFindByIdMock.mockResolvedValueOnce(proj);
 
         const out = await svc.listCustomStatuses(proj._id, adminCaller());
-        expect(out.defaults.map((d) => d.key)).toEqual(['to_do', 'in_progress', 'review', 'done']);
+        expect(out.defaults.map((d) => d.key)).toEqual(['to_do', 'in_progress', 'bug', 'review', 'done']);
         expect(out.custom.map((c) => c.key)).toEqual(['shipped', 'qa_passed']);
+    });
+
+    it('a project saved before the bug migration still lists bug at 250, active', async () => {
+        const proj = makeProject();
+        (proj as unknown as { default_status_orders: unknown }).default_status_orders = [
+            { key: 'to_do', order: 100, is_active: true },
+            { key: 'in_progress', order: 200, is_active: true },
+            { key: 'review', order: 300, is_active: true },
+            { key: 'done', order: 400, is_active: true },
+        ];
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        const out = await svc.listCustomStatuses(proj._id, adminCaller());
+        expect(out.defaults.find((d) => d.key === 'bug')).toEqual({ key: 'bug', order: 250, is_active: true });
+        expect(out.defaults.map((d) => d.key)).toEqual(['to_do', 'in_progress', 'bug', 'review', 'done']);
     });
 
     it('addCustomStatus rejects key collision with CUSTOM_STATUS_KEY_TAKEN', async () => {
