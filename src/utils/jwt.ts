@@ -116,6 +116,21 @@ export const verifyAccessToken = (token: string): BaseJWTPayload => {
     }
 };
 
+/** Like `verifyAccessToken` but never throws and never counts a failure —
+ *  for callers that only want a hint (the rate limiter runs before
+ *  `authenticate`, which does the real, counted check on the same request).
+ *  Refresh / MFA-session tokens (they carry a `type`) are not access tokens. */
+export const tryVerifyAccessToken = (token: string): BaseJWTPayload | null => {
+    try {
+        const payload = jwt.verify(token, pickVerifyKey(token, JWT_KEY_REGISTRY, JWT_SECRET)) as BaseJWTPayload & {
+            type?: string;
+        };
+        return payload.type ? null : payload;
+    } catch {
+        return null;
+    }
+};
+
 export const verifyRefreshToken = (token: string): RefreshJWTPayload => {
     const secret = pickVerifyKey(token, JWT_REFRESH_KEY_REGISTRY, JWT_REFRESH_SECRET);
     try {

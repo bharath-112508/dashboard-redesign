@@ -883,6 +883,7 @@ export const updateTask = async (
 
     task.updated_by = caller.id;
     await task.save();
+    if (!objectIdEq(task.story_id, prev.story_id)) await cascadeEpicToSubtasks(task, caller.id);
 
     // M3 — task.save() runs WITHOUT a transaction by design. Audit +
     // activity-feed writes that follow are *both* explicitly
@@ -1293,6 +1294,17 @@ export const rankTask = async (
 // operation, so non-admin/manager callers receive STORY_WRITE_FORBIDDEN
 // (not TASK_WRITE_FORBIDDEN).
 
+/**
+ * Subtasks share their parent's epic (as in Jira): when a parent's epic
+ * changes, its subtasks follow. Without this a subtask kept the epic it was
+ * created with, so the board showed parent and child under different epics.
+ * A subtask's own epic change doesn't cascade (subtasks have no children).
+ */
+const cascadeEpicToSubtasks = async (task: TaskDocument, callerId: Types.ObjectId): Promise<void> => {
+    if (task.parent_task_id) return;
+    await Task.updateMany({ parent_task_id: task._id }, { $set: { story_id: task.story_id, updated_by: callerId } });
+};
+
 export const assignTaskStory = async (
     taskId: Types.ObjectId,
     body: AssignStoryBody,
@@ -1318,6 +1330,7 @@ export const assignTaskStory = async (
     }
     task.updated_by = caller.id;
     await task.save();
+    if (!objectIdEq(task.story_id, prevStoryId)) await cascadeEpicToSubtasks(task, caller.id);
 
     if (caller.audit) {
         await recordAudit(caller.audit, {

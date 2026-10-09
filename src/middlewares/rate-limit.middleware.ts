@@ -1,14 +1,37 @@
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
-import { AUTH_RATE_LIMIT_MAX, GENERAL_RATE_LIMIT_MAX } from '../config/server.config.js';
+import type { Request } from 'express';
+
+import { AUTH_RATE_LIMIT_MAX, GENERAL_RATE_LIMIT_MAX, GENERAL_RATE_LIMIT_USER_MAX } from '../config/server.config.js';
+import { tryVerifyAccessToken } from '../utils/jwt.js';
+
+/** The signed-in user behind a request, from a VERIFIED access token (a
+ *  forged or expired one gives null, so it can't be used to dodge the per-IP
+ *  cap). Memoised on the request — `keyGenerator` and `limit` both ask. */
+const signedInUser = (req: Request): string | null => {
+    const memo = req as Request & { _rateLimitUser?: string | null };
+    if (memo._rateLimitUser !== undefined) return memo._rateLimitUser;
+    const header = req.headers?.authorization;
+    const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : null;
+    memo._rateLimitUser = (token && tryVerifyAccessToken(token)?.user_id) || null;
+    return memo._rateLimitUser;
+};
 
 /**
- * General-purpose limiter — applied globally on `/api/*`.
- * Default: 120 requests / minute / IP. Override with `GENERAL_RATE_LIMIT_MAX`.
+ * General-purpose limiter — applied globally on `/api/*`, before
+ * `authenticate`. A signed-in caller gets their own bucket of
+ * `GENERAL_RATE_LIMIT_USER_MAX` (default 600) / minute; everything else is
+ * per IP at `GENERAL_RATE_LIMIT_MAX` (default 120). Per-IP alone made a whole
+ * office behind one NAT share 120 — and a single quick editor hit it, since
+ * each edit refetches several lists.
  */
 export const generalRateLimiter = rateLimit({
     windowMs: 60 * 1000,
-    limit: GENERAL_RATE_LIMIT_MAX,
+    limit: (req) => (signedInUser(req) ? GENERAL_RATE_LIMIT_USER_MAX : GENERAL_RATE_LIMIT_MAX),
+    keyGenerator: (req) => {
+        const userId = signedInUser(req);
+        return userId ? `user:${userId}` : `ip:${ipKeyGenerator(req.ip ?? '')}`;
+    },
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     message: { message: 'Too many requests. Please retry later.' },

@@ -253,6 +253,10 @@ export const TRUST_PROXY = (() => {
 // local smoke environments bump these so the bash smokes can exercise the
 // per-user lockout (5 wrong → 423) without colliding with the per-IP cap.
 export const GENERAL_RATE_LIMIT_MAX = Number(getEnv('GENERAL_RATE_LIMIT_MAX', '120'));
+//   GENERAL_RATE_LIMIT_USER_MAX — same window, per signed-in user (valid access
+//   token). Colleagues behind one office NAT no longer share the per-IP budget,
+//   and one person editing quickly (each edit refetches several lists) fits.
+export const GENERAL_RATE_LIMIT_USER_MAX = Number(getEnv('GENERAL_RATE_LIMIT_USER_MAX', '600'));
 export const AUTH_RATE_LIMIT_MAX = Number(getEnv('AUTH_RATE_LIMIT_MAX', '10'));
 
 // ─── Operational toggles ───────────────────────────────────────────────

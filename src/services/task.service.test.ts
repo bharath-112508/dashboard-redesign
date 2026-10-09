@@ -1178,6 +1178,33 @@ describe('assignTaskStory', () => {
         expect(task.story_id).toBeNull();
         expect(task.save).toHaveBeenCalled();
     });
+    it('an epic change on a parent carries to its subtasks', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, story_id: null, parent_task_id: null });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubStoryLookup(project._id);
+        const storyId = new Types.ObjectId();
+
+        await svc.assignTaskStory(task._id, { story_id: storyId.toString() }, adminCaller());
+
+        expect(taskUpdateManyMock).toHaveBeenCalledWith(
+            { parent_task_id: task._id },
+            { $set: { story_id: storyId, updated_by: expect.anything() } }
+        );
+    });
+
+    it("a subtask's own epic change does not touch other tasks", async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, story_id: null, parent_task_id: new Types.ObjectId() });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubStoryLookup(project._id);
+
+        await svc.assignTaskStory(task._id, { story_id: new Types.ObjectId().toString() }, adminCaller());
+
+        expect(taskUpdateManyMock).not.toHaveBeenCalled();
+    });
 });
 
 // ─── moveTaskToSprint ────────────────────────────────────────────────────
