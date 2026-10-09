@@ -1112,6 +1112,24 @@ describe('custom statuses', () => {
         expect(out.defaults.map((d) => d.key)).toEqual(['to_do', 'in_progress', 'bug', 'review', 'done']);
     });
 
+    it('a project with a custom "bug" lists it once, as the custom status', async () => {
+        const proj = makeProject();
+        (proj as unknown as { default_status_orders: unknown }).default_status_orders = [
+            { key: 'to_do', order: 100, is_active: true },
+            { key: 'in_progress', order: 200, is_active: true },
+            { key: 'review', order: 300, is_active: true },
+            { key: 'done', order: 400, is_active: true },
+        ];
+        proj.custom_task_statuses = makeSubArray([
+            { _id: new Types.ObjectId(), key: 'bug', label: 'Bug (custom)', order: 500, is_terminal: false as boolean },
+        ]);
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        const out = await svc.listCustomStatuses(proj._id, adminCaller());
+        expect(out.defaults.map((d) => d.key)).not.toContain('bug');
+        expect(out.custom.map((c) => c.key)).toEqual(['bug']);
+    });
+
     it('addCustomStatus rejects key collision with CUSTOM_STATUS_KEY_TAKEN', async () => {
         const proj = makeProject();
         proj.custom_task_statuses = makeSubArray([

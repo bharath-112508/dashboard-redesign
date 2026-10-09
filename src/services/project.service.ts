@@ -1312,7 +1312,8 @@ export const listCustomStatuses = async (
     // column list and filter hidden columns out. Fall-back values keep
     // the API safe during the migration window for pre-existing projects.
     const defaults = withAllDefaultStatuses(
-        (doc.default_status_orders ?? []).map((o) => ({ key: o.key, order: o.order, is_active: o.is_active }))
+        (doc.default_status_orders ?? []).map((o) => ({ key: o.key, order: o.order, is_active: o.is_active })),
+        (doc.custom_task_statuses ?? []).map((c) => c.key)
     ).sort((a, b) => a.order - b.order);
 
     return {

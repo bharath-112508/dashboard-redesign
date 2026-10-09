@@ -90,9 +90,12 @@ export const buildCanonicalDefaultOrders = (): Array<{
  * stay valid and render it in place until the migration stores it.
  */
 export const withAllDefaultStatuses = (
-    orders: ReadonlyArray<{ key: string; order: number; is_active: boolean }>
+    orders: ReadonlyArray<{ key: string; order: number; is_active: boolean }>,
+    // A custom status may already own a built-in's key (e.g. a hand-made `bug`);
+    // adding the built-in too would give the project two columns with one key.
+    customKeys: readonly string[] = []
 ): Array<{ key: string; order: number; is_active: boolean }> => {
-    const have = new Set(orders.map((o) => o.key));
+    const have = new Set([...orders.map((o) => o.key), ...customKeys]);
     const missing = DEFAULT_TASK_STATUS_KEYS.filter((k) => !have.has(k)).map((k) => ({
         key: k,
         order: DEFAULT_STATUS_ORDER_VALUES[k],

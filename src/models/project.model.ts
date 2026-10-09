@@ -294,21 +294,21 @@ const projectSchema = new Schema<ProjectDocument>(
             type: [defaultStatusOrderSchema],
             default: buildCanonicalDefaultOrders,
             validate: {
-                // Each of the five canonical keys must appear exactly once.
-                // Prevents drift (e.g. a key disappearing or a duplicate
-                // entry that would cause the board to render two columns
-                // for the same key).
-                validator: (v: DefaultStatusOrder[]) => {
-                    if (v.length !== DEFAULT_TASK_STATUS_KEYS.length) return false;
+                // Each canonical key must appear exactly once — except one a
+                // custom status already owns (a pre-`bug` project with its own
+                // `bug`), which must not appear at all. Prevents drift (a key
+                // disappearing, or two board columns for one key).
+                validator: function (this: unknown, v: DefaultStatusOrder[]) {
+                    const customs = (this as { custom_task_statuses?: Array<{ key: string }> }).custom_task_statuses;
+                    const customKeys = new Set((customs ?? []).map((c) => c.key));
+                    const expected = DEFAULT_TASK_STATUS_KEYS.filter((k) => !customKeys.has(k));
+                    if (v.length !== expected.length) return false;
                     const seen = new Set<string>();
                     for (const entry of v) {
                         if (seen.has(entry.key)) return false;
                         seen.add(entry.key);
                     }
-                    for (const k of DEFAULT_TASK_STATUS_KEYS) {
-                        if (!seen.has(k)) return false;
-                    }
-                    return true;
+                    return expected.every((k) => seen.has(k));
                 },
                 message: 'Each built-in status must appear exactly once in the order.',
             },
@@ -370,7 +370,9 @@ projectSchema.pre('validate', function normaliseDefaultStatusOrders() {
         is_active: boolean;
     }>;
     if (current.length >= DEFAULT_TASK_STATUS_KEYS.length) return;
-    this.set('default_status_orders', withAllDefaultStatuses(current));
+    const customKeys = ((this.custom_task_statuses ?? []) as Array<{ key: string }>).map((c) => c.key);
+    const filled = withAllDefaultStatuses(current, customKeys);
+    if (filled.length !== current.length) this.set('default_status_orders', filled);
 });
 
 export const Project: Model<ProjectDocument> = model<ProjectDocument>(COLLECTIONS.PROJECTS, projectSchema);

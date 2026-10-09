@@ -25,3 +25,10 @@ describe('planBugStatusMigration', () => {
         expect(planBugStatusMigration([{ _id: '4', name: 'P4' }]).toUpdate).toEqual(['4']);
     });
 });
+
+describe('planBugStatusMigration — custom bug wins', () => {
+    it('reports a conflict even if a built-in bug was already written next to the custom one', () => {
+        const plan = planBugStatusMigration([p('5', ['to_do', 'in_progress', 'bug', 'review', 'done'], ['bug'])]);
+        expect(plan).toEqual({ toUpdate: [], alreadyDone: 0, conflicts: [{ id: '5', name: 'P5' }] });
+    });
+});

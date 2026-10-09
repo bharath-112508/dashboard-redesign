@@ -32,3 +32,14 @@ describe('withAllDefaultStatuses', () => {
         expect(withAllDefaultStatuses([]).map((o) => o.key)).toEqual([...DEFAULT_TASK_STATUS_KEYS]);
     });
 });
+
+describe('withAllDefaultStatuses — custom key conflict', () => {
+    it('does not add a built-in whose key a custom status already uses', () => {
+        expect(withAllDefaultStatuses(LEGACY, ['bug']).map((o) => o.key)).toEqual([
+            'to_do',
+            'in_progress',
+            'review',
+            'done',
+        ]);
+    });
+});
