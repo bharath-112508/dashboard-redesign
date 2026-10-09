@@ -284,7 +284,7 @@ export const listTasksQuerySchema = z
          */
         assignee_id: z.union([objectIdSchema, z.literal('null')]).optional(),
         status: z.string().trim().min(1).max(TASK_STATUS_KEY_MAX).optional(),
-        /** `client` = raised from the client side (the client Board's "Your reported bugs"). */
+        /** `client` = raised from the client side (the client Board's "Your requests"). */
         source: z.enum(['client']).optional(),
         priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
         due_before: isoDateSchema.optional(),
