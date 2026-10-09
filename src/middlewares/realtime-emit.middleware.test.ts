@@ -41,6 +41,14 @@ describe('realtimeEmit', () => {
         run('POST', '/leaves', 400);
         expect(publishMock).not.toHaveBeenCalled();
     });
+    it('a new comment (POST /tasks/:id/comments) also publishes task-comments', () => {
+        run('POST', '/tasks/abc123/comments', 201);
+        expect(publishMock).toHaveBeenCalledWith(['tasks', 'task-comments']);
+    });
+    it('a plain task write publishes tasks only', () => {
+        run('PATCH', '/tasks/abc123', 200);
+        expect(publishMock).toHaveBeenCalledWith(['tasks']);
+    });
     it('does not publish for an unmapped path', () => {
         run('POST', '/something-else', 200);
         expect(publishMock).not.toHaveBeenCalled();

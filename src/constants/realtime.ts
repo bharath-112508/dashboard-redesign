@@ -58,3 +58,13 @@ export const PATH_TOPIC_MAP: Record<string, RealtimeTopic> = {
     users: REALTIME_TOPICS.USERS,
     roles: REALTIME_TOPICS.ROLES,
 };
+
+/**
+ * Nested sub-resources whose writes go through a parent path but have their
+ * own topic. `POST /tasks/:id/comments` starts with `tasks`, so without this a
+ * new comment only refreshed task lists — other viewers never saw it until
+ * they reloaded. Keyed by the third path segment (`/<parent>/:id/<child>`).
+ */
+export const NESTED_PATH_TOPIC_MAP: Record<string, RealtimeTopic> = {
+    comments: REALTIME_TOPICS.TASK_COMMENTS,
+};
