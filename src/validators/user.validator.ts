@@ -381,6 +381,25 @@ export const deactivateUserBodySchema = z.object({
 
 export type DeactivateUserBody = z.infer<typeof deactivateUserBodySchema>;
 
+// ─── GET /users/photos ─────────────────────────────────────────────────────
+
+/** Avatars on one screen, batched: `?ids=a,b,c` (max 200). */
+export const USER_PHOTOS_MAX_IDS = 200;
+export const userPhotosQuerySchema = z.object({
+    ids: z
+        .string()
+        .transform((s) => [
+            ...new Set(
+                s
+                    .split(',')
+                    .map((x) => x.trim())
+                    .filter(Boolean)
+            ),
+        ])
+        .pipe(z.array(objectIdSchema).min(1).max(USER_PHOTOS_MAX_IDS)),
+});
+export type UserPhotosQuery = z.infer<typeof userPhotosQuerySchema>;
+
 // ─── GET /users/assignable ─────────────────────────────────────────────────
 
 export const assignableQuerySchema = z.object({

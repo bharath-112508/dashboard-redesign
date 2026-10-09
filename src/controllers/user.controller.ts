@@ -20,6 +20,7 @@ import type {
     DeactivateUserBody,
     ListUsersQuery,
     UpdateUserBody,
+    UserPhotosQuery,
 } from '../validators/user.validator.js';
 import type { ProfilePhotoFinalizeBody, ProfilePhotoUploadUrlBody } from '../validators/profile-photo.validator.js';
 
@@ -135,6 +136,11 @@ export const getAssignableUsers = async (req: Request, res: Response): Promise<R
     // company-scoped, and an inline literal here would silently omit it.
     const rows = await userService.listAssignable(req.query as unknown as AssignableQuery, projectCallerFrom(req));
     return ok(res, rows);
+};
+
+export const getUserPhotos = async (req: Request, res: Response): Promise<Response> => {
+    const { ids } = req.query as unknown as UserPhotosQuery;
+    return ok(res, await userService.listUserPhotos(ids));
 };
 
 // ─── Profile photo endpoints (Step 22) ─────────────────────────────────────

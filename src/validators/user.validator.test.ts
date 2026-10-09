@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { createUserBodySchema, updateUserBodySchema, listUsersQuerySchema } from './user.validator.js';
+import {
+    createUserBodySchema,
+    updateUserBodySchema,
+    listUsersQuerySchema,
+    userPhotosQuerySchema,
+} from './user.validator.js';
 
 /**
  * BUG-044 — phone field accepts only valid international (E.164) numbers,
@@ -373,5 +378,20 @@ describe('createUserBodySchema — freelancer employment record', () => {
             internal_profile: { ...baseInternalProfile, ...blanks },
         });
         expect(r.success).toBe(false);
+    });
+});
+
+describe('userPhotosQuerySchema', () => {
+    const id = 'a'.repeat(24);
+    it('splits a comma list of ObjectIds', () => {
+        expect(userPhotosQuerySchema.parse({ ids: `${id},${'b'.repeat(24)}` }).ids).toEqual([id, 'b'.repeat(24)]);
+    });
+    it('rejects a bad id and more than 200', () => {
+        expect(userPhotosQuerySchema.safeParse({ ids: 'nope' }).success).toBe(false);
+        expect(
+            userPhotosQuerySchema.safeParse({
+                ids: Array.from({ length: 201 }, (_, i) => i.toString(16).padStart(24, '0')).join(','),
+            }).success
+        ).toBe(false);
     });
 });

@@ -13,6 +13,7 @@ import {
     listUsersQuerySchema,
     updateUserBodySchema,
     userIdParamSchema,
+    userPhotosQuerySchema,
 } from '../validators/user.validator.js';
 import {
     finalizeBodySchema as profilePhotoFinalizeBodySchema,
@@ -27,6 +28,9 @@ router.use(authenticate);
 // ─── Collection routes ─────────────────────────────────────────────────────
 
 router.get('/assignable', validate({ query: assignableQuerySchema }), asyncHandler(users.getAssignableUsers));
+
+// Any signed-in caller: avatars show wherever a person does (boards, comments, lists).
+router.get('/photos', validate({ query: userPhotosQuerySchema }), asyncHandler(users.getUserPhotos));
 
 router.get(
     '/',

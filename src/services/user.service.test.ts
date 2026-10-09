@@ -861,3 +861,32 @@ describe('listUsers — employment_type filter', () => {
         expect(filter).not.toHaveProperty('internal_profile.employment_type');
     });
 });
+
+describe('listUserPhotos', () => {
+    const chain = (rows: unknown[]) => ({ select: () => ({ lean: () => Promise.resolve(rows) }) });
+
+    it('signs a URL for each asked-for user with a photo, and skips the rest', async () => {
+        const a = new Types.ObjectId();
+        const b = new Types.ObjectId();
+        userFindMock.mockReturnValueOnce(chain([{ _id: a, profile_photo_blob_key: 'k/a.png' }]));
+        photoSignMock.mockReturnValueOnce('https://blob/a.png?sas');
+
+        const out = await svc.listUserPhotos([a.toString(), b.toString()]);
+
+        expect(userFindMock.mock.calls[0]![0]).toEqual({
+            _id: { $in: [a, b] },
+            profile_photo_blob_key: { $nin: [null, ''] },
+        });
+        expect(out).toEqual({
+            ttl_minutes: 15,
+            data: [{ id: a.toString(), profile_photo_url: 'https://blob/a.png?sas' }],
+        });
+    });
+
+    it('drops a user whose URL could not be signed (Azure off)', async () => {
+        const a = new Types.ObjectId();
+        userFindMock.mockReturnValueOnce(chain([{ _id: a, profile_photo_blob_key: 'k/a.png' }]));
+        photoSignMock.mockReturnValueOnce(null);
+        expect((await svc.listUserPhotos([a.toString()])).data).toEqual([]);
+    });
+});

@@ -330,6 +330,28 @@ export const listUsers = async (
 
 // ─── GET /users/:id ────────────────────────────────────────────────────────
 
+/**
+ * Signed photo URLs for the given users — the avatars on one screen. Ids
+ * only, no names, and only ids the caller already holds from responses it
+ * was allowed to read; users without a photo are simply absent.
+ */
+export const listUserPhotos = async (
+    ids: string[]
+): Promise<{ ttl_minutes: number; data: Array<{ id: string; profile_photo_url: string }> }> => {
+    const ttl = await loadPhotoTtlMinutes();
+    const rows = await User.find({
+        _id: { $in: ids.map((id) => new Types.ObjectId(id)) },
+        profile_photo_blob_key: { $nin: [null, ''] },
+    })
+        .select('_id profile_photo_blob_key')
+        .lean<Array<{ _id: Types.ObjectId; profile_photo_blob_key: string }>>();
+    const data = rows.flatMap((u) => {
+        const url = signProfilePhotoUrl(u.profile_photo_blob_key, ttl);
+        return url ? [{ id: String(u._id), profile_photo_url: url }] : [];
+    });
+    return { ttl_minutes: ttl, data };
+};
+
 export const getUser = async (id: Types.ObjectId): Promise<Record<string, unknown>> => {
     const user = await User.findById(id);
     if (!user) {
