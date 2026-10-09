@@ -1092,6 +1092,40 @@ describe('rankTask', () => {
         expect(task.backlog_rank).toBe(0);
     });
 
+    it('re-ranking a task after the neighbour it already follows is a no-op (safe retry)', async () => {
+        const project = makeProject();
+        // task at rank 3 already directly after the neighbour at rank 2.
+        const task = makeTask({ project_id: project._id, backlog_rank: 3 });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForNeighbour({ backlog_rank: 2 });
+        stubFindOneForLastRank({ backlog_rank: 9 });
+
+        await svc.rankTask(task._id, { after_task_id: new Types.ObjectId().toString() }, adminCaller());
+
+        expect(taskUpdateManyMock).not.toHaveBeenCalled();
+        expect(task.backlog_rank).toBe(3);
+    });
+
+    it('shifts only the rank range between the old and new slot (hidden tasks keep their order)', async () => {
+        const project = makeProject();
+        // rank 2 → after neighbour at rank 5 (moving down): only (2, 5] shifts.
+        const task = makeTask({ project_id: project._id, backlog_rank: 2 });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneForNeighbour({ backlog_rank: 5 });
+        stubFindOneForLastRank({ backlog_rank: 9 });
+
+        await svc.rankTask(task._id, { after_task_id: new Types.ObjectId().toString() }, adminCaller());
+
+        expect(taskUpdateManyMock).toHaveBeenCalledTimes(1);
+        expect(taskUpdateManyMock).toHaveBeenCalledWith(
+            { project_id: task.project_id, _id: { $ne: task._id }, backlog_rank: { $gt: 2, $lte: 5 } },
+            { $inc: { backlog_rank: -1 } }
+        );
+        expect(task.backlog_rank).toBe(5);
+    });
+
     it('rejects a neighbour that is not in the same project', async () => {
         const project = makeProject();
         const task = makeTask({ project_id: project._id, backlog_rank: 0 });
