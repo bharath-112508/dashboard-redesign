@@ -1646,3 +1646,21 @@ describe('updateTask — flag', () => {
         expect(recordActivityMock).toHaveBeenCalledWith(expect.objectContaining({ activity_type: 'flag_removed' }));
     });
 });
+
+describe('listTasks — source filter', () => {
+    const chain = (rows: unknown[]) => ({
+        sort: () => ({ skip: () => ({ limit: () => Promise.resolve(rows) }) }),
+    });
+
+    it('`source=client` narrows to client-raised tasks; absent means no source filter', async () => {
+        taskFindMock.mockReturnValueOnce(chain([]) as never);
+        taskCountDocumentsMock.mockResolvedValueOnce(0 as never);
+        await svc.listTasks({ page: 1, limit: 20, source: 'client' } as never, adminCaller() as never);
+        expect((taskFindMock.mock.calls.at(-1)![0] as Record<string, unknown>).source).toBe('client');
+
+        taskFindMock.mockReturnValueOnce(chain([]) as never);
+        taskCountDocumentsMock.mockResolvedValueOnce(0 as never);
+        await svc.listTasks({ page: 1, limit: 20 } as never, adminCaller() as never);
+        expect((taskFindMock.mock.calls.at(-1)![0] as Record<string, unknown>).source).toBeUndefined();
+    });
+});

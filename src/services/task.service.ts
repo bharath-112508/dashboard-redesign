@@ -688,6 +688,7 @@ export const listTasks = async (
     }
     if (query.status) filter.status = query.status;
     if (query.priority) filter.priority = query.priority;
+    if (query.source) filter.source = query.source;
     if (query.due_before) filter.due_date = { $lte: query.due_before };
 
     if (query.story_id !== undefined) {

@@ -301,3 +301,21 @@ describe('listTasksQuerySchema include_cover', () => {
         expect(listTasksQuerySchema.safeParse({ include_cover: 'yes' }).success).toBe(false);
     });
 });
+
+describe('listTasksQuerySchema source', () => {
+    it('accepts source=client and rejects other values', () => {
+        expect(listTasksQuerySchema.safeParse({ source: 'client' }).success).toBe(true);
+        expect(listTasksQuerySchema.safeParse({ source: 'anything' }).success).toBe(false);
+    });
+});
+
+describe('createTaskBodySchema source', () => {
+    it('a create request cannot mark a task as client-raised', () => {
+        const r = createTaskBodySchema.safeParse({
+            project_id: '64b7f0f0f0f0f0f0f0f0f0f0',
+            title: 'x',
+            source: 'client',
+        });
+        expect(r.success && 'source' in r.data).toBe(false);
+    });
+});

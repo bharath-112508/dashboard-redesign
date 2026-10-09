@@ -238,5 +238,7 @@ taskSchema.index({ status: 1, completed_at: 1 }, { partialFilterExpression: { co
 
 // Text search joins the global-search set (titles + descriptions).
 taskSchema.index({ title: 'text', description: 'text' });
+// Client Board: "Your reported bugs" lists a project's client-raised items.
+taskSchema.index({ project_id: 1, source: 1 });
 
 export const Task: Model<TaskDocument> = model<TaskDocument>(COLLECTIONS.TASKS, taskSchema);
