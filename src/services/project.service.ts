@@ -15,7 +15,6 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import {
-    DEFAULT_TASK_STATUS_KEYS,
     PROJECT_CLIENT_SIDE_ROLES,
     PROJECT_COMPANY_SCOPED_ROLES,
     PROJECT_MEMBER_SCOPED_ROLES,
