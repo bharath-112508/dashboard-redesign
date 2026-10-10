@@ -662,7 +662,7 @@ describe('updateTask', () => {
         expect(task.save).not.toHaveBeenCalled();
     });
 
-    it('rejects a NON-owner employee who removes existing assignees while adding self', async () => {
+    it('lets a NON-owner employee take over a ticket someone else holds (Jira "Assign to me")', async () => {
         const project = makeProject();
         const employeeId = new Types.ObjectId();
         const existing = new Types.ObjectId();
@@ -674,12 +674,12 @@ describe('updateTask', () => {
         });
         taskFindByIdMock.mockResolvedValueOnce(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubActiveUsers([employeeId]);
 
-        // Sends only [self], dropping `existing` — not a pure self-add.
-        await expect(
-            svc.updateTask(task._id, { assignee_ids: [employeeId.toString()] }, employeeCaller(employeeId))
-        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
-        expect(task.save).not.toHaveBeenCalled();
+        await svc.updateTask(task._id, { assignee_ids: [employeeId.toString()] }, employeeCaller(employeeId));
+        expect(task.assignee_ids.map(String)).toEqual([employeeId.toString()]);
+        expect(String(task.primary_assignee_id)).toBe(employeeId.toString());
+        expect(task.save).toHaveBeenCalled();
     });
 
     it('lets the CREATOR employee assign multiple project members', async () => {
@@ -771,7 +771,7 @@ describe('updateTask', () => {
         expect(task.save).not.toHaveBeenCalled();
     });
 
-    it('lets a non-creator employee ADD themselves (grab), keeping existing assignees', async () => {
+    it('refuses a non-creator employee keeping someone else on the ticket alongside themselves', async () => {
         const project = makeProject();
         const employeeId = new Types.ObjectId();
         const other = new Types.ObjectId();
@@ -783,15 +783,15 @@ describe('updateTask', () => {
         });
         taskFindByIdMock.mockResolvedValueOnce(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);
-        stubActiveUsers([other, employeeId]);
 
-        await svc.updateTask(
-            task._id,
-            { assignee_ids: [other.toString(), employeeId.toString()] },
-            employeeCaller(employeeId)
-        );
-        expect(task.assignee_ids.map(String)).toEqual([other.toString(), employeeId.toString()]);
-        expect(task.save).toHaveBeenCalled();
+        await expect(
+            svc.updateTask(
+                task._id,
+                { assignee_ids: [other.toString(), employeeId.toString()] },
+                employeeCaller(employeeId)
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
+        expect(task.save).not.toHaveBeenCalled();
     });
 
     it('moves task to END of new column on status change (admin)', async () => {
@@ -1667,6 +1667,42 @@ describe('assertEmployeePatchScope', () => {
                 employeeCaller(me)
             )
         ).not.toThrow();
+    });
+
+    // Jira "Assign to me": any employee may take a ticket, even one someone
+    // else holds — but may not hand it to another person or drop it.
+    it('lets an employee take a ticket someone else is assigned to', () => {
+        const me = new Types.ObjectId();
+        const other = new Types.ObjectId();
+        expect(() =>
+            svc.assertEmployeePatchScope(
+                { assignee_ids: [me.toString()] } as never,
+                taskOwnedBy(new Types.ObjectId(), [other]),
+                employeeCaller(me)
+            )
+        ).not.toThrow();
+    });
+
+    it('refuses an employee assigning someone else', () => {
+        const me = new Types.ObjectId();
+        expect(() =>
+            svc.assertEmployeePatchScope(
+                { assignee_ids: [new Types.ObjectId().toString()] } as never,
+                taskOwnedBy(new Types.ObjectId(), []),
+                employeeCaller(me)
+            )
+        ).toThrow(/only to yourself/i);
+    });
+
+    it('refuses a non-creator employee unassigning the ticket', () => {
+        const me = new Types.ObjectId();
+        expect(() =>
+            svc.assertEmployeePatchScope(
+                { assignee_ids: [] } as never,
+                taskOwnedBy(new Types.ObjectId(), [me]),
+                employeeCaller(me)
+            )
+        ).toThrow(/creator or a manager/i);
     });
 
     it('still refuses fields no employee may touch, creator or not', () => {

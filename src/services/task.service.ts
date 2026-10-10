@@ -126,35 +126,26 @@ const isCallerAssignee = (task: TaskDocument, caller: ProjectCaller): boolean =>
 };
 
 /**
- * Validate that an `assignee_ids` patch only ADDS the caller themselves — a
- * non-creator employee may grab an available task by putting their own name on
- * it, but may never REMOVE anyone (including themselves) or add someone else.
- * Managing the roster — every removal, and assigning other people — is the
- * creator's (and managers') job.
+ * A non-creator employee's assignee change (Jira "Assign to me"): they may
+ * take the ticket for themselves — even from someone else — but may not hand
+ * it to another person, nor unassign it. Reassigning others and clearing the
+ * assignee stay with the creator and managers.
  */
 const assertSelfAddOnly = (patch: PatchTaskBody, task: TaskDocument, caller: ProjectCaller): void => {
     if (patch.assignee_ids === undefined) return;
-    const callerStr = String(caller.id);
-    const requested = new Set(patch.assignee_ids.map(String));
+    const requested = patch.assignee_ids.map(String);
     const current = new Set(task.assignee_ids.map((id) => String(id)));
     if (task.primary_assignee_id) current.add(String(task.primary_assignee_id));
-    // Nobody may be removed (this also blocks a non-creator leaving on their own).
-    for (const id of current) {
-        if (!requested.has(id)) {
-            throw AppError.forbidden(
-                'Only the task creator or a manager can remove assignees.',
-                ERROR_CODES.TASK_WRITE_FORBIDDEN
-            );
-        }
+    const unchanged = requested.length === current.size && requested.every((id) => current.has(id));
+    if (unchanged) return;
+    if (requested.length === 0) {
+        throw AppError.forbidden(
+            'Only the task creator or a manager can unassign this ticket.',
+            ERROR_CODES.TASK_WRITE_FORBIDDEN
+        );
     }
-    // The only person the caller may add is themselves.
-    for (const id of requested) {
-        if (!current.has(id) && id !== callerStr) {
-            throw AppError.forbidden(
-                'You can add only yourself — you cannot assign other people.',
-                ERROR_CODES.TASK_WRITE_FORBIDDEN
-            );
-        }
+    if (requested.some((id) => id !== String(caller.id))) {
+        throw AppError.forbidden('You can assign this ticket only to yourself.', ERROR_CODES.TASK_WRITE_FORBIDDEN);
     }
 };
 
@@ -213,7 +204,7 @@ export const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocumen
 
     // Non-creator employee:
     //  - work-field edits (status/description/estimate) require being an assignee;
-    //  - any assignee-list change may add/remove ONLY the caller themselves.
+    //  - an assignee change may only put the caller on it (taking it over).
     const isAssignee = isCallerAssignee(task, caller);
     const editsWorkFields = Object.keys(patch).some((k) => k !== 'assignee_ids');
     if (editsWorkFields && !isAssignee) {
