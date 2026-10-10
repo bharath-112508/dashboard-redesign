@@ -29,6 +29,7 @@
 
 export const TASK_ACTIVITY_TYPES = {
     CREATED: 'created',
+    TITLE_CHANGED: 'title_changed',
     STATUS_CHANGED: 'status_changed',
     PRIORITY_CHANGED: 'priority_changed',
     DUE_DATE_CHANGED: 'due_date_changed',

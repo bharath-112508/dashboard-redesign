@@ -893,6 +893,24 @@ describe('updateTask — labels', () => {
         );
     });
 
+    // Regression: ISSUE-003 — renaming a task left no trace in Activity.
+    it('emits TITLE_CHANGED when the title changes', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, title: 'Old name' });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await svc.updateTask(task._id, { title: 'New name' }, adminCaller());
+
+        expect(recordActivityMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                activity_type: TASK_ACTIVITY_TYPES.TITLE_CHANGED,
+                from_value: 'Old name',
+                to_value: 'New name',
+            })
+        );
+    });
+
     it('does NOT emit LABELS_CHANGED on a reorder / case-only no-op', async () => {
         const project = makeProject();
         const task = makeTask({ project_id: project._id, labels: ['UI', 'api'] });

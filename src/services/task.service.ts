@@ -798,6 +798,7 @@ export const updateTask = async (
     // — Mongoose docs are reference types, so reading `task.priority`
     // after the assignment would give us the new value.
     const prev = {
+        title: task.title,
         status: task.status,
         priority: task.priority,
         issue_type: task.issue_type,
@@ -935,6 +936,7 @@ export const updateTask = async (
 const emitPatchActivities = async (
     task: TaskDocument,
     prev: {
+        title: string;
         status: string;
         priority: string;
         issue_type: string;
@@ -950,6 +952,15 @@ const emitPatchActivities = async (
     },
     actorId: Types.ObjectId
 ): Promise<void> => {
+    if (task.title !== prev.title) {
+        await recordActivity({
+            task_id: task._id,
+            actor_id: actorId,
+            activity_type: TASK_ACTIVITY_TYPES.TITLE_CHANGED,
+            from_value: prev.title,
+            to_value: task.title,
+        });
+    }
     if (task.issue_type !== prev.issue_type) {
         await recordActivity({
             task_id: task._id,
