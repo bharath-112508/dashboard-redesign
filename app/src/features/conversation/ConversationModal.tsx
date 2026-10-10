@@ -4,7 +4,8 @@ import type { Attachment, ChatFile, ChatMessage, ClientPriority, Question, Task 
 import { Avatar, CloseButton, Icon, Label, PATHS } from '../../components/ui'
 import { diff, fmt, todayLabel, TODAY } from '../../lib/dates'
 import { isImageName, readFiles } from '../../lib/files'
-import { ME, questionTags } from '../../lib/theme'
+import { questionTags } from '../../lib/theme'
+import { useMe } from '../tickets/useMe'
 import { usePage } from '../../state/page'
 import { useOverlay } from '../../state/ui'
 import { statusOf, taskKey, fileExt } from '../../domain/tasks'
@@ -75,6 +76,7 @@ export function ConversationModal({ bugId, questionId }: { bugId?: number; quest
 }
 
 function QuestionConversation({ q, close }: { q: Question; close: () => void }) {
+  const me = useMe()
   const send = useSend()
   const { side, person } = usePage()
   const team = side === 'team'
@@ -114,7 +116,7 @@ function QuestionConversation({ q, close }: { q: Question; close: () => void }) 
                 {
                   type: 'question.message',
                   id: q.id,
-                  message: { who: ME, side: 'team', text: q.solved ? 'Reopened the question' : 'Marked as solved', when: 'just now', files: [] },
+                  message: { who: me.name, side: 'team', text: q.solved ? 'Reopened the question' : 'Marked as solved', when: 'just now', files: [] },
                 },
               ],
             }),
@@ -491,6 +493,7 @@ function Shell({ m, close, children }: { m: Model; close: () => void; children: 
 }
 
 function Chat({ m, close }: { m: Model; close: () => void }) {
+  const me = useMe()
   const { side: SIDE, person } = usePage()
   const [draft, setDraft] = useState('')
   const [pend, setPend] = useState<ChatFile[]>([])
@@ -507,7 +510,7 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
   useEscapeHold('composer', ok)
   const send = () => {
     if (!ok) return
-    m.send({ who: SIDE === 'client' ? 'Client' : ME, side: SIDE, text: draft.trim(), when: 'just now', files: pend })
+    m.send({ who: SIDE === 'client' ? 'Client' : me.name, side: SIDE, text: draft.trim(), when: 'just now', files: pend })
     setDraft('')
     setPend([])
   }

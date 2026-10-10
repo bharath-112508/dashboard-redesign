@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useTasks } from '../../api/queries'
 import type { Priority, TaskType } from '../../api/types'
 import { Avatar, Icon, PATHS, Scrim } from '../../components/ui'
-import { ME, person, PRIO, PRIO_ICON, PRIO_ICON_COLOR, PRIO_LIST, TYPE_ICON, TYPE_LIST, TYPES } from '../../lib/theme'
+import { useMe } from '../../features/tickets/useMe'
+import { person, PRIO, PRIO_ICON, PRIO_ICON_COLOR, PRIO_LIST, TYPE_ICON, TYPE_LIST, TYPES } from '../../lib/theme'
 import { useUi } from '../../state/ui'
 
 type Opt = { v: string; label: string; vb: string; path: string; ic: string; soft: string; n: number }
@@ -85,7 +86,7 @@ export function Toolbar() {
   const EPS = ui.epSel.includes(ui.epic) ? ui.epSel : [ui.epic]
   const base = tasks.filter(t => !t.parent && EPS.includes(t.epic))
   const all: Opt = { v: '', label: 'All', vb: '0 0 24 24', path: 'M4 6h16M4 12h16M4 18h16', ic: '#22354C', soft: '#EEF3FB', n: base.length }
-  const me = person(ME)
+  const me = person(useMe().name)
 
   return (
     <div className="mb-[18px] mt-3 flex flex-wrap items-center gap-2">

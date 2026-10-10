@@ -3,7 +3,7 @@ import { useEntries, useTasks, useWorkspace } from '../../api/queries'
 import type { Task } from '../../api/types'
 import { Avatar } from '../../components/ui'
 import { diff, short, TODAY } from '../../lib/dates'
-import { PEOPLE } from '../../lib/theme'
+import { useTeamPeople } from '../../features/tickets/useMe'
 import { usePerson } from '../../state/page'
 import { useOverlay, useUi } from '../../state/ui'
 import { assigneesOf, cardAvatars, estimateHours, loggedHours, statusOf, taskKey } from '../../domain/tasks'
@@ -37,6 +37,7 @@ export function OverviewView() {
   const ws = useWorkspace().data!
   const all = (useTasks().data ?? []).filter(t => !t.parent)
   const entries = useEntries().data ?? []
+  const team = useTeamPeople()
   const ui = useUi()
   const person = usePerson()
   const overlay = useOverlay()
@@ -115,13 +116,15 @@ export function OverviewView() {
   })
 
   const tot = wH.reduce((a, x) => a + x.hl, 0)
-  const pp = PEOPLE.map(n => {
-    let v = 0
-    entries.forEach(x => {
-      if (x.user === n && all.some(t => t.id === x.task)) v += (x.bill || 0) + (x.non || 0)
+  const pp = team
+    .map(p => {
+      let v = 0
+      entries.forEach(x => {
+        if (x.userId === p.id && all.some(t => t.id === x.task)) v += (x.bill || 0) + (x.non || 0)
+      })
+      return { ...person(p.name), v }
     })
-    return { ...person(n), v }
-  }).sort((a, b) => b.v - a.v)
+    .sort((a, b) => b.v - a.v)
   const pmx = Math.max(1, ...pp.map(x => x.v))
   const topL = wH
     .filter(x => x.hl > 0)

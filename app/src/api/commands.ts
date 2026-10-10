@@ -1,4 +1,3 @@
-import { ME } from '../lib/theme'
 import { nextTaskId } from '../domain/tasks'
 import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, Question, RequestComment, Sprint, Task, TimeEntry } from './types'
 import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
@@ -15,9 +14,10 @@ export type ProfilePatch = Partial<Pick<Person, 'name' | 'phone' | 'tz' | 'pwHas
 export type Command =
   /** `top`: put the task first in the list (the header "+" on the Bugs column). */
   | { type: 'task.create'; task: Task; top?: boolean }
-  | { type: 'task.update'; id: number; patch: Partial<Task>; log?: string; who?: string }
+  /** `who` is the signed-in person; it names the author of the activity line. */
+  | { type: 'task.update'; id: number; patch: Partial<Task>; log?: string; who: string }
   | { type: 'task.delete'; id: number }
-  | { type: 'task.comment'; id: number; text: string }
+  | { type: 'task.comment'; id: number; text: string; who: string }
   | { type: 'bug.message'; id: number; message: ChatMessage }
   | { type: 'question.message'; id: number; message: ChatMessage }
   | { type: 'request.comment'; id: number; comment: RequestComment }
@@ -129,12 +129,12 @@ export const reduce = (db: Db, input: Command): Db => {
       return mapTask(db, cmd.id, t => ({
         ...t,
         ...cmd.patch,
-        acts: cmd.log ? [{ kind: 'history', who: cmd.who ?? ME, what: cmd.log, when: 'just now' }, ...t.acts] : t.acts,
+        acts: cmd.log ? [{ kind: 'history', who: cmd.who, what: cmd.log, when: 'just now' }, ...t.acts] : t.acts,
       }))
     case 'task.delete':
       return { ...db, tasks: db.tasks.filter(t => t.id !== cmd.id) }
     case 'task.comment':
-      return mapTask(db, cmd.id, t => ({ ...t, acts: [{ kind: 'comment', who: ME, text: cmd.text, when: 'just now' }, ...t.acts] }))
+      return mapTask(db, cmd.id, t => ({ ...t, acts: [{ kind: 'comment', who: cmd.who, text: cmd.text, when: 'just now' }, ...t.acts] }))
     case 'bug.message':
       return mapTask(db, cmd.id, t =>
         t.clientBug ? { ...t, clientBug: { ...t.clientBug, chat: [...t.clientBug.chat, cmd.message] } } : t,

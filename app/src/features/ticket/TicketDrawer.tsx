@@ -7,7 +7,8 @@ import { Markdown } from '../../components/Markdown'
 import { Avatar, Backdrop, CloseButton, CountPill, Icon, Label, PATHS, Scrim, TabButton, unassigned } from '../../components/ui'
 import { diff, fmt, short, TODAY } from '../../lib/dates'
 import { focusField } from '../../lib/focusField'
-import { ME, pal, PEOPLE, PRIO, PRIO_LIST, TYPE_LIST, TYPES } from '../../lib/theme'
+import { pal, PRIO, PRIO_LIST, TYPE_LIST, TYPES } from '../../lib/theme'
+import { useMe, useTeamPeople } from '../tickets/useMe'
 import { usePage } from '../../state/page'
 import { ClientChat } from './ClientChat'
 import { useOverlay } from '../../state/ui'
@@ -24,6 +25,7 @@ import {
   taskKey,
 } from '../../domain/tasks'
 import { DescriptionEditor } from './DescriptionEditor'
+import { nextEntryId } from '../../domain/tasks'
 import { Caret, PillDropdown, type PillOption } from './PillDropdown'
 
 type Tab = 'details' | 'subs' | 'act' | 'chat'
@@ -87,10 +89,10 @@ export function TicketDrawer({ id }: { id: number }) {
  * browser Back or a route change), it is removed; a typed title is saved instead.
  * Does nothing once the ticket has a title, so it is safe to run more than once.
  */
-function settleNewTicket(send: (cmd: Command) => void, t: Task, titleDraft: string) {
+function settleNewTicket(send: (cmd: Command) => void, who: string, t: Task, titleDraft: string) {
   if (!t.isNew || t.title) return
   const v = titleDraft.trim()
-  if (v) send({ type: 'task.update', id: t.id, patch: { title: v, isNew: false } })
+  if (v) send({ type: 'task.update', who, id: t.id, patch: { title: v, isNew: false } })
   else send({ type: 'task.delete', id: t.id })
 }
 
@@ -116,6 +118,8 @@ function TicketBody({
   const ws = useWorkspace().data!
   const entries = useEntries().data ?? []
   const send = useSend()
+  const me = useMe()
+  const teamPeople = useTeamPeople()
   const loc = useLocation()
   const { person, side } = usePage()
   const view = loc.pathname.split('/')[2] || 'board'
@@ -134,8 +138,8 @@ function TicketBody({
   const [dropOn, setDropOn] = useState(false)
 
   // The latest values, read by the close paths below (including the unmount cleanup).
-  const latest = useRef({ task: raw0, titleDraft, send, settled: false })
-  latest.current = { task: raw0, titleDraft, send, settled: latest.current.settled }
+  const latest = useRef({ task: raw0, titleDraft, send, who: me.name, settled: false })
+  latest.current = { task: raw0, titleDraft, send, who: me.name, settled: latest.current.settled }
   const pendingSettle = useRef<number | undefined>(undefined)
 
   /** Settles the new ticket once per drawer instance. */
@@ -143,7 +147,7 @@ function TicketBody({
     const L = latest.current
     if (L.settled) return
     L.settled = true
-    settleNewTicket(L.send, L.task, L.titleDraft)
+    settleNewTicket(L.send, L.who, L.task, L.titleDraft)
   }
   const close = () => {
     settle()
@@ -181,7 +185,7 @@ function TicketBody({
 
   const raw: Task = { ...raw0, subs: subsOf(raw0, tasks) }
   const id = raw.id
-  const upd = (patch: Partial<Task>, log?: string) => send({ type: 'task.update', id, patch, log })
+  const upd = (patch: Partial<Task>, log?: string) => send({ type: 'task.update', who: me.name, id, patch, log })
   const key = taskKey(raw)
   const st = statusOf(ws.statuses, raw.status)
   const ty = TYPES[raw.type]
@@ -199,7 +203,7 @@ function TicketBody({
   const nEnt = entryCount(raw, entries)
   const estN = estimateHours(raw)
   const estOver = estN > 0 && logged > estN
-  const people = PEOPLE
+  const people = teamPeople.map(p => p.name)
 
   // ---------- subtasks
   const openSub = (parent: Task, i: number) => {
@@ -231,13 +235,13 @@ function TicketBody({
       sprint: parent.sprint,
       start: parent.start || TODAY,
       time: {},
-      acts: [{ kind: 'history', who: ME, what: 'opened subtask of ' + taskKey(parent), when: 'just now' }],
+      acts: [{ kind: 'history', who: me.name, what: 'opened subtask of ' + taskKey(parent), when: 'just now' }],
     }
     send({
       type: 'batch',
       cmds: [
         { type: 'task.create', task: rec },
-        { type: 'task.update', id: parent.id, patch: { subs: parent.subs.map((y, j) => (j === i ? { ...y, sid } : y)) } },
+        { type: 'task.update', who: me.name, id: parent.id, patch: { subs: parent.subs.map((y, j) => (j === i ? { ...y, sid } : y)) } },
       ],
     })
     go(sid, 'details', stack)
@@ -248,12 +252,13 @@ function TicketBody({
     const cmds: Command[] = [
       {
         type: 'task.update',
+        who: me.name,
         id,
         patch: { subs: raw0.subs.map((y, j) => (j === i ? { ...y, done } : y)) },
         log: (done ? 'completed' : 'reopened') + ' subtask “' + x.t + '”',
       },
     ]
-    if (x.sid) cmds.push({ type: 'task.update', id: x.sid, patch: { status: done ? 'done' : ws.statuses[0].id } })
+    if (x.sid) cmds.push({ type: 'task.update', who: me.name, id: x.sid, patch: { status: done ? 'done' : ws.statuses[0].id } })
     send({ type: 'batch', cmds })
   }
   const addSub = () => {
@@ -267,7 +272,7 @@ function TicketBody({
   const post = () => {
     const v = cDraft.trim()
     if (!v) return
-    send({ type: 'task.comment', id, text: v })
+    send({ type: 'task.comment', who: me.name, id, text: v })
     setCDraft('')
   }
 
@@ -369,6 +374,7 @@ function TicketBody({
             const cmds: Command[] = [
               {
                 type: 'task.update',
+                who: me.name,
                 id,
                 patch: { assignees: L, assignee: L[0] || '', contribs: raw.contribs.filter(x => !L.includes(x)) },
                 log: on ? 'removed ' + n + ' as assignee' : 'assigned ' + n,
@@ -1242,10 +1248,27 @@ function TicketBody({
                 onClick={() => {
                   const v = Math.round((logHr + logMin / 60) * 100) / 100
                   if (!v) return
-                  const tm = { ...(raw.time || {}) }
-                  tm[TODAY] = (tm[TODAY] || 0) + v
                   const lbl = ((logHr ? logHr + 'h' : '') + (logMin ? ' ' + logMin + 'm' : '')).trim()
-                  upd({ time: tm }, 'logged ' + lbl)
+                  send({
+                    type: 'batch',
+                    cmds: [
+                      {
+                        type: 'entry.create',
+                        entry: {
+                          id: nextEntryId(entries),
+                          date: TODAY,
+                          userId: me.id,
+                          user: me.name,
+                          type: 'General',
+                          task: id,
+                          notes: '',
+                          bill: v,
+                          non: 0,
+                        },
+                      },
+                      { type: 'task.update', who: me.name, id, patch: {}, log: 'logged ' + lbl },
+                    ],
+                  })
                   setLogHr(0)
                   setLogMin(0)
                 }}

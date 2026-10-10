@@ -3,7 +3,8 @@ import { useDevops, useRequests, useSend, useWorkspace } from '../../api/queries
 import type { DevopsRequest, Priority } from '../../api/types'
 import { Icon, PATHS, Scrim } from '../../components/ui'
 import { fmt, TODAY } from '../../lib/dates'
-import { devopsTone, ME, PRIO } from '../../lib/theme'
+import { devopsTone, PRIO } from '../../lib/theme'
+import { useMe } from './useMe'
 import { usePerson } from '../../state/page'
 import { useOverlay } from '../../state/ui'
 import { Caret } from '../ticket/PillDropdown'
@@ -39,6 +40,7 @@ type Draft = { type: string; prio: Priority; to: string; text: string }
 
 /** The DevOps button in the epic bar and its panel: project status and requests to the DevOps team. */
 export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string }) {
+  const me = useMe()
   const ws = useWorkspace().data!
   const dv = useDevops().data
   const requests = useRequests().data ?? []
@@ -82,7 +84,7 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
         prio: rq.prio,
         to: rq.to || p.owner || '',
         text,
-        by: ME,
+        by: me.name,
         when: 'just now',
         raised: TODAY,
         status: 'Open',

@@ -1,5 +1,7 @@
+import { useMemo } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
-import { teamPerson } from '../../lib/theme'
+import { usePeople } from '../../api/people/directory'
+import { avatarFor } from '../../features/tickets/useMe'
 import { PageContext, type PageInfo } from '../../state/page'
 import { UiProvider } from '../../state/ui'
 import { PlanView } from '../clients/PlanView'
@@ -12,17 +14,17 @@ import { BacklogView } from './BacklogView'
 import { TimesheetView } from './TimesheetView'
 import { FilesView } from './FilesView'
 
-/** The team's side of the shared windows, with personal avatar colours. */
-const TEAM_PAGE: PageInfo = { side: 'team', base: '/tickets', person: teamPerson }
-
 /**
  * Entry point for the Tickets page (team side). It has its own board filters
  * and epic selection, separate from the Clients page.
  */
 export function TicketsRoutes() {
+  // The team's side of the shared windows: avatars use each person's colour from the directory.
+  const people = usePeople().data ?? []
+  const team = useMemo<PageInfo>(() => ({ side: 'team', base: '/tickets', person: name => avatarFor(people, name) }), [people])
   return (
     <UiProvider>
-      <PageContext.Provider value={TEAM_PAGE}>
+      <PageContext.Provider value={team}>
         <Routes>
           <Route element={<TicketsLayout />}>
             <Route index element={<Navigate to="board" replace />} />

@@ -1,4 +1,5 @@
 import { useOverlay } from '../state/ui'
+import { ticketIdFromParam } from '../domain/tasks'
 import { TicketDrawer } from './ticket/TicketDrawer'
 import { ConversationModal } from './conversation/ConversationModal'
 import { RequestDrawer } from './requests/RequestDrawer'
@@ -8,14 +9,15 @@ import { EpicDocModal } from './plan/EpicDocModal'
 import { SprintFormModal } from './plan/SprintFormModal'
 import { SprintViewModal } from './plan/SprintViewModal'
 
-/** Renders whichever window the URL asks for (?ticket=12, ?bug=17, ?report=1 …). */
+/** Renders whichever window the URL asks for (?ticket=12 or ?ticket=PMT-12, ?bug=17, ?report=1 …). */
 export function Overlays() {
   const { get } = useOverlay()
   const num = (k: Parameters<typeof get>[0]) => {
     const v = get(k)
     return v != null && v !== '' && !isNaN(+v) ? +v : null
   }
-  const ticket = num('ticket')
+  // ?ticket= takes a number or a key such as PMT-12 (My tickets links use the key).
+  const ticket = ticketIdFromParam(get('ticket'))
   const bug = num('bug')
   const question = num('question')
   const request = num('request')

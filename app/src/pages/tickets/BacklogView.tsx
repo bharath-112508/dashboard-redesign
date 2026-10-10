@@ -3,7 +3,8 @@ import { useSend, useTasks, useWorkspace } from '../../api/queries'
 import type { Sprint, Task } from '../../api/types'
 import { Avatar, Icon, PATHS, unassigned } from '../../components/ui'
 import { range, TODAY, weeks } from '../../lib/dates'
-import { ME, PRIO, SPRINT_STATE, TYPES } from '../../lib/theme'
+import { PRIO, SPRINT_STATE, TYPES } from '../../lib/theme'
+import { useMe } from '../../features/tickets/useMe'
 import { usePerson } from '../../state/page'
 import { useUi } from '../../state/ui'
 import { nextTaskId, sprintsOf, statusOf, taskKey } from '../../domain/tasks'
@@ -11,6 +12,7 @@ import { useOpenTask } from '../../features/useOpenTask'
 
 /** The "Backlog" tab: the epic's open sprints and its backlog, with a "move to sprint" menu on every task. */
 export function BacklogView() {
+  const me = useMe()
   const ws = useWorkspace().data!
   const tasks = useTasks().data ?? []
   const ui = useUi()
@@ -26,7 +28,7 @@ export function BacklogView() {
   const move = (t: Task, v: string) => {
     const to = v || null
     const sp = ws.sprints.find(y => y.id === to)
-    send({ type: 'task.update', id: t.id, patch: { sprint: to }, log: sp ? 'moved it to ' + sp.name : 'moved it to the backlog' })
+    send({ type: 'task.update', who: me.name, id: t.id, patch: { sprint: to }, log: sp ? 'moved it to ' + sp.name : 'moved it to the backlog' })
   }
 
   const row = (t: Task) => {
@@ -120,7 +122,7 @@ export function BacklogView() {
         sprint: null,
         start: TODAY,
         time: {},
-        acts: [{ kind: 'history', who: ME, what: 'created the task', when: 'just now' }],
+        acts: [{ kind: 'history', who: me.name, what: 'created the task', when: 'just now' }],
       },
     })
     setDraft('')

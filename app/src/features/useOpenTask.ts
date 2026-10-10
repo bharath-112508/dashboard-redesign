@@ -2,8 +2,8 @@ import { useCallback } from 'react'
 import { useSendAsync, useTasks, useWorkspace } from '../api/queries'
 import type { Task } from '../api/types'
 import { TODAY } from '../lib/dates'
-import { ME } from '../lib/theme'
 import { activeSprint, nextTaskId } from '../domain/tasks'
+import { useMe } from './tickets/useMe'
 import { useOverlay } from '../state/ui'
 import { usePage } from '../state/page'
 
@@ -29,6 +29,7 @@ export const useOpenTask = () => {
 export const useCreateTicket = () => {
   const tasks = useTasks().data ?? []
   const ws = useWorkspace().data
+  const me = useMe()
   const send = useSendAsync()
   const overlay = useOverlay()
   /** Whether the ticket window still shows `id` (the user may have moved on). */
@@ -63,7 +64,7 @@ export const useCreateTicket = () => {
           sprint,
           start: TODAY,
           time: {},
-          acts: [{ kind: 'history', who: ME, what: 'created the task', when: 'just now' }],
+          acts: [{ kind: 'history', who: me.name, what: 'created the task', when: 'just now' }],
         },
       })
     } catch {

@@ -3,7 +3,8 @@ import { useQuestions, useRequests, useSend, useTasks, useWorkspace } from '../.
 import type { DevopsRequest, Priority, Task } from '../../api/types'
 import { Icon, PATHS } from '../../components/ui'
 import { diff, short, TODAY } from '../../lib/dates'
-import { ME, questionTags } from '../../lib/theme'
+import { questionTags } from '../../lib/theme'
+import { useMe } from '../../features/tickets/useMe'
 import { useOverlay, useUi } from '../../state/ui'
 import { assigneesOf, blurb, cardAvatars, taskKey } from '../../domain/tasks'
 import { usePerson } from '../../state/page'
@@ -15,6 +16,7 @@ const REQ_STATUS: Record<string, string> = { Open: 'todo', 'In progress': 'prog'
 
 /** Tasks matching the board's epic, sprint, search and filter settings. */
 export function useBoardTasks() {
+  const me = useMe()
   const ui = useUi()
   const tasks = useTasks().data ?? []
   const q = ui.q.trim().toLowerCase()
@@ -25,13 +27,14 @@ export function useBoardTasks() {
       EPS.includes(t.epic) &&
       (!ui.spSel || ui.spSel.includes(t.sprint || 'backlog')) &&
       (!q || (t.title + ' ' + taskKey(t)).toLowerCase().includes(q)) &&
-      (!ui.mine || t.assignee === ME) &&
+      (!ui.mine || t.assignee === me.name) &&
       (!ui.typeF || t.type === ui.typeF) &&
       (!ui.prioF || t.prio === ui.prioF),
   )
 }
 
 export function BoardView() {
+  const me = useMe()
   const person = usePerson()
   const ws = useWorkspace().data!
   const ui = useUi()
@@ -98,11 +101,11 @@ export function BoardView() {
     if (!t) return
     if (target === '__bugs') {
       if (t.type !== 'Bug' || t.status !== first)
-        send({ type: 'task.update', id: t.id, patch: { type: 'Bug', status: first }, log: 'moved it to Bugs' })
+        send({ type: 'task.update', who: me.name, id: t.id, patch: { type: 'Bug', status: first }, log: 'moved it to Bugs' })
       return
     }
     const s = ws.statuses.find(x => x.id === target)!
-    if (t.status !== s.id) send({ type: 'task.update', id: t.id, patch: { status: s.id }, log: 'moved it to ' + s.name })
+    if (t.status !== s.id) send({ type: 'task.update', who: me.name, id: t.id, patch: { status: s.id }, log: 'moved it to ' + s.name })
   }
   const dragOver = (id: string) => (e: DragEvent) => {
     e.preventDefault()

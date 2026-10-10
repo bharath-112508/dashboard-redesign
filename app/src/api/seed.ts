@@ -124,15 +124,9 @@ const buildTasks = (sprints: Sprint[]): Task[] => {
     9: ['mob', 'm1', '2026-09-29'], 10: ['mob', 'm2', '2026-10-06'], 11: ['mob', 'm2', '2026-10-12'], 12: ['mob', 'm2', '2026-10-09'],
     13: ['mob', 'm3', '2026-10-19'], 14: ['mob', 'm4', '2026-10-27'], 15: ['mob', null, '2026-10-10'], 16: ['mob', 'm8', '2026-12-07'],
   }
-  const TIME: Record<number, Record<string, number>> = {
-    1: { '2026-10-08': 1.5, '2026-10-09': 2 },
-    4: { '2026-10-09': 1 },
-    10: { '2026-10-06': 3, '2026-10-07': 2.5, '2026-10-08': 2 },
-    12: { '2026-10-09': 2 },
-  }
   const tasks: Task[] = T0.map(t => {
     const [epic, sprint, start] = PLACE[t.id]
-    return { ...t, epic, sprint, start, time: TIME[t.id] || {} }
+    return { ...t, epic, sprint, start, time: {} }
   })
 
   // Bugs the client reported from the Clients page, each with its own chat.
@@ -221,6 +215,31 @@ const ENTRIES: TimeEntry[] = (
   non: r[6],
 }))
 
+/** Hours logged on tickets before the shared store existed. They are time entries now, so every page reads the same hours. */
+const TICKET_HOURS: [string, string, number, number][] = [
+  ['2026-10-08', 'Bharath Reddy Panyala', 1, 1.5],
+  ['2026-10-09', 'Bharath Reddy Panyala', 1, 2],
+  ['2026-10-09', 'Rahul', 4, 1],
+  ['2026-10-06', 'Chary', 10, 3],
+  ['2026-10-07', 'Chary', 10, 2.5],
+  ['2026-10-08', 'Chary', 10, 2],
+  ['2026-10-09', 'Chary', 12, 2],
+]
+const ALL_ENTRIES: TimeEntry[] = [
+  ...ENTRIES,
+  ...TICKET_HOURS.map(([date, user, task, bill], i) => ({
+    id: ENTRIES.length + i + 1,
+    date,
+    userId: personIdByName(user),
+    user,
+    type: 'General',
+    task,
+    notes: '',
+    bill,
+    non: 0,
+  })),
+]
+
 export const DB_VERSION = 3
 
 export const createSeed = (): Db => {
@@ -239,7 +258,7 @@ export const createSeed = (): Db => {
       devopsLinks: { mob: 'OPS-101', web: 'OPS-107' },
     },
     tasks: buildTasks(sprints),
-    entries: ENTRIES,
+    entries: ALL_ENTRIES,
     people: PEOPLE_SEED,
     companies: COMPANIES_SEED,
     internalProjects: [],

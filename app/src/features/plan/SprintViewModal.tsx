@@ -1,12 +1,15 @@
+import { useState } from 'react'
 import { useSend, useTasks, useWorkspace } from '../../api/queries'
 import { CloseButton } from '../../components/ui'
 import { diff, range, short, TODAY, weeks } from '../../lib/dates'
 import { SPRINT_STATE } from '../../lib/theme'
-import { usePerson } from '../../state/page'
+import { usePage, usePerson } from '../../state/page'
+import { useMe } from '../tickets/useMe'
 import { useOverlay } from '../../state/ui'
-import { statusOf } from '../../domain/tasks'
+import { statusOf, taskKey } from '../../domain/tasks'
 import { useOpenTask } from '../useOpenTask'
 import { useEscape } from '../useEscape'
+import type { Command } from '../../api/commands'
 import { onActivate } from './keyboard'
 
 const C = 2 * Math.PI * 50
@@ -21,9 +24,49 @@ export function SprintViewModal({ id }: { id: string }) {
   const openTask = useOpenTask()
   const close = () => overlay.close('sprint')
   useEscape(close)
+  const me = useMe()
+  const { side } = usePage()
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<number[]>([])
+  const [confirming, setConfirming] = useState(false)
 
   const x = ws.sprints.find(y => y.id === id)
   if (!x) return null
+  // Lifecycle rules (decision 2): one active sprint per epic; completing a sprint moves its unfinished tasks to the next planned sprint of the epic, or to the backlog when there is none.
+  const activeOther = ws.sprints.find(y => y.epic === x.epic && y.state === 'active' && y.id !== x.id)
+  const nextPlanned = ws.sprints
+    .filter(y => y.epic === x.epic && y.state === 'planned' && y.id !== x.id)
+    .sort((a, b) => (a.start < b.start ? -1 : 1))[0]
+  const unfinished = tasks.filter(t => t.sprint === x.id && t.status !== 'done')
+  const backlog = tasks.filter(t => t.epic === x.epic && !t.sprint && t.status !== 'done')
+  const teamSide = side === 'team'
+  const startSprint = () => send({ type: 'sprint.update', id: x.id, patch: { state: 'active' } })
+  const completeSprint = () => {
+    const cmds: Command[] = [{ type: 'sprint.update', id: x.id, patch: { state: 'done', summary: 'Completed' } }]
+    unfinished.forEach(t =>
+      cmds.push({
+        type: 'task.update',
+        who: me.name,
+        id: t.id,
+        patch: { sprint: nextPlanned?.id ?? null },
+        log: nextPlanned ? 'moved it to ' + nextPlanned.name + ' when ' + x.name + ' completed' : 'moved it to the backlog when ' + x.name + ' completed',
+      }),
+    )
+    send({ type: 'batch', cmds })
+    setConfirming(false)
+  }
+  const addPicked = () => {
+    const cmds: Command[] = picked.map(tid => ({
+      type: 'task.update',
+      who: me.name,
+      id: tid,
+      patch: { sprint: x.id },
+      log: 'moved it to ' + x.name,
+    }))
+    if (cmds.length) send({ type: 'batch', cmds })
+    setPicked([])
+    setPicking(false)
+  }
   const [stInk, stSoft, stDot, stLabel] = SPRINT_STATE[x.state]
   const ts = tasks.filter(t => t.sprint === x.id)
   const dn = ts.filter(t => t.status === 'done').length
@@ -66,6 +109,47 @@ export function SprintViewModal({ id }: { id: string }) {
                   )
                 })}
               </div>
+              {teamSide && x.state !== 'done' && (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {x.state === 'planned' && (
+                    <button
+                      type="button"
+                      onClick={startSprint}
+                      disabled={!!activeOther}
+                      title={activeOther ? 'Complete ' + activeOther.name + ' first' : undefined}
+                      className="h-9 cursor-pointer rounded-[10px] border-0 bg-blue px-3.5 text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      Start sprint
+                    </button>
+                  )}
+                  {x.state === 'active' && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(c => !c)}
+                      className="h-9 cursor-pointer rounded-[10px] border-[1.5px] border-line bg-white px-3.5 text-[13.5px] font-semibold text-ink"
+                    >
+                      Complete sprint
+                    </button>
+                  )}
+                </div>
+              )}
+              {teamSide && confirming && x.state === 'active' && (
+                <div className="mt-3 rounded-xl bg-white px-3.5 py-3 text-[13px] text-ink-2 shadow-[0_0_0_1.5px_#C9D2DD]">
+                  <div>
+                    {unfinished.length
+                      ? unfinished.length + ' unfinished task' + (unfinished.length === 1 ? '' : 's') + ' move to ' + (nextPlanned ? nextPlanned.name : 'the backlog') + '.'
+                      : 'Every task is done. Nothing moves.'}
+                  </div>
+                  <div className="mt-2.5 flex gap-2">
+                    <button type="button" onClick={completeSprint} className="h-8 cursor-pointer rounded-lg border-0 bg-ink px-3 text-[12.5px] font-semibold text-white">
+                      Complete and move tasks
+                    </button>
+                    <button type="button" onClick={() => setConfirming(false)} className="h-8 cursor-pointer rounded-lg border-[1.5px] border-line bg-white px-3 text-[12.5px] font-semibold text-ink">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="relative size-[140px] flex-none">
               <svg viewBox="0 0 120 120" width="140" height="140" style={{ transform: 'rotate(-90deg)' }}>
@@ -131,7 +215,50 @@ export function SprintViewModal({ id }: { id: string }) {
               <span className="ml-auto text-[12px] font-bold text-ink-2">
                 {dn}/{ts.length} done
               </span>
+              {teamSide && x.state !== 'done' && (
+                <button
+                  type="button"
+                  onClick={() => setPicking(p => !p)}
+                  className="ml-3 h-7 cursor-pointer rounded-lg border-0 bg-sky-2 px-2.5 text-[12px] font-semibold text-blue-ink"
+                >
+                  + Add from backlog
+                </button>
+              )}
             </div>
+            {teamSide && picking && (
+              <div className="mt-3 rounded-xl bg-canvas p-2.5">
+                {backlog.length ? (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      {backlog.map(t => {
+                        const on = picked.includes(t.id)
+                        return (
+                          <label key={t.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg bg-white px-2.5 py-2 text-[13px]">
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => setPicked(p => (on ? p.filter(v => v !== t.id) : [...p, t.id]))}
+                            />
+                            <span className="min-w-0 flex-1 truncate font-semibold">{t.title}</span>
+                            <span className="flex-none text-[12px] text-ink-2">{taskKey(t)}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addPicked}
+                      disabled={!picked.length}
+                      className="mt-2.5 h-8 cursor-pointer rounded-lg border-0 bg-blue px-3 text-[12.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      Add {picked.length || ''} to {x.name}
+                    </button>
+                  </>
+                ) : (
+                  <div className="text-[13px] text-muted">No backlog tasks in this epic.</div>
+                )}
+              </div>
+            )}
             <div className="mt-3 flex flex-col gap-1.5">
               {ts.map(t => {
                 const st = statusOf(ws.statuses, t.status)

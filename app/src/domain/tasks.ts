@@ -57,3 +57,16 @@ export const cardAvatars = (names: string[], person: (n: string) => Person = gre
         return { name: n, i: m.i, bg: m.bg, color: '#fff', ring: '0 0 0 0 transparent' }
       })
     : [{ name: 'Unassigned', i: '+', bg: '#FFFFFF', color: '#3B4A5E', ring: 'inset 0 0 0 1.5px #A9B6C5' }]
+
+/** The id for a new time entry: one more than the largest id in the shared store. */
+export const nextEntryId = (entries: TimeEntry[]) => Math.max(0, ...entries.map(e => e.id)) + 1
+
+/**
+ * The ticket a `?ticket=` value names: a number ("12") or a key ("PMT-12").
+ * Returns null for anything else, so a bad link opens nothing.
+ */
+export const ticketIdFromParam = (v: string | null | undefined): number | null => {
+  if (v == null) return null
+  const m = /^(?:PMT-)?(\d+)$/i.exec(v.trim())
+  return m ? +m[1] : null
+}
