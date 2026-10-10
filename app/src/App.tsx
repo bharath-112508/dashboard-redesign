@@ -8,6 +8,9 @@ import { TicketsRoutes } from './pages/tickets/TicketsRoutes'
 import { DevopsRoutes } from './pages/devops/DevopsRoutes'
 import { ComingSoon } from './pages/shell/ComingSoon'
 import { DashboardPage } from './pages/dashboard/DashboardPage'
+import { CompaniesPage } from './pages/companies/CompaniesPage'
+import { CompanyDetailPage } from './pages/companies/CompanyDetailPage'
+import { ProjectsPage } from './pages/projects/ProjectsPage'
 import { Shell } from './pages/shell/Shell'
 import { LoginPage } from './pages/login/LoginPage'
 import { PAGE_PATH, isPageName } from './api/session/pages'
@@ -35,8 +38,11 @@ export function App() {
           <Route element={<Shell />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="companies" element={<ComingSoon page="Companies" />} />
-            <Route path="projects" element={<ComingSoon page="Projects" />} />
+            <Route path="companies">
+              <Route index element={<CompaniesPage />} />
+              <Route path=":id" element={<CompanyDetailPage />} />
+            </Route>
+            <Route path="projects" element={<ProjectsPage />} />
             <Route path="my-tickets" element={<ComingSoon page="My tickets" />} />
             <Route path="timesheet" element={<ComingSoon page="Timesheet" />} />
             <Route path="employee-timesheets" element={<ComingSoon page="Employee timesheets" />} />
