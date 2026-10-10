@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState, type KeyboardEvent } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -31,28 +31,47 @@ export function SprintFormModal({ epicId }: { epicId: string }) {
   const overlay = useOverlay()
   const close = () => overlay.close('newSprint')
   useEscape(close)
+  const epic = ws.epics.find(e => e.id === epicId)
+  // An unknown epic (e.g. ?newSprint=nope) has nothing to attach a sprint to: drop the URL param and show nothing.
+  useEffect(() => {
+    if (!epic) overlay.close('newSprint')
+  }, [epic])
   const sp = sprintsOf(ws.sprints, epicId)
   const last = sp[sp.length - 1]
   const start0 = last ? addDays(last.end, 1) : TODAY
   const [items, setItems] = useState<string[]>([])
   const [itemDraft, setItemDraft] = useState('')
-  const { register, handleSubmit, watch, setValue } = useForm<Form>({
+  const { register, handleSubmit, watch, setValue, getValues } = useForm<Form>({
     resolver: zodResolver(schema),
     defaultValues: { name: 'Sprint ' + (sp.length + 1), goal: '', why: '', len: 14, start: start0, end: addDays(start0, 13), m1: '', m2: '' },
   })
   const f = watch()
   const ok = !!f.goal.trim() && !!f.start && !!f.end && f.end >= f.start
-  const epic = ws.epics.find(e => e.id === epicId)
+  // The reason shown next to the disabled Create button.
+  const reason = !f.goal.trim()
+    ? 'Add a sprint goal'
+    : !f.start
+      ? 'Pick a start date'
+      : !f.end
+        ? 'Pick a length or an end date'
+        : f.end < f.start
+          ? 'The sprint must end after it starts'
+          : ''
 
   const setLen = (L: number) => {
     setValue('len', L)
-    setValue('end', addDays(f.start, L - 1))
+    setValue('end', addDays(getValues('start'), L - 1))
   }
   const startField = register('start', {
     onChange: e => {
-      if (f.len) setValue('end', addDays(e.target.value, f.len - 1))
+      const len = getValues('len')
+      setValue('end', len ? addDays(e.target.value, len - 1) : '')
     },
   })
+  // Only the goal-item input reacts to Enter. Enter anywhere else in the form must not submit it.
+  const blockEnter = (e: KeyboardEvent<HTMLFormElement>) => {
+    if (e.key === 'Enter' && e.target instanceof HTMLInputElement && e.target.type !== 'submit' && e.target.type !== 'button') e.preventDefault()
+  }
   const addItem = () => {
     const t = itemDraft.trim()
     if (!t) return
@@ -61,6 +80,7 @@ export function SprintFormModal({ epicId }: { epicId: string }) {
   }
 
   const onSubmit = (v: Form) => {
+    if (!epic) return
     const goals = [...items, ...(itemDraft.trim() ? [itemDraft.trim()] : [])]
     const hasActive = ws.sprints.some(x => x.epic === epicId && x.state === 'active')
     send({
@@ -97,11 +117,14 @@ export function SprintFormModal({ epicId }: { epicId: string }) {
     </label>
   )
 
+  if (!epic) return null
+
   return (
     <>
       <div onClick={close} className="fixed inset-0 z-[70] bg-[rgba(27,45,69,0.38)]" />
       <form
         onSubmit={handleSubmit(onSubmit)}
+        onKeyDown={blockEnter}
         noValidate
         className="fixed left-1/2 top-1/2 z-[71] max-h-[calc(100vh-48px)] w-[min(620px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[22px] border-[1.5px] border-line bg-white px-[26px] py-6 shadow-[0_30px_90px_rgba(27,45,69,0.3)]"
       >
@@ -191,11 +214,17 @@ export function SprintFormModal({ epicId }: { epicId: string }) {
           {personSelect('m1', 'Person 1')}
           {personSelect('m2', 'Person 2')}
         </div>
-        <div className="mt-5 flex justify-end gap-2.5">
+        <div className="mt-5 flex items-center justify-end gap-2.5">
+          {!ok && reason && <span className="mr-auto text-[12.5px] font-semibold text-rust">{reason}</span>}
           <button type="button" onClick={close} className="h-[38px] cursor-pointer rounded-[10px] border-[1.5px] border-faint bg-white px-4 text-[13.5px] font-semibold text-ink">
             Cancel
           </button>
-          <button type="submit" className="h-[38px] cursor-pointer rounded-[10px] border-0 bg-blue px-[18px] text-[13.5px] font-bold text-white" style={{ opacity: ok ? 1 : 0.45 }}>
+          <button
+            type="submit"
+            disabled={!ok}
+            className="h-[38px] cursor-pointer rounded-[10px] border-0 bg-blue px-[18px] text-[13.5px] font-bold text-white disabled:cursor-not-allowed"
+            style={{ opacity: ok ? 1 : 0.45 }}
+          >
             Create sprint
           </button>
         </div>

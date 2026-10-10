@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useTasks, useWorkspace } from '../../api/queries'
 import type { Task } from '../../api/types'
 import { Avatar, Icon, PATHS } from '../../components/ui'
@@ -8,6 +8,7 @@ import { usePerson } from '../../state/page'
 import { useOverlay, useUi } from '../../state/ui'
 import { assigneesOf, cardAvatars, sprintsOf, statusOf, taskKey } from '../../domain/tasks'
 import { useCreateTicket, useOpenTask } from '../../features/useOpenTask'
+import { onActivate } from '../../features/plan/keyboard'
 import { CriticalBadge, PrioMark } from './TaskCard'
 import { short } from '../../lib/dates'
 
@@ -21,7 +22,10 @@ function PlanTaskCard({ t, onOpen }: { t: Task; onOpen: () => void }) {
   const overdue = !!t.due && diff(t.due, TODAY) < 0 && t.status !== 'done'
   return (
     <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
+      onKeyDown={onActivate(onOpen)}
       data-crit={t.prio === 'Critical' ? '1' : undefined}
       className={`flex w-[360px] cursor-pointer flex-col gap-2 rounded-xl bg-white px-3 py-2.5 shadow-[0_0_0_1.5px_#D6DEE8] hover:shadow-[0_0_0_1.5px_#4870E8,0_6px_16px_-8px_rgba(27,45,69,0.2)] ${
         t.prio === 'Critical' && t.status !== 'done' ? 'animate-crit-blink' : ''
@@ -67,6 +71,18 @@ export function PlanView() {
   const createTicket = useCreateTicket()
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({})
 
+  // Epics and sprints that appear after the first render (created here or in another tab) start expanded,
+  // so their "+ New sprint" / "+ Create ticket" buttons are visible straight away.
+  const known = useRef<Set<string> | null>(null)
+  useLayoutEffect(() => {
+    const keys = [...ws.epics.map(e => 'e_' + e.id), ...ws.sprints.map(s => 's_' + s.id)]
+    const prev = known.current
+    known.current = new Set(keys)
+    if (!prev) return
+    const fresh = keys.filter(k => !prev.has(k))
+    if (fresh.length) setOpenMap(m => ({ ...m, ...Object.fromEntries(fresh.map(k => [k, true])) }))
+  }, [ws.epics, ws.sprints])
+
   const dflt = (k: string) => {
     if (k.startsWith('e_')) return k.slice(2) === ui.epic
     return ws.sprints.find(s => 's_' + s.id === k)?.state === 'active'
@@ -98,7 +114,9 @@ export function PlanView() {
             <rect x="3" y="5" width="18" height="16" rx="2" />
             <path d="M3 10h18M8 3v4M16 3v4" />
           </svg>
-          Today · {today}
+          {/* Two spans, as in the prototype: the 6px flex gap sits between "Today ·" and the date. */}
+          <span>Today · </span>
+          <span>{today}</span>
         </span>
         <button type="button" onClick={() => setAll(true)} className={btn}>Expand all</button>
         <button type="button" onClick={() => setAll(false)} className={btn}>Collapse all</button>
@@ -178,7 +196,12 @@ export function PlanView() {
                         <div key={x.id} className="flex items-start">
                           <span className="mt-[38px] h-0.5 w-[18px] flex-none bg-line" />
                           <div
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`${x.name}, ${stLabel}`}
+                            aria-expanded={sOpen}
                             onClick={() => toggle('s_' + x.id)}
+                            onKeyDown={onActivate(() => toggle('s_' + x.id))}
                             className="w-[270px] flex-none cursor-pointer rounded-[14px] px-3 py-2.5 hover:!shadow-[inset_0_0_0_1.5px_#4870E8]"
                             style={{ background: active ? '#E7EEFB' : '#EEF3FB', boxShadow: active ? 'inset 0 0 0 1.5px #4870E8' : 'none' }}
                           >
@@ -246,7 +269,13 @@ export function PlanView() {
                               </div>
                             </>
                           ) : (
-                            <span onClick={() => toggle('s_' + x.id)} className="ml-3 mt-8 cursor-pointer whitespace-nowrap text-[12.5px] font-semibold text-blue-ink">
+                            <span
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => toggle('s_' + x.id)}
+                              onKeyDown={onActivate(() => toggle('s_' + x.id))}
+                              className="ml-3 mt-8 cursor-pointer whitespace-nowrap text-[12.5px] font-semibold text-blue-ink"
+                            >
                               {sts.length} task{sts.length === 1 ? '' : 's'} ›
                             </span>
                           )}
@@ -266,7 +295,14 @@ export function PlanView() {
                   </div>
                 </>
               ) : (
-                <div onClick={() => toggle('e_' + e.id)} className="ml-4 flex cursor-pointer items-center gap-1.5 self-center">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={false}
+                  onClick={() => toggle('e_' + e.id)}
+                  onKeyDown={onActivate(() => toggle('e_' + e.id))}
+                  className="ml-4 flex cursor-pointer items-center gap-1.5 self-center"
+                >
                   <span className="h-0.5 w-6 bg-line" />
                   {sp.map(x => {
                     const [stInk, stSoft] = SPRINT_STATE[x.state]

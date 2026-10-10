@@ -7,6 +7,7 @@ import { useOverlay } from '../../state/ui'
 import { statusOf } from '../../domain/tasks'
 import { useOpenTask } from '../useOpenTask'
 import { useEscape } from '../useEscape'
+import { onActivate } from './keyboard'
 
 const C = 2 * Math.PI * 50
 
@@ -96,10 +97,15 @@ export function SprintViewModal({ id }: { id: string }) {
               <div className="mt-3 flex flex-col gap-2">
                 {goals.map((t, i) => {
                   const on = !!gd[i]
+                  const toggleGoal = () => send({ type: 'sprint.update', id: x.id, patch: { goalsDone: { ...gd, [i]: !on } } })
                   return (
                     <div
                       key={i}
-                      onClick={() => send({ type: 'sprint.update', id: x.id, patch: { goalsDone: { ...gd, [i]: !on } } })}
+                      role="checkbox"
+                      aria-checked={on}
+                      tabIndex={0}
+                      onClick={toggleGoal}
+                      onKeyDown={onActivate(toggleGoal)}
                       className="flex cursor-pointer items-center gap-3 rounded-xl px-3.5 py-[11px]"
                       style={{ background: on ? '#EEF7F3' : '#F6F9FC', boxShadow: `inset 0 0 0 1.5px ${on ? '#3F9079' : '#E4EAF0'}` }}
                     >
@@ -133,7 +139,10 @@ export function SprintViewModal({ id }: { id: string }) {
                 return (
                   <div
                     key={t.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => openTask(t)}
+                    onKeyDown={onActivate(() => openTask(t))}
                     className="flex cursor-pointer items-center gap-2.5 rounded-[10px] bg-canvas px-3 py-[9px] shadow-[inset_0_0_0_1.5px_#E4EAF0] hover:shadow-[inset_0_0_0_1.5px_#4870E8]"
                   >
                     <span className="size-2 flex-none rounded-full" style={{ background: st.c }} />

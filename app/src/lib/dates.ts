@@ -17,14 +17,24 @@ export const short = (iso: string) => {
   return `${+d} ${MON[+m - 1]}`
 }
 
-/** Whole days from b to a. */
-export const diff = (a: string, b: string) =>
-  Math.round((new Date(a + 'T12:00:00Z').getTime() - new Date(b + 'T12:00:00Z').getTime()) / 864e5)
+/** True for a "YYYY-MM-DD" string that is a real calendar date. */
+export const isIso = (iso: unknown): iso is string => {
+  if (typeof iso !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false
+  return !isNaN(new Date(iso + 'T12:00:00Z').getTime())
+}
 
+/** Whole days from b to a. Returns 0 when either date is empty or invalid. */
+export const diff = (a: string, b: string) => {
+  if (!isIso(a) || !isIso(b)) return 0
+  return Math.round((new Date(a + 'T12:00:00Z').getTime() - new Date(b + 'T12:00:00Z').getTime()) / 864e5)
+}
+
+/** Adds n days to a date. Returns '' when the date is empty or invalid, so callers can show "—". */
 export const addDays = (iso: string, n: number) => {
+  if (!isIso(iso) || !Number.isFinite(n)) return ''
   const d = new Date(iso + 'T12:00:00Z')
   d.setUTCDate(d.getUTCDate() + n)
-  return d.toISOString().slice(0, 10)
+  return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
 }
 
 /** "5 Oct – 18 Oct" */
