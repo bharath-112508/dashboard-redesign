@@ -885,6 +885,7 @@ export const updateTask = async (
     task.updated_by = caller.id;
     await task.save();
     if (!objectIdEq(task.story_id, prev.story_id)) await cascadeEpicToSubtasks(task, caller.id);
+    if (!objectIdEq(task.sprint_id, prev.sprint_id)) await cascadeSprintToSubtasks(task, caller.id);
 
     // M3 — task.save() runs WITHOUT a transaction by design. Audit +
     // activity-feed writes that follow are *both* explicitly
@@ -1306,6 +1307,12 @@ const cascadeEpicToSubtasks = async (task: TaskDocument, callerId: Types.ObjectI
     await Task.updateMany({ parent_task_id: task._id }, { $set: { story_id: task.story_id, updated_by: callerId } });
 };
 
+/** Same for sprints: a parent moved into a sprint (or the backlog) takes its subtasks with it. */
+const cascadeSprintToSubtasks = async (task: TaskDocument, callerId: Types.ObjectId): Promise<void> => {
+    if (task.parent_task_id) return;
+    await Task.updateMany({ parent_task_id: task._id }, { $set: { sprint_id: task.sprint_id, updated_by: callerId } });
+};
+
 export const assignTaskStory = async (
     taskId: Types.ObjectId,
     body: AssignStoryBody,
@@ -1378,6 +1385,7 @@ export const moveTaskToSprint = async (
     }
     task.updated_by = caller.id;
     await task.save();
+    if (!objectIdEq(task.sprint_id, prevSprintId)) await cascadeSprintToSubtasks(task, caller.id);
 
     if (caller.audit) {
         await recordAudit(caller.audit, {

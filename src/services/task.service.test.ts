@@ -1237,6 +1237,34 @@ describe('moveTaskToSprint', () => {
         await svc.moveTaskToSprint(task._id, { sprint_id: null }, managerCaller());
         expect(task.sprint_id).toBeNull();
     });
+
+    it('a parent moving sprint carries its subtasks along', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, sprint_id: null, parent_task_id: null });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubSprintLookup(project._id);
+        const sprintId = new Types.ObjectId();
+
+        await svc.moveTaskToSprint(task._id, { sprint_id: sprintId.toString() }, adminCaller());
+
+        expect(taskUpdateManyMock).toHaveBeenCalledWith(
+            { parent_task_id: task._id },
+            { $set: { sprint_id: sprintId, updated_by: expect.anything() } }
+        );
+    });
+
+    it("a subtask's own sprint move does not touch other tasks", async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, sprint_id: null, parent_task_id: new Types.ObjectId() });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubSprintLookup(project._id);
+
+        await svc.moveTaskToSprint(task._id, { sprint_id: new Types.ObjectId().toString() }, adminCaller());
+
+        expect(taskUpdateManyMock).not.toHaveBeenCalled();
+    });
 });
 
 // ─── addTaskDependency — self / dup / cycle / project mismatch ───────────
