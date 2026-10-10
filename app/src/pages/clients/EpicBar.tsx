@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useWorkspace } from '../../api/queries'
+import { useDevops, useWorkspace } from '../../api/queries'
 import { CheckSquare, Icon, PATHS, Scrim } from '../../components/ui'
 import { range } from '../../lib/dates'
 import { devopsTone, pal } from '../../lib/theme'
@@ -60,9 +60,11 @@ const chevron = <Icon d={PATHS.chevron} size={11} sw={2.8} className="text-ink-2
 export function EpicBar({ showSprints }: { showSprints: boolean }) {
   const ui = useUi()
   const ws = useWorkspace().data
+  // The DevOps board owns the projects; the epic bar only shows the linked one's status.
+  const devops = useDevops().data
   const overlay = useOverlay()
   const [open, setOpen] = useState<'e' | 's' | null>(null)
-  if (!ws) return null
+  if (!ws || !devops) return null
 
   const allE = ws.epics.map(e => e.id)
   const EPS = ui.epSel.includes(ui.epic) ? ui.epSel : [ui.epic]
@@ -99,8 +101,8 @@ export function EpicBar({ showSprints }: { showSprints: boolean }) {
         ? range(eSp[0].start, eSp[eSp.length - 1].end) + ' · ' + eSp.length + ' sprints'
         : ''
 
-  const project = ws.devops.find(x => x.key === ws.devopsLinks[ui.epic]) || ws.devops[0]
-  const [dvC, dvBg, dvDot] = devopsTone(project.infra)
+  const project = devops.projects.find(x => x.key === ws.devopsLinks[ui.epic]) || devops.projects[0]
+  const [dvC, dvBg, dvDot] = devopsTone(project?.infra ?? '')
 
   return (
     <div className="mt-3.5 flex flex-wrap items-center gap-2.5">
@@ -146,15 +148,17 @@ export function EpicBar({ showSprints }: { showSprints: boolean }) {
           </span>
           Report a bug
         </button>
-        <span
-          title="Updated by the DevOps team"
-          className="inline-flex h-[34px] items-center gap-2 rounded-lg px-3 text-[13.5px] font-semibold"
-          style={{ background: dvBg, color: dvC }}
-        >
-          <span className="text-[11px] font-bold uppercase tracking-[0.05em] opacity-80">DevOps</span>
-          <span className="size-[7px] rounded-full" style={{ background: dvDot }} />
-          {project.infra}
-        </span>
+        {project && (
+          <span
+            title="Updated by the DevOps team"
+            className="inline-flex h-[34px] items-center gap-2 rounded-lg px-3 text-[13.5px] font-semibold"
+            style={{ background: dvBg, color: dvC }}
+          >
+            <span className="text-[11px] font-bold uppercase tracking-[0.05em] opacity-80">DevOps</span>
+            <span className="size-[7px] rounded-full" style={{ background: dvDot }} />
+            {project.infra}
+          </span>
+        )}
       </span>
 
       {showSprints && (

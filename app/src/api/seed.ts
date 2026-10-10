@@ -206,7 +206,7 @@ const ENTRIES: TimeEntry[] = (
   ] as const
 ).map((r, i) => ({ id: i + 1, date: r[0], user: r[1], type: r[2], task: r[3], notes: r[4], bill: r[5], non: r[6] }))
 
-export const DB_VERSION = 1
+export const DB_VERSION = 2
 
 export const createSeed = (): Db => {
   const sprints = buildSprints()
@@ -221,16 +221,6 @@ export const createSeed = (): Db => {
       ],
       epics: EPICS,
       sprints,
-      devops: [
-        { key: 'OPS-101', name: 'DACO', infra: 'Not started' },
-        { key: 'OPS-102', name: 'Inoff', infra: 'Not started' },
-        { key: 'OPS-103', name: 'Weland', infra: 'Waiting for client access' },
-        { key: 'OPS-104', name: 'Alnarp Customer portal', infra: 'Completed' },
-        { key: 'OPS-105', name: 'Alnarp Lead Automation', infra: 'Completed' },
-        { key: 'OPS-106', name: 'ARC Fast', infra: 'Completed' },
-        { key: 'OPS-107', name: 'Fa tech', infra: 'In progress' },
-        { key: 'OPS-108', name: 'OSBY', infra: 'Completed' },
-      ],
       devopsLinks: { mob: 'OPS-101', web: 'OPS-107' },
     },
     tasks: buildTasks(sprints),

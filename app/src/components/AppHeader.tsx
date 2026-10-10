@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router'
 import { Avatar } from './ui'
 import { ME, person } from '../lib/theme'
+import { HEADER_SLOT_ID } from './HeaderSlot'
 
 const LINKS = [
   { to: '/devops', label: 'DevOps board' },
@@ -30,7 +31,9 @@ export function AppHeader() {
           </NavLink>
         ))}
       </nav>
-      <Avatar i={me.i} bg="#1B2D45" size={32} radius={8} font={12} title={ME} className="ml-auto" />
+      {/* Pages can put their own controls here (see HeaderSlot). Empty on the Clients page. */}
+      <div id={HEADER_SLOT_ID} className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2.5" />
+      <Avatar i={me.i} bg="#1B2D45" size={32} radius={8} font={12} title={ME} />
     </header>
   )
 }

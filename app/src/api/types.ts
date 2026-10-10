@@ -186,18 +186,11 @@ export interface DevopsRequest {
   statusSeen?: string
 }
 
-export interface DevopsProject {
-  key: string
-  name: string
-  infra: string
-}
-
 export interface Workspace {
   statuses: Status[]
   epics: Epic[]
   sprints: Sprint[]
-  devops: DevopsProject[]
-  /** Which DevOps project each epic is linked to. */
+  /** Which DevOps project (key in the devops resource) each epic is linked to. */
   devopsLinks: Record<string, string>
 }
 
