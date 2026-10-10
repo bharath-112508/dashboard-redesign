@@ -1,3 +1,5 @@
+import type { DevopsDb } from './devops/types'
+
 export type TaskType = 'Bug' | 'Task' | 'Story'
 export type Priority = 'Critical' | 'Urgent' | 'High' | 'Medium' | 'Low'
 export type ClientPriority = 'Low' | 'Medium' | 'High' | 'Critical'
@@ -201,4 +203,5 @@ export interface Db {
   entries: TimeEntry[]
   questions: Question[]
   requests: DevopsRequest[]
+  devops: DevopsDb
 }

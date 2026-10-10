@@ -5,7 +5,8 @@ import { ClientsLayout } from './pages/clients/ClientsLayout'
 import { BoardView } from './pages/clients/BoardView'
 import { PlanView } from './pages/clients/PlanView'
 import { TimelineView } from './pages/clients/TimelineView'
-import { Placeholder } from './pages/Placeholder'
+import { TicketsRoutes } from './pages/tickets/TicketsRoutes'
+import { DevopsRoutes } from './pages/devops/DevopsRoutes'
 import { UiProvider } from './state/ui'
 
 function Shell() {
@@ -30,8 +31,8 @@ export function App() {
             <Route path="plan" element={<PlanView />} />
             <Route path="timeline" element={<TimelineView />} />
           </Route>
-          <Route path="devops" element={<Placeholder title="DevOps board" />} />
-          <Route path="tickets" element={<Placeholder title="Tickets" />} />
+          <Route path="devops/*" element={<DevopsRoutes />} />
+          <Route path="tickets/*" element={<TicketsRoutes />} />
           <Route path="*" element={<Navigate to="/clients/board" replace />} />
         </Route>
       </Routes>

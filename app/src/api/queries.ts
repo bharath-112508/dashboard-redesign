@@ -10,22 +10,28 @@ export const qk = {
   entries: ['entries'] as const,
   questions: ['questions'] as const,
   requests: ['requests'] as const,
+  devops: ['devops'] as const,
 }
 
-const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'questions', 'requests']
+const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'questions', 'requests', 'devops']
 
 export const useWorkspace = () => useQuery({ queryKey: qk.workspace, queryFn: () => server.get('workspace') })
 export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => server.get('tasks') })
 export const useEntries = () => useQuery({ queryKey: qk.entries, queryFn: () => server.get('entries') })
 export const useQuestions = () => useQuery({ queryKey: qk.questions, queryFn: () => server.get('questions') })
 export const useRequests = () => useQuery({ queryKey: qk.requests, queryFn: () => server.get('requests') })
+export const useDevops = () => useQuery({ queryKey: qk.devops, queryFn: () => server.get('devops') })
 
-/** Builds a Db from the cache so the shared reducer can run on it. */
-const cachedDb = (qc: QueryClient): Db | null => {
+/**
+ * Builds a Db from the cache so the shared reducer can run on it. Only the
+ * resources the command touches must be cached; a page that never loaded,
+ * say, the DevOps data can still update its own data instantly.
+ */
+const cachedDb = (qc: QueryClient, needed: Resource[]): Db | null => {
   const db: Partial<Db> = { version: 0 }
   for (const r of RESOURCES) {
     const v = qc.getQueryData([r])
-    if (v === undefined) return null
+    if (v === undefined && needed.includes(r)) return null
     ;(db as Record<string, unknown>)[r] = v
   }
   return db as Db
@@ -43,7 +49,7 @@ export const useSend = () => {
       const keys = touches(cmd)
       await Promise.all(keys.map(k => qc.cancelQueries({ queryKey: [k] })))
       const prev = Object.fromEntries(keys.map(k => [k, qc.getQueryData([k])]))
-      const db = cachedDb(qc)
+      const db = cachedDb(qc, keys)
       if (db) {
         const next = reduce(db, cmd)
         keys.forEach(k => qc.setQueryData([k], next[k]))

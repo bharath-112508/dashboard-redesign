@@ -1,5 +1,7 @@
 import { ME } from '../lib/theme'
 import type { ChatMessage, Db, Epic, RequestComment, Sprint, Task } from './types'
+import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
+import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/commands'
 
 /**
  * Every write the page makes is one of these commands. The same reducer runs
@@ -20,8 +22,10 @@ export type Command =
   | { type: 'epic.create'; epic: Epic }
   | { type: 'epic.update'; id: string; patch: Partial<Epic> }
   | { type: 'batch'; cmds: Command[] }
+  | TicketsCommand
+  | DevopsCommand
 
-export type Resource = 'workspace' | 'tasks' | 'entries' | 'questions' | 'requests'
+export type Resource = 'workspace' | 'tasks' | 'entries' | 'questions' | 'requests' | 'devops'
 
 export const touches = (cmd: Command): Resource[] => {
   switch (cmd.type) {
@@ -43,6 +47,8 @@ export const touches = (cmd: Command): Resource[] => {
       return ['workspace']
     case 'batch':
       return [...new Set(cmd.cmds.flatMap(touches))]
+    default:
+      return [...touchesTickets(cmd), ...touchesDevops(cmd)]
   }
 }
 
@@ -122,5 +128,7 @@ export const reduce = (db: Db, cmd: Command): Db => {
       }
     case 'batch':
       return cmd.cmds.reduce(reduce, db)
+    default:
+      return reduceDevops(reduceTickets(db, cmd), cmd)
   }
 }

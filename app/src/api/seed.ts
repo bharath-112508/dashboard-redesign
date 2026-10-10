@@ -1,4 +1,5 @@
 import { addDays, TODAY } from '../lib/dates'
+import { createDevopsSeed } from './devops/seed'
 import type { Activity, ChatMessage, Db, Epic, Sprint, Task, TimeEntry } from './types'
 
 const hist = (who: string, what: string, when: string): Activity => ({ kind: 'history', who, what, when })
@@ -254,6 +255,7 @@ export const createSeed = (): Db => {
         answer: 'Use the new version, we will send it this week.',
       },
     ],
+    devops: createDevopsSeed(),
     requests: [
       {
         id: 1, key: 'OPS-101', pname: 'DACO', rkey: 'REQ-1', type: 'Environment', prio: 'High', to: 'Chary',
