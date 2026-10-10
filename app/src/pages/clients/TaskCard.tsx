@@ -93,7 +93,7 @@ export function TaskCard({
             />
           ))}
         </span>
-        <span className="ml-[7px] min-w-0 flex-1 truncate text-[14px] font-semibold text-ink">{c.title}</span>
+        <span className="ml-[7px] min-w-0 flex-1 truncate text-[14px] font-semibold tracking-normal text-ink">{c.title}</span>
         <span className="tnum flex-none whitespace-nowrap rounded-md bg-sky-2 px-[7px] py-[3px] text-[11.5px] font-semibold text-blue-ink">
           {c.key}
         </span>

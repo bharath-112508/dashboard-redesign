@@ -38,6 +38,8 @@ export function ReportBugModal() {
   const [files, setFiles] = useState<ChatFile[]>([])
   const [drag, setDrag] = useState(false)
   const close = () => overlay.close('report')
+  // `?report=top` comes from the Bugs column header "+": the bug goes to the top of the column.
+  const top = overlay.get('report') === 'top'
   const {
     register,
     handleSubmit,
@@ -63,6 +65,7 @@ export function ReportBugModal() {
     const ds = todayLabel()
     send({
       type: 'task.create',
+      top,
       task: {
         id: nextTaskId(tasks),
         title: f.title.trim(),

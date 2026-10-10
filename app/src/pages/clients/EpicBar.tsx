@@ -64,7 +64,13 @@ export function EpicBar({ showSprints }: { showSprints: boolean }) {
   const devops = useDevops().data
   const overlay = useOverlay()
   const [open, setOpen] = useState<'e' | 's' | null>(null)
-  if (!ws || !devops) return null
+  // Same height as the real bar (14px margin + 34px row) so the toolbar does not jump when data arrives.
+  if (!ws || !devops)
+    return (
+      <div aria-hidden="true" className="mt-3.5 flex h-[34px] items-center gap-2.5">
+        <span className="h-[34px] w-[190px] rounded-lg bg-sky-2" />
+      </div>
+    )
 
   const allE = ws.epics.map(e => e.id)
   const EPS = ui.epSel.includes(ui.epic) ? ui.epSel : [ui.epic]

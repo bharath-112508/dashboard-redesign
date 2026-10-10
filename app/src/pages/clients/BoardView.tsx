@@ -131,7 +131,7 @@ export function BoardView() {
   const addBugButton = (
     <button
       type="button"
-      onClick={() => overlay.open('report')}
+      onClick={() => overlay.open('report', 'top')}
       title="Add task to top"
       className="grid size-[26px] cursor-pointer place-items-center rounded-[7px] border-[1.5px] border-line bg-white p-0 text-blue-ink hover:border-blue hover:bg-sky-2"
     >

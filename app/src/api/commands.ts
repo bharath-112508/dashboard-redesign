@@ -9,7 +9,8 @@ import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/comman
  * UI and the "server" can never disagree about what a write does.
  */
 export type Command =
-  | { type: 'task.create'; task: Task }
+  /** `top`: put the task first in the list (the header "+" on the Bugs column). */
+  | { type: 'task.create'; task: Task; top?: boolean }
   | { type: 'task.update'; id: number; patch: Partial<Task>; log?: string; who?: string }
   | { type: 'task.delete'; id: number }
   | { type: 'task.comment'; id: number; text: string }
@@ -76,7 +77,12 @@ const mapTask = (db: Db, id: number, f: (t: Task) => Task): Db => ({
 export const reduce = (db: Db, cmd: Command): Db => {
   switch (cmd.type) {
     case 'task.create':
-      return { ...db, tasks: [...db.tasks.filter(t => t.id !== cmd.task.id), cmd.task] }
+      return {
+        ...db,
+        tasks: cmd.top
+          ? [cmd.task, ...db.tasks.filter(t => t.id !== cmd.task.id)]
+          : [...db.tasks.filter(t => t.id !== cmd.task.id), cmd.task],
+      }
     case 'task.update':
       return mapTask(db, cmd.id, t => ({
         ...t,

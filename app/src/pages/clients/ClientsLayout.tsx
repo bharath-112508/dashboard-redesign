@@ -78,7 +78,7 @@ export function ClientsLayout() {
       {view === 'board' ? <Toolbar /> : <div className="h-5" />}
 
       {error ? (
-        <div className="rounded-[14px] border-[1.5px] border-dashed border-line p-8 text-center text-[14px] text-ink-2">
+        <div role="status" className="rounded-[14px] border-[1.5px] border-dashed border-line p-8 text-center text-[14px] text-ink-2">
           Couldn't load the project. Reload the page to try again.
         </div>
       ) : ready ? (
@@ -87,7 +87,7 @@ export function ClientsLayout() {
           <Overlays />
         </>
       ) : (
-        <div className="p-12 text-center text-[14px] text-muted">Loading…</div>
+        <div role="status" aria-busy="true" className="p-12 text-center text-[14px] text-muted">Loading…</div>
       )}
     </main>
   )
