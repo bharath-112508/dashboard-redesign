@@ -6,6 +6,7 @@ import { diff, short, TODAY } from '../../lib/dates'
 import { ME, questionTags } from '../../lib/theme'
 import { useOverlay, useUi } from '../../state/ui'
 import { assigneesOf, blurb, cardAvatars, taskKey } from '../../domain/tasks'
+import { usePerson } from '../../state/page'
 import { clientQuestionState } from '../../domain/questions'
 import { TaskCard, type CardModel } from './TaskCard'
 import { useOpenTask } from '../../features/useOpenTask'
@@ -31,6 +32,7 @@ export function useBoardTasks() {
 }
 
 export function BoardView() {
+  const person = usePerson()
   const ws = useWorkspace().data!
   const ui = useUi()
   const send = useSend()
@@ -60,7 +62,7 @@ export function BoardView() {
       dueLabel: t.due ? (overdue ? 'Overdue ' : 'Due ') + short(t.due) : 'No due date',
       dueColor: overdue ? '#C0392B' : '#3B4A5E',
       dueWeight: overdue ? 800 : 600,
-      avatars: cardAvatars(assigneesOf(t)),
+      avatars: cardAvatars(assigneesOf(t), person),
       subLabel: t.subs.length ? t.subs.filter(x => x.done).length + '/' + t.subs.length : undefined,
       draggable: true,
     }
@@ -83,7 +85,7 @@ export function BoardView() {
     dueLabel: r.due ? 'Due ' + short(r.due) : 'No due date',
     dueColor: '#22354C',
     dueWeight: 500,
-    avatars: cardAvatars([r.to || 'DevOps team']).map(a => (r.to ? a : { ...a, i: 'D', bg: '#9F89E5' })),
+    avatars: cardAvatars([r.to || 'DevOps team'], person).map(a => (r.to ? a : { ...a, i: 'D', bg: '#9F89E5' })),
     draggable: false,
   })
 

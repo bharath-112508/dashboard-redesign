@@ -4,7 +4,8 @@ import { useSend, useTasks, useWorkspace } from '../../api/queries'
 import type { Epic, EpicListField } from '../../api/types'
 import { Avatar, CloseButton } from '../../components/ui'
 import { fmt, range } from '../../lib/dates'
-import { pal, person, SPRINT_STATE } from '../../lib/theme'
+import { pal, SPRINT_STATE } from '../../lib/theme'
+import { usePage } from '../../state/page'
 import { useOverlay, useUi } from '../../state/ui'
 import { sprintsOf } from '../../domain/tasks'
 import { useEscape } from '../useEscape'
@@ -24,6 +25,7 @@ const MARK_COLOR = (m: string) => (m === '−' ? '#A5502C' : m === '+' ? '#3F907
 
 /** The epic's requirement document. */
 export function EpicDocModal({ id }: { id: string }) {
+  const { person, base } = usePage()
   const ws = useWorkspace().data!
   const tasks = (useTasks().data ?? []).filter(t => !t.parent)
   const send = useSend()
@@ -120,7 +122,7 @@ export function EpicDocModal({ id }: { id: string }) {
             onClick={() => {
               close()
               ui.set({ epic: ev.id, epSel: [ev.id], spSel: null })
-              navigate('/clients/board', { state: loc.state })
+              navigate(base + '/board', { state: loc.state })
             }}
             className="mt-2.5 h-9 w-full cursor-pointer rounded-[10px] border-0 bg-ink text-[12.5px] font-bold text-white"
           >

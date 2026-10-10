@@ -1,7 +1,8 @@
 import { useSend, useTasks, useWorkspace } from '../../api/queries'
 import { CloseButton } from '../../components/ui'
 import { diff, range, short, TODAY, weeks } from '../../lib/dates'
-import { person, SPRINT_STATE } from '../../lib/theme'
+import { SPRINT_STATE } from '../../lib/theme'
+import { usePerson } from '../../state/page'
 import { useOverlay } from '../../state/ui'
 import { statusOf } from '../../domain/tasks'
 import { useOpenTask } from '../useOpenTask'
@@ -11,6 +12,7 @@ const C = 2 * Math.PI * 50
 
 /** Sprint overview: goal, why it matters, goals checklist and tasks. */
 export function SprintViewModal({ id }: { id: string }) {
+  const person = usePerson()
   const ws = useWorkspace().data!
   const tasks = (useTasks().data ?? []).filter(t => !t.parent)
   const send = useSend()

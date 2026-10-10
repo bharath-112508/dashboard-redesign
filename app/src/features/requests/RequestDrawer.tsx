@@ -3,7 +3,8 @@ import { useRequests, useSend, useWorkspace } from '../../api/queries'
 import { Markdown } from '../../components/Markdown'
 import { Avatar, Backdrop, CloseButton, CountPill, Icon, Label, PATHS, TabButton } from '../../components/ui'
 import { diff, fmt, TODAY } from '../../lib/dates'
-import { ME, person, PRIO, REQUEST_STATUS } from '../../lib/theme'
+import { ME, PRIO, REQUEST_STATUS } from '../../lib/theme'
+import { usePerson } from '../../state/page'
 import { useOverlay, useUi } from '../../state/ui'
 import { rh } from '../../domain/tasks'
 
@@ -18,6 +19,7 @@ const lockIcon = (
 
 /** A DevOps request linked to this project. Managed by DevOps; only comments can be added here. */
 export function RequestDrawer({ id }: { id: number }) {
+  const person = usePerson()
   const r = (useRequests().data ?? []).find(x => x.id === id)
   const ws = useWorkspace().data!
   const ui = useUi()

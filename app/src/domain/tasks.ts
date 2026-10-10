@@ -1,5 +1,5 @@
 import { diff, TODAY } from '../lib/dates'
-import { pal, person } from '../lib/theme'
+import { pal, person as greyPerson, type Person } from '../lib/theme'
 import type { Sprint, Status, Task, TimeEntry } from '../api/types'
 
 export const taskKey = (t: Pick<Task, 'id' | 'subKey'>) => t.subKey || 'PMT-' + t.id
@@ -50,7 +50,7 @@ export const fileSize = (bytes: number) =>
 export const fileExt = (name: string, n = 4) => (name.split('.').pop() || '').slice(0, n).toUpperCase()
 
 /** Avatars shown on a card: up to three assignees, or an "Unassigned" placeholder. */
-export const cardAvatars = (names: string[]) =>
+export const cardAvatars = (names: string[], person: (n: string) => Person = greyPerson) =>
   names.length
     ? names.slice(0, 3).map(n => {
         const m = person(n)

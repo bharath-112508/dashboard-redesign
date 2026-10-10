@@ -6,11 +6,11 @@ import { devopsTone, pal } from '../../lib/theme'
 import { useOverlay, useUi } from '../../state/ui'
 import { sprintsOf } from '../../domain/tasks'
 
-const SPRINT_DOT = { done: '#3F9079', active: '#4870E8', planned: '#A9B6C5' }
+export const SPRINT_DOT = { done: '#3F9079', active: '#4870E8', planned: '#A9B6C5' }
 
 type Opt = { key: string; label: string; sub: string; c: string; on: boolean; toggle: () => void }
 
-function PickerMenu({
+export function PickerMenu({
   all,
   allLabel,
   opts,

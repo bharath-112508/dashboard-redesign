@@ -7,7 +7,9 @@ import { Markdown } from '../../components/Markdown'
 import { Avatar, Backdrop, CloseButton, CountPill, Icon, Label, PATHS, Scrim, TabButton, unassigned } from '../../components/ui'
 import { diff, fmt, short, TODAY } from '../../lib/dates'
 import { focusField } from '../../lib/focusField'
-import { ME, pal, PEOPLE, person, PRIO, PRIO_LIST, TYPE_LIST, TYPES } from '../../lib/theme'
+import { ME, pal, PEOPLE, PRIO, PRIO_LIST, TYPE_LIST, TYPES } from '../../lib/theme'
+import { usePage } from '../../state/page'
+import { ClientChat } from './ClientChat'
 import { useOverlay } from '../../state/ui'
 import {
   assigneesOf,
@@ -24,9 +26,18 @@ import {
 import { DescriptionEditor } from './DescriptionEditor'
 import { Caret, PillDropdown, type PillOption } from './PillDropdown'
 
-type Tab = 'details' | 'subs' | 'act'
+type Tab = 'details' | 'subs' | 'act' | 'chat'
 
-const VIEW_NAMES: Record<string, string> = { board: 'board', plan: 'epics & sprints', timeline: 'timeline' }
+const VIEW_NAMES: Record<string, string> = {
+  board: 'board',
+  plan: 'epics & sprints',
+  timeline: 'timeline',
+  overview: 'overview',
+  tasks: 'tasks',
+  backlog: 'backlog',
+  timesheet: 'timesheet',
+  files: 'files',
+}
 
 /** Subtasks with titles and done state taken from their full records once opened. */
 const subsOf = (raw: Task, tasks: Task[]): Subtask[] =>
@@ -101,6 +112,7 @@ function TicketBody({
   const entries = useEntries().data ?? []
   const send = useSend()
   const loc = useLocation()
+  const { person, side } = usePage()
   const view = loc.pathname.split('/')[2] || 'board'
 
   const [tab, setTab] = useState<Tab>(raw0.parent && initialTab === 'subs' ? 'details' : initialTab)
@@ -412,6 +424,8 @@ function TicketBody({
     ['details', isSub ? 'Overview' : 'Details', raw.atts.length + raw.deps.length],
     ['subs', 'Subtasks', raw.subs.length],
     ['act', 'Activity', raw.acts.length],
+    // The team chats with the client on bugs the client reported.
+    ...(raw.clientBug && side === 'team' ? [['chat', 'Client chat', raw.clientBug.chat.length] as [Tab, string, number]] : []),
   ]
   const sdn = raw.subs.filter(x => x.done).length
   const subPct = raw.subs.length ? Math.round((sdn / raw.subs.length) * 100) + '%' : '0%'
@@ -901,6 +915,8 @@ function TicketBody({
               </>
             )}
 
+            {tab === 'chat' && raw.clientBug && <ClientChat bug={raw} />}
+
             {tab === 'act' && (
               <>
                 <div className="rounded-[14px] border-[1.5px] border-line bg-canvas p-1">
@@ -1294,6 +1310,7 @@ function SubtaskRow({
 }) {
   const ws = useWorkspace().data!
   const entries = useEntries().data ?? []
+  const { person } = usePage()
   const rec = x.sid ? tasks.find(y => y.id === x.sid) : undefined
   const an = rec?.assignee || x.assignee || ''
   const due = rec?.due || x.due || ''

@@ -149,7 +149,9 @@ export interface Question {
   fromDevops?: boolean
   /** DevOps project key (e.g. OPS-101) for questions raised from the DevOps board. */
   project?: string
-  sprint?: string
+  sprint?: string | null
+  /** How many client messages the team has already seen (Tickets page unread badge). */
+  seenT?: number
 }
 
 export type RequestStatus = 'Open' | 'In progress' | 'Done'
@@ -190,6 +192,14 @@ export interface DevopsProject {
   key: string
   name: string
   infra: string
+  /** Read-only details the Tickets page shows in its DevOps panel (set by the DevOps team). */
+  deploy?: string
+  /** Estimated deployment date, e.g. "15 Oct 2026". */
+  due?: string
+  cicd?: boolean
+  /** Client follow-up step (0 = waiting for client … 5 = escalate); null when none is running. */
+  step?: number | null
+  owner?: string
 }
 
 export interface Workspace {

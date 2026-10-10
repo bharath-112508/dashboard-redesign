@@ -104,6 +104,9 @@
   }
   a { color: var(--color-blue-ink); text-decoration: none; }
   button { font: inherit; color: inherit; }
+  /* The Tickets prototype's form controls keep the browser's normal letter
+     spacing (only the font is inherited), so their text is a little wider. */
+  [data-page="tickets"] :is(button, input, select, textarea) { letter-spacing: normal; }
   ::-webkit-scrollbar { height: 8px; width: 8px; }
   ::-webkit-scrollbar-thumb { background: rgba(27, 45, 69, 0.16); border-radius: 8px; }
 }

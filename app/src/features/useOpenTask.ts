@@ -5,13 +5,19 @@ import { TODAY } from '../lib/dates'
 import { ME } from '../lib/theme'
 import { activeSprint, nextTaskId } from '../domain/tasks'
 import { useOverlay } from '../state/ui'
+import { usePage } from '../state/page'
 
-/** Opens a ticket: client-reported bugs open in the bug chat, everything else in the ticket drawer. */
+/**
+ * Opens a ticket. On the Clients page, client-reported bugs open in the bug
+ * chat; the team always gets the ticket drawer (with a "Client chat" tab).
+ */
 export const useOpenTask = () => {
   const overlay = useOverlay()
+  const { side } = usePage()
   return useCallback(
-    (t: Pick<Task, 'id' | 'clientBug'>) => (t.clientBug ? overlay.open('bug', t.id) : overlay.open('ticket', t.id)),
-    [overlay],
+    (t: Pick<Task, 'id' | 'clientBug'>) =>
+      t.clientBug && side === 'client' ? overlay.open('bug', t.id) : overlay.open('ticket', t.id),
+    [overlay, side],
   )
 }
 
@@ -21,17 +27,18 @@ export const useCreateTicket = () => {
   const ws = useWorkspace().data
   const send = useSend()
   const overlay = useOverlay()
-  return (p: { epic: string; sprint?: string | null; status?: string }) => {
+  /** `top` adds the ticket at the top of its column instead of the bottom. */
+  return (p: { epic: string; sprint?: string | null; status?: string; type?: Task['type']; top?: boolean }) => {
     if (!ws) return
     const id = nextTaskId(tasks)
     const sprint = p.sprint !== undefined ? p.sprint : activeSprint(ws.sprints, p.epic)?.id ?? null
     send({
-      type: 'task.create',
+      type: p.top ? 'tickets.task.createTop' : 'task.create',
       task: {
         id,
         isNew: true,
         title: '',
-        type: 'Task',
+        type: p.type || 'Task',
         status: p.status || ws.statuses[0].id,
         prio: 'Medium',
         due: '',

@@ -3,7 +3,8 @@ import { useTasks, useWorkspace } from '../../api/queries'
 import type { Task } from '../../api/types'
 import { Avatar, Icon, PATHS } from '../../components/ui'
 import { diff, range, TODAY, weeks } from '../../lib/dates'
-import { pal, person, SPRINT_STATE } from '../../lib/theme'
+import { pal, SPRINT_STATE } from '../../lib/theme'
+import { usePerson } from '../../state/page'
 import { useOverlay, useUi } from '../../state/ui'
 import { assigneesOf, cardAvatars, sprintsOf, statusOf, taskKey } from '../../domain/tasks'
 import { useCreateTicket, useOpenTask } from '../../features/useOpenTask'
@@ -14,6 +15,7 @@ const btn =
   'h-[34px] flex-none cursor-pointer whitespace-nowrap rounded-lg border-[1.5px] border-line bg-white px-3 text-[13px] font-semibold text-ink hover:border-blue'
 
 function PlanTaskCard({ t, onOpen }: { t: Task; onOpen: () => void }) {
+  const person = usePerson()
   const ws = useWorkspace().data!
   const st = statusOf(ws.statuses, t.status)
   const overdue = !!t.due && diff(t.due, TODAY) < 0 && t.status !== 'done'
@@ -27,7 +29,7 @@ function PlanTaskCard({ t, onOpen }: { t: Task; onOpen: () => void }) {
     >
       <div className="flex min-w-0 items-center gap-2">
         <span className="flex flex-none">
-          {cardAvatars(assigneesOf(t)).map(a => (
+          {cardAvatars(assigneesOf(t), person).map(a => (
             <Avatar key={a.name} title={a.name} i={a.i} bg={a.bg} color={a.color} size={22} radius={5} font={9} className="!font-bold" ring={`0 0 0 2px #fff,${a.ring}`} style={{ marginRight: -5 }} />
           ))}
         </span>
@@ -56,6 +58,7 @@ function PlanTaskCard({ t, onOpen }: { t: Task; onOpen: () => void }) {
 
 /** Epic → Sprints → Tasks tree. */
 export function PlanView() {
+  const person = usePerson()
   const ws = useWorkspace().data!
   const tasks = (useTasks().data ?? []).filter(t => !t.parent)
   const ui = useUi()

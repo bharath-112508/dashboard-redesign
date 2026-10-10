@@ -3,7 +3,8 @@ import { useTasks, useWorkspace } from '../../api/queries'
 import type { Task } from '../../api/types'
 import { Avatar, CheckSquare, Icon, PATHS, Scrim, Select, unassigned } from '../../components/ui'
 import { addDays, diff, MON, range, short, TODAY } from '../../lib/dates'
-import { pal, person, SPRINT_STATE } from '../../lib/theme'
+import { pal, SPRINT_STATE } from '../../lib/theme'
+import { usePerson } from '../../state/page'
 import { useUi } from '../../state/ui'
 import { sprintsOf, statusOf } from '../../domain/tasks'
 import { useOpenTask } from '../../features/useOpenTask'
@@ -287,6 +288,7 @@ export function TimelineView() {
 }
 
 function TaskLabel({ r, onOpen }: { r: Extract<Row, { kind: 'task' }>; onOpen: () => void }) {
+  const person = usePerson()
   const ws = useWorkspace().data!
   const st = statusOf(ws.statuses, r.t.status)
   const a = r.t.assignee ? { ...person(r.t.assignee), color: '#fff', ring: 'none' } : { ...unassigned, name: 'Unassigned' }

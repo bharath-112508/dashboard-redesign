@@ -4,13 +4,12 @@ import type { Attachment, ChatFile, ChatMessage, ClientPriority, Question, Task 
 import { Avatar, CloseButton, Icon, Label, PATHS } from '../../components/ui'
 import { diff, fmt, todayLabel, TODAY } from '../../lib/dates'
 import { isImageName, readFiles } from '../../lib/files'
-import { person, questionTags } from '../../lib/theme'
+import { ME, questionTags } from '../../lib/theme'
+import { usePage } from '../../state/page'
 import { useOverlay } from '../../state/ui'
 import { statusOf, taskKey, fileExt } from '../../domain/tasks'
 import { clientQuestionState, threadOf } from '../../domain/questions'
 
-/** This page is the client's view: their messages sit on the right. */
-const SIDE = 'client'
 
 const PRIO_COLORS: Record<ClientPriority, [string, string]> = {
   Low: ['#22354C', '#E7EEFB'],
@@ -30,12 +29,17 @@ interface Model {
   title: string
   by: { name: string; i: string; bg: string }
   when: string
-  status: { label: string; color: string }
+  status: { label: string; color: string; dot?: string }
+  /** Status pill next to the key (team side). */
+  pill?: { label: string; bg: string; c: string }
+  /** "Mark as solved" toggle (team side). */
+  solve?: { solved: boolean; toggle: () => void }
   photos: ChatFile[]
   thread: ChatMessage[]
   chatSub: string
   placeholder: string
   waiting: boolean
+  waitLbl: string
   teamWait: boolean
   send: (m: ChatMessage) => void
 }
@@ -62,9 +66,20 @@ export function ConversationModal({ bugId, questionId }: { bugId?: number; quest
 
 function QuestionConversation({ q, close }: { q: Question; close: () => void }) {
   const send = useSend()
+  const { side, person } = usePage()
+  const team = side === 'team'
   const st = clientQuestionState(q)
   const T = threadOf(q)
   const last = T[T.length - 1]
+  const answered = T.some(c => c.side === 'client')
+  // The team sees Waiting / Answered / Solved; the client sees what they need to do.
+  const tst = q.solved ? 'Solved' : answered ? 'Answered' : 'Waiting'
+  const TST: Record<string, [string, string, string, string]> = {
+    Solved: ['#3F9079', '#FFFFFF', '#195040', '#3F9079'],
+    Answered: ['#D6E9E2', '#195040', '#195040', '#3F9079'],
+    Waiting: ['#FBEDC2', '#7A5C0E', '#7A5C0E', '#B98A2F'],
+  }
+  const [pBg, pC, sTx, sDot] = TST[tst]
   const m: Model = {
     kind: 'Question to client',
     kIc: '?',
@@ -76,13 +91,32 @@ function QuestionConversation({ q, close }: { q: Question; close: () => void }) 
     title: q.title || (q.text.length > 60 ? q.text.slice(0, 60).replace(/\s+\S*$/, '') + '…' : q.text),
     by: person(q.by),
     when: q.when,
-    status: { label: st.label, color: st.boxC },
+    status: team ? { label: tst, color: sTx, dot: sDot } : { label: st.label, color: st.boxC },
+    pill: team ? { label: tst, bg: pBg, c: pC } : undefined,
+    solve: team
+      ? {
+          solved: !!q.solved,
+          toggle: () =>
+            send({
+              type: 'batch',
+              cmds: [
+                { type: 'question.update', id: q.id, patch: { solved: !q.solved } },
+                {
+                  type: 'question.message',
+                  id: q.id,
+                  message: { who: ME, side: 'team', text: q.solved ? 'Reopened the question' : 'Marked as solved', when: 'just now', files: [] },
+                },
+              ],
+            }),
+        }
+      : undefined,
     photos: q.photos || [],
     thread: T,
-    chatSub: 'Answer and attach documents for the Viljetech team',
-    placeholder: 'Write your answer…',
-    waiting: !T.some(c => c.side === 'client'),
-    teamWait: !!last && last.side === 'client',
+    chatSub: team ? 'Chat with the client · they reply from the Clients page' : 'Answer and attach documents for the Viljetech team',
+    placeholder: team ? 'Message the client…' : 'Write your answer…',
+    waiting: !answered,
+    waitLbl: team ? 'Waiting for the client to answer' : 'The team is waiting for your answer',
+    teamWait: !team && !!last && last.side === 'client',
     send: message => send({ type: 'question.message', id: q.id, message }),
   }
   return (
@@ -93,7 +127,18 @@ function QuestionConversation({ q, close }: { q: Question; close: () => void }) 
           <div className="mt-2 whitespace-pre-wrap text-[15px] leading-[1.65] text-ink [text-wrap:pretty]">{q.text}</div>
         </>
       )}
-      <Photos photos={m.photos} />
+      <Photos
+        photos={m.photos}
+        emptyText={team ? 'No photos or files yet' : undefined}
+        onAdd={
+          team
+            ? async files => {
+                const F = await readFiles(files)
+                if (F.length) send({ type: 'question.update', id: q.id, patch: { photos: [...(q.photos || []), ...F] } })
+              }
+            : undefined
+        }
+      />
     </Shell>
   )
 }
@@ -134,6 +179,7 @@ function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
     chatSub: 'Chat with the Viljetech team about this bug',
     placeholder: 'Message the team…',
     waiting: false,
+    waitLbl: '',
     teamWait: false,
     send: message => send({ type: 'bug.message', id: bug.id, message }),
   }
@@ -275,10 +321,12 @@ function Photos({
   photos,
   onAdd,
   onRemove,
+  emptyText = 'No photos or files yet. Attach yours in the chat.',
 }: {
   photos: ChatFile[]
   onAdd?: (files: File[]) => void
   onRemove?: (i: number) => void
+  emptyText?: string
 }) {
   return (
     <>
@@ -341,7 +389,7 @@ function Photos({
         </div>
       ) : (
         <div className="mt-5 rounded-xl border-[1.5px] border-dashed border-line p-[18px] text-center text-[13px] text-muted">
-          No photos or files yet. Attach yours in the chat.
+          {emptyText}
         </div>
       )}
     </>
@@ -365,11 +413,32 @@ function Shell({ m, close, children }: { m: Model; close: () => void; children: 
               {m.kind}
             </span>
             <span className="tnum rounded-md bg-lavender px-[7px] py-[3px] text-[12px] font-bold text-purple-ink">{m.qkey}</span>
+            {m.pill && (
+              <span className="inline-flex h-6 items-center gap-[5px] rounded-full pl-[7px] pr-[9px] text-[12px] font-bold" style={{ background: m.pill.bg, color: m.pill.c }}>
+                <span className="size-1.5 rounded-full" style={{ background: m.pill.c }} />
+                {m.pill.label}
+              </span>
+            )}
             {m.tags.map(g => (
               <span key={g.t} className="inline-flex h-6 items-center rounded-[7px] px-[9px] text-[12px] font-bold" style={{ background: g.bg, color: g.c }}>
                 {g.t}
               </span>
             ))}
+            {m.solve && (
+              <button
+                type="button"
+                onClick={m.solve.toggle}
+                className="ml-auto inline-flex h-[30px] cursor-pointer items-center gap-1.5 rounded-lg border-[1.5px] px-3 text-[13px] font-bold"
+                style={{
+                  borderColor: m.solve.solved ? '#3F9079' : '#A9B6C5',
+                  background: m.solve.solved ? '#D6E9E2' : '#FFFFFF',
+                  color: m.solve.solved ? '#195040' : '#1B2D45',
+                }}
+              >
+                <Icon d="M5 12l5 5 9-10" size={13} sw={2.8} />
+                {m.solve.solved ? 'Solved · reopen' : 'Mark as solved'}
+              </button>
+            )}
           </div>
           <div className="mt-3.5 text-[26px] font-extrabold leading-[1.2] tracking-[-0.02em] text-ink [text-wrap:pretty]">{m.title}</div>
           <div className="mt-3.5 grid grid-cols-3 overflow-hidden rounded-[14px] shadow-[0_0_0_1.5px_#D6DEE8]">
@@ -387,7 +456,7 @@ function Shell({ m, close, children }: { m: Model; close: () => void; children: 
             <div className="min-w-0 border-l-[1.5px] border-line-2 px-3.5 py-2.5">
               <Label className="block">Status</Label>
               <div className="mt-[5px] flex items-center gap-[7px] truncate text-[14px] font-bold" style={{ color: m.status.color }}>
-                <span className="size-2 flex-none rounded-full" style={{ background: m.status.color }} />
+                <span className="size-2 flex-none rounded-full" style={{ background: m.status.dot || m.status.color }} />
                 {m.status.label}
               </div>
             </div>
@@ -401,6 +470,7 @@ function Shell({ m, close, children }: { m: Model; close: () => void; children: 
 }
 
 function Chat({ m, close }: { m: Model; close: () => void }) {
+  const { side: SIDE, person } = usePage()
   const [draft, setDraft] = useState('')
   const [pend, setPend] = useState<ChatFile[]>([])
   const end = useRef<HTMLDivElement>(null)
@@ -409,7 +479,7 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
   const ok = !!draft.trim() || pend.length > 0
   const send = () => {
     if (!ok) return
-    m.send({ who: 'Client', side: SIDE, text: draft.trim(), when: 'just now', files: pend })
+    m.send({ who: SIDE === 'client' ? 'Client' : ME, side: SIDE, text: draft.trim(), when: 'just now', files: pend })
     setDraft('')
     setPend([])
   }
@@ -472,7 +542,7 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
         })}
         {m.waiting && (
           <div className="rounded-[10px] border-[1.5px] border-dashed border-[#F0D58A] bg-[#FDF8EC] p-2.5 text-center text-[12.5px] font-semibold text-amber-ink">
-            The team is waiting for your answer
+            {m.waitLbl}
           </div>
         )}
         {m.teamWait && (
