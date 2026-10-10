@@ -337,7 +337,8 @@ test.describe('Tickets: team workspace', () => {
     await page.locator('select[aria-label="Person"]').selectOption({ label: 'Everyone' })
     await expect(page.getByText(note, { exact: true })).toBeVisible()
 
-    await page.locator('div.grid', { hasText: note }).last().getByRole('button', { name: 'Delete', exact: true }).click()
+    await page.getByRole('button', { name: note }).click()
+    await page.getByRole('button', { name: 'Delete', exact: true }).click()
     await expect(page.getByText(note, { exact: true })).toHaveCount(0)
     await expectNotSaved(page, note)
   })
