@@ -346,3 +346,33 @@ describe('buildTimeline (undated tasks)', () => {
         ]);
     });
 });
+
+describe('buildTimeline (undated tasks in a sprint — Jira-style)', () => {
+    it('draws an undated task in an on-screen sprint as a bar across the sprint, flagged as sprint-dated', async () => {
+        loadProjectForCallerMock.mockResolvedValueOnce(projectFixture());
+        const sprint = sprintFixture({ start_date: '2026-02-01', end_date: '2026-02-14' });
+        sprintFindMock.mockReturnValueOnce(queryStub([sprint]));
+        const inSprint = taskFixture({ title: 'In the sprint', due_date: null, sprint_id: sprint._id });
+        const loose = taskFixture({ title: 'No sprint', due_date: null, sprint_id: null });
+        taskFindMock.mockReturnValueOnce(queryStub([])).mockReturnValueOnce(queryStub([inSprint, loose]));
+
+        const result = await svc.buildTimeline(new Types.ObjectId(), baseQuery() as never, adminCaller() as never);
+
+        expect(result.tasks).toEqual([
+            expect.objectContaining({
+                id: inSprint._id.toString(),
+                start_date: '2026-02-01',
+                due_date: '2026-02-14',
+                dated_by_sprint: true,
+            }),
+        ]);
+        expect(result.undated.map((u) => u.title)).toEqual(['No sprint']);
+    });
+
+    it('a dated task is not flagged as sprint-dated', async () => {
+        loadProjectForCallerMock.mockResolvedValueOnce(projectFixture());
+        taskFindMock.mockReturnValueOnce(queryStub([taskFixture()])).mockReturnValueOnce(queryStub([]));
+        const result = await svc.buildTimeline(new Types.ObjectId(), baseQuery() as never, adminCaller() as never);
+        expect(result.tasks[0]!.dated_by_sprint).toBe(false);
+    });
+});

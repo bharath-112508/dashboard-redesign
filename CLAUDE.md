@@ -292,6 +292,7 @@ The full surface — projects + members + clients + custom statuses + sprints + 
   - **Share-link cascade** — deactivating a client revokes all their open links via `revokeLinksForDeactivatedClient`; each revoke is independently audited; never throws.
   - **Public 410 doesn't echo `revoke_reason`** — would leak `client_deactivated` to a token holder.
   - **Timeline derived `start_date`** — read-time per task; `sprint.start_date` if task is sprinted, else `toIstDate(created_at)`. No schema migration; FE Gantt renders `[start_date, due_date]`.
+  - **Timeline: undated tasks in a sprint are drawn across the sprint (Jira's behaviour, 2026-10-10)** — a task with no `due_date` whose sprint overlaps the window comes back in `tasks` with `start_date`/`due_date` = the sprint's range and `dated_by_sprint: true`; only tasks in no sprint stay in `undated`. The FE draws these bars dashed + lighter and never marks them overdue (`timeline-timeliness.ts`).
   - **Timeline two-stage overlap filter** — DB anchors the right edge (`due_date >= from_date`), JS anchors the left edge (`derived_start <= to_date`) after the sprint join.
   - **Timeline caps**: `TIMELINE_RANGE_MAX_DAYS = 365`, `TIMELINE_TASK_CAP = 2000` with `truncated: true` flag. Read-only — never audits.
 

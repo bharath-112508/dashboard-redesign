@@ -68,6 +68,8 @@ interface TimelineTask {
     depends_on_task_ids: string[];
     /** Surface the explicit position for stable ordering within a group. */
     position: number;
+    /** No due date of its own: the bar spans its sprint (Jira's behaviour). */
+    dated_by_sprint: boolean;
 }
 
 export interface TimelineResult {
@@ -168,7 +170,9 @@ export const buildTimeline = async (
     // they don't vanish from the timeline (same sprint/epic/done filters).
     const { due_date: _ignored, ...undatedFilter } = taskFilter;
     const undatedRows = await Task.find({ ...undatedFilter, due_date: null })
-        .select('_id title status priority sprint_id story_id primary_assignee_id')
+        .select(
+            '_id title status priority sprint_id story_id parent_task_id primary_assignee_id depends_on_task_ids position created_at'
+        )
         .sort({ position: 1, created_at: 1 })
         .limit(TIMELINE_UNDATED_CAP)
         .lean<
@@ -179,7 +183,10 @@ export const buildTimeline = async (
                 priority: string;
                 sprint_id: Types.ObjectId | null;
                 story_id: Types.ObjectId | null;
+                parent_task_id: Types.ObjectId | null;
                 primary_assignee_id: Types.ObjectId | null;
+                depends_on_task_ids?: Types.ObjectId[];
+                position: number;
             }[]
         >();
 
@@ -213,6 +220,33 @@ export const buildTimeline = async (
             primary_assignee_id: t.primary_assignee_id?.toString() ?? null,
             depends_on_task_ids: t.depends_on_task_ids.map((id) => id.toString()),
             position: t.position,
+            dated_by_sprint: false,
+        });
+    }
+
+    // Like Jira: an undated task in an on-screen sprint is drawn across the
+    // sprint. Only tasks in no (on-screen) sprint stay "Unscheduled".
+    const unscheduled: typeof undatedRows = [];
+    for (const t of undatedRows ?? []) {
+        const sprint = t.sprint_id ? sprintsById.get(t.sprint_id.toString()) : undefined;
+        if (!sprint) {
+            if (!t.sprint_id) unscheduled.push(t);
+            continue;
+        }
+        tasks.push({
+            id: t._id.toString(),
+            title: t.title,
+            status: t.status,
+            priority: t.priority,
+            start_date: sprint.start_date,
+            due_date: sprint.end_date,
+            sprint_id: sprint._id.toString(),
+            story_id: t.story_id?.toString() ?? null,
+            parent_task_id: t.parent_task_id?.toString() ?? null,
+            primary_assignee_id: t.primary_assignee_id?.toString() ?? null,
+            depends_on_task_ids: (t.depends_on_task_ids ?? []).map((id) => id.toString()),
+            position: t.position,
+            dated_by_sprint: true,
         });
     }
 
@@ -232,7 +266,7 @@ export const buildTimeline = async (
         })),
         tasks,
         truncated,
-        undated: (undatedRows ?? []).map((t) => ({
+        undated: unscheduled.map((t) => ({
             id: t._id.toString(),
             title: t.title,
             status: t.status,
