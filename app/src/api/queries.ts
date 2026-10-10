@@ -41,9 +41,9 @@ const cachedDb = (qc: QueryClient, needed: Resource[]): Db | null => {
  * Sends a command to the server. The cache is updated straight away with the
  * same reducer the server uses, then refetched once the server confirms.
  */
-export const useSend = () => {
+const useCommandMutation = () => {
   const qc = useQueryClient()
-  const m = useMutation({
+  return useMutation({
     mutationFn: (cmd: Command) => server.send(cmd),
     onMutate: async cmd => {
       const keys = touches(cmd)
@@ -64,11 +64,20 @@ export const useSend = () => {
       // them, so only the last write to finish refetches (everything it and
       // the earlier skipped writes touched).
       if (qc.isMutating() > 1) return
-      RESOURCES.forEach(k => qc.invalidateQueries({ queryKey: [k] }))
+      return Promise.all(RESOURCES.map(k => qc.invalidateQueries({ queryKey: [k] })))
     },
   })
-  return m.mutate
 }
+
+/** Fire and forget: the write is applied optimistically and errors roll back. */
+export const useSend = () => useCommandMutation().mutate
+
+/**
+ * Like useSend, but resolves once the server has applied the command and the
+ * cache has been refetched, with what the server did (e.g. the id it gave a
+ * new task). Rejects if the write fails.
+ */
+export const useSendAsync = () => useCommandMutation().mutateAsync
 
 /** Refetches everything when another tab changes the data. */
 export const useLiveSync = () => {

@@ -1,4 +1,5 @@
 import { ME } from '../lib/theme'
+import { nextTaskId } from '../domain/tasks'
 import type { ChatMessage, Db, DevopsRequest, Epic, Question, RequestComment, Sprint, Task, TimeEntry } from './types'
 import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
 import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/commands'
@@ -73,7 +74,41 @@ const mapTask = (db: Db, id: number, f: (t: Task) => Task): Db => ({
   tasks: db.tasks.map(t => (t.id === id ? f(t) : t)),
 })
 
-export const reduce = (db: Db, cmd: Command): Db => {
+/**
+ * Gives a new top-level task an id that is free in `db`. The client picks its
+ * id from its own copy of the tasks, which can be stale (another tab, or a
+ * create that is still in flight), so the copy the command is applied to has
+ * the final say. Subtask records keep the ids they were given.
+ */
+export const assignIds = (db: Db, cmd: Command): Command => {
+  switch (cmd.type) {
+    case 'task.create':
+    case 'tickets.task.createTop': {
+      const { task } = cmd
+      if (task.parent || !db.tasks.some(t => t.id === task.id)) return cmd
+      return { ...cmd, task: { ...task, id: nextTaskId(db.tasks) } }
+    }
+    case 'batch': {
+      // Commands in a batch run one after another, so each sees the ones before it.
+      let acc = db
+      const cmds = cmd.cmds.map(c => {
+        const fixed = assignIds(acc, c)
+        acc = reduce(acc, fixed)
+        return fixed
+      })
+      return { ...cmd, cmds }
+    }
+    default:
+      return cmd
+  }
+}
+
+/** The id of the top-level task a command creates, if it creates one. */
+export const createdId = (cmd: Command): number | undefined =>
+  cmd.type === 'task.create' || cmd.type === 'tickets.task.createTop' ? cmd.task.id : undefined
+
+export const reduce = (db: Db, input: Command): Db => {
+  const cmd = assignIds(db, input)
   switch (cmd.type) {
     case 'task.create':
       return { ...db, tasks: [...db.tasks.filter(t => t.id !== cmd.task.id), cmd.task] }
