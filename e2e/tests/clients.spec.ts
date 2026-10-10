@@ -296,7 +296,8 @@ test.describe('Clients board: tasks, drawer and filters', () => {
     await signIn(page, 'cadmin')
     await openBoard(page)
     await card(page, TEAM_TASK).click()
-    await expect(page.getByText('Add subtasks', { exact: true })).toBeEnabled()
+    await page.getByText('Add subtasks', { exact: true }).click()
+    await expect(page.getByPlaceholder('Add a subtask and press Enter')).toBeVisible()
   })
 
   test('CL-15 team member links a blocking task', async ({ page }) => {
