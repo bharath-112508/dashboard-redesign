@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useRequests, useSend, useWorkspace } from '../../api/queries'
+import { useDevops, useRequests, useSend, useWorkspace } from '../../api/queries'
 import type { DevopsRequest, Priority } from '../../api/types'
 import { Icon, PATHS, Scrim } from '../../components/ui'
-import { TODAY } from '../../lib/dates'
+import { fmt, TODAY } from '../../lib/dates'
 import { devopsTone, ME, PRIO } from '../../lib/theme'
 import { usePerson } from '../../state/page'
 import { useOverlay } from '../../state/ui'
@@ -40,6 +40,7 @@ type Draft = { type: string; prio: Priority; to: string; text: string }
 /** The DevOps button in the epic bar and its panel: project status and requests to the DevOps team. */
 export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string }) {
   const ws = useWorkspace().data!
+  const dv = useDevops().data
   const requests = useRequests().data ?? []
   const send = useSend()
   const person = usePerson()
@@ -50,7 +51,18 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
   const [dd, setDd] = useState<string | null>(null)
   const [rq, setRq] = useState<Draft>({ type: 'Deployment', prio: 'Medium', to: '', text: '' })
 
-  const p = ws.devops.find(x => x.key === ws.devopsLinks[epic]) || ws.devops[0]
+  // The read-only project details this panel shows, mapped from the DevOps board's own data.
+  const src = dv?.projects.find(x => x.key === ws.devopsLinks[epic]) || dv?.projects[0]
+  const p = {
+    key: src?.key ?? '',
+    name: src?.name ?? '',
+    infra: src?.infra ?? '',
+    deploy: src?.deploy ?? '',
+    due: src?.latestDue ? fmt(src.latestDue) : '',
+    cicd: !!src?.cicd,
+    step: src?.step ?? null,
+    owner: src?.owner ?? '',
+  }
   const [c, bg, dot] = devopsTone(p.infra)
   const reqs = requests.filter(r => r.key === p.key)
   const unread = reqs.reduce((a, r) => a + unreadOf(r), 0)

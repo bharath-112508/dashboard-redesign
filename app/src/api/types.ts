@@ -188,26 +188,11 @@ export interface DevopsRequest {
   statusSeen?: string
 }
 
-export interface DevopsProject {
-  key: string
-  name: string
-  infra: string
-  /** Read-only details the Tickets page shows in its DevOps panel (set by the DevOps team). */
-  deploy?: string
-  /** Estimated deployment date, e.g. "15 Oct 2026". */
-  due?: string
-  cicd?: boolean
-  /** Client follow-up step (0 = waiting for client … 5 = escalate); null when none is running. */
-  step?: number | null
-  owner?: string
-}
-
 export interface Workspace {
   statuses: Status[]
   epics: Epic[]
   sprints: Sprint[]
-  devops: DevopsProject[]
-  /** Which DevOps project each epic is linked to. */
+  /** Which DevOps project (key in the devops resource) each epic is linked to. */
   devopsLinks: Record<string, string>
 }
 

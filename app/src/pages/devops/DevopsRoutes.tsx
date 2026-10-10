@@ -1,6 +1,15 @@
-import { Placeholder } from '../Placeholder'
+import { Navigate, Route, Routes } from 'react-router'
+import { DevopsProvider } from '../../features/devops/ctx'
+import { DevopsPage } from './DevopsPage'
 
-/** Entry point for the DevOps board. Owned by the DevOps board build. */
+/** Entry point for the DevOps board: /devops/board and /devops/list, with windows opened by URL parameters. */
 export function DevopsRoutes() {
-  return <Placeholder title="DevOps board" />
+  return (
+    <DevopsProvider>
+      <Routes>
+        <Route index element={<Navigate to="board" replace />} />
+        <Route path=":view" element={<DevopsPage />} />
+      </Routes>
+    </DevopsProvider>
+  )
 }
