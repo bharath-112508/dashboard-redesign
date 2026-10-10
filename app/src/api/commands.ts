@@ -3,6 +3,7 @@ import { nextTaskId } from '../domain/tasks'
 import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, Question, RequestComment, Sprint, Task, TimeEntry } from './types'
 import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
 import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/commands'
+import { reduceUsers, touchesUsers, type UsersCommand } from './users/commands'
 
 /**
  * Every write the page makes is one of these commands. The same reducer runs
@@ -39,8 +40,21 @@ export type Command =
   | { type: 'batch'; cmds: Command[] }
   | TicketsCommand
   | DevopsCommand
+  | UsersCommand
 
-export type Resource = 'workspace' | 'tasks' | 'entries' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects'
+export type Resource =
+  | 'workspace'
+  | 'tasks'
+  | 'entries'
+  | 'questions'
+  | 'requests'
+  | 'devops'
+  | 'people'
+  | 'companies'
+  | 'internalProjects'
+  | 'access'
+  | 'leave'
+  | 'notifications'
 
 export const touches = (cmd: Command): Resource[] => {
   switch (cmd.type) {
@@ -73,7 +87,7 @@ export const touches = (cmd: Command): Resource[] => {
     case 'batch':
       return [...new Set(cmd.cmds.flatMap(touches))]
     default:
-      return [...touchesTickets(cmd), ...touchesDevops(cmd)]
+      return [...touchesTickets(cmd), ...touchesDevops(cmd), ...touchesUsers(cmd)]
   }
 }
 
@@ -221,6 +235,6 @@ export const reduce = (db: Db, input: Command): Db => {
     case 'batch':
       return cmd.cmds.reduce(reduce, db)
     default:
-      return reduceDevops(reduceTickets(db, cmd), cmd)
+      return reduceUsers(reduceDevops(reduceTickets(db, cmd), cmd), cmd)
   }
 }
