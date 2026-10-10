@@ -147,6 +147,8 @@ export interface Question {
   qtype?: string
   qprio?: string
   fromDevops?: boolean
+  /** DevOps project key (e.g. OPS-101) for questions raised from the DevOps board. */
+  project?: string
   sprint?: string
 }
 
@@ -179,6 +181,9 @@ export interface DevopsRequest {
   start?: string
   est?: string
   logs?: { h: number; by: string; when: string; date?: string; notes?: string }[]
+  /** How many DevOps replies / which status the Tickets side has already seen (for unread badges). */
+  seenT?: number
+  statusSeen?: string
 }
 
 export interface DevopsProject {

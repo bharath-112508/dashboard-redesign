@@ -1,5 +1,5 @@
 import { ME } from '../lib/theme'
-import type { ChatMessage, Db, Epic, RequestComment, Sprint, Task } from './types'
+import type { ChatMessage, Db, DevopsRequest, Epic, Question, RequestComment, Sprint, Task, TimeEntry } from './types'
 import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
 import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/commands'
 
@@ -16,6 +16,14 @@ export type Command =
   | { type: 'bug.message'; id: number; message: ChatMessage }
   | { type: 'question.message'; id: number; message: ChatMessage }
   | { type: 'request.comment'; id: number; comment: RequestComment }
+  // Shared by the Tickets page and the DevOps board.
+  | { type: 'question.create'; question: Question }
+  | { type: 'question.update'; id: number; patch: Partial<Question> }
+  | { type: 'request.create'; request: DevopsRequest }
+  /** Updates a request; `log` adds a line to its history. */
+  | { type: 'request.update'; id: number; patch: Partial<DevopsRequest>; log?: { by: string; text: string } }
+  | { type: 'entry.create'; entry: TimeEntry }
+  | { type: 'entry.delete'; id: number }
   | { type: 'sprint.create'; sprint: Sprint }
   | { type: 'sprint.update'; id: string; patch: Partial<Sprint> }
   | { type: 'sprint.addMembers'; id: string; names: string[] }
@@ -36,7 +44,15 @@ export const touches = (cmd: Command): Resource[] => {
     case 'bug.message':
       return ['tasks']
     case 'question.message':
+    case 'question.create':
+    case 'question.update':
       return ['questions']
+    case 'request.create':
+    case 'request.update':
+      return ['requests']
+    case 'entry.create':
+    case 'entry.delete':
+      return ['entries']
     case 'request.comment':
       return ['requests']
     case 'sprint.create':
@@ -91,6 +107,29 @@ export const reduce = (db: Db, cmd: Command): Db => {
               },
         ),
       }
+    case 'question.create':
+      return { ...db, questions: [...db.questions.filter(q => q.id !== cmd.question.id), cmd.question] }
+    case 'question.update':
+      return { ...db, questions: db.questions.map(q => (q.id === cmd.id ? { ...q, ...cmd.patch } : q)) }
+    case 'request.create':
+      return { ...db, requests: [cmd.request, ...db.requests.filter(r => r.id !== cmd.request.id)] }
+    case 'request.update':
+      return {
+        ...db,
+        requests: db.requests.map(r =>
+          r.id !== cmd.id
+            ? r
+            : {
+                ...r,
+                ...cmd.patch,
+                history: cmd.log ? [{ ...cmd.log, when: 'just now' }, ...(r.history || [])] : r.history,
+              },
+        ),
+      }
+    case 'entry.create':
+      return { ...db, entries: [...db.entries, cmd.entry] }
+    case 'entry.delete':
+      return { ...db, entries: db.entries.filter(e => e.id !== cmd.id) }
     case 'request.comment':
       return {
         ...db,
