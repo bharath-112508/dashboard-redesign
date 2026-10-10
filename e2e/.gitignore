@@ -5,3 +5,4 @@ tests/_explore/
 .probe/
 tests/clients-scratch/
 .devops-run*.log
+tests/zz-*.spec.ts
