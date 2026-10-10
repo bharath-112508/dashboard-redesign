@@ -1,7 +1,10 @@
 import type { ChatFile } from '../api/types'
 import { fileSize } from '../domain/tasks'
 
-/** Browsers can only keep small files in local storage, so larger ones keep their name but can't be opened. */
+/**
+ * Files above this keep their name and size but can't be opened or downloaded. The limit
+ * is kept from before attachment contents moved to IndexedDB, so the behaviour stays the same.
+ */
 const MAX_INLINE = 1.5e6
 
 /** Reads picked or dropped files into attachments with data URLs. */
