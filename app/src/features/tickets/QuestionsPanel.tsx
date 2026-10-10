@@ -1,8 +1,9 @@
+import { useActorSend } from '../../state/access'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useQuestions, useSend, useWorkspace } from '../../api/queries'
+import { useQuestions, useWorkspace } from '../../api/queries'
 import type { ChatFile, Question } from '../../api/types'
 import { Avatar, Icon, PATHS, Scrim } from '../../components/ui'
 import { readFiles } from '../../lib/files'
@@ -51,7 +52,7 @@ export function QuestionsPanel({ epic }: { epic: string }) {
   const me = useMe()
   const ws = useWorkspace().data!
   const questions = useQuestions().data ?? []
-  const send = useSend()
+  const send = useActorSend()
   const person = usePerson()
   const overlay = useOverlay()
   const [open, setOpen] = useState(false)

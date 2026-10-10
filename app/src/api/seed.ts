@@ -243,7 +243,7 @@ const ALL_ENTRIES: TimeEntry[] = [
   })),
 ]
 
-export const DB_VERSION = 3
+export const DB_VERSION = 4
 
 export const createSeed = (): Db => {
   const sprints = buildSprints()

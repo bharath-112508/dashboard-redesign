@@ -1,5 +1,6 @@
+import { useActorSend } from '../../state/access'
 import { useState } from 'react'
-import { useSend, useTasks, useWorkspace } from '../../api/queries'
+import { useTasks, useWorkspace } from '../../api/queries'
 import type { Sprint, Task } from '../../api/types'
 import { Avatar, Icon, PATHS, unassigned } from '../../components/ui'
 import { range, TODAY, weeks } from '../../lib/dates'
@@ -16,7 +17,7 @@ export function BacklogView() {
   const ws = useWorkspace().data!
   const tasks = useTasks().data ?? []
   const ui = useUi()
-  const send = useSend()
+  const send = useActorSend()
   const person = usePerson()
   const openTask = useOpenTask()
   const [draft, setDraft] = useState('')

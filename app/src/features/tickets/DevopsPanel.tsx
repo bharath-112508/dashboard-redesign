@@ -1,5 +1,6 @@
+import { useActorSend } from '../../state/access'
 import { useState } from 'react'
-import { useDevops, useRequests, useSend, useWorkspace } from '../../api/queries'
+import { useDevops, useRequests, useWorkspace } from '../../api/queries'
 import type { DevopsRequest, Priority } from '../../api/types'
 import { Icon, PATHS, Scrim } from '../../components/ui'
 import { fmt, TODAY } from '../../lib/dates'
@@ -23,7 +24,7 @@ export const unreadOf = (r: DevopsRequest) =>
 
 /** Marks a request as read and opens it. */
 export const useOpenRequest = () => {
-  const send = useSend()
+  const send = useActorSend()
   const overlay = useOverlay()
   return (r: DevopsRequest) => {
     if (unreadOf(r) > 0)
@@ -44,7 +45,7 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
   const ws = useWorkspace().data!
   const dv = useDevops().data
   const requests = useRequests().data ?? []
-  const send = useSend()
+  const send = useActorSend()
   const person = usePerson()
   const openRequest = useOpenRequest()
   const [open, setOpen] = useState(false)

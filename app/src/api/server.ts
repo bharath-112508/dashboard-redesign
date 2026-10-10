@@ -2,6 +2,7 @@ import { assignIds, createdId, reduce, type Command } from './commands'
 import { createSeed, DB_VERSION, personIdByName } from './seed'
 import { PEOPLE_SEED } from './people/seed'
 import { COMPANIES_SEED } from './companies/seed'
+import { INTERNAL_PROJECTS_SEED } from './projects/seed'
 import type { Db } from './types'
 import { setSaveProblem } from '../components/SaveNotice'
 
@@ -60,15 +61,34 @@ const isDb = (v: unknown): v is Db => {
  * Everything else is kept, so nobody loses their tickets on upgrade.
  */
 const migrate = (v: unknown): unknown => {
-  // Weeks submitted before the weekSubmissions collection existed: none.
-  if (isObj(v) && v.version === DB_VERSION && !Array.isArray(v.weekSubmissions)) return { ...v, weekSubmissions: [] }
-  if (!isObj(v) || v.version !== 2) return v
+  if (isObj(v) && v.version === 2) return migrate3(upgrade2(v))
+  if (isObj(v) && (v.version === 3 || v.version === DB_VERSION)) return migrate3(v)
+  return v
+}
+
+/**
+ * Version 3 gains the leave, notifications and client team collections, and an
+ * internal project seed for stores that never had one. Per-ticket hours kept in
+ * task.time stay where they are (they still count on the tickets).
+ */
+const migrate3 = (v: Record<string, unknown>): unknown => ({
+  ...v,
+  version: DB_VERSION,
+  leave: Array.isArray(v.leave) ? v.leave : [],
+  notifications: Array.isArray(v.notifications) ? v.notifications : [],
+  clientTeam: Array.isArray(v.clientTeam) ? v.clientTeam : [],
+  internalProjects: Array.isArray(v.internalProjects) && v.internalProjects.length ? v.internalProjects : clone(INTERNAL_PROJECTS_SEED),
+  weekSubmissions: Array.isArray(v.weekSubmissions) ? v.weekSubmissions : [],
+})
+
+/** Version 2 gains people, companies, internal projects and per-entry person ids. */
+const upgrade2 = (v: Record<string, unknown>): Record<string, unknown> => {
   const entries = Array.isArray(v.entries)
     ? v.entries.map(e => (isObj(e) && e.userId === undefined ? { ...e, userId: personIdByName(String(e.user)) } : e))
     : v.entries
   return {
     ...v,
-    version: DB_VERSION,
+    version: 2,
     people: clone(PEOPLE_SEED),
     companies: clone(COMPANIES_SEED),
     internalProjects: [],
