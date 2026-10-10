@@ -8,6 +8,7 @@ import { usePerson } from '../../state/page'
 import { useUi } from '../../state/ui'
 import { sprintsOf, statusOf } from '../../domain/tasks'
 import { useOpenTask } from '../../features/useOpenTask'
+import { onActivate } from '../../features/plan/keyboard'
 
 type Row =
   | { kind: 'group'; id: string; name: string; sub: string; count: number; closed: boolean; span: { left: number; w: number; c: string } | null }
@@ -150,7 +151,7 @@ export function TimelineView() {
             <option value="weeks">Weeks</option>
           </Select>
           <span className="relative inline-flex">
-            <button type="button" onClick={() => setPickOpen(!pickOpen)} className={`${navBtn} inline-flex items-center gap-2 px-3`}>
+            <button type="button" aria-expanded={pickOpen} onClick={() => setPickOpen(!pickOpen)} className={`${navBtn} inline-flex items-center gap-2 px-3`}>
               {pickLabel}
               <Icon d={PATHS.chevron} size={12} sw={2.6} />
             </button>
@@ -158,12 +159,27 @@ export function TimelineView() {
               <>
                 <Scrim onClick={() => setPickOpen(false)} />
                 <div className="absolute left-0 top-[42px] z-[41] w-[290px] rounded-[14px] border-[1.5px] border-line bg-white p-1.5 shadow-[0_18px_50px_rgba(27,45,69,0.2)]">
-                  <div onClick={() => setSel(sel ? null : [])} className="flex cursor-pointer items-center gap-2.5 rounded-[9px] border-b-[1.5px] border-sky px-2.5 py-[9px] hover:bg-canvas">
+                  <div
+                    role="checkbox"
+                    aria-checked={!sel}
+                    tabIndex={0}
+                    onClick={() => setSel(sel ? null : [])}
+                    onKeyDown={onActivate(() => setSel(sel ? null : []))}
+                    className="flex cursor-pointer items-center gap-2.5 rounded-[9px] border-b-[1.5px] border-sky px-2.5 py-[9px] hover:bg-canvas"
+                  >
                     <CheckSquare on={!sel} />
                     <span className="text-[13.5px] font-bold">All sprints</span>
                   </div>
                   {[...eSp.map(x => ({ id: x.id, label: x.name, sub: range(x.start, x.end) })), { id: 'backlog', label: 'Backlog', sub: 'no sprint' }].map(o => (
-                    <div key={o.id} onClick={() => toggleSel(o.id)} className="flex cursor-pointer items-center gap-2.5 rounded-[9px] px-2.5 py-2 hover:bg-canvas">
+                    <div
+                      key={o.id}
+                      role="checkbox"
+                      aria-checked={cur.includes(o.id)}
+                      tabIndex={0}
+                      onClick={() => toggleSel(o.id)}
+                      onKeyDown={onActivate(() => toggleSel(o.id))}
+                      className="flex cursor-pointer items-center gap-2.5 rounded-[9px] px-2.5 py-2 hover:bg-canvas"
+                    >
                       <CheckSquare on={cur.includes(o.id)} />
                       <span className="text-[13.5px] font-semibold">{o.label}</span>
                       <span className="ml-auto whitespace-nowrap text-[12px] text-muted">{o.sub}</span>
@@ -233,7 +249,11 @@ export function TimelineView() {
               r.kind === 'group' ? (
                 <div
                   key={'g' + r.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={!r.closed}
                   onClick={() => setCollapsed(c => ({ ...c, [r.id]: !c[r.id] }))}
+                  onKeyDown={onActivate(() => setCollapsed(c => ({ ...c, [r.id]: !c[r.id] })))}
                   className="flex h-11 cursor-pointer items-center gap-2 border-b-[1.5px] border-line-2 bg-canvas px-4"
                 >
                   <Icon d={PATHS.chevron} size={12} sw={2.6} className="text-ink-2" style={{ transform: `rotate(${r.closed ? -90 : 0}deg)` }} />
@@ -293,7 +313,13 @@ function TaskLabel({ r, onOpen }: { r: Extract<Row, { kind: 'task' }>; onOpen: (
   const st = statusOf(ws.statuses, r.t.status)
   const a = r.t.assignee ? { ...person(r.t.assignee), color: '#fff', ring: 'none' } : { ...unassigned, name: 'Unassigned' }
   return (
-    <div onClick={onOpen} className="flex h-12 cursor-pointer items-center gap-2.5 border-b-[1.5px] border-line-3 px-4 hover:bg-canvas">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={onActivate(onOpen)}
+      className="flex h-12 cursor-pointer items-center gap-2.5 border-b-[1.5px] border-line-3 px-4 hover:bg-canvas"
+    >
       <span className="size-4 flex-none rounded-full border-[1.5px]" style={{ borderColor: st.c, background: r.t.status === 'done' ? st.c : 'transparent' }} />
       <span className="min-w-0 flex-1 truncate text-[14px]">{r.t.title}</span>
       {r.over && <Icon d={PATHS.warn} size={15} sw={2.2} stroke="#D2724A" />}
@@ -308,7 +334,10 @@ function TaskBar({ r, onOpen }: { r: Extract<Row, { kind: 'task' }>; onOpen: () 
   return (
     <div className="relative h-12 border-b-[1.5px] border-line-3">
       <span
+        role="button"
+        tabIndex={0}
         onClick={onOpen}
+        onKeyDown={onActivate(onOpen)}
         title={r.range}
         className="absolute top-2 flex h-8 cursor-pointer items-center truncate whitespace-nowrap rounded-lg px-2.5 text-[13px] font-semibold"
         style={{ left: r.left, width: r.w, background: st.soft, color: st.ink, boxShadow: `inset 0 0 0 1.5px ${st.c}` }}

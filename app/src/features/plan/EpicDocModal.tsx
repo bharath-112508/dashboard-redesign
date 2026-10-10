@@ -9,6 +9,7 @@ import { usePage } from '../../state/page'
 import { useOverlay, useUi } from '../../state/ui'
 import { sprintsOf } from '../../domain/tasks'
 import { useEscape } from '../useEscape'
+import { onActivate } from './keyboard'
 
 const SECTIONS = [
   ['summary', 'Summary'],
@@ -174,7 +175,11 @@ export function EpicDocModal({ id }: { id: string }) {
                 return (
                   <div
                     key={i}
+                    role="checkbox"
+                    aria-checked={on}
+                    tabIndex={0}
                     onClick={() => update({ critDone: { ...cd, [i]: !on } })}
+                    onKeyDown={onActivate(() => update({ critDone: { ...cd, [i]: !on } }))}
                     className="flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2.5"
                     style={{ background: on ? '#EEF7F3' : '#F6F9FC', boxShadow: `inset 0 0 0 1.5px ${on ? '#3F9079' : '#E4EAF0'}` }}
                   >
@@ -216,7 +221,10 @@ export function EpicDocModal({ id }: { id: string }) {
                 return (
                   <div
                     key={x.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => overlay.open('sprint', x.id)}
+                    onKeyDown={onActivate(() => overlay.open('sprint', x.id))}
                     className="grid cursor-pointer items-center gap-3 border-t-[1.5px] border-sky px-3.5 py-2.5 hover:bg-canvas"
                     style={{ gridTemplateColumns: '90px 130px minmax(0,1fr) 90px 80px' }}
                   >
