@@ -1,3 +1,4 @@
 node_modules/
 report/
 test-results/
+tests/_explore/
