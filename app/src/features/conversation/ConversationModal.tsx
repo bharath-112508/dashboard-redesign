@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuestions, useSend, useTasks, useWorkspace } from '../../api/queries'
 import type { Attachment, ChatFile, ChatMessage, ClientPriority, Question, Task } from '../../api/types'
 import { Avatar, CloseButton, Icon, Label, PATHS } from '../../components/ui'
@@ -9,6 +9,7 @@ import { usePage } from '../../state/page'
 import { useOverlay } from '../../state/ui'
 import { statusOf, taskKey, fileExt } from '../../domain/tasks'
 import { clientQuestionState, threadOf } from '../../domain/questions'
+import { EscapeHoldContext, useEscapeHold, type EscapeHold } from './escapeHold'
 
 
 const PRIO_COLORS: Record<ClientPriority, [string, string]> = {
@@ -51,17 +52,26 @@ export function ConversationModal({ bugId, questionId }: { bugId?: number; quest
   const overlay = useOverlay()
   const close = () => overlay.close('bug', 'question')
 
+  // Escape closes the window only when no edit is open in it (see escapeHold.ts).
+  const holds = useRef(new Set<string>())
+  const hold = useCallback<EscapeHold>((id, on) => {
+    if (on) holds.current.add(id)
+    else holds.current.delete(id)
+  }, [])
   useEffect(() => {
-    const h = (e: KeyboardEvent) => e.key === 'Escape' && close()
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && holds.current.size === 0) close()
+    }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   })
 
   const bug = bugId != null ? tasks.find(t => t.id === bugId && t.clientBug) : undefined
   const q = questionId != null ? questions.find(x => x.id === questionId) : undefined
-  if (bug) return <BugConversation bug={bug} close={close} />
-  if (q) return <QuestionConversation q={q} close={close} />
-  return null
+  let body: ReactNode = null
+  if (bug) body = <BugConversation bug={bug} close={close} />
+  else if (q) body = <QuestionConversation q={q} close={close} />
+  return <EscapeHoldContext.Provider value={hold}>{body}</EscapeHoldContext.Provider>
 }
 
 function QuestionConversation({ q, close }: { q: Question; close: () => void }) {
@@ -124,7 +134,7 @@ function QuestionConversation({ q, close }: { q: Question; close: () => void }) 
       {q.text && (
         <>
           <div className="mt-[22px] text-[15px] font-extrabold text-ink">Details</div>
-          <div className="mt-2 whitespace-pre-wrap text-[15px] leading-[1.65] text-ink [text-wrap:pretty]">{q.text}</div>
+          <div className="mt-2 whitespace-pre-wrap text-[15px] leading-[1.65] text-ink [overflow-wrap:anywhere] [text-wrap:pretty]">{q.text}</div>
         </>
       )}
       <Photos
@@ -148,6 +158,15 @@ function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
   const send = useSend()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
+  const descRef = useRef<HTMLTextAreaElement>(null)
+  useEscapeHold('desc', editing)
+  // Start with the caret at the end of the existing text, not at position 0.
+  useEffect(() => {
+    const t = descRef.current
+    if (!editing || !t) return
+    t.focus()
+    t.setSelectionRange(t.value.length, t.value.length)
+  }, [editing])
   const st = statusOf(ws.statuses, bug.status)
   const ci = ws.statuses.findIndex(s => s.id === bug.status)
   const n = ws.statuses.length
@@ -274,10 +293,10 @@ function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
       {editing ? (
         <>
           <textarea
+            ref={descRef}
             value={draft}
             onChange={e => setDraft(e.target.value)}
             rows={6}
-            autoFocus
             className="mt-2 w-full resize-y rounded-xl border-[1.5px] border-blue px-3 py-2.5 text-[14.5px] leading-[1.6] text-ink outline-0"
           />
           <div className="mt-2 flex justify-end gap-2">
@@ -298,7 +317,7 @@ function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
           </div>
         </>
       ) : (
-        <div className="mt-2 whitespace-pre-wrap text-[15px] leading-[1.65] [text-wrap:pretty]" style={{ color: bug.desc ? '#1B2D45' : '#3B4A5E' }}>
+        <div className="mt-2 whitespace-pre-wrap text-[15px] leading-[1.65] [overflow-wrap:anywhere] [text-wrap:pretty]" style={{ color: bug.desc ? '#1B2D45' : '#3B4A5E' }}>
           {bug.desc || 'No description yet.'}
         </div>
       )}
@@ -397,14 +416,16 @@ function Photos({
 }
 
 function Shell({ m, close, children }: { m: Model; close: () => void; children: ReactNode }) {
+  // The single grid row is bounded by the window, so each column scrolls on its own
+  // and the chat column's header and composer stay in view.
   return (
     <>
       <div onClick={close} className="fixed inset-0 z-[80] animate-fade-in bg-[rgba(27,45,69,0.45)]" />
       <div
         className="fixed bottom-5 left-1/2 top-5 z-[81] grid w-[min(1180px,calc(100vw-32px))] -translate-x-1/2 animate-pop-in overflow-hidden rounded-3xl border-[1.5px] border-line bg-white shadow-[0_40px_100px_rgba(27,45,69,0.35)]"
-        style={{ gridTemplateColumns: 'minmax(0,1.15fr) minmax(0,0.85fr)' }}
+        style={{ gridTemplateColumns: 'minmax(0,1.15fr) minmax(0,0.85fr)', gridTemplateRows: 'minmax(0,1fr)' }}
       >
-        <div className="min-w-0 overflow-y-auto px-[30px] pb-[30px] pt-6">
+        <div className="min-h-0 min-w-0 overflow-y-auto px-[30px] pb-[30px] pt-6">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-[7px] pl-1 pr-[9px] text-[12px] font-extrabold" style={{ background: m.kSoft, color: m.kC }}>
               <span className="grid size-[18px] place-items-center rounded-[5px] text-[11px] text-white" style={{ background: m.kBg }}>
@@ -440,7 +461,7 @@ function Shell({ m, close, children }: { m: Model; close: () => void; children: 
               </button>
             )}
           </div>
-          <div className="mt-3.5 text-[26px] font-extrabold leading-[1.2] tracking-[-0.02em] text-ink [text-wrap:pretty]">{m.title}</div>
+          <div className="mt-3.5 text-[26px] font-extrabold leading-[1.2] tracking-[-0.02em] text-ink [overflow-wrap:anywhere] [text-wrap:pretty]">{m.title}</div>
           <div className="mt-3.5 grid grid-cols-3 overflow-hidden rounded-[14px] shadow-[0_0_0_1.5px_#D6DEE8]">
             <div className="px-3.5 py-2.5">
               <Label className="block">Raised by</Label>
@@ -473,10 +494,17 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
   const { side: SIDE, person } = usePage()
   const [draft, setDraft] = useState('')
   const [pend, setPend] = useState<ChatFile[]>([])
-  const end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [m.thread.length])
+  const list = useRef<HTMLDivElement>(null)
+  // Scroll the message list itself. scrollIntoView would also scroll the window's
+  // overflow-hidden panel and push its header off the top.
+  useEffect(() => {
+    const el = list.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [m.thread.length, m.waiting, m.teamWait])
 
   const ok = !!draft.trim() || pend.length > 0
+  // An unsent draft is an edit in progress: Escape should not throw it away.
+  useEscapeHold('composer', ok)
   const send = () => {
     if (!ok) return
     m.send({ who: SIDE === 'client' ? 'Client' : ME, side: SIDE, text: draft.trim(), when: 'just now', files: pend })
@@ -485,7 +513,7 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
   }
 
   return (
-    <div className="flex min-w-0 flex-col border-l-[1.5px] border-line-2 bg-canvas">
+    <div className="flex min-h-0 min-w-0 flex-col border-l-[1.5px] border-line-2 bg-canvas">
       <div className="flex items-center gap-2.5 border-b-[1.5px] border-line-2 bg-white px-[18px] py-4">
         <span className="grid size-8 place-items-center rounded-[9px] bg-green text-[12px] font-extrabold text-white">C</span>
         <div className="min-w-0">
@@ -496,21 +524,21 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
           <CloseButton onClick={close} />
         </span>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-[18px] py-4">
+      <div ref={list} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-[18px] py-4">
         {m.thread.map((c, i) => {
           const isC = c.side === 'client'
           const mine = c.side === SIDE
           const av = isC ? { i: 'C', bg: '#3F9079' } : person(c.who)
           return (
-            <div key={i} className="flex items-end gap-2" style={{ flexDirection: mine ? 'row-reverse' : 'row' }}>
-              <Avatar i={av.i} bg={av.bg} size={26} radius={7} font={9.5} className="!font-bold" />
-              <div className="flex max-w-[82%] flex-col gap-1.5" style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
-                <div className="rounded-[14px] px-3 py-2.5" style={{ background: isC ? '#EEF7F3' : '#F3F0FC', boxShadow: `inset 0 0 0 1.5px ${isC ? '#D6E9E2' : '#DCD3F5'}` }}>
-                  <div className="flex gap-2 text-[11.5px] font-bold" style={{ color: isC ? '#195040' : '#3F2E94' }}>
+            <div key={i} className="flex min-w-0 items-end gap-2" style={{ flexDirection: mine ? 'row-reverse' : 'row' }}>
+              <Avatar i={av.i} bg={av.bg} size={26} radius={7} font={9.5} className="!font-bold flex-none" />
+              <div className="flex min-w-0 max-w-[82%] flex-col gap-1.5" style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
+                <div className="min-w-0 max-w-full rounded-[14px] px-3 py-2.5 [overflow-wrap:anywhere]" style={{ background: isC ? '#EEF7F3' : '#F3F0FC', boxShadow: `inset 0 0 0 1.5px ${isC ? '#D6E9E2' : '#DCD3F5'}` }}>
+                  <div className="flex min-w-0 gap-2 text-[11.5px] font-bold" style={{ color: isC ? '#195040' : '#3F2E94' }}>
                     {c.who}
                     <span className="font-medium text-muted">{c.when}</span>
                   </div>
-                  {c.text && <div className="mt-[3px] whitespace-pre-wrap text-[14px] leading-normal text-ink">{c.text}</div>}
+                  {c.text && <div className="mt-[3px] whitespace-pre-wrap text-[14px] leading-normal text-ink [overflow-wrap:anywhere]">{c.text}</div>}
                 </div>
                 {c.files?.length > 0 && (
                   <div className="flex flex-wrap gap-1.5" style={{ justifyContent: mine ? 'flex-end' : 'flex-start' }}>
@@ -550,7 +578,6 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
             Sent. Waiting for the team to reply
           </div>
         )}
-        <div ref={end} />
       </div>
       <div className="border-t-[1.5px] border-line-2 bg-white px-3.5 py-3">
         {pend.length > 0 && (
