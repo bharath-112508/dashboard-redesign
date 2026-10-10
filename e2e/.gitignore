@@ -3,3 +3,5 @@ report/
 test-results/
 tests/_explore/
 .probe/
+tests/clients-scratch/
+.devops-run*.log
