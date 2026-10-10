@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useEntries, useRequests, useSend, useTasks, useWorkspace } from '../../api/queries'
 import { usePeople } from '../../api/people/directory'
+import { logTime } from '../../api/timesheet'
 import { Avatar, Icon, PATHS } from '../../components/ui'
 import { diff, fmt, TODAY } from '../../lib/dates'
 import { ME, PEOPLE } from '../../lib/theme'
@@ -99,7 +100,7 @@ export function TimesheetView() {
           non: x.non,
           sortId: x.id,
           open: () => t && openTask(t),
-          remove: () => send({ type: 'entry.delete', id: x.id }),
+          remove: () => send({ type: 'time.remove', id: x.id }),
         }
       })
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.sortId - a.sortId)),
@@ -167,10 +168,8 @@ export function TimesheetView() {
           patch: { logs: [...(r.logs || []), { h: bill + non, by: f.user, when: 'just now', date: f.date || TODAY, notes: f.notes.trim() }] },
         })
     } else {
-      send({
-        type: 'entry.create',
-        entry: {
-          id: Math.max(0, ...entries.map(x => x.id)) + 1,
+      send(
+        logTime({
           date: f.date || TODAY,
           userId: people.find(p => p.name === f.user)?.id ?? 0,
           user: f.user,
@@ -179,8 +178,8 @@ export function TimesheetView() {
           notes: f.notes.trim(),
           bill,
           non,
-        },
-      })
+        }),
+      )
     }
     reset({ ...getValues(), notes: '', bill: '', non: '' })
   }

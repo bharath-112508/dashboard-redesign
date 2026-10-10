@@ -1,10 +1,11 @@
 import { ME } from '../lib/theme'
 import { nextTaskId } from '../domain/tasks'
-import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, Question, RequestComment, Sprint, Task, TimeEntry } from './types'
+import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, Question, RequestComment, Sprint, Task } from './types'
 import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
 import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/commands'
 import { reduceCompanies, touchesCompanies, type CompaniesCommand } from './companies/commands'
 import { reduceProjects, touchesProjects, type ProjectsCommand } from './projects/commands'
+import { assignTimeIds, reduceTime, touchesTime, type TimeCommand } from './timesheet/commands'
 
 /**
  * Every write the page makes is one of these commands. The same reducer runs
@@ -29,8 +30,6 @@ export type Command =
   | { type: 'request.create'; request: DevopsRequest }
   /** Updates a request; `log` adds a line to its history. */
   | { type: 'request.update'; id: number; patch: Partial<DevopsRequest>; log?: { by: string; text: string } }
-  | { type: 'entry.create'; entry: TimeEntry }
-  | { type: 'entry.delete'; id: number }
   | { type: 'sprint.create'; sprint: Sprint }
   | { type: 'sprint.update'; id: string; patch: Partial<Sprint> }
   | { type: 'sprint.addMembers'; id: string; names: string[] }
@@ -43,8 +42,9 @@ export type Command =
   | DevopsCommand
   | CompaniesCommand
   | ProjectsCommand
+  | TimeCommand
 
-export type Resource = 'workspace' | 'tasks' | 'entries' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects'
+export type Resource = 'workspace' | 'tasks' | 'entries' | 'weekSubmissions' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects'
 
 export const touches = (cmd: Command): Resource[] => {
   switch (cmd.type) {
@@ -61,9 +61,6 @@ export const touches = (cmd: Command): Resource[] => {
     case 'request.create':
     case 'request.update':
       return ['requests']
-    case 'entry.create':
-    case 'entry.delete':
-      return ['entries']
     case 'request.comment':
       return ['requests']
     case 'sprint.create':
@@ -77,7 +74,7 @@ export const touches = (cmd: Command): Resource[] => {
     case 'batch':
       return [...new Set(cmd.cmds.flatMap(touches))]
     default:
-      return [...touchesTickets(cmd), ...touchesDevops(cmd), ...touchesCompanies(cmd), ...touchesProjects(cmd)]
+      return [...touchesTickets(cmd), ...touchesDevops(cmd), ...touchesCompanies(cmd), ...touchesProjects(cmd), ...touchesTime(cmd)]
   }
 }
 
@@ -111,7 +108,7 @@ export const assignIds = (db: Db, cmd: Command): Command => {
       return { ...cmd, cmds }
     }
     default:
-      return cmd
+      return assignTimeIds(db, cmd)
   }
 }
 
@@ -178,10 +175,6 @@ export const reduce = (db: Db, input: Command): Db => {
               },
         ),
       }
-    case 'entry.create':
-      return { ...db, entries: [...db.entries, cmd.entry] }
-    case 'entry.delete':
-      return { ...db, entries: db.entries.filter(e => e.id !== cmd.id) }
     case 'request.comment':
       return {
         ...db,
@@ -225,6 +218,6 @@ export const reduce = (db: Db, input: Command): Db => {
     case 'batch':
       return cmd.cmds.reduce(reduce, db)
     default:
-      return reduceProjects(reduceCompanies(reduceDevops(reduceTickets(db, cmd), cmd), cmd), cmd)
+      return reduceProjects(reduceCompanies(reduceDevops(reduceTickets(reduceTime(db, cmd), cmd), cmd), cmd), cmd)
   }
 }

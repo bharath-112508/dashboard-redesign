@@ -137,9 +137,24 @@ export interface TimeEntry {
   task: number | null
   area?: string
   epic?: string
+  /**
+   * Project the time is booked to: `c:<client project id>` or `i:<internal project id>`.
+   * Set by My timesheet. When a writer leaves it out and `task` is set, the
+   * store fills it in from the ticket's epic (see api/timesheet/projects.ts).
+   */
+  project?: string
   notes: string
   bill: number
   non: number
+}
+
+/** A week (Monday's ISO date) that a person has submitted. Present means locked. */
+export interface WeekSubmission {
+  userId: number
+  /** Monday of the week, 'YYYY-MM-DD'. */
+  week: string
+  /** Display time of the submit, e.g. '12 Oct 2026, 14:05'. */
+  when: string
 }
 
 /** System roles. The keys are used by the session, the page access map and the directory. */
@@ -337,6 +352,7 @@ export interface Db {
   workspace: Workspace
   tasks: Task[]
   entries: TimeEntry[]
+  weekSubmissions: WeekSubmission[]
   questions: Question[]
   requests: DevopsRequest[]
   devops: DevopsDb
