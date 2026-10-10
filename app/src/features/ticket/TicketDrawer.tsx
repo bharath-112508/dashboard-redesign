@@ -1,4 +1,4 @@
-import { useEffect, useState, type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useLocation } from 'react-router'
 import { useEntries, useSend, useTasks, useWorkspace } from '../../api/queries'
 import type { Command } from '../../api/commands'
@@ -49,7 +49,6 @@ const subsOf = (raw: Task, tasks: Task[]): Subtask[] =>
 /** The full ticket, opened from the board, plan or timeline. Subtasks open in the same drawer. */
 export function TicketDrawer({ id }: { id: number }) {
   const tasks = useTasks().data ?? []
-  const send = useSend()
   const overlay = useOverlay()
   const [navStack, setNavStack] = useState<number[]>([])
   const [initialTab, setInitialTab] = useState<Tab>('details')
@@ -62,13 +61,7 @@ export function TicketDrawer({ id }: { id: number }) {
     overlay.open('ticket', to, { replace: true })
   }
 
-  const close = (titleDraft: string) => {
-    const t = raw0
-    const tt = titleDraft.trim()
-    if (t?.isNew && !t.title) {
-      if (!tt) send({ type: 'task.delete', id: t.id })
-      else send({ type: 'task.update', id: t.id, patch: { title: tt, isNew: false } })
-    }
+  const onClose = () => {
     setNavStack([])
     overlay.close('ticket')
   }
@@ -84,9 +77,21 @@ export function TicketDrawer({ id }: { id: number }) {
       railHide={railHide}
       setRailHide={setRailHide}
       go={go}
-      close={close}
+      onClose={onClose}
     />
   )
+}
+
+/**
+ * A ticket created by "+ Create ticket" starts empty. Left without a title (any close path,
+ * browser Back or a route change), it is removed; a typed title is saved instead.
+ * Does nothing once the ticket has a title, so it is safe to run more than once.
+ */
+function settleNewTicket(send: (cmd: Command) => void, t: Task, titleDraft: string) {
+  if (!t.isNew || t.title) return
+  const v = titleDraft.trim()
+  if (v) send({ type: 'task.update', id: t.id, patch: { title: v, isNew: false } })
+  else send({ type: 'task.delete', id: t.id })
 }
 
 function TicketBody({
@@ -97,7 +102,7 @@ function TicketBody({
   railHide,
   setRailHide,
   go,
-  close,
+  onClose,
 }: {
   raw0: Task
   tasks: Task[]
@@ -106,7 +111,7 @@ function TicketBody({
   railHide: boolean | null
   setRailHide: (v: boolean) => void
   go: (to: number, tab?: Tab, stack?: number[]) => void
-  close: (titleDraft: string) => void
+  onClose: () => void
 }) {
   const ws = useWorkspace().data!
   const entries = useEntries().data ?? []
@@ -128,13 +133,47 @@ function TicketBody({
   const [logMin, setLogMin] = useState(0)
   const [dropOn, setDropOn] = useState(false)
 
+  // The latest values, read by the close paths below (including the unmount cleanup).
+  const latest = useRef({ task: raw0, titleDraft, send, settled: false })
+  latest.current = { task: raw0, titleDraft, send, settled: latest.current.settled }
+  const pendingSettle = useRef<number | undefined>(undefined)
+
+  /** Settles the new ticket once per drawer instance. */
+  const settle = () => {
+    const L = latest.current
+    if (L.settled) return
+    L.settled = true
+    settleNewTicket(L.send, L.task, L.titleDraft)
+  }
+  const close = () => {
+    settle()
+    onClose()
+  }
+
+  // Leaving the drawer by any route (browser Back, a link, a route change, another ticket) settles it too.
+  // The settle is deferred one tick so that React's strict-mode effect replay, which runs cleanup straight
+  // after mount, cancels it instead of removing a ticket that is still open.
+  useEffect(() => {
+    window.clearTimeout(pendingSettle.current)
+    return () => {
+      pendingSettle.current = window.setTimeout(settle, 0)
+    }
+  }, [])
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !tdd) close(titleDraft)
+      if (e.key !== 'Escape') return
+      // An open menu closes first; the next Escape closes the drawer.
+      if (tdd || asAll) {
+        setTdd(null)
+        setAsAll(false)
+        return
+      }
+      close()
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [close, titleDraft, tdd])
+  }, [tdd, asAll, close])
 
   useEffect(() => {
     if (raw0.isNew && !raw0.title) setTimeout(() => document.querySelector<HTMLInputElement>('input[placeholder="Ticket title"]')?.focus(), 150)
@@ -415,7 +454,7 @@ function TicketBody({
 
   const navBack = () => {
     if (prevT) go(prevT.id, 'details', navStack.slice(0, -1))
-    else close(titleDraft)
+    else close()
   }
   const backLabel = prevT ? 'Back to ' + taskKey(prevT) : 'Back to ' + (VIEW_NAMES[view] || 'board')
   const rowCols = isSub ? 'minmax(0,1fr)' : '110px minmax(0,1fr)'
@@ -430,18 +469,28 @@ function TicketBody({
   const sdn = raw.subs.filter(x => x.done).length
   const subPct = raw.subs.length ? Math.round((sdn / raw.subs.length) * 100) + '%' : '0%'
 
-  const fact = 'flex min-w-0 cursor-pointer flex-col gap-1.5 rounded-xl bg-white px-3.5 py-3 shadow-[0_0_0_1.5px_#C9D2DD] transition-shadow hover:shadow-[0_0_0_1.5px_#4870E8]'
+  // Due and Time shortcuts; only these two get the blue hover ring (the Assignee card does not).
+  const factBase = 'flex min-w-0 cursor-pointer flex-col gap-1.5 rounded-xl bg-white px-3.5 py-3 shadow-[0_0_0_1.5px_#C9D2DD] transition-shadow'
+  const fact = factBase + ' hover:shadow-[0_0_0_1.5px_#4870E8] focus-visible:shadow-[0_0_0_2px_#4870E8]'
+  /** Enter or Space on a clickable card, for keyboard users. */
+  const keyOpen = (fn: () => void) => (e: ReactKeyboardEvent<HTMLElement>) => {
+    if (e.target !== e.currentTarget) return
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      fn()
+    }
+  }
   const sideRow = 'flex min-h-12 items-center justify-between gap-2.5 px-3.5 py-1.5'
   const tnumSm = 'tnum text-[12.5px] text-ink'
 
   return (
     <>
-      <Backdrop onClick={() => close(titleDraft)} z={40} />
+      <Backdrop onClick={close} z={40} />
       <aside
         className="fixed bottom-3 right-3 top-3 z-[41] flex max-w-[calc(100vw-24px)] animate-pop-in overflow-hidden rounded-[28px] border-[1.5px] border-line bg-white shadow-[0_30px_90px_rgba(27,45,69,0.22)]"
         style={{ width: par ? 'min(1240px, calc(100vw - 24px))' : 'min(1120px, calc(100vw - 24px))' }}
       >
-        <CloseButton onClick={() => close(titleDraft)} className="absolute right-4 top-4 z-[5]" />
+        <CloseButton onClick={close} className="absolute right-4 top-4 z-[5]" />
 
         {par && rc && (
           <div className="flex flex-[0_0_56px] flex-col items-center gap-2 border-r-[1.5px] border-line bg-canvas py-5">
@@ -598,7 +647,9 @@ function TicketBody({
                     onClick={() => upd({ status: nxt.id }, 'changed status to ' + nxt.name)}
                     className="inline-flex h-[34px] flex-none cursor-pointer items-center gap-2 rounded-[10px] border-0 bg-blue px-3.5 text-[13px] font-semibold text-white shadow-[0_1px_2px_rgba(27,45,69,0.12)] hover:bg-blue-600"
                   >
-                    Move to {nxt.name}
+                    {/* Separate flex items, so the 8px gap sits before the status name as in the prototype. */}
+                    <span>Move to </span>
+                    <span>{nxt.name}</span>
                     <Icon d={PATHS.arrowRight} size={14} sw={2.6} />
                   </button>
                 ) : (
@@ -609,7 +660,13 @@ function TicketBody({
                 )}
               </div>
               <div className="mt-3.5 grid gap-2" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1.6fr) minmax(0,1fr)' }}>
-                <div onClick={() => !raw.due && focusField('tk-due')} className={fact}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => !raw.due && focusField('tk-due')}
+                  onKeyDown={keyOpen(() => !raw.due && focusField('tk-due'))}
+                  className={fact}
+                >
                   <Label>Due</Label>
                   <span className="truncate text-[16px] font-bold" style={{ color: late ? '#C0392B' : '#1B2D45' }}>
                     {raw.due ? fmt(raw.due) : 'Not set'}
@@ -624,7 +681,13 @@ function TicketBody({
                     {raw.due && d != null ? (late ? -d + 'd overdue' : d === 0 ? 'Today' : 'in ' + d + 'd') : 'Add date'}
                   </span>
                 </div>
-                <div onClick={() => focusField('tk-log')} className={fact}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => focusField('tk-log')}
+                  onKeyDown={keyOpen(() => focusField('tk-log'))}
+                  className={fact}
+                >
                   <div className="flex items-center gap-2">
                     <Label>Time</Label>
                     <span className="ml-auto inline-flex h-[22px] items-center gap-[5px] rounded-md bg-sky-2 px-2 text-[12px] font-bold text-blue-ink">
@@ -648,7 +711,7 @@ function TicketBody({
                     {estOver ? rh(logged - estN) + ' over estimate' : estN ? rh(estN - logged) + ' left' : 'Set an estimate'}
                   </span>
                 </div>
-                <div className={fact + ' relative !cursor-default'}>
+                <div className={factBase + ' relative !cursor-default'}>
                   <Label>{A.length > 1 ? 'Assignees' : 'Assignee'}</Label>
                   <div onClick={editAssignees} title="Edit assignees" className="flex min-h-7 cursor-pointer items-center">
                     {people4.map(a => (
@@ -725,7 +788,7 @@ function TicketBody({
                       <div className="flex items-start gap-4">
                         <div
                           onClick={() => setDescEdit(true)}
-                          className="-mx-2.5 -my-1.5 min-w-0 flex-1 cursor-text whitespace-pre-wrap rounded-[10px] px-2.5 py-1.5 text-[14.5px] leading-[1.65] [text-wrap:pretty] hover:bg-canvas"
+                          className="-mx-2.5 -my-1.5 min-w-0 flex-1 cursor-text whitespace-pre-wrap [overflow-wrap:anywhere] rounded-[10px] px-2.5 py-1.5 text-[14.5px] leading-[1.65] [text-wrap:pretty] hover:bg-canvas"
                           style={{ color: raw.desc ? '#1B2D45' : '#3B4A5E' }}
                         >
                           {raw.desc ? <Markdown src={raw.desc} /> : 'No description yet. Add what should happen and why.'}
@@ -854,7 +917,8 @@ function TicketBody({
                   </div>
                 </div>
                 {isSub && (
-                  <div className="mt-1.5 border-t-[1.5px] border-line pt-[18px]">
+                  // The prototype's 16px flex gap plus a 6px margin: 22px below "Blocked by".
+                  <div className="mt-[22px] border-t-[1.5px] border-line pt-[18px]">
                     <div className="mb-3 flex items-center gap-2">
                       <span className="text-[15px] font-bold text-ink">Comments</span>
                       <span className="tnum text-[12px] text-ink-2">{comments.length}</span>
@@ -870,7 +934,7 @@ function TicketBody({
                               <div className="text-[13.5px] text-ink-2">
                                 <b className="font-bold text-ink">{a.who}</b> <span className="text-muted">· {a.when}</span>
                               </div>
-                              <div className="mt-1.5 whitespace-pre-wrap rounded-xl border-[1.5px] border-line bg-canvas px-3 py-2.5 text-[14px] leading-normal">{a.text}</div>
+                              <div className="mt-1.5 whitespace-pre-wrap rounded-xl border-[1.5px] border-line bg-canvas px-3 py-2.5 text-[14px] leading-normal [overflow-wrap:anywhere]">{a.text}</div>
                             </div>
                           </div>
                         )
@@ -968,11 +1032,11 @@ function TicketBody({
                       <div key={i} className="flex gap-3 border-b-[1.5px] border-line py-3">
                         <Avatar i={m.i} bg={m.bg} size={28} radius={6} font={10.5} />
                         <div className="min-w-0 flex-1">
-                          <div className="text-[13.5px] leading-[1.45] text-ink-2">
+                          <div className="text-[13.5px] leading-[1.45] text-ink-2 [overflow-wrap:anywhere]">
                             <b className="font-semibold text-ink">{a.who}</b> {a.kind === 'comment' ? 'commented' : a.what} <span>· {a.when}</span>
                           </div>
                           {a.kind === 'comment' && (
-                            <div className="mt-1.5 whitespace-pre-wrap rounded-xl border-[1.5px] border-line bg-canvas px-3 py-2.5 text-[14px] leading-normal">{a.text}</div>
+                            <div className="mt-1.5 whitespace-pre-wrap rounded-xl border-[1.5px] border-line bg-canvas px-3 py-2.5 text-[14px] leading-normal [overflow-wrap:anywhere]">{a.text}</div>
                           )}
                         </div>
                       </div>
@@ -1153,9 +1217,15 @@ function TicketBody({
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-[13px] text-ink-2">
                   Hours
-                  <span onClick={() => focusField('tk-log')} title="Log hours" className="inline-grid size-[18px] cursor-pointer place-items-center rounded-[5px] bg-blue align-middle text-white">
+                  <button
+                    type="button"
+                    onClick={() => focusField('tk-log')}
+                    title="Log hours"
+                    aria-label="Log hours"
+                    className="inline-grid size-[18px] cursor-pointer place-items-center rounded-[5px] border-0 bg-blue p-0 align-middle text-white"
+                  >
                     <Icon d={PATHS.plus} size={10} sw={3.2} />
-                  </span>
+                  </button>
                 </div>
                 <div className="mt-px text-[11.5px] font-semibold text-muted">{nEnt ? nEnt + ' entr' + (nEnt > 1 ? 'ies' : 'y') : 'Nothing logged yet'}</div>
               </div>
@@ -1324,8 +1394,18 @@ function SubtaskRow({
   const chip = 'tnum inline-flex h-[22px] items-center gap-[5px] rounded-full border-[1.5px] border-line bg-canvas px-[9px] text-[11.5px]'
   return (
     <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
-      className="grid cursor-pointer items-center gap-3 rounded-xl border-[1.5px] border-line bg-white px-3.5 py-3 hover:border-blue"
+      onKeyDown={e => {
+        // Only the row itself: Enter or Space on the nested done toggle is left to that button.
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      className="grid cursor-pointer items-center gap-3 rounded-xl border-[1.5px] border-line bg-white px-3.5 py-3 hover:border-blue focus-visible:border-blue"
       style={{ gridTemplateColumns: '22px minmax(0,1fr) auto' }}
     >
       <button
