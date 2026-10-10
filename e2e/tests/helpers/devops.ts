@@ -36,13 +36,9 @@ export async function pickStatus(page: Page, status: string) {
 /** A text input inside the settings dialog whose current value is `value` (React mirrors it to the value attribute). */
 export const settingsInput = (page: Page, value: string): Locator => settingsOf(page).locator(`input[value="${value}"]`)
 
-/** The settings row (name input + hours/days input) whose name input shows `name`. */
+/** The settings row whose name input shows `name`: the name input's parent holds the row's hours/days input. */
 export function settingsRow(page: Page, name: string): Locator {
-  return settingsOf(page)
-    .locator('div')
-    .filter({ has: settingsInput(page, name) })
-    .filter({ has: settingsOf(page).locator('input[type="number"]') })
-    .last()
+  return settingsInput(page, name).locator('xpath=..')
 }
 
 /** Opens a settings tab by URL (?settings=infra|seq|dates|dev). */
