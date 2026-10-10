@@ -5,7 +5,7 @@ import type { DvProject } from '../../api/devops/types'
 import { readFiles } from '../../lib/files'
 import { threadOf } from '../../domain/questions'
 import { useDv } from './ctx'
-import { DV_ME, T } from './model'
+import { member, T } from './model'
 
 /* ───────────── Activity ───────────── */
 
@@ -62,7 +62,9 @@ export function ActivityTab({ p }: { p: DvProject }) {
       <div className="mt-7 flex flex-col gap-[22px]">
         {p.logs.map((l, i) => (
           <div key={i} className="grid grid-cols-[26px_1fr] gap-3">
-            <div className="flex size-[26px] items-center justify-center rounded-md bg-blue text-[11px] font-semibold text-white">R</div>
+            <div className="flex size-[26px] items-center justify-center rounded-md text-[11px] font-semibold text-white" style={{ background: member(l.by).bg }}>
+              {member(l.by).i}
+            </div>
             <div className="min-w-0">
               <div className="flex items-baseline gap-2 text-[12px] text-muted">
                 <span className="text-[13px] font-semibold text-ink">{l.by}</span>
@@ -186,7 +188,7 @@ const SelectBox = ({ value, onChange, options }: { value: string; onChange: (v: 
 )
 
 export function ClientChatTab({ p, questions }: { p: DvProject; questions: Question[] }) {
-  const { open } = useDv()
+  const { open, me } = useDv()
   const send = useSend()
   const [form, setForm] = useState(false)
   const [title, setTitle] = useState('')
@@ -204,7 +206,7 @@ export function ClientChatTab({ p, questions }: { p: DvProject; questions: Quest
       type: 'question.create',
       question: {
         id,
-        by: DV_ME,
+        by: me,
         title: ti,
         text: text.trim(),
         photos: pend,

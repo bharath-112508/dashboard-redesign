@@ -1,13 +1,15 @@
 import type { DvProject } from '../../api/devops/types'
 import { useDv } from './ctx'
-import { addH, DV_ME, fmtD, infraText, lad, ladderNames, offs, statusDesc, TODAY, tone } from './model'
+import { addH, fmtD, infraText, lad, ladderNames, offs, statusDesc, TODAY, tone } from './model'
 
 const dateInput = 'mt-1.5 w-full rounded-[10px] border-0 bg-canvas px-2.5 py-[7px] text-[13px] text-ink outline-0'
 
 /**
  * Opens for every status change (Details, the status card, dragging on the
- * board) and for "Edit description". Moving to Client onboarding also asks
- * for the initial due date and the first reminder.
+ * board) and for "Edit status description". A status change needs a reason
+ * when the date rules ask for one. Moving to Client onboarding also asks for
+ * the initial due date and the first reminder; once the initial due date is
+ * saved it is fixed.
  */
 export function StatusChangeModal() {
   const { db, chg: g, setChg, update } = useDv()
@@ -19,18 +21,20 @@ export function StatusChangeModal() {
   const tt = tone(g.to)
   const def = statusDesc(s, g.to)
   const need = !same && g.to === 'Client onboarding'
-  const blocked = need && (!g.start || !g.due)
+  const dueFixed = !!c.initDue && s.rules.lockInitial
+  const due = dueFixed ? c.initDue || '' : g.due
+  const reasonMissing = !same && s.rules.requireNote && !(g.note || '').trim()
+  const blocked = (need && (!due || !g.start)) || reasonMissing
   const set = (patch: Partial<typeof g>) => setChg(x => (x ? { ...x, ...patch } : x))
   const cancel = () => setChg(null)
 
   const save = () => {
     const t = (g.note || '').trim()
     if (same) {
-      if (t !== infraText(c, s))
-        update(c.key, { infraNote: t, updatedBy: DV_ME }, { type: 'Field change', text: 'Status description updated', detail: t || '(cleared)' })
+      if (t !== infraText(c, s)) update(c.key, { infraNote: t }, { type: 'Field change', text: 'Status description updated', detail: t || '(cleared)' })
     } else {
       if (blocked) return
-      const patch: Partial<DvProject> = { infra: g.to, infraNote: t, updatedBy: DV_ME }
+      const patch: Partial<DvProject> = { infra: g.to, infraNote: t }
       if (need) {
         const rt = s.rules.remTime
         const O = offs(c, s)
@@ -45,7 +49,7 @@ export function StatusChangeModal() {
           actDate: TODAY,
           reminder: r,
           overdue: g.start < TODAY,
-          initDue: g.due,
+          initDue: due,
           latestDue: null,
           moved: null,
         } satisfies Partial<DvProject>)
@@ -56,8 +60,8 @@ export function StatusChangeModal() {
         detail:
           'Was: ' +
           (c.infra || '—') +
-          (need ? ' · Initial due ' + fmtD(g.due) + ' · first reminder ' + fmtD(g.start) : '') +
-          (t ? ' · Description: ' + t : ''),
+          (need ? ' · Initial due ' + fmtD(due) + ' · first reminder ' + fmtD(g.start) : '') +
+          (t ? ' · Reason: ' + t : ''),
       })
     }
     setChg(null)
@@ -87,7 +91,15 @@ export function StatusChangeModal() {
             <label className="block">
               <div className="text-[13px] font-semibold">Initial due date</div>
               <div className="mt-0.5 text-[12px] text-muted">Fixed once saved.</div>
-              <input type="date" aria-label="Initial due date" value={g.due} onChange={e => set({ due: e.target.value })} className={dateInput} />
+              <input
+                type="date"
+                aria-label="Initial due date"
+                value={due}
+                disabled={dueFixed}
+                onChange={e => set({ due: e.target.value })}
+                className={dateInput}
+                style={{ opacity: dueFixed ? 0.7 : 1 }}
+              />
             </label>
             <label className="block">
               <div className="text-[13px] font-semibold">First reminder</div>
@@ -96,12 +108,14 @@ export function StatusChangeModal() {
             </label>
           </div>
         )}
-        <div className="mt-[18px] text-[13px] font-semibold">Description</div>
+        <div className="mt-[18px] text-[13px] font-semibold">{same ? 'Description' : 'Reason'}</div>
+        {!same && <div className="mt-0.5 text-[12px] text-muted">{s.rules.requireNote ? 'Why did it move? Required.' : 'Why did it move? Optional.'}</div>}
         <textarea
           value={g.note}
           onChange={e => set({ note: e.target.value })}
           rows={5}
-          placeholder="What's happening at this status?"
+          aria-label={same ? 'Description' : 'Reason'}
+          placeholder={same ? "What's happening at this status?" : 'Why did it move?'}
           className="mt-1.5 w-full resize-y rounded-xl border-0 bg-canvas px-3 py-2.5 text-[14px] leading-normal text-ink outline-0 focus:shadow-[0_0_0_2px_#4870E8]"
         />
         <div className="mt-1.5 flex items-center gap-2.5">

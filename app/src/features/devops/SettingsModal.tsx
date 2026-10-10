@@ -1,13 +1,19 @@
 import { useState } from 'react'
 import { useSend } from '../../api/queries'
+import { escalationIndex } from '../../api/devops/rules'
 import type { DvRules, DvSettings } from '../../api/devops/types'
 import { useDv } from './ctx'
 import { T, tone } from './model'
 import { Caret, GlassMenu, Switch } from './ui'
 
-type Row = { name: string; num: number | ''; desc: string; orig: string | null }
-type Draft = { ladder: Row[]; iladder: Row[]; dev: Row[]; infra: Row[]; rules: DvRules }
+/** A row of a list in the draft. `id` is stable across renames, reorders and removals. */
+type Row = { id: number; name: string; num: number | ''; desc: string; orig: string | null }
+/** `escRow` is the id of the ladder row the project escalates from. */
+type Draft = { ladder: Row[]; iladder: Row[]; dev: Row[]; infra: Row[]; rules: DvRules; escRow: number | null }
 type ListKey = 'ladder' | 'iladder' | 'dev' | 'infra'
+
+let rowSeq = 0
+const rid = () => ++rowSeq
 
 const TABS: [string, string][] = [
   ['infra', 'Statuses'],
@@ -16,13 +22,17 @@ const TABS: [string, string][] = [
   ['dev', 'Dev phases'],
 ]
 
-const draftOf = (s: DvSettings): Draft => ({
-  ladder: s.ladder.map((x, i) => ({ name: x.name, num: i ? x.hours : 0, desc: '', orig: x.name })),
-  iladder: s.iladder.map(name => ({ name, num: '', desc: '', orig: name })),
-  dev: s.devPhases.map(x => ({ name: x.name, num: x.days ?? '', desc: '', orig: x.name })),
-  infra: s.statuses.map(x => ({ name: x.name, num: '', desc: x.desc, orig: x.name })),
-  rules: { ...s.rules },
-})
+const draftOf = (s: DvSettings): Draft => {
+  const ladder = s.ladder.map((x, i) => ({ id: rid(), name: x.name, num: i ? x.hours : 0, desc: '', orig: x.name }))
+  return {
+    ladder,
+    iladder: s.iladder.map(name => ({ id: rid(), name, num: '', desc: '', orig: name })),
+    dev: s.devPhases.map(x => ({ id: rid(), name: x.name, num: x.days ?? '', desc: '', orig: x.name })),
+    infra: s.statuses.map(x => ({ id: rid(), name: x.name, num: '', desc: x.desc, orig: x.name })),
+    rules: { ...s.rules },
+    escRow: ladder[escalationIndex(s)]?.id ?? null,
+  }
+}
 
 const inp = 'rounded-[9px] border-0 bg-canvas px-2.5 py-2 text-[13px] text-ink outline-0'
 const arrowBtn = 'w-[22px] cursor-pointer border-0 bg-transparent p-0 text-[13px] font-medium text-muted'
@@ -69,6 +79,9 @@ export function SettingsModal({ tab }: { tab: string }) {
   const save = () => {
     const lad = D.ladder.map(r => ({ ...r, name: r.name.trim() })).filter(r => r.name)
     if (!lad.length) return
+    // The escalation step is the chosen row's (new) name. If that row was removed, the step at the same position takes over.
+    const chosen = lad.find(r => r.id === D.escRow)
+    const escName = (chosen ? chosen.name : lad[Math.min(escalationIndex(db.settings), lad.length - 1)].name) as string
     const ilad = D.iladder.map(r => r.name.trim()).filter(Boolean)
     const dev = D.dev.map(r => ({ ...r, name: r.name.trim() })).filter(r => r.name)
     const inf = D.infra.map(r => ({ ...r, name: r.name.trim() })).filter(r => r.name)
@@ -80,13 +93,14 @@ export function SettingsModal({ tab }: { tab: string }) {
       iladder: ilad.length ? ilad : db.settings.iladder,
       devPhases: uniq(dev).map(r => ({ name: r.name, days: r.num === '' ? null : +r.num })),
       statuses: inf.length ? uniq(inf).map(r => ({ name: r.name, desc: r.desc.trim() })) : db.settings.statuses,
-      rules: { ...D.rules, esc: Math.min(+D.rules.esc, lad.length - 1) },
+      rules: { ...D.rules, escStep: escName, esc: lad.findIndex(r => r.name === escName) },
     }
     send({ type: 'devops.settings.save', settings: next, renames: { statuses: inf.length ? ren(inf) : {}, ladder: ren(lad), dev: ren(dev) } })
     close()
   }
 
   const setRule = <K extends keyof DvRules>(k: K, v: DvRules[K]) => setD(d => ({ ...d, rules: { ...d.rules, [k]: v } }))
+  const escIdx = D.ladder.findIndex(r => r.id === D.escRow)
   const toggles = (list: [keyof DvRules, string, string][]) =>
     list.map(([k, label, desc], i) => (
       <div key={k} className="flex items-center gap-4 px-4 py-3.5" style={{ borderTop: i ? '1px solid #E7EEFB' : 'none' }}>
@@ -164,7 +178,7 @@ export function SettingsModal({ tab }: { tab: string }) {
                     </div>
                   ))}
                 </div>
-                {addBtn('+ Add status', () => setD(d => ({ ...d, infra: [...d.infra, { name: 'New status', desc: '', num: '', orig: null }] })))}
+                {addBtn('+ Add status', () => setD(d => ({ ...d, infra: [...d.infra, { id: rid(), name: 'New status', desc: '', num: '', orig: null }] })))}
                 <div className="ml-1.5 mt-2 text-[12px] text-muted">Projects on a removed status move to the first status.</div>
               </>
             )}
@@ -194,7 +208,7 @@ export function SettingsModal({ tab }: { tab: string }) {
                     </div>
                   ))}
                 </div>
-                {addBtn('+ Add step', () => setD(d => ({ ...d, ladder: [...d.ladder, { name: 'New step', num: 24, desc: '', orig: null }] })))}
+                {addBtn('+ Add step', () => setD(d => ({ ...d, ladder: [...d.ladder, { id: rid(), name: 'New step', num: 24, desc: '', orig: null }] })))}
                 <div className={`${eyebrow} mt-7`}>Internal · dev team</div>
                 <div className="mt-0.5 px-1 pb-2.5 text-[12px] text-muted">
                   Used when action is from the development team or DevOps. No fixed days; you set each date when moving to the step.
@@ -208,7 +222,7 @@ export function SettingsModal({ tab }: { tab: string }) {
                     </div>
                   ))}
                 </div>
-                {addBtn('+ Add step', () => setD(d => ({ ...d, iladder: [...d.iladder, { name: 'New step', num: '', desc: '', orig: null }] })))}
+                {addBtn('+ Add step', () => setD(d => ({ ...d, iladder: [...d.iladder, { id: rid(), name: 'New step', num: '', desc: '', orig: null }] })))}
                 <div className={`${eyebrow} mt-7 pb-2`}>Escalation</div>
                 <div className={`${cardC} flex items-center gap-4 px-4 py-3.5`}>
                   <div className="flex-1">
@@ -222,7 +236,7 @@ export function SettingsModal({ tab }: { tab: string }) {
                       className="flex cursor-pointer items-center gap-2 rounded-[9px] border-0 bg-canvas px-3 py-2 text-[13px] font-medium text-ink hover:bg-line-3"
                       style={{ boxShadow: escOpen ? '0 0 0 2px #4870E8' : 'none' }}
                     >
-                      {D.ladder[D.rules.esc] ? D.rules.esc + 1 + '. ' + D.ladder[D.rules.esc].name : '—'}
+                      {escIdx >= 0 ? escIdx + 1 + '. ' + D.ladder[escIdx].name : '—'}
                       <span className="opacity-60">
                         <Caret sw={1.4} />
                       </span>
@@ -233,13 +247,13 @@ export function SettingsModal({ tab }: { tab: string }) {
                         z={52}
                         onClose={() => setDd(null)}
                         options={D.ladder.map((r, i) => {
-                          const c = i >= D.rules.esc ? T.red : T.blue
+                          const c = escIdx >= 0 && i >= escIdx ? T.red : T.blue
                           return {
                             label: i + 1 + '. ' + r.name,
-                            on: i === D.rules.esc,
+                            on: r.id === D.escRow,
                             dot: [c[0], c[1]] as [string, string],
                             pick: () => {
-                              setRule('esc', i)
+                              setD(d => ({ ...d, escRow: r.id }))
                               setDd(null)
                             },
                           }
@@ -294,7 +308,7 @@ export function SettingsModal({ tab }: { tab: string }) {
                     ))}
                   </div>
                 </div>
-                {addBtn('+ Add phase', () => setD(d => ({ ...d, dev: [...d.dev, { name: 'New phase', num: '', desc: '', orig: null }] })))}
+                {addBtn('+ Add phase', () => setD(d => ({ ...d, dev: [...d.dev, { id: rid(), name: 'New phase', num: '', desc: '', orig: null }] })))}
                 <div className={`${eyebrow} mt-7 pb-2`}>Rules</div>
                 <div className={cardC}>
                   {toggles([

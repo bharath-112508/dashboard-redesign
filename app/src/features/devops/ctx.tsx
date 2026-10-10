@@ -1,8 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router'
 import { useDevops, useSend } from '../../api/queries'
+import { findPerson, usePeople } from '../../api/people/directory'
+import { useSession } from '../../api/session/store'
 import type { DevopsDb, DvLog, DvProject } from '../../api/devops/types'
-import { DV_ME, FIELD_LABEL, lad, statusDesc, type FieldKey } from './model'
+import { FIELD_LABEL, lad, statusDesc, type FieldKey } from './model'
 
 /** The status change window: which project, the new status and its draft description and dates. */
 export interface StatusChange {
@@ -18,8 +20,13 @@ export type DvWindow = 'project' | 'tab' | 'request' | 'question' | 'settings' |
 
 type Log = Omit<DvLog, 'by' | 'when'>
 
+/** Which client / internal switch is showing. Kept for the session, so reopening a project keeps it. */
+export type SeqTab = 'cl' | 'int' | null
+
 interface DvApi {
   db: DevopsDb
+  /** The signed-in DevOps person: the author of every change made from this board. */
+  me: string
   /** Changes a project and optionally adds an Activity entry. */
   update: (key: string, patch: Partial<DvProject>, log?: Log) => void
   /** Changes a Details field and logs it with the old value. Status changes open the status window. */
@@ -31,6 +38,8 @@ interface DvApi {
   setDd: (k: string | null) => void
   chg: StatusChange | null
   setChg: (c: StatusChange | null | ((c: StatusChange | null) => StatusChange | null)) => void
+  seqTab: SeqTab
+  setSeqTab: (t: SeqTab) => void
 }
 
 const Ctx = createContext<DvApi | null>(null)
@@ -41,15 +50,25 @@ export function DevopsProvider({ children }: { children: ReactNode }) {
   return <Inner db={db}>{children}</Inner>
 }
 
+/** The signed-in person's name as the directory has it (the session name until the directory loads). */
+const useMe = (): string => {
+  const session = useSession()
+  const people = usePeople().data
+  if (!session) return ''
+  return (people && findPerson(people, session.personId)?.name) || session.name
+}
+
 function Inner({ db, children }: { db: DevopsDb; children: ReactNode }) {
   const send = useSend()
+  const me = useMe()
   const [params, setParams] = useSearchParams()
   const [dd, setDd] = useState<string | null>(null)
   const [chg, setChg] = useState<StatusChange | null>(null)
+  const [seqTab, setSeqTab] = useState<SeqTab>(null)
 
   const update = useCallback(
-    (key: string, patch: Partial<DvProject>, log?: Log) => send({ type: 'devops.project.update', key, patch, log }),
-    [send],
+    (key: string, patch: Partial<DvProject>, log?: Log) => send({ type: 'devops.project.update', key, by: me, patch, log }),
+    [send, me],
   )
 
   const get = useCallback((w: DvWindow) => params.get(w), [params])
@@ -76,7 +95,7 @@ function Inner({ db, children }: { db: DevopsDb; children: ReactNode }) {
         setChg({ key: sp.key, to: value, note: statusDesc(db.settings, value), due: sp.initDue || '', start: '' })
         return
       }
-      const patch: Partial<DvProject> = { [k]: value, updatedBy: DV_ME }
+      const patch: Partial<DvProject> = { [k]: value }
       if (own) (patch as Record<string, unknown>)[k] = value === 'Unassigned' ? null : value
       if (k === 'act') {
         const i = lad(sp, db.settings).indexOf(value)
@@ -113,8 +132,8 @@ function Inner({ db, children }: { db: DevopsDb; children: ReactNode }) {
   }, [])
 
   const v = useMemo<DvApi>(
-    () => ({ db, update, setField, get, open, dd, setDd, chg, setChg }),
-    [db, update, setField, get, open, dd, chg],
+    () => ({ db, me, update, setField, get, open, dd, setDd, chg, setChg, seqTab, setSeqTab }),
+    [db, me, update, setField, get, open, dd, chg, seqTab],
   )
   return <Ctx.Provider value={v}>{children}</Ctx.Provider>
 }

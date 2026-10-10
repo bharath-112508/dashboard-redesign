@@ -148,6 +148,7 @@ export const createDevopsSeed = (): DevopsDb => ({
     ],
     rules: {
       esc: 4,
+      escStep: 'Inform Marcus',
       requireNote: true,
       requireReminder: true,
       lockInitial: true,

@@ -104,8 +104,10 @@ export interface DvProject {
 }
 
 export interface DvRules {
-  /** Index of the client step from which a project counts as escalated. */
+  /** Index of the client step from which a project counts as escalated (see escalationIndex). */
   esc: number
+  /** Name of that step; kept in step with renames in Settings. */
+  escStep?: string
   requireNote: boolean
   requireReminder: boolean
   lockInitial: boolean

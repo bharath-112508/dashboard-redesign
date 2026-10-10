@@ -1,11 +1,9 @@
+import { escalationIndex } from '../../api/devops/rules'
 import type { DvProject, DvSettings } from '../../api/devops/types'
 import { TODAY } from '../../lib/dates'
 
 /** The DevOps board's "today": the app-wide fixed date. */
 export { TODAY }
-
-/** The signed-in DevOps user. */
-export const DV_ME = 'Rahul'
 
 /* ───────────── Colours ───────────── */
 
@@ -137,6 +135,8 @@ export const movedLabel = (due: string, init: string) => {
 /* ───────────── Sequences and phases ───────────── */
 
 export const ladderNames = (s: DvSettings) => s.ladder.map(x => x.name)
+/** The client step from which a project counts as escalated (by name in Settings). */
+export const escIndex = (s: DvSettings) => escalationIndex(s)
 /** Hours from the start of the sequence for each default client step. */
 export const ladderOffsets = (s: DvSettings) => {
   let acc = 0
@@ -179,7 +179,7 @@ export const FILTERS: [FilterId, string, (p: DvProject, s: DvSettings) => boolea
   [
     'esc',
     'Escalated',
-    (p, s) => (p.from === 'Client' && p.step != null && p.step >= s.rules.esc) || (p.ifu || []).length >= s.iladder.length,
+    (p, s) => (p.from === 'Client' && p.step != null && p.step >= escIndex(s)) || (p.ifu || []).length >= s.iladder.length,
   ],
   ['moved', 'Rescheduled', p => !!p.moved],
 ]
@@ -205,8 +205,11 @@ export const FIELD_LABEL: Record<FieldKey, string> = {
   devOwner: 'Dev phase owner',
 }
 
+/** The DevOps team for owner pickers: Settings' list, plus the signed-in person when they are not on it. */
+export const teamOf = (s: DvSettings, me?: string) => (me && !s.people.includes(me) ? [...s.people, me] : s.people)
+
 /** The options of a Details dropdown for this project. */
-export const fieldOptions = (k: FieldKey, p: DvProject, s: DvSettings): string[] => {
+export const fieldOptions = (k: FieldKey, p: DvProject, s: DvSettings, me?: string): string[] => {
   const extra = s.options[k] || []
   switch (k) {
     case 'infra':
@@ -225,13 +228,13 @@ export const fieldOptions = (k: FieldKey, p: DvProject, s: DvSettings): string[]
       return [...devListFor(p, s), 'Not set']
     case 'owner':
     case 'devOwner':
-      return [...s.people, ...extra, 'Unassigned']
+      return [...teamOf(s, me), ...extra, 'Unassigned']
   }
 }
 
 /** The value a dropdown shows (unknown values fall back to the last option, e.g. "Not set"). */
-export const fieldValue = (k: FieldKey, p: DvProject, s: DvSettings) => {
+export const fieldValue = (k: FieldKey, p: DvProject, s: DvSettings, me?: string) => {
   const raw = k === 'owner' || k === 'devOwner' ? p[k] || 'Unassigned' : (p[k] as string | undefined)
-  const opts = fieldOptions(k, p, s)
+  const opts = fieldOptions(k, p, s, me)
   return raw && opts.includes(raw) ? raw : opts[opts.length - 1]
 }

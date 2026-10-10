@@ -12,6 +12,8 @@ import { BoardView } from './BoardView'
 const PAGE_CSS = `
 @keyframes critPulse{0%,100%{background-color:#FBF3EF}50%{background-color:#F6DDD0}}
 @keyframes dvSlideIn{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+.dv-slide{animation:dvSlideIn .24s cubic-bezier(0.16,1,0.3,1)}
+@media (prefers-reduced-motion: reduce){[data-crit],.dv-slide{animation:none!important}}
 `
 
 /** Colours of each filter tab: [badge bg, ink, underline]. */

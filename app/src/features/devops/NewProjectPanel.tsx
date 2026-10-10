@@ -8,7 +8,6 @@ import { useDv } from './ctx'
 import {
   addD,
   devList,
-  DV_ME,
   fmtD,
   FIELD_LABEL,
   FROMS,
@@ -21,6 +20,7 @@ import {
   tileOf,
   tileText,
   TODAY,
+  teamOf,
   tone,
 } from './model'
 import { Caret, GlassMenu, PrioIcon, Switch } from './ui'
@@ -68,7 +68,7 @@ const card = 'rounded-[14px] bg-white shadow-[0_0_0_0.5px_rgba(0,0,0,0.06),0_1px
 
 /** "New project": the same layout as an open project, with the fields in the sidebar. */
 export function NewProjectPanel() {
-  const { db, open, dd, setDd } = useDv()
+  const { db, open, dd, setDd, me } = useDv()
   const send = useSend()
   const s = db.settings
   const [dateOpen, setDateOpen] = useState<DateKey | null>(null)
@@ -83,7 +83,7 @@ export function NewProjectPanel() {
       infra: s.statuses[0]?.name ?? 'Not started',
       prio: 'Medium',
       from: 'Client',
-      owner: DV_ME,
+      owner: me || 'Unassigned',
       dev: devList(s)[0] ?? 'Not started',
       initDue: '',
       latestDue: '',
@@ -126,7 +126,7 @@ export function NewProjectPanel() {
       dev: n.dev,
       devDue: n.devDue || null,
       deploy: 'Not set',
-      updatedBy: DV_ME,
+      updatedBy: me,
       act: n.ladder ? lad[0] : 'Not required',
       step: n.ladder ? 0 : null,
       seqStart: n.ladder && n.actDate ? n.actDate + 'T' + rt : null,
@@ -140,10 +140,10 @@ export function NewProjectPanel() {
           type: 'Field change',
           text: 'Project created',
           detail: [n.infra, n.prio, 'Initial due ' + fmtD(n.initDue)].join(' · '),
-          by: DV_ME,
+          by: me,
           when: 'Just now',
         },
-        ...(n.ladder && n.note.trim() ? [{ type: 'Action update', by: DV_ME, when: 'Just now', text: n.note.trim() }] : []),
+        ...(n.ladder && n.note.trim() ? [{ type: 'Action update', by: me, when: 'Just now', text: n.note.trim() }] : []),
       ],
     }
     send({ type: 'devops.project.create', project })
@@ -155,7 +155,7 @@ export function NewProjectPanel() {
     prio: PRIOS,
     from: FROMS,
     dev: [...devList(s), 'Not set'],
-    owner: [...s.people, 'Unassigned'],
+    owner: [...teamOf(s, me), 'Unassigned'],
   }
   const set = (k: keyof Form, val: string) => setValue(k, val as never, { shouldValidate: formState.isSubmitted })
 
@@ -173,8 +173,7 @@ export function NewProjectPanel() {
       <div onClick={close} className="fixed inset-0 z-50 animate-fade-in bg-[rgba(27,45,69,0.38)]" />
       <aside
         data-testid="new-project"
-        className="fixed bottom-3 right-3 top-3 z-[51] flex w-[920px] max-w-[calc(100vw-24px)] overflow-hidden rounded-[28px] border border-line-3 bg-white font-normal text-ink shadow-[0_30px_90px_rgba(0,0,0,0.2),0_0_0_0.5px_rgba(0,0,0,0.08)]"
-        style={{ animation: 'dvSlideIn .24s cubic-bezier(0.16,1,0.3,1)' }}
+        className="dv-slide fixed bottom-3 right-3 top-3 z-[51] flex w-[920px] max-w-[calc(100vw-24px)] overflow-hidden rounded-[28px] border border-line-3 bg-white font-normal text-ink shadow-[0_30px_90px_rgba(0,0,0,0.2),0_0_0_0.5px_rgba(0,0,0,0.08)]"
       >
         <form onSubmit={create} className="flex min-w-0 flex-1 flex-col">
           <div className="px-9 pt-7">

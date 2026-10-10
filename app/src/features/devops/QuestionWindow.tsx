@@ -6,7 +6,7 @@ import { fileExt } from '../../domain/tasks'
 import { readFiles } from '../../lib/files'
 import { questionTags } from '../../lib/theme'
 import { useDv } from './ctx'
-import { DV_ME, member } from './model'
+import { member } from './model'
 import { questionStatus } from './OtherTabs'
 
 /** DevOps is the team side: its messages sit on the right. */
@@ -26,7 +26,7 @@ export function QuestionWindow({ id }: { id: number }) {
 }
 
 function Inner({ q }: { q: Question }) {
-  const { open } = useDv()
+  const { open, me } = useDv()
   const send = useSend()
   const [draft, setDraft] = useState('')
   const [pend, setPend] = useState<ChatFile[]>([])
@@ -40,7 +40,7 @@ function Inner({ q }: { q: Question }) {
   const by = member(q.by)
   const photos = q.photos || []
   const ok = !!draft.trim() || pend.length > 0
-  const msg = (text: string, files: ChatFile[] = []): ChatMessage => ({ who: DV_ME, side: SIDE, text, when: 'just now', files })
+  const msg = (text: string, files: ChatFile[] = []): ChatMessage => ({ who: me, side: SIDE, text, when: 'just now', files })
 
   const sendMsg = () => {
     if (!ok) return

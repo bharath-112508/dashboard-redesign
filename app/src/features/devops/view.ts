@@ -1,10 +1,10 @@
 import type { DvProject, DvSettings } from '../../api/devops/types'
-import { ddMon, dayOf, fmtD, lad, relD, shortD } from './model'
+import { ddMon, dayOf, escIndex, fmtD, lad, relD, shortD } from './model'
 
 /** What the list row and the board card show for a project (the prototype's `deco`). */
 export const projectView = (p: DvProject, s: DvSettings) => {
   const L = lad(p, s)
-  const esc = s.rules.esc
+  const esc = escIndex(s)
   const crit = p.prio === 'Critical'
   const onLadder = p.from === 'Client' && p.step != null && p.infra !== 'Not started'
   const f = p.ifu || []

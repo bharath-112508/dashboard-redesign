@@ -1,11 +1,12 @@
 import { useQuestions, useRequests } from '../../api/queries'
 import type { DvProject } from '../../api/devops/types'
 import { useDv } from './ctx'
-import { tileOf, tileText } from './model'
+import { PRIO_ICON, tileOf, tileText, tone } from './model'
 import { FollowUpsTab } from './FollowUpsTab'
 import { PhasesTab } from './PhasesTab'
 import { ActivityTab, ClientChatTab, TicketsTab } from './OtherTabs'
 import { Sidebar } from './Sidebar'
+import { PrioIcon } from './ui'
 
 type Tab = 'follow' | 'phases' | 'log' | 'tickets' | 'cchat'
 
@@ -32,8 +33,7 @@ export function ProjectPanel({ p }: { p: DvProject }) {
       <div onClick={close} className="fixed inset-0 z-30 animate-fade-in bg-[rgba(27,45,69,0.38)]" />
       <aside
         data-testid="project-panel"
-        className="fixed bottom-3 right-3 top-3 z-[31] flex w-[920px] max-w-[calc(100vw-24px)] overflow-hidden rounded-[28px] border border-line-3 bg-white font-normal text-ink shadow-[0_30px_90px_rgba(0,0,0,0.2),0_0_0_0.5px_rgba(0,0,0,0.08)]"
-        style={{ animation: 'dvSlideIn .24s cubic-bezier(0.16,1,0.3,1)' }}
+        className="dv-slide fixed bottom-3 right-3 top-3 z-[31] flex w-[920px] max-w-[calc(100vw-24px)] overflow-hidden rounded-[28px] border border-line-3 bg-white font-normal text-ink shadow-[0_30px_90px_rgba(0,0,0,0.2),0_0_0_0.5px_rgba(0,0,0,0.08)]"
       >
         <button
           type="button"
@@ -63,6 +63,29 @@ export function ProjectPanel({ p }: { p: DvProject }) {
                 </div>
               </div>
               <div className="flex flex-none items-center gap-2.5">
+                {(() => {
+                  const st = tone(p.infra)
+                  const crit = p.prio === 'Critical'
+                  return (
+                    <>
+                      <span className="max-w-[200px] truncate whitespace-nowrap rounded-md px-2 py-1 text-[12px] font-semibold" style={{ background: st[1], color: st[0] }}>
+                        {p.infra || 'Not set'}
+                      </span>
+                      <span
+                        data-crit={crit ? '1' : undefined}
+                        className="inline-flex flex-none items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-[12px] font-semibold"
+                        style={{
+                          background: crit ? '#F6DDD0' : '#F3F5F8',
+                          color: PRIO_ICON[p.prio]?.[0] ?? '#56657A',
+                          animation: crit ? 'critPulse 1.6s ease-in-out infinite' : undefined,
+                        }}
+                      >
+                        <PrioIcon p={p.prio} size={13} sw={2.2} />
+                        {p.prio}
+                      </span>
+                    </>
+                  )
+                })()}
                 <span className="tnum flex-none whitespace-nowrap rounded-md bg-sky-2 px-2 py-1 font-sans text-[12px] font-medium text-blue-ink">{p.key}</span>
               </div>
             </div>
