@@ -14,6 +14,9 @@ import { CompanyDetailPage } from './pages/companies/CompanyDetailPage'
 import { ProjectsPage } from './pages/projects/ProjectsPage'
 import { Shell } from './pages/shell/Shell'
 import { LoginPage } from './pages/login/LoginPage'
+import { UsersPage } from './pages/users/UsersPage'
+import { ProfilePage } from './pages/users/ProfilePage'
+import { EmployeeTimesheetsPage } from './pages/employee-timesheets/EmployeeTimesheetsPage'
 import { PAGE_PATH, isPageName } from './api/session/pages'
 import { UiProvider } from './state/ui'
 
@@ -46,8 +49,15 @@ export function App() {
             <Route path="projects" element={<ProjectsPage />} />
             <Route path="my-tickets" element={<ComingSoon page="My tickets" />} />
             <Route path="timesheet" element={<TimesheetPage />} />
-            <Route path="employee-timesheets" element={<ComingSoon page="Employee timesheets" />} />
-            <Route path="users" element={<ComingSoon page="Users" />} />
+            <Route path="employee-timesheets">
+              <Route index element={<EmployeeTimesheetsPage />} />
+              <Route path=":id" element={<ProfilePage base="employee-timesheets" />} />
+            </Route>
+            <Route path="users">
+              <Route index element={<UsersPage />} />
+              <Route path=":id" element={<ProfilePage base="users" />} />
+            </Route>
+
             <Route path="clients">
               <Route index element={<ComingSoon page="Your projects" />} />
               <Route element={<ClientsLayout />}>

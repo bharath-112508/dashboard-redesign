@@ -6,6 +6,7 @@ import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/comman
 import { reduceCompanies, touchesCompanies, type CompaniesCommand } from './companies/commands'
 import { reduceProjects, touchesProjects, type ProjectsCommand } from './projects/commands'
 import { assignTimeIds, reduceTime, touchesTime, type TimeCommand } from './timesheet/commands'
+import { reduceUsers, touchesUsers, type UsersCommand } from './users/commands'
 
 /**
  * Every write the page makes is one of these commands. The same reducer runs
@@ -44,7 +45,9 @@ export type Command =
   | ProjectsCommand
   | TimeCommand
 
-export type Resource = 'workspace' | 'tasks' | 'entries' | 'weekSubmissions' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects'
+  | UsersCommand
+
+export type Resource = 'workspace' | 'tasks' | 'entries' | 'weekSubmissions' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects' | 'access' | 'leave' | 'notifications'
 
 export const touches = (cmd: Command): Resource[] => {
   switch (cmd.type) {
@@ -74,7 +77,7 @@ export const touches = (cmd: Command): Resource[] => {
     case 'batch':
       return [...new Set(cmd.cmds.flatMap(touches))]
     default:
-      return [...touchesTickets(cmd), ...touchesDevops(cmd), ...touchesCompanies(cmd), ...touchesProjects(cmd), ...touchesTime(cmd)]
+      return [...touchesTickets(cmd), ...touchesDevops(cmd), ...touchesCompanies(cmd), ...touchesProjects(cmd), ...touchesTime(cmd), ...touchesUsers(cmd)]
   }
 }
 
@@ -218,6 +221,6 @@ export const reduce = (db: Db, input: Command): Db => {
     case 'batch':
       return cmd.cmds.reduce(reduce, db)
     default:
-      return reduceProjects(reduceCompanies(reduceDevops(reduceTickets(reduceTime(db, cmd), cmd), cmd), cmd), cmd)
+      return reduceUsers(reduceProjects(reduceCompanies(reduceDevops(reduceTickets(reduceTime(db, cmd), cmd), cmd), cmd), cmd), cmd)
   }
 }

@@ -4,6 +4,7 @@ import type { Activity, ChatMessage, Db, Epic, Sprint, Task, TimeEntry } from '.
 import { PEOPLE_SEED } from './people/seed'
 import { COMPANIES_SEED } from './companies/seed'
 import { INTERNAL_PROJECTS_SEED } from './projects/seed'
+import { USERS_SEED } from './users/seed'
 
 const hist = (who: string, what: string, when: string): Activity => ({ kind: 'history', who, what, when })
 
@@ -245,6 +246,7 @@ export const createSeed = (): Db => {
     people: PEOPLE_SEED,
     companies: COMPANIES_SEED,
     internalProjects: INTERNAL_PROJECTS_SEED,
+    ...USERS_SEED,
     questions: [
       {
         id: 1,

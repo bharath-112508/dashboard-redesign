@@ -160,7 +160,8 @@ export interface WeekSubmission {
 /** System roles. The keys are used by the session, the page access map and the directory. */
 export type Role = 'super' | 'admin' | 'pm' | 'dev' | 'devops' | 'cadmin' | 'cuser'
 
-export type DevType = 'Frontend' | 'Backend' | 'Full-stack' | 'Mobile' | 'DevOps' | 'QA' | 'Designer'
+/** A developer type (discipline). The list is editable in Users (access.devTypes), so this is any name from it. */
+export type DevType = string
 
 export interface NotifPrefs {
   tickets: boolean
@@ -363,3 +364,51 @@ export interface Db {
 
 /** Points at one project: a client project inside its company, or an internal project. */
 export type ProjectRef = { kind: 'client'; companyId: string; id: string } | { kind: 'internal'; id: string }
+
+// ---- WP-07: users, access, leave and notifications
+
+/** Permission groups in the Roles & permissions matrix, in display order. */
+export type PermissionGroup = 'Workspace' | 'Projects' | 'Tickets' | 'Time & money'
+
+/** Permission ids per role, plus the developer types offered on user forms. */
+export interface AccessConfig {
+  /** Display and admin data. Page access is still decided by the role map in session/access.ts (DECISIONS 5). */
+  perms: Record<Role, string[]>
+  devTypes: string[]
+}
+
+export type LeaveType = 'Annual' | 'Sick' | 'Holiday' | 'Personal'
+export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected'
+
+export interface LeaveRequest {
+  id: number
+  /** Directory person id. */
+  userId: number
+  type: LeaveType
+  /** ISO dates, both inclusive. */
+  from: string
+  to: string
+  reason: string
+  status: LeaveStatus
+  decidedBy?: string
+  decidedWhen?: string
+}
+
+/** A note recorded for one person, such as the outcome of their leave request. */
+export interface Notification {
+  id: number
+  userId: number
+  kind: 'leave'
+  text: string
+  when: string
+}
+
+/**
+ * The collections WP-07 adds to the shared db. This second declaration merges
+ * into the Db interface above, so the file stays append-only.
+ */
+export interface Db {
+  leave: LeaveRequest[]
+  notifications: Notification[]
+  access: AccessConfig
+}

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { reduce, touches, type Command, type Resource } from './commands'
 import { server } from './server'
 import type { Db } from './types'
+import { DEFAULT_DEV_TYPES, DEFAULT_PERMS } from './users/access'
 
 export const qk = {
   workspace: ['workspace'] as const,
@@ -15,9 +16,12 @@ export const qk = {
   people: ['people'] as const,
   companies: ['companies'] as const,
   internalProjects: ['internalProjects'] as const,
+  access: ['access'] as const,
+  leave: ['leave'] as const,
+  notifications: ['notifications'] as const,
 }
 
-const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'weekSubmissions', 'questions', 'requests', 'devops', 'people', 'companies', 'internalProjects']
+const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'weekSubmissions', 'questions', 'requests', 'devops', 'people', 'companies', 'internalProjects', 'access', 'leave', 'notifications']
 
 export const useWorkspace = () => useQuery({ queryKey: qk.workspace, queryFn: () => server.get('workspace') })
 export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => server.get('tasks') })
@@ -93,3 +97,13 @@ export const useLiveSync = () => {
 
 export const useWeekSubmissions = () =>
   useQuery({ queryKey: qk.weekSubmissions, queryFn: () => server.get('weekSubmissions') })
+// ---- WP-07: users, access, leave. A db saved before WP-07 has none of these, so the reads fall back to the seed defaults.
+
+export const useAccess = () =>
+  useQuery({
+    queryKey: qk.access,
+    queryFn: async () => (await server.get('access')) ?? { perms: DEFAULT_PERMS, devTypes: DEFAULT_DEV_TYPES },
+  })
+export const useLeave = () => useQuery({ queryKey: qk.leave, queryFn: async () => (await server.get('leave')) ?? [] })
+export const useNotifications = () =>
+  useQuery({ queryKey: qk.notifications, queryFn: async () => (await server.get('notifications')) ?? [] })
