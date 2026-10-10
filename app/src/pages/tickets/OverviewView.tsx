@@ -21,6 +21,17 @@ const r1 = (n: number) => Math.round(n * 10) / 10
 
 type Why = { t: string; bg: string; c: string; r: number }
 
+const Head = ({ title, n, right }: { title: string; n?: ReactNode; right?: string }) => (
+  <div className="flex items-center gap-2 px-1.5 py-1">
+    <span className="text-[13.5px] font-semibold text-ink">{title}</span>
+    <span className="tnum text-[13px] text-ink-2">{n}</span>
+    {right && <span className="ml-auto text-[12px] text-muted">{right}</span>}
+  </div>
+)
+const Empty = ({ children }: { children: ReactNode }) => (
+  <div className="rounded-xl border-[1.5px] border-dashed border-line p-3.5 text-center text-[13px] text-muted">{children}</div>
+)
+
 /** The "Overview" tab: what needs attention across the project, and where the time went. */
 export function OverviewView() {
   const ws = useWorkspace().data!
@@ -145,16 +156,6 @@ export function OverviewView() {
   ]
 
   const statusFor = (t: Task) => statusOf(ws.statuses, t.status)
-  const Head = ({ title, n, right }: { title: string; n?: ReactNode; right?: string }) => (
-    <div className="flex items-center gap-2 px-1.5 py-1">
-      <span className="text-[13.5px] font-semibold text-ink">{title}</span>
-      <span className="tnum text-[13px] text-ink-2">{n}</span>
-      {right && <span className="ml-auto text-[12px] text-muted">{right}</span>}
-    </div>
-  )
-  const Empty = ({ children }: { children: ReactNode }) => (
-    <div className="rounded-xl border-[1.5px] border-dashed border-line p-3.5 text-center text-[13px] text-muted">{children}</div>
-  )
   const card = 'cursor-pointer rounded-[14px] bg-white px-3.5 py-3 shadow-[0_0_0_1.5px_#D6DEE8,0_1px_2px_rgba(27,45,69,0.04)]'
   const taskHead = (t: Task) => (
     <div className="flex min-w-0 items-center gap-2.5">
@@ -290,10 +291,10 @@ export function OverviewView() {
         <div className={col}>
           <Head title="Recent activity" />
           <div className="rounded-[14px] bg-white px-3.5 py-1 shadow-[0_0_0_1.5px_#D6DEE8,0_1px_2px_rgba(27,45,69,0.04)]">
-            {acts.slice(0, 8).map((a, i) => {
+            {acts.slice(0, 8).map(a => {
               const m = person(a.who)
               return (
-                <div key={a.k} className="flex items-center gap-2.5 py-[9px]" style={{ borderTop: '1.5px solid #EEF3FB', borderTopWidth: i ? 1.5 : 1.5 }}>
+                <div key={a.k} className="flex items-center gap-2.5 border-t-[1.5px] border-sky py-[9px]">
                   <Avatar i={m.i} bg={m.bg} size={24} radius={6} font={10} className="!font-bold" />
                   <div className="min-w-0 flex-1 truncate text-[13px] text-ink-2">
                     <b className="font-semibold text-ink">{a.who}</b> {a.what}
