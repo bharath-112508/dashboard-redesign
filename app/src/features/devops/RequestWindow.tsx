@@ -5,7 +5,7 @@ import { Markdown } from '../../components/Markdown'
 import { DescriptionEditor } from '../ticket/DescriptionEditor'
 import { focusField } from '../../lib/focusField'
 import { useDv } from './ctx'
-import { diffD, DV_ME, member, ownerColor, TODAY } from './model'
+import { diffD, member, ownerColor, TODAY } from './model'
 import { REQ_PRIO, REQ_STATUS } from './OtherTabs'
 
 const FLOW = ['Open', 'In progress', 'Done'] as const
@@ -44,7 +44,7 @@ export function RequestWindow({ id }: { id: number }) {
 }
 
 function Inner({ r }: { r: DevopsRequest }) {
-  const { db, open } = useDv()
+  const { db, open, me } = useDv()
   const send = useSend()
   const [tab, setTab] = useState<'ov' | 'act'>('ov')
   const [editing, setEditing] = useState(false)
@@ -55,11 +55,11 @@ function Inner({ r }: { r: DevopsRequest }) {
   const [min, setMin] = useState(0)
   const back = () => open({ request: null }, true)
   const upd = (patch: Partial<DevopsRequest>, what?: string) =>
-    send({ type: 'request.update', id: r.id, patch, log: what ? { by: DV_ME, text: what } : undefined })
+    send({ type: 'request.update', id: r.id, patch, log: what ? { by: me, text: what } : undefined })
   const post = () => {
     const t = cDraft.trim()
     if (!t) return
-    send({ type: 'request.comment', id: r.id, comment: { by: DV_ME, text: t, when: 'just now', side: 'devops' } })
+    send({ type: 'request.comment', id: r.id, comment: { by: me, text: t, when: 'just now', side: 'devops' } })
     setCDraft('')
   }
 
@@ -590,7 +590,7 @@ function Inner({ r }: { r: DevopsRequest }) {
                   const v = Math.round((hr + min / 60) * 100) / 100
                   if (!v) return
                   const l = ((hr ? hr + 'h' : '') + (min ? ' ' + min + 'm' : '')).trim()
-                  upd({ logs: [...(r.logs || []), { h: v, by: DV_ME, when: 'just now', date: TODAY }] }, 'logged ' + l)
+                  upd({ logs: [...(r.logs || []), { h: v, by: me, when: 'just now', date: TODAY }] }, 'logged ' + l)
                   setHr(0)
                   setMin(0)
                 }}

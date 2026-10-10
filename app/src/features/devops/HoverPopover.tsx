@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type MouseEvent } from 'react'
 import { useDv } from './ctx'
-import { DV_ME, infraText, tone } from './model'
+import { infraText, tone } from './model'
 
 interface PopState {
   key: string
@@ -95,7 +95,7 @@ export function HoverPopover({ pop: P }: { pop: Popover }) {
                 type="button"
                 onClick={() => {
                   const t = P.draft.trim()
-                  update(c.key, { infraNote: t, updatedBy: DV_ME }, { type: 'Field change', text: 'Status description updated', detail: t })
+                  update(c.key, { infraNote: t }, { type: 'Field change', text: 'Status description updated', detail: t })
                   P.close()
                 }}
                 className="cursor-pointer border-0 bg-transparent p-0 text-[12px] font-semibold text-blue-ink"

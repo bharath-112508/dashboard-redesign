@@ -5,7 +5,7 @@ import {
   addH,
   dayOf,
   diffD,
-  DV_ME,
+  escIndex,
   fmtD,
   fmtDay,
   infraText,
@@ -27,7 +27,7 @@ const toMap = (arr: string[]) => Object.fromEntries(arr.map((v, i) => [i, v])) a
 
 /** Status card, the client / internal follow-up sequences and the project's notes. */
 export function FollowUpsTab({ p }: { p: DvProject }) {
-  const { db, update, dd, setDd, setField, setChg } = useDv()
+  const { db, update, dd, setDd, setField, setChg, me, seqTab, setSeqTab } = useDv()
   const s = db.settings
   const L = lad(p, s)
   const O = offs(p, s)
@@ -38,7 +38,6 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
   const isInternal = !isCl && !!p.from && p.from !== 'Not set'
   const fromLower = (p.from || '').toLowerCase()
 
-  const [seqTab, setSeqTab] = useState<'cl' | 'int' | null>(null)
   const stv = seqTab || (isInternal ? 'int' : 'cl')
   const showCl = stv === 'cl' && onLadder
   const showInt = stv === 'int' && isInternal
@@ -58,7 +57,7 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
   const st = tone(p.infra)
   const note = infraText(p, s)
   const scOpen = dd === 'sc'
-  const hotC = p.step != null && p.step >= s.rules.esc ? '#D2724A' : '#4870E8'
+  const hotC = p.step != null && p.step >= escIndex(s) ? '#D2724A' : '#4870E8'
   const setDates = (d: string[]) => update(p.key, { dates: toMap(d) })
   const step = p.step ?? 0
   const canAdvance = p.step != null && p.step < L.length - 1
@@ -74,13 +73,13 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
     const patch: Partial<DvProject> = {
       step: n,
       act: L[n],
-      updatedBy: DV_ME,
       reminder: adv.rem ? adv.rem.slice(0, 16) : p.reminder,
       overdue: adv.rem ? adv.rem < TODAY : !!p.overdue,
       notes: { ...(p.notes || {}), [n]: { text: t || 'Moved to ' + L[n], when: 'Just now' } },
       dates: toMap(d),
     }
     let det = 'Moved from ' + L[step] + ' to ' + L[n] + (adv.rem ? ' · next reminder ' + fmtD(adv.rem) : '')
+    if (t) det = 'What happened: ' + t + ' · ' + det
     const due = adv.due
     if (due && due !== dayOf(p.latestDue || p.initDue)) {
       patch.latestDue = due
@@ -88,7 +87,7 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
       if (t) patch.reason = t
       det += ' · estimated deployment ' + fmtD(due)
     }
-    update(p.key, patch, { type: 'Action', text: t || 'Moved to ' + L[n], detail: det })
+    update(p.key, patch, { type: 'Action', text: 'Moved to ' + L[n], detail: det })
     setAdv(null)
   }
 
@@ -119,7 +118,7 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
     arr.push({ date: ifu.date, name: s.iladder[arr.length] })
     update(
       p.key,
-      { ifu: arr, reminder: ifu.date + 'T' + rt, overdue: ifu.date < TODAY, updatedBy: DV_ME },
+      { ifu: arr, reminder: ifu.date + 'T' + rt, overdue: ifu.date < TODAY },
       {
         type: first ? 'Action' : 'Follow-up',
         text: first ? 'Internal follow-up set for ' + fmtD(ifu.date) : t,
@@ -186,11 +185,11 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
             type="button"
             onClick={() => {
               setDd(null)
-              setChg({ key: p.key, to: p.infra, note, due: '', start: '' })
+              setChg({ key: p.key, to: p.infra, note, due: p.initDue || '', start: '' })
             }}
             className="flex-none cursor-pointer rounded border-0 bg-white px-3.5 py-1.5 text-[12px] font-semibold text-ink-2 shadow-[inset_0_0_0_1px_#DDE3E8] hover:bg-sky-2"
           >
-            Edit description
+            Edit status description
           </button>
         </div>
         <div
@@ -598,7 +597,7 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
             onClick={() => {
               const t = pnDraft.trim()
               if (!t) return
-              update(p.key, { pnotes: [{ id: Date.now(), text: t, by: DV_ME, when: 'Just now' }, ...pn] }, { type: 'Note', text: t })
+              update(p.key, { pnotes: [{ id: Date.now(), text: t, by: me, when: 'Just now' }, ...pn] }, { type: 'Note', text: 'Added note to ' + p.name, detail: t })
               setPnDraft('')
             }}
             className="px-3.5 py-1.5 text-[12px]"
@@ -650,7 +649,7 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
                       update(
                         p.key,
                         { pnotes: pn.map(x => (x.id === n.id ? { ...x, text: t, when: 'Edited just now' } : x)) },
-                        n.text !== t ? { type: 'Note', text: 'Note edited', detail: 'Was: ' + n.text } : undefined,
+                        n.text !== t ? { type: 'Note', text: 'Edited note on ' + p.name, detail: 'Was: ' + n.text } : undefined,
                       )
                       setPnEdit(null)
                     }}

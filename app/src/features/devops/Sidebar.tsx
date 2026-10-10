@@ -4,7 +4,6 @@ import type { DvProject } from '../../api/devops/types'
 import { useDv } from './ctx'
 import {
   dayOf,
-  DV_ME,
   FIELD_LABEL,
   fieldOptions,
   fieldValue,
@@ -37,11 +36,11 @@ export function FieldPill({
   onAdd?: () => void
   zMenu?: number
 }) {
-  const { db, dd, setDd, setField } = useDv()
+  const { db, dd, setDd, setField, me } = useDv()
   const s = db.settings
   const id = ddKey || k
   const open = dd === id
-  const value = fieldValue(k, p, s)
+  const value = fieldValue(k, p, s, me)
   const own = k === 'owner' || k === 'devOwner'
   const [tC, tBg] = own ? ['#1B2D45', '#E7EEFB'] : tone(value)
   const label = FIELD_LABEL[k]
@@ -89,7 +88,7 @@ export function FieldPill({
                 }
               : undefined
           }
-          options={fieldOptions(k, p, s).map(o => {
+          options={fieldOptions(k, p, s, me).map(o => {
             const on = o === value
             return {
               label: o,
@@ -181,7 +180,10 @@ const DATE_FIELDS: [DateKey, string][] = [
 /** The right-hand column of the project panel: Details and Dates. */
 export function Sidebar({ p }: { p: DvProject }) {
   const { db, update } = useDv()
-  const s = db.settings
+  /** A date is fixed only once it has a value (the rules decide whether it is locked). */
+  const fixed = (k: DateKey) =>
+    (k === 'initDue' && db.settings.rules.lockInitial && !!p.initDue) ||
+    (k === 'devDue' && db.settings.rules.lockDevDue && !!(p.dev && p.devDues?.[p.dev]))
   const [adding, setAdding] = useState<FieldKey | null>(null)
   const [editField, setEditField] = useState<DateKey | null>(null)
   const [fieldDraft, setFieldDraft] = useState('')
@@ -197,7 +199,7 @@ export function Sidebar({ p }: { p: DvProject }) {
       const label = DATE_FIELDS.find(f => f[0] === k)![1]
       const old = p[k] ? fmtD(p[k]) : '—'
       if (fmtD(t) !== old) {
-        const patch: Partial<DvProject> = { [k]: t, updatedBy: DV_ME }
+        const patch: Partial<DvProject> = { [k]: t }
         if (k === 'latestDue') patch.moved = null
         update(p.key, patch, { type: 'Field change', text: label + ' changed to ' + fmtD(t), detail: 'Was: ' + old })
       }
@@ -225,7 +227,7 @@ export function Sidebar({ p }: { p: DvProject }) {
                   label="Toggle CI/CD"
                   on={!!p.cicd}
                   onClick={() =>
-                    update(p.key, { cicd: !p.cicd, updatedBy: DV_ME }, { type: 'Field change', text: 'CI/CD ' + (!p.cicd ? 'turned on' : 'turned off') })
+                    update(p.key, { cicd: !p.cicd }, { type: 'Field change', text: 'CI/CD ' + (!p.cicd ? 'turned on' : 'turned off') })
                   }
                 />
               </div>
@@ -257,7 +259,7 @@ export function Sidebar({ p }: { p: DvProject }) {
       <div className={`${card} mt-2.5`}>
         {DATE_FIELDS.map(([k, label], i) => {
           const raw = p[k]
-          const locked = (k === 'initDue' && s.rules.lockInitial) || (k === 'devDue' && s.rules.lockDevDue)
+          const locked = fixed(k)
           const [rel, relC] = relD(dayOf(raw), k === 'reminder' || k === 'latestDue' || k === 'devDue')
           const editing = !locked && editField === k
           return (

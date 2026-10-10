@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { DvProject } from '../../api/devops/types'
 import { useDv } from './ctx'
-import { addD, dayOf, devDays, devList, devListFor, DV_ME, fieldOptions, fieldValue, fmtD, ownerColor, relD, TODAY } from './model'
+import { addD, dayOf, devDays, devList, devListFor, fieldOptions, fieldValue, fmtD, ownerColor, relD, teamOf, TODAY } from './model'
 import { NewOptionForm } from './Sidebar'
 import { Btn, Caret, Eyebrow, GlassMenu, Initial } from './ui'
 
@@ -11,7 +11,7 @@ const field = 'w-full rounded-[10px] border-0 bg-white px-2.5 py-[7px] text-[13p
 
 /** Dev phase owner, the dev phase stepper and the DevOps phase timeline. */
 export function PhasesTab({ p }: { p: DvProject }) {
-  const { db, update, dd, setDd, setField } = useDv()
+  const { db, update, dd, setDd, setField, me } = useDv()
   const s = db.settings
   const rules = s.rules
 
@@ -43,7 +43,7 @@ export function PhasesTab({ p }: { p: DvProject }) {
   const devNextLabel = di < 0 ? 'Start ' + dsteps[0] : 'Move to ' + dsteps[di + 1]
 
   const ownOpen = dd === 'devOwner'
-  const ownerVal = fieldValue('devOwner', p, s)
+  const ownerVal = fieldValue('devOwner', p, s, me)
   const hist = (p.history || []).slice().reverse()
 
   return (
@@ -90,7 +90,7 @@ export function PhasesTab({ p }: { p: DvProject }) {
                   setDd(null)
                   setAddingOwner(true)
                 }}
-                options={fieldOptions('devOwner', p, s).map(o => ({
+                options={fieldOptions('devOwner', p, s, me).map(o => ({
                   label: o,
                   on: o === ownerVal,
                   avatar: { i: o !== 'Unassigned' ? o[0] : '–', bg: ownerColor(o) },
@@ -118,7 +118,7 @@ export function PhasesTab({ p }: { p: DvProject }) {
           />
           <div className="mt-3 text-[12px] text-muted">Owner</div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {s.people.map(n => (
+            {teamOf(s, me).map(n => (
               <button
                 key={n}
                 type="button"
@@ -145,7 +145,7 @@ export function PhasesTab({ p }: { p: DvProject }) {
                 if (!dn.owner || !dn.date || !t) return
                 update(
                   p.key,
-                  { devOwner: dn.owner, devDue: dn.date, devStepTitle: t, updatedBy: DV_ME },
+                  { devOwner: dn.owner, devDue: dn.date, devStepTitle: t },
                   { type: 'Action', text: t, detail: 'Owner ' + dn.owner + ' · due ' + fmtD(dn.date) },
                 )
                 setDn(null)
@@ -375,7 +375,7 @@ export function PhasesTab({ p }: { p: DvProject }) {
                 const t = devAdv.note.trim()
                 update(
                   p.key,
-                  { dev: to, devDue: due, updatedBy: DV_ME, devDues: { ...dues, ...(due ? { [to]: due } : {}) } },
+                  { dev: to, devDue: due, devDues: { ...dues, ...(due ? { [to]: due } : {}) } },
                   { type: 'Phase change', text: t || 'Dev phase moved to ' + to, detail: 'Dev phase: ' + (p.dev || 'Not set') + ' → ' + to + (due ? ' · due ' + fmtD(due) : '') },
                 )
                 setDevAdv(null)
