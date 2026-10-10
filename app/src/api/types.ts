@@ -344,3 +344,6 @@ export interface Db {
   companies: Company[]
   internalProjects: InternalProject[]
 }
+
+/** Points at one project: a client project inside its company, or an internal project. */
+export type ProjectRef = { kind: 'client'; companyId: string; id: string } | { kind: 'internal'; id: string }

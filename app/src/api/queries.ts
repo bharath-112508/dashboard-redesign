@@ -25,6 +25,7 @@ export const useQuestions = () => useQuery({ queryKey: qk.questions, queryFn: ()
 export const useRequests = () => useQuery({ queryKey: qk.requests, queryFn: () => server.get('requests') })
 export const useDevops = () => useQuery({ queryKey: qk.devops, queryFn: () => server.get('devops') })
 export const useCompanies = () => useQuery({ queryKey: qk.companies, queryFn: () => server.get('companies') })
+export const useInternalProjects = () => useQuery({ queryKey: qk.internalProjects, queryFn: () => server.get('internalProjects') })
 
 /**
  * Builds a Db from the cache so the shared reducer can run on it. Only the
