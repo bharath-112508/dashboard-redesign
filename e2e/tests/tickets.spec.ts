@@ -441,7 +441,7 @@ test.describe('Tickets: team workspace', () => {
     await menu(page).getByText('Mobile app', { exact: true }).click()
     await expect(page.getByText(BANKID, { exact: true })).toHaveCount(0)
     await expect(page.getByText('Add company', { exact: true })).toBeVisible()
-    await page.keyboard.press('Escape')
+    await page.locator('div.fixed.inset-0').first().click()
     await page.getByRole('button', { name: 'All sprints', exact: true }).click()
     await menu(page).getByText('Backlog', { exact: true }).click()
     await expect(page.getByText('Add company', { exact: true })).toHaveCount(0)

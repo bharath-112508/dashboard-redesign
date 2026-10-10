@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { signIn, USERS } from './helpers/session'
+import { signIn } from './helpers/session'
 import {
   cardsOn,
   moveClientStep,
