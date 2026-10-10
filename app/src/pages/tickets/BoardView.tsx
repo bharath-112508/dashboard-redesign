@@ -7,6 +7,7 @@ import { usePerson } from '../../state/page'
 import { useUi } from '../../state/ui'
 import { assigneesOf, blurb, cardAvatars, taskKey } from '../../domain/tasks'
 import { useCreateTicket, useOpenTask } from '../../features/useOpenTask'
+import { useMe } from '../../features/tickets/useMe'
 import { useOpenRequest } from '../../features/tickets/DevopsPanel'
 import { useBoardTasks } from '../clients/BoardView'
 import { TaskCard, type CardModel } from '../clients/TaskCard'
@@ -18,6 +19,7 @@ const REQ_STATUS: Record<string, string> = { Open: 'todo', 'In progress': 'prog'
  * do) placed before Done. Every column has "+" buttons that create a ticket.
  */
 export function BoardView() {
+  const me = useMe()
   const ws = useWorkspace().data!
   const ui = useUi()
   const send = useSend()
@@ -84,11 +86,11 @@ export function BoardView() {
     if (!t) return
     if (target === '__bugs') {
       if (t.type !== 'Bug' || t.status !== first)
-        send({ type: 'task.update', id: t.id, patch: { type: 'Bug', status: first }, log: 'moved it to Bugs' })
+        send({ type: 'task.update', who: me.name, id: t.id, patch: { type: 'Bug', status: first }, log: 'moved it to Bugs' })
       return
     }
     const s = ws.statuses.find(x => x.id === target)!
-    if (t.status !== s.id) send({ type: 'task.update', id: t.id, patch: { status: s.id }, log: 'moved it to ' + s.name })
+    if (t.status !== s.id) send({ type: 'task.update', who: me.name, id: t.id, patch: { status: s.id }, log: 'moved it to ' + s.name })
   }
   const dragOver = (id: string) => (e: DragEvent) => {
     e.preventDefault()

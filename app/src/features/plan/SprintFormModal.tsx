@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSend, useWorkspace } from '../../api/queries'
 import { addDays, fmt, TODAY } from '../../lib/dates'
-import { PEOPLE } from '../../lib/theme'
+import { useTeamPeople } from '../tickets/useMe'
 import { useOverlay } from '../../state/ui'
 import { sprintsOf } from '../../domain/tasks'
 import { useEscape } from '../useEscape'
@@ -27,6 +27,7 @@ type Form = z.infer<typeof schema>
 /** "New sprint": what the sprint will deliver, its length and who works on it. */
 export function SprintFormModal({ epicId }: { epicId: string }) {
   const ws = useWorkspace().data!
+  const team = useTeamPeople()
   const send = useSend()
   const overlay = useOverlay()
   const close = () => overlay.close('newSprint')
@@ -108,9 +109,9 @@ export function SprintFormModal({ epicId }: { epicId: string }) {
       </span>
       <select {...register(k)} className={fieldCls + ' cursor-pointer'}>
         <option value="">Add later</option>
-        {PEOPLE.map(o => (
-          <option key={o} value={o}>
-            {o}
+        {team.map(p => (
+          <option key={p.id} value={p.name}>
+            {p.name}
           </option>
         ))}
       </select>

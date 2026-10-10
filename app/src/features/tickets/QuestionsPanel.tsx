@@ -6,7 +6,8 @@ import { useQuestions, useSend, useWorkspace } from '../../api/queries'
 import type { ChatFile, Question } from '../../api/types'
 import { Avatar, Icon, PATHS, Scrim } from '../../components/ui'
 import { readFiles } from '../../lib/files'
-import { ME, questionTags } from '../../lib/theme'
+import { questionTags } from '../../lib/theme'
+import { useMe } from './useMe'
 import { threadOf } from '../../domain/questions'
 import { sprintsOf } from '../../domain/tasks'
 import { usePerson } from '../../state/page'
@@ -47,6 +48,7 @@ export const hasNewReply = (q: Question) => clientCount(q) > (q.seenT || 0)
 
 /** "Questions to client" button in the epic bar and its panel: raise a question and see every question. */
 export function QuestionsPanel({ epic }: { epic: string }) {
+  const me = useMe()
   const ws = useWorkspace().data!
   const questions = useQuestions().data ?? []
   const send = useSend()
@@ -78,7 +80,7 @@ export function QuestionsPanel({ epic }: { epic: string }) {
       type: 'question.create',
       question: {
         id,
-        by: ME,
+        by: me.name,
         title: v.title.trim() || text.split('\n')[0].slice(0, 80),
         text,
         photos: pend,

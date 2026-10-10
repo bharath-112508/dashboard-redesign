@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useEntries, useQuestions, useRequests, useTasks, useWorkspace } from '../../api/queries'
+import { usePeople } from '../../api/people/directory'
 import { Avatar, Icon, PATHS } from '../../components/ui'
-import { PEOPLE } from '../../lib/theme'
 import { usePerson } from '../../state/page'
 import { Overlays } from '../../features/Overlays'
 import { Toolbar } from '../clients/Toolbar'
+import { useTeamPeople } from '../../features/tickets/useMe'
 import { TicketsEpicBar } from './TicketsEpicBar'
 
 export const TICKET_VIEWS = [
@@ -44,7 +45,8 @@ export function TicketsLayout() {
   const fromLabel = from && TICKET_VIEWS.find(v => v.id === from)?.label
 
   // Load everything the page needs up front.
-  const loading = [useWorkspace(), useTasks(), useEntries(), useQuestions(), useRequests()]
+  const team = useTeamPeople()
+  const loading = [useWorkspace(), useTasks(), useEntries(), useQuestions(), useRequests(), usePeople()]
   const error = loading.find(q => q.isError)
   const ready = loading.every(q => q.data)
 
@@ -69,9 +71,9 @@ export function TicketsLayout() {
         <span className="grid size-[26px] place-items-center rounded-[7px] bg-blue text-[12px] font-bold text-white">P</span>
         <h1 className="m-0 text-[22px] font-bold tracking-[-0.02em] text-ink">Project Management tool</h1>
         <div className="ml-1.5 flex">
-          {PEOPLE.map(n => {
-            const m = person(n)
-            return <Avatar key={n} i={m.i} bg={m.bg} size={24} radius={6} font={9.5} title={n} ring="0 0 0 2px #F6F9FC" style={{ marginRight: -5 }} />
+          {team.map(p => {
+            const m = person(p.name)
+            return <Avatar key={p.id} i={m.i} bg={m.bg} size={24} radius={6} font={9.5} title={p.name} ring="0 0 0 2px #F6F9FC" style={{ marginRight: -5 }} />
           })}
         </div>
       </div>

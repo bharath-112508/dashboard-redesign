@@ -8,6 +8,7 @@ import { pal } from '../../lib/theme'
 import { useUi } from '../../state/ui'
 import { taskKey } from '../../domain/tasks'
 import { useOpenTask } from '../../features/useOpenTask'
+import { useMe } from '../../features/tickets/useMe'
 
 const KIND: Record<string, string[]> = {
   img: ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'],
@@ -31,6 +32,7 @@ const COLS = 'minmax(0,2.4fr) minmax(0,1.6fr) 110px 80px 110px 40px'
 
 /** The "Files" tab: every attachment on every ticket, with upload by drag and drop. */
 export function FilesView() {
+  const me = useMe()
   const ws = useWorkspace().data!
   const tasks = (useTasks().data ?? []).filter(t => !t.parent)
   const ui = useUi()
@@ -63,13 +65,14 @@ export function FilesView() {
     const ds = todayLabel()
     send({
       type: 'task.update',
+      who: me.name,
       id: tgt.id,
       patch: { atts: [...tgt.atts, ...F.map(f => ({ name: f.name, size: f.size, date: ds, url: f.url }))] },
       log: 'attached ' + F.length + ' file' + (F.length > 1 ? 's' : ''),
     })
   }
   const remove = (t: Task, i: number) =>
-    send({ type: 'task.update', id: t.id, patch: { atts: t.atts.filter((_, j) => j !== i) }, log: 'removed ' + t.atts[i].name })
+    send({ type: 'task.update', who: me.name, id: t.id, patch: { atts: t.atts.filter((_, j) => j !== i) }, log: 'removed ' + t.atts[i].name })
 
   const select = 'h-9 cursor-pointer appearance-none rounded-[10px] border-[1.5px] border-line bg-white pl-3 pr-[30px] text-[13.5px] font-semibold text-ink outline-0'
   const chevron = <Icon d={PATHS.chevron} size={11} sw={2.8} className="pointer-events-none absolute right-[11px] top-1/2 -translate-y-1/2 text-ink-2" />
@@ -111,6 +114,19 @@ export function FilesView() {
           </select>
           {chevron}
         </span>
+        {(q || epF !== 'all' || kF !== 'all') && (
+          <button
+            type="button"
+            onClick={() => {
+              setQ('')
+              setEpF('all')
+              setKF('all')
+            }}
+            className="h-9 cursor-pointer rounded-[10px] border-[1.5px] border-line bg-white px-3 text-[13px] font-semibold text-ink"
+          >
+            Clear filters
+          </button>
+        )}
         <span className="ml-auto text-[13px] font-semibold text-ink-2">
           {rows.length} file{rows.length === 1 ? '' : 's'}
         </span>

@@ -12,7 +12,10 @@ export const MEMBERS: Record<string, { i: string; bg: string }> = {
 }
 export const PEOPLE = Object.keys(MEMBERS)
 
-/** The signed-in user. */
+/**
+ * Fixed name used by the Clients and DevOps code only. Tickets code reads the
+ * signed-in person (features/tickets/useMe.ts).
+ */
 export const ME = 'Rahul'
 
 export type Person = { name: string; i: string; bg: string }
@@ -20,20 +23,6 @@ export type Person = { name: string; i: string; bg: string }
 export const person = (name: string): Person => {
   const m = MEMBERS[name]
   return { name, i: m ? m.i : (name || '?')[0], bg: m ? m.bg : '#56657A' }
-}
-
-/** Personal colours the team sees on the Tickets page (`MEM` in Tickets.dc.html). */
-export const TEAM_COLORS: Record<string, string> = {
-  Rahul: '#4870E8',
-  'Bharath Reddy Panyala': '#9F89E5',
-  Chary: '#B98A2F',
-  Vivek: '#3E908F',
-}
-
-/** Same as `person`, with the team's personal colours. */
-export const teamPerson = (name: string): Person => {
-  const p = person(name)
-  return TEAM_COLORS[name] ? { ...p, bg: TEAM_COLORS[name] } : p
 }
 
 /** [colour, soft, ink] */

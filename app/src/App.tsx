@@ -7,8 +7,8 @@ import { PlanView } from './pages/clients/PlanView'
 import { TimelineView } from './pages/clients/TimelineView'
 import { TicketsRoutes } from './pages/tickets/TicketsRoutes'
 import { DevopsRoutes } from './pages/devops/DevopsRoutes'
+import { MyTicketsPage } from './pages/my-tickets/MyTicketsPage'
 import { TimesheetPage } from './pages/timesheet/TimesheetPage'
-import { ComingSoon } from './pages/shell/ComingSoon'
 import { DashboardPage } from './pages/dashboard/DashboardPage'
 import { CompaniesPage } from './pages/companies/CompaniesPage'
 import { CompanyDetailPage } from './pages/companies/CompanyDetailPage'
@@ -48,7 +48,7 @@ export function App() {
               <Route path=":id" element={<CompanyDetailPage />} />
             </Route>
             <Route path="projects" element={<ProjectsPage />} />
-            <Route path="my-tickets" element={<ComingSoon page="My tickets" />} />
+            <Route path="my-tickets" element={<MyTicketsPage />} />
             <Route path="timesheet" element={<TimesheetPage />} />
             <Route path="employee-timesheets">
               <Route index element={<EmployeeTimesheetsPage />} />

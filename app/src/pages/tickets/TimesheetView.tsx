@@ -7,7 +7,7 @@ import { usePeople } from '../../api/people/directory'
 import { logTime } from '../../api/timesheet'
 import { Avatar, Icon, PATHS } from '../../components/ui'
 import { diff, fmt, TODAY } from '../../lib/dates'
-import { ME, PEOPLE } from '../../lib/theme'
+import { useMe, useTeamPeople } from '../../features/tickets/useMe'
 import { usePerson } from '../../state/page'
 import { useUi } from '../../state/ui'
 import { taskKey } from '../../domain/tasks'
@@ -66,6 +66,8 @@ export function TimesheetView() {
   const tasks = useTasks().data ?? []
   const entries = useEntries().data ?? []
   const people = usePeople().data ?? []
+  const team = useTeamPeople()
+  const me = useMe()
   const requests = useRequests().data ?? []
   const ui = useUi()
   const send = useSend()
@@ -82,17 +84,21 @@ export function TimesheetView() {
   const reqs = requests.filter(r => r.key === ws.devopsLinks[ui.epic])
   const rangeOk = (d: string) =>
     rangeF === 'all' || (rangeF === 'week' ? diff(TODAY, d) < 7 && diff(TODAY, d) >= 0 : d.slice(0, 7) === TODAY.slice(0, 7))
-  const userOk = (u: string) => !userF || u === userF
+  /** The person picked in the filter, by directory id ('' for everyone). */
+  const pickedName = userF ? (people.find(p => p.id === +userF)?.name ?? '') : ''
+  const nameOf = (id: number, fallback: string) => people.find(p => p.id === id)?.name ?? fallback
+  const userOkId = (id: number) => !userF || id === +userF
+  const userOkName = (n: string) => !userF || n === pickedName
 
   const rows: Row[] = [
     ...entries
-      .filter(x => x.task !== null && ids.has(x.task) && userOk(x.user) && rangeOk(x.date))
+      .filter(x => x.task !== null && ids.has(x.task) && userOkId(x.userId) && rangeOk(x.date))
       .map(x => {
         const t = tasks.find(y => y.id === x.task)
         return {
           id: 'e' + x.id,
           date: x.date,
-          user: x.user,
+          user: nameOf(x.userId, x.user),
           type: x.type,
           title: t ? t.title : '—',
           notes: x.notes,
@@ -106,7 +112,7 @@ export function TimesheetView() {
       .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.sortId - a.sortId)),
     ...reqs.flatMap(r =>
       (r.logs || []).flatMap((x, i) =>
-        x.date && userOk(x.by) && rangeOk(x.date)
+        x.date && userOkName(x.by) && rangeOk(x.date)
           ? [
               {
                 id: 'r' + r.id + '_' + i,
@@ -152,27 +158,29 @@ export function TimesheetView() {
     ...epTasks.filter(t => t.parent).map(t => ({ v: String(t.id), label: taskKey(t) + ' · ' + t.title })),
     ...reqs.map(r => ({ v: 'r' + r.id, label: r.rkey + ' · ' + r.text + ' (DevOps)' })),
   ]
-  const blank: Form = { date: TODAY, user: ME, type: 'General', task: taskOpts[0]?.v || '', notes: '', bill: '', non: '' }
+  const blank: Form = { date: TODAY, user: String(me.id), type: 'General', task: taskOpts[0]?.v || '', notes: '', bill: '', non: '' }
   const { register, handleSubmit, reset, watch, getValues } = useForm<Form>({ resolver: zodResolver(schema), defaultValues: blank })
   const w = watch()
   const ok = !!w.task && (+(w.bill || 0) || 0) + (+(w.non || 0) || 0) > 0
   const onSave = (f: Form) => {
     const bill = +(f.bill || 0) || 0
     const non = +(f.non || 0) || 0
+    const pid = +f.user
+    const pname = nameOf(pid, '')
     if (f.task.startsWith('r')) {
       const r = requests.find(x => x.id === +f.task.slice(1))
       if (r)
         send({
           type: 'request.update',
           id: r.id,
-          patch: { logs: [...(r.logs || []), { h: bill + non, by: f.user, when: 'just now', date: f.date || TODAY, notes: f.notes.trim() }] },
+          patch: { logs: [...(r.logs || []), { h: bill + non, by: pname, when: 'just now', date: f.date || TODAY, notes: f.notes.trim() }] },
         })
     } else {
       send(
         logTime({
           date: f.date || TODAY,
-          userId: people.find(p => p.name === f.user)?.id ?? 0,
-          user: f.user,
+          userId: pid,
+          user: pname,
           type: f.type,
           task: +f.task,
           notes: f.notes.trim(),
@@ -215,9 +223,9 @@ export function TimesheetView() {
             <span className="relative inline-flex">
               <select value={userF} onChange={e => setUserF(e.target.value)} aria-label="Person" className={select}>
                 <option value="">Everyone</option>
-                {PEOPLE.map(n => (
-                  <option key={n} value={n}>
-                    {n}
+                {team.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
                   </option>
                 ))}
               </select>
@@ -258,9 +266,9 @@ export function TimesheetView() {
               Person
               <span className="relative inline-flex w-full">
                 <select {...register('user')} className={select}>
-                  {PEOPLE.map(n => (
-                    <option key={n} value={n}>
-                      {n}
+                  {team.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
                     </option>
                   ))}
                 </select>
