@@ -1,6 +1,8 @@
 import { addDays, TODAY } from '../lib/dates'
 import { createDevopsSeed } from './devops/seed'
 import type { Activity, ChatMessage, Db, Epic, Sprint, Task, TimeEntry } from './types'
+import { PEOPLE_SEED } from './people/seed'
+import { COMPANIES_SEED } from './companies/seed'
 
 const hist = (who: string, what: string, when: string): Activity => ({ kind: 'history', who, what, when })
 
@@ -188,6 +190,9 @@ const buildTasks = (sprints: Sprint[]): Task[] => {
   return tasks
 }
 
+/** The directory id of a person, by display name (seed data only). */
+export const personIdByName = (name: string): number => PEOPLE_SEED.find(p => p.name === name)?.id ?? 0
+
 const ENTRIES: TimeEntry[] = (
   [
     ['2026-10-09', 'Chary', 'General', 10, '- Finished the BankID test flow\n- Handled cancel and timeout states', 6.5, 0],
@@ -204,9 +209,19 @@ const ENTRIES: TimeEntry[] = (
     ['2026-09-30', 'Rahul', 'General', 9, '- Implemented the first two onboarding steps', 6.5, 0],
     ['2026-09-29', 'Rahul', 'General', 9, '- Started onboarding layout and navigation', 3.5, 0],
   ] as const
-).map((r, i) => ({ id: i + 1, date: r[0], user: r[1], type: r[2], task: r[3], notes: r[4], bill: r[5], non: r[6] }))
+).map((r, i) => ({
+  id: i + 1,
+  date: r[0],
+  userId: personIdByName(r[1]),
+  user: r[1],
+  type: r[2],
+  task: r[3],
+  notes: r[4],
+  bill: r[5],
+  non: r[6],
+}))
 
-export const DB_VERSION = 2
+export const DB_VERSION = 3
 
 export const createSeed = (): Db => {
   const sprints = buildSprints()
@@ -225,6 +240,9 @@ export const createSeed = (): Db => {
     },
     tasks: buildTasks(sprints),
     entries: ENTRIES,
+    people: PEOPLE_SEED,
+    companies: COMPANIES_SEED,
+    internalProjects: [],
     questions: [
       {
         id: 1,

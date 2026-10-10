@@ -152,3 +152,67 @@ Front-end build of `project/DevOps Board v6.dc.html`, at `/devops/board` and `/d
 - **New project** doesn't reset the page's filter and search after creating, but it opens the new project straight away.
 - **"Export a backup"** in the footer downloads the board's data as JSON; in the prototype it was a dead link.
 - **Escape** closes the status window, then an open menu, then the top window. The prototype did the same, but for the project panel only.
+
+# App shell, sign-in and roles
+
+The shell wraps every page: sign-in, the role guard, the sidebar, the top bar with search, profile settings and the Back button. Built from the uploaded prototype's `template.html`, `764bb322` (session and role map) and `a5dbe222` (Login).
+
+## Routes
+
+Paths replace the prototype's `#PageName` hash. A hash link (`/#Dashboard?x=1`) still opens its page.
+
+| Prototype page | Route | Sidebar item | Roles that can open it |
+| --- | --- | --- | --- |
+| Login | `/login` | none (no shell) | everyone |
+| Dashboard | `/dashboard` | Dashboard | all seven |
+| Companies | `/companies` | Companies | super, admin, pm, dev |
+| Projects | `/projects` | Projects | super, admin, pm, dev |
+| DevOps Board v6 | `/devops/board`, `/devops/list` | DevOps board | super, admin, devops |
+| Tickets | `/tickets/<tab>` | none (search and links) | super, admin, pm, dev |
+| My Tickets | `/my-tickets` | My tickets | super, admin, pm, dev (Tickets rule) |
+| Clients | `/clients/board`, `/clients/plan`, `/clients/timeline`; `/clients` is the portal home | Clients ("Project portal" for client users) | super, admin, pm, cadmin, cuser |
+| Timesheet | `/timesheet` | Timesheet | super, admin, pm, dev, devops |
+| Employee Timesheets | `/employee-timesheets` | Employee timesheets | super, admin, pm |
+| Users | `/users` | Users | super, admin, cadmin |
+
+Pages not built yet (Dashboard, Companies, Projects, My tickets, Timesheet, Employee timesheets, Users, Clients portal home) render `pages/shell/ComingSoon.tsx` inside the shell. Each package replaces its route element.
+
+## Code map
+
+| Path | What it holds |
+| --- | --- |
+| `src/pages/shell/Shell.tsx` | The guard (`Shell`) and the frame: sidebar, top bar, Back stack, profile modal |
+| `src/pages/shell/Sidebar.tsx`, `nav.ts` | Nine nav items, role filter, collapse (`vt.sideCol`), profile row, sign out, client brand |
+| `src/pages/shell/GlobalSearch.tsx` | Search flyout: Pages, Tickets, Projects, Companies, People |
+| `src/pages/shell/ProfileModal.tsx` | Profile settings (name, phone, time zone, notifications, password) |
+| `src/pages/shell/toast.tsx` | The access-denied message |
+| `src/pages/login/LoginPage.tsx` | Sign-in (LG-01..LG-06) |
+| `src/api/session/` | `pages.ts` (page names and paths), `access.ts` (role map, `canAccess`), `store.ts` (`vt.session`, `useSession`), `signIn.ts` (checks) |
+| `src/api/people/` | The people directory: `usePeople`, `findPerson`, `avatarOf`, the seed |
+| `src/api/companies/seed.ts` | Company seed (companies collection) |
+| `src/lib/media.ts` | Avatar faces (JPEG data URLs), company logos, generated logo tiles, `initials` |
+| `src/components/HeaderSlot.tsx` | Renders page controls into the top bar (`#app-header-slot`). DevOps uses it for its search and epic controls |
+
+## Sign-in and roles
+
+- Sign-in checks the email against the directory (case and spaces ignored) and the password against the demo password `demo`. A password set from the profile replaces it for that person (stored as a SHA-256 hash; needs https or localhost).
+- Deactivated people cannot sign in. Only `active` people can, and Ola Nilsen is seeded inactive.
+- The role map (`access.ts`) is the prototype's `ACC`. It is enforced in the client only. A backend has to repeat it.
+- No session goes to `/login`. A page the role cannot open shows "Your role (…) does not have access to …" and goes to `/dashboard`.
+- Client users see the company brand and "Project portal". Their avatars show initials only.
+
+## Data model (shared)
+
+`src/api/types.ts` adds `Person`, `Session`, `Company` (with `CompanyContact`, `ClientProject`, `EpicSummary`), `InternalProject` and the shared `TimeEntry` (`userId` and nullable `task`). The `Db` gains `people`, `companies` and `internalProjects`. `DB_VERSION` is 3. A version 2 store is upgraded on read (`migrate` in `api/server.ts`), keeping its tickets and entries. Commands: `profile.update` (`api/commands.ts`).
+
+Session writes are not part of the Db reducer: `vt.session` is per browser, so the profile modal writes it next to the `profile.update` command.
+
+## Decisions beyond DECISIONS.md
+
+- Search sits in the top bar (as the spec asks), so the collapsed sidebar has no search icon.
+- Bharath Reddy Panyala is added to the directory as a developer (he appears on Tickets and in the time seed, but not in the prototype's Users list).
+- Wrong password: "That password is not right." Blank password: "Enter your password." Deactivated: "This account is deactivated. Ask an admin to reactivate it."
+- The sign-in hint names the demo password instead of "any password works" (the prototype's text is no longer true).
+- The Tickets page highlights the Projects item in the sidebar, as the prototype does.
+- Client brand: "{Company} admin panel" for client admins and "{Company} project portal" for client users (the prototype used the admin wording for both).
+- Team colours in `lib/theme.ts` are unchanged, and they match the directory's colours for the four Tickets members.

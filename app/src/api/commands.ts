@@ -1,6 +1,6 @@
 import { ME } from '../lib/theme'
 import { nextTaskId } from '../domain/tasks'
-import type { ChatMessage, Db, DevopsRequest, Epic, Question, RequestComment, Sprint, Task, TimeEntry } from './types'
+import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, Question, RequestComment, Sprint, Task, TimeEntry } from './types'
 import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
 import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/commands'
 
@@ -9,6 +9,9 @@ import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/comman
  * on the React Query cache (optimistic update) and in the mock server, so the
  * UI and the "server" can never disagree about what a write does.
  */
+/** The fields a person can change on their own profile. */
+export type ProfilePatch = Partial<Pick<Person, 'name' | 'phone' | 'tz' | 'pwHash'>> & { notif?: NotifPrefs }
+
 export type Command =
   /** `top`: put the task first in the list (the header "+" on the Bugs column). */
   | { type: 'task.create'; task: Task; top?: boolean }
@@ -31,11 +34,13 @@ export type Command =
   | { type: 'sprint.addMembers'; id: string; names: string[] }
   | { type: 'epic.create'; epic: Epic }
   | { type: 'epic.update'; id: string; patch: Partial<Epic> }
+  /** Saves the signed-in user's own details in the directory. The session is written by the caller. */
+  | { type: 'profile.update'; id: number; patch: ProfilePatch }
   | { type: 'batch'; cmds: Command[] }
   | TicketsCommand
   | DevopsCommand
 
-export type Resource = 'workspace' | 'tasks' | 'entries' | 'questions' | 'requests' | 'devops'
+export type Resource = 'workspace' | 'tasks' | 'entries' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects'
 
 export const touches = (cmd: Command): Resource[] => {
   switch (cmd.type) {
@@ -63,6 +68,8 @@ export const touches = (cmd: Command): Resource[] => {
     case 'epic.create':
     case 'epic.update':
       return ['workspace']
+    case 'profile.update':
+      return ['people']
     case 'batch':
       return [...new Set(cmd.cmds.flatMap(touches))]
     default:
@@ -205,6 +212,11 @@ export const reduce = (db: Db, input: Command): Db => {
           ...db.workspace,
           epics: db.workspace.epics.map(e => (e.id === cmd.id ? { ...e, ...cmd.patch } : e)),
         },
+      }
+    case 'profile.update':
+      return {
+        ...db,
+        people: db.people.map(p => (p.id === cmd.id ? { ...p, ...cmd.patch } : p)),
       }
     case 'batch':
       return cmd.cmds.reduce(reduce, db)

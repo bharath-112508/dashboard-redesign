@@ -121,15 +121,151 @@ export interface Task {
   clientBug?: ClientBugInfo
 }
 
+/**
+ * One timesheet entry, shared by the Dashboard quick log, My timesheet, the
+ * Tickets timesheet and Employee timesheets. Hours are numbers. `userId` is
+ * the person's id in the directory; `user` is their display name, kept so the
+ * current Tickets views can still show it.
+ */
 export interface TimeEntry {
   id: number
   date: string
+  userId: number
   user: string
   type: string
-  task: number
+  /** Ticket id, or null for a text entry (then `area` is set). */
+  task: number | null
+  area?: string
+  epic?: string
   notes: string
   bill: number
   non: number
+}
+
+/** System roles. The keys are used by the session, the page access map and the directory. */
+export type Role = 'super' | 'admin' | 'pm' | 'dev' | 'devops' | 'cadmin' | 'cuser'
+
+export type DevType = 'Frontend' | 'Backend' | 'Full-stack' | 'Mobile' | 'DevOps' | 'QA' | 'Designer'
+
+export interface NotifPrefs {
+  tickets: boolean
+  due: boolean
+  questions: boolean
+  weekly: boolean
+}
+
+/**
+ * A person in the directory. This is the one record for a person's name,
+ * role, colour and photo; everything else refers to people by `id`.
+ */
+export interface Person {
+  id: number
+  name: string
+  email: string
+  /** 'vt' for Viljetech staff, otherwise the id of the client company. */
+  org: string
+  role: Role
+  devType?: DevType
+  emp?: 'freelancer' | 'employee'
+  /** 'all', or the ids of the projects this person works on. */
+  projects: 'all' | string[]
+  /** Personal colour for avatars on the team side. */
+  colour: string
+  active: boolean
+  invited?: boolean
+  /** Free text shown in Users, such as "Now" or "2h ago". */
+  last: string
+  phone?: string
+  tz?: string
+  notif?: NotifPrefs
+  /** A data URL when uploaded, '' for no photo, undefined for the built-in face. */
+  photo?: string
+  /** SHA-256 hex of a password set from the profile. Without it, the demo password applies. */
+  pwHash?: string
+}
+
+/** The signed-in user. Stored per browser in localStorage under `vt.session`. */
+export interface Session {
+  personId: number
+  name: string
+  email: string
+  role: Role
+  /** Organisation name: 'Viljetech', or the client company's name. */
+  org: string
+  /** Company id, for client users. */
+  orgId?: string
+  emp?: 'freelancer' | 'employee'
+  phone?: string
+  tz?: string
+  notif?: Partial<NotifPrefs>
+}
+
+export type CompanyRole = 'Super admin' | 'Admin' | 'Developer' | 'Viewer'
+
+export interface CompanyContact {
+  /** The directory person this contact is, when there is one. */
+  personId: number | null
+  name: string
+  role: string
+  email: string
+  /** Ids of the company's projects this contact works on. */
+  projects: string[]
+  admin?: boolean
+}
+
+export type ProjectState = 'active' | 'planned' | 'done' | 'hold'
+
+export interface EpicSummary {
+  id: string
+  name: string
+  state: ProjectState
+  pct: number
+  sprints: number
+}
+
+export interface ClientProject {
+  id: string
+  name: string
+  desc: string
+  state: ProjectState
+  pct: number
+  due: string
+  start?: string
+  /** Directory person ids. */
+  team: number[]
+  epics: EpicSummary[]
+}
+
+export interface Company {
+  id: string
+  name: string
+  industry: string
+  country: string
+  web: string
+  /** A data URL. When missing, the logo comes from lib/media.ts. */
+  logo?: string
+  /** Palette index used for the company colour. */
+  p: number
+  notes: string
+  contacts: CompanyContact[]
+  projects: ClientProject[]
+  /** Company role per directory person id. */
+  ourRoles: Record<number, CompanyRole>
+  archived: boolean
+  archivedAt: string | null
+}
+
+export interface InternalProject {
+  id: string
+  name: string
+  desc: string
+  area: string
+  state: ProjectState
+  pct: number
+  start?: string
+  due: string
+  /** Directory person ids. */
+  team: number[]
 }
 
 export interface Question {
@@ -204,4 +340,7 @@ export interface Db {
   questions: Question[]
   requests: DevopsRequest[]
   devops: DevopsDb
+  people: Person[]
+  companies: Company[]
+  internalProjects: InternalProject[]
 }

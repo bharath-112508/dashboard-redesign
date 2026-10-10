@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useEntries, useRequests, useSend, useTasks, useWorkspace } from '../../api/queries'
+import { usePeople } from '../../api/people/directory'
 import { Avatar, Icon, PATHS } from '../../components/ui'
 import { diff, fmt, TODAY } from '../../lib/dates'
 import { ME, PEOPLE } from '../../lib/theme'
@@ -63,6 +64,7 @@ export function TimesheetView() {
   const ws = useWorkspace().data!
   const tasks = useTasks().data ?? []
   const entries = useEntries().data ?? []
+  const people = usePeople().data ?? []
   const requests = useRequests().data ?? []
   const ui = useUi()
   const send = useSend()
@@ -83,7 +85,7 @@ export function TimesheetView() {
 
   const rows: Row[] = [
     ...entries
-      .filter(x => ids.has(x.task) && userOk(x.user) && rangeOk(x.date))
+      .filter(x => x.task !== null && ids.has(x.task) && userOk(x.user) && rangeOk(x.date))
       .map(x => {
         const t = tasks.find(y => y.id === x.task)
         return {
@@ -167,7 +169,17 @@ export function TimesheetView() {
     } else {
       send({
         type: 'entry.create',
-        entry: { id: Math.max(0, ...entries.map(x => x.id)) + 1, date: f.date || TODAY, user: f.user, type: f.type, task: +f.task, notes: f.notes.trim(), bill, non },
+        entry: {
+          id: Math.max(0, ...entries.map(x => x.id)) + 1,
+          date: f.date || TODAY,
+          userId: people.find(p => p.name === f.user)?.id ?? 0,
+          user: f.user,
+          type: f.type,
+          task: +f.task,
+          notes: f.notes.trim(),
+          bill,
+          non,
+        },
       })
     }
     reset({ ...getValues(), notes: '', bill: '', non: '' })
