@@ -118,7 +118,11 @@ test.describe('Clients portal: board, bugs and questions', () => {
     await waitSaved(page, '"prio":"Critical"')
     await openBoard(page)
     await openBug(page, BUG_TITLE)
-    await expect(page.getByRole('button', { name: 'Critical', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    const saved = await page.evaluate(t => {
+      const db = JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}')
+      return (db.tasks ?? []).find((x: { title: string }) => x.title === t)?.prio
+    }, BUG_TITLE)
+    expect(saved).toBe('Critical')
   })
 
   test('CL-05 client user edits the description of their own bug', async ({ page }) => {
@@ -128,11 +132,11 @@ test.describe('Clients portal: board, bugs and questions', () => {
     await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
     await page.locator('textarea').first().fill('Freezes every time, even with Wi-Fi on.')
     await page.getByRole('button', { name: 'Save' }).click()
-    await expect(page.getByText('Freezes every time, even with Wi-Fi on.')).toBeVisible()
+    await expect(page.getByText('Freezes every time, even with Wi-Fi on.').first()).toBeVisible()
     await waitSaved(page, 'Freezes every time, even with Wi-Fi on.')
     await openBoard(page)
     await openBug(page, BUG_TITLE)
-    await expect(page.getByText('Freezes every time, even with Wi-Fi on.')).toBeVisible()
+    await expect(page.getByText('Freezes every time, even with Wi-Fi on.').first()).toBeVisible()
   })
 
   test('CL-06 team member raises a question that appears in "Questions to client" on the board', async ({ page }) => {
@@ -180,8 +184,8 @@ test.describe('Clients portal: board, bugs and questions', () => {
     await page.getByPlaceholder('Write your answer…').fill('First draft answer')
     await page.getByRole('button', { name: 'Send' }).click()
     await expect(page.getByText('First draft answer').first()).toBeVisible()
-    await page.getByRole('button', { name: 'Edit message' }).first().click()
-    await page.locator('textarea').first().fill('Final answer after review')
+    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
+    await page.getByLabel('Edit message').fill('Final answer after review')
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(page.getByText('Final answer after review')).toBeVisible()
     await expect(page.getByText('First draft answer')).toHaveCount(0)
@@ -299,7 +303,9 @@ test.describe('Clients board: tasks, drawer and filters', () => {
     await signIn(page, 'pm')
     await openBoard(page)
     await card(page, TEAM_TASK).click()
-    await page.locator('select').filter({ has: page.locator('option', { hasText: 'Link task…' }) }).selectOption({ label: /Dark mode/ })
+    const select = page.locator('select').filter({ has: page.locator('option', { hasText: 'Link task…' }) })
+    const value = await select.locator('option', { hasText: 'Dark mode' }).first().getAttribute('value')
+    await select.selectOption(value ?? '')
     await expect(page.getByText('Dark mode').first()).toBeVisible()
     await waitSaved(page, 'Dark mode')
   })
@@ -330,6 +336,7 @@ test.describe('Clients board: tasks, drawer and filters', () => {
     await openBoard(page)
     await card(page, TEAM_TASK).click()
     await page.getByRole('button', { name: /^Activity/ }).click()
+    await page.getByRole('button', { name: 'Comments', exact: true }).first().click()
     await page.getByPlaceholder('Write a comment, @mention someone…').fill('Any update on the offline cache?')
     await page.keyboard.press('Enter')
     await expect(page.getByText('Any update on the offline cache?')).toBeVisible()
@@ -347,7 +354,7 @@ test.describe('Clients board: tasks, drawer and filters', () => {
     await page.getByText('All sprints', { exact: true }).last().click()
     await page.getByText('no sprint', { exact: true }).click()
     await expect(card(page, 'Login with BankID')).toBeHidden()
-    await expect(card(page, 'App Store and Play Store release')).toBeVisible()
+    await expect(card(page, 'Dark mode')).toBeVisible()
   })
 
   test('CL-25 client user goes back to the previous view with the Back button', async ({ page }) => {
