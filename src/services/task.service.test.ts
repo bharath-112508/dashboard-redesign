@@ -292,44 +292,34 @@ describe('createTask', () => {
         expect(loadProjectForCallerMock).not.toHaveBeenCalled();
     });
 
-    it('creates with multiple assignees and derives primary_assignee_id = assignee_ids[0]', async () => {
+    it('rejects more than one assignee — a ticket has one (Jira-style)', async () => {
         const project = makeProject();
         loadProjectForCallerMock.mockResolvedValueOnce(project);
         const a = new Types.ObjectId();
         const b = new Types.ObjectId();
-        stubActiveUsers([a, b]); // assignee validation
-        stubFindOneForLastPosition(null);
-        stubFindOneForLastRank(null);
-        taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
 
-        await svc.createTask({ ...baseInput(project._id), assignee_ids: [a.toString(), b.toString()] }, adminCaller());
-
-        const createArg = taskCreateMock.mock.calls[0][0];
-        expect(createArg.assignee_ids.map(String)).toEqual([a.toString(), b.toString()]);
-        expect(String(createArg.primary_assignee_id)).toBe(a.toString());
+        await expect(
+            svc.createTask({ ...baseInput(project._id), assignee_ids: [a.toString(), b.toString()] }, adminCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_ERROR });
+        expect(taskCreateMock).not.toHaveBeenCalled();
     });
 
-    it('de-dupes assignees and merges a lone primary_assignee_id into the set', async () => {
+    it('merges a matching primary_assignee_id + assignee_ids into one assignee', async () => {
         const project = makeProject();
         loadProjectForCallerMock.mockResolvedValueOnce(project);
         const a = new Types.ObjectId();
-        const b = new Types.ObjectId();
-        stubActiveUsers([a, b]);
+        stubActiveUsers([a]);
         stubFindOneForLastPosition(null);
         stubFindOneForLastRank(null);
         taskCreateMock.mockResolvedValueOnce(makeTask({ project_id: project._id }));
 
         await svc.createTask(
-            {
-                ...baseInput(project._id),
-                primary_assignee_id: a.toString(),
-                assignee_ids: [a.toString(), b.toString()], // a is duplicated
-            },
+            { ...baseInput(project._id), primary_assignee_id: a.toString(), assignee_ids: [a.toString()] },
             adminCaller()
         );
 
         const createArg = taskCreateMock.mock.calls[0][0];
-        expect(createArg.assignee_ids.map(String)).toEqual([a.toString(), b.toString()]);
+        expect(createArg.assignee_ids.map(String)).toEqual([a.toString()]);
         expect(String(createArg.primary_assignee_id)).toBe(a.toString());
     });
 

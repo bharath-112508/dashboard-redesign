@@ -15,6 +15,7 @@ import {
     DEFAULT_TASK_STATUSES,
     DEFAULT_TASK_STATUS_VALUES,
     TASK_DEPENDENCIES_MAX,
+    TASK_MAX_ASSIGNEES,
     TASK_CLIENT_PATCH_FIELDS,
     TASK_CREATOR_PATCH_FIELDS,
     TASK_EMPLOYEE_PATCH_FIELDS,
@@ -504,13 +505,15 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
     const parentId = input.parent_task_id ? new Types.ObjectId(input.parent_task_id) : null;
     if (parentId) await assertParentTaskUsable(parentId, projectId);
 
-    // Multi-assignee resolution. Accept `assignee_ids` (new clients) and/or a
-    // lone `primary_assignee_id` (older clients); merge, de-dupe, and let the
-    // first entry become the denormalized `primary_assignee_id`.
+    // One assignee. Accept `assignee_ids` (new clients) and/or a lone
+    // `primary_assignee_id` (older clients); they must name the same person.
     const rawAssignees: Types.ObjectId[] = [];
     if (input.primary_assignee_id) rawAssignees.push(new Types.ObjectId(input.primary_assignee_id));
     for (const id of input.assignee_ids ?? []) rawAssignees.push(new Types.ObjectId(id));
     const assigneeIds = dedupeObjectIds(rawAssignees);
+    if (assigneeIds.length > TASK_MAX_ASSIGNEES) {
+        throw AppError.badRequest('A ticket has one assignee — add others as contributors.');
+    }
     if (assigneeIds.length > 0) await assertActiveInternalUsers(assigneeIds, ERROR_CODES.TASK_INVALID_ASSIGNEE);
     const primaryAssignee = assigneeIds[0] ?? null;
 

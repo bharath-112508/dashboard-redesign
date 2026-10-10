@@ -195,5 +195,6 @@ export const TASK_CREATOR_PATCH_FIELDS: readonly string[] = ['priority', 'due_da
  */
 export const TASK_CLIENT_PATCH_FIELDS: readonly string[] = ['title', 'description', 'priority'];
 
-/** Max people a single task can be assigned to. */
-export const TASK_MAX_ASSIGNEES = 20;
+/** One assignee per ticket (as in Jira) — helpers go in `collaborator_ids`.
+ *  Kept as an array (`assignee_ids`) so filters/notifications are unchanged. */
+export const TASK_MAX_ASSIGNEES = 1;

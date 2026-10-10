@@ -148,6 +148,8 @@ export const createTaskReportBodySchema = z
 
 export type CreateTaskReportBody = z.infer<typeof createTaskReportBodySchema>;
 
+const ONE_ASSIGNEE_MSG = 'A ticket has one assignee — add others as contributors.';
+
 export const createTaskBodySchema = z
     .object({
         project_id: objectIdSchema,
@@ -164,10 +166,9 @@ export const createTaskBodySchema = z
         // Optional: `null`/omitted = no due date.
         due_date: isoDateSchema.nullable().optional(),
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX).optional(),
-        // Multi-assignee. `primary_assignee_id` is still accepted for backward
-        // compatibility (older clients); the service merges it into the assignee
-        // set and keeps `primary_assignee_id = assignee_ids[0]` in sync.
-        assignee_ids: z.array(objectIdSchema).max(TASK_MAX_ASSIGNEES).optional(),
+        // At most one assignee (TASK_MAX_ASSIGNEES). `primary_assignee_id` is still
+        // accepted for older clients; the service keeps the two in sync.
+        assignee_ids: z.array(objectIdSchema).max(TASK_MAX_ASSIGNEES, ONE_ASSIGNEE_MSG).optional(),
         primary_assignee_id: optionalNullableObjectId,
         collaborator_ids: z.array(objectIdSchema).max(TASK_COLLABORATORS_MAX).optional(),
         depends_on_task_ids: z.array(objectIdSchema).max(TASK_DEPENDENCIES_MAX).optional(),
@@ -197,7 +198,7 @@ export const patchTaskBodySchema = z
         due_date: isoDateSchema.nullable(),
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX),
         is_flagged: z.boolean(),
-        assignee_ids: z.array(objectIdSchema).max(TASK_MAX_ASSIGNEES),
+        assignee_ids: z.array(objectIdSchema).max(TASK_MAX_ASSIGNEES, ONE_ASSIGNEE_MSG),
         primary_assignee_id: optionalNullableObjectId,
         collaborator_ids: z.array(objectIdSchema).max(TASK_COLLABORATORS_MAX),
         position: z.number().int().min(0),
