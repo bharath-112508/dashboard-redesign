@@ -1,0 +1,131 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Kalice";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Kalice-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Kalice";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/Kalice-Italic.woff2") format("woff2");
+}
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-serif: "Kalice", Georgia, serif;
+
+  /* Text */
+  --color-ink: #1b2d45;
+  --color-ink-2: #22354c;
+  --color-muted: #3b4a5e;
+  --color-slate: #56657a;
+  --color-faint: #a9b6c5;
+
+  /* Lines */
+  --color-line: #c9d2dd;
+  --color-line-2: #d6dee8;
+  --color-line-3: #e4eaf0;
+  --color-line-4: #dde3e8;
+
+  /* Surfaces */
+  --color-canvas: #f6f9fc;
+  --color-sky: #eef3fb;
+  --color-sky-2: #e7eefb;
+  --color-sky-3: #dce5fa;
+
+  /* Accents */
+  --color-blue: #4870e8;
+  --color-blue-600: #3a63e0;
+  --color-blue-ink: #1f3faf;
+  --color-red: #c0392b;
+  --color-red-600: #a93226;
+  --color-red-soft: #fbe3df;
+  --color-rust: #a5502c;
+  --color-rust-soft: #fbf3ef;
+  --color-rust-line: #f0c9b8;
+  --color-peach: #f6ddd0;
+  --color-purple: #6e58c9;
+  --color-purple-ink: #3f2e94;
+  --color-purple-soft: #f3f0fc;
+  --color-purple-line: #dcd3f5;
+  --color-lavender: #e6dffa;
+  --color-green: #3f9079;
+  --color-green-ink: #195040;
+  --color-green-soft: #d6e9e2;
+  --color-amber: #b98a2f;
+  --color-amber-ink: #7a5c0e;
+  --color-amber-soft: #fbedc2;
+
+  --animate-pop-in: pop-in 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fade-in 0.2s ease;
+  --animate-crit-dot: crit-dot 1s ease-in-out infinite;
+  --animate-crit-blink: crit-blink 1.4s ease-in-out infinite;
+
+  @keyframes pop-in {
+    from { transform: translateY(10px) scale(0.985); opacity: 0; }
+    to { transform: none; opacity: 1; }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes crit-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+  @keyframes crit-blink {
+    0%, 100% { box-shadow: 0 0 0 1.5px #d2724a, 0 0 0 0 rgba(210, 114, 74, 0); }
+    50% { box-shadow: 0 0 0 2px #c0392b, 0 0 0 6px rgba(210, 60, 40, 0.18); }
+  }
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    /* The design uses the browser's default line height, not Tailwind's 1.5. */
+    line-height: normal;
+  }
+  /* 14px on body, not html: Tailwind's rem-based spacing must stay at 16px. */
+  body {
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--color-blue-ink); text-decoration: none; }
+  button { font: inherit; color: inherit; }
+  ::-webkit-scrollbar { height: 8px; width: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(27, 45, 69, 0.16); border-radius: 8px; }
+}
+
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@utility clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@utility clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-crit] { animation: none !important; }
+}

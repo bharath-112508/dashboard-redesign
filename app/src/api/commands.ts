@@ -1,0 +1,126 @@
+import { ME } from '../lib/theme'
+import type { ChatMessage, Db, Epic, RequestComment, Sprint, Task } from './types'
+
+/**
+ * Every write the page makes is one of these commands. The same reducer runs
+ * on the React Query cache (optimistic update) and in the mock server, so the
+ * UI and the "server" can never disagree about what a write does.
+ */
+export type Command =
+  | { type: 'task.create'; task: Task }
+  | { type: 'task.update'; id: number; patch: Partial<Task>; log?: string; who?: string }
+  | { type: 'task.delete'; id: number }
+  | { type: 'task.comment'; id: number; text: string }
+  | { type: 'bug.message'; id: number; message: ChatMessage }
+  | { type: 'question.message'; id: number; message: ChatMessage }
+  | { type: 'request.comment'; id: number; comment: RequestComment }
+  | { type: 'sprint.create'; sprint: Sprint }
+  | { type: 'sprint.update'; id: string; patch: Partial<Sprint> }
+  | { type: 'sprint.addMembers'; id: string; names: string[] }
+  | { type: 'epic.create'; epic: Epic }
+  | { type: 'epic.update'; id: string; patch: Partial<Epic> }
+  | { type: 'batch'; cmds: Command[] }
+
+export type Resource = 'workspace' | 'tasks' | 'entries' | 'questions' | 'requests'
+
+export const touches = (cmd: Command): Resource[] => {
+  switch (cmd.type) {
+    case 'task.create':
+    case 'task.update':
+    case 'task.delete':
+    case 'task.comment':
+    case 'bug.message':
+      return ['tasks']
+    case 'question.message':
+      return ['questions']
+    case 'request.comment':
+      return ['requests']
+    case 'sprint.create':
+    case 'sprint.update':
+    case 'sprint.addMembers':
+    case 'epic.create':
+    case 'epic.update':
+      return ['workspace']
+    case 'batch':
+      return [...new Set(cmd.cmds.flatMap(touches))]
+  }
+}
+
+const mapTask = (db: Db, id: number, f: (t: Task) => Task): Db => ({
+  ...db,
+  tasks: db.tasks.map(t => (t.id === id ? f(t) : t)),
+})
+
+export const reduce = (db: Db, cmd: Command): Db => {
+  switch (cmd.type) {
+    case 'task.create':
+      return { ...db, tasks: [...db.tasks.filter(t => t.id !== cmd.task.id), cmd.task] }
+    case 'task.update':
+      return mapTask(db, cmd.id, t => ({
+        ...t,
+        ...cmd.patch,
+        acts: cmd.log ? [{ kind: 'history', who: cmd.who ?? ME, what: cmd.log, when: 'just now' }, ...t.acts] : t.acts,
+      }))
+    case 'task.delete':
+      return { ...db, tasks: db.tasks.filter(t => t.id !== cmd.id) }
+    case 'task.comment':
+      return mapTask(db, cmd.id, t => ({ ...t, acts: [{ kind: 'comment', who: ME, text: cmd.text, when: 'just now' }, ...t.acts] }))
+    case 'bug.message':
+      return mapTask(db, cmd.id, t =>
+        t.clientBug ? { ...t, clientBug: { ...t.clientBug, chat: [...t.clientBug.chat, cmd.message] } } : t,
+      )
+    case 'question.message':
+      return {
+        ...db,
+        questions: db.questions.map(q =>
+          q.id !== cmd.id
+            ? q
+            : {
+                ...q,
+                comments: [...(q.comments || []), cmd.message],
+                // The client's first message is also stored as their answer.
+                ...(cmd.message.side === 'client' && !q.answer
+                  ? { answer: cmd.message.text || 'Sent files', answeredWhen: cmd.message.when }
+                  : {}),
+              },
+        ),
+      }
+    case 'request.comment':
+      return {
+        ...db,
+        requests: db.requests.map(r => (r.id === cmd.id ? { ...r, comments: [...(r.comments || []), cmd.comment] } : r)),
+      }
+    case 'sprint.create':
+      return { ...db, workspace: { ...db.workspace, sprints: [...db.workspace.sprints, cmd.sprint] } }
+    case 'sprint.update':
+      return {
+        ...db,
+        workspace: {
+          ...db.workspace,
+          sprints: db.workspace.sprints.map(s => (s.id === cmd.id ? { ...s, ...cmd.patch } : s)),
+        },
+      }
+    case 'sprint.addMembers':
+      return {
+        ...db,
+        workspace: {
+          ...db.workspace,
+          sprints: db.workspace.sprints.map(s =>
+            s.id === cmd.id ? { ...s, members: [...new Set([...(s.members || []), ...cmd.names.filter(Boolean)])] } : s,
+          ),
+        },
+      }
+    case 'epic.create':
+      return { ...db, workspace: { ...db.workspace, epics: [...db.workspace.epics, cmd.epic] } }
+    case 'epic.update':
+      return {
+        ...db,
+        workspace: {
+          ...db.workspace,
+          epics: db.workspace.epics.map(e => (e.id === cmd.id ? { ...e, ...cmd.patch } : e)),
+        },
+      }
+    case 'batch':
+      return cmd.cmds.reduce(reduce, db)
+  }
+}

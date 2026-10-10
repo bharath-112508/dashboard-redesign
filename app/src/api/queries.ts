@@ -1,0 +1,71 @@
+import { useEffect } from 'react'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { reduce, touches, type Command, type Resource } from './commands'
+import { server } from './server'
+import type { Db } from './types'
+
+export const qk = {
+  workspace: ['workspace'] as const,
+  tasks: ['tasks'] as const,
+  entries: ['entries'] as const,
+  questions: ['questions'] as const,
+  requests: ['requests'] as const,
+}
+
+const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'questions', 'requests']
+
+export const useWorkspace = () => useQuery({ queryKey: qk.workspace, queryFn: () => server.get('workspace') })
+export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => server.get('tasks') })
+export const useEntries = () => useQuery({ queryKey: qk.entries, queryFn: () => server.get('entries') })
+export const useQuestions = () => useQuery({ queryKey: qk.questions, queryFn: () => server.get('questions') })
+export const useRequests = () => useQuery({ queryKey: qk.requests, queryFn: () => server.get('requests') })
+
+/** Builds a Db from the cache so the shared reducer can run on it. */
+const cachedDb = (qc: QueryClient): Db | null => {
+  const db: Partial<Db> = { version: 0 }
+  for (const r of RESOURCES) {
+    const v = qc.getQueryData([r])
+    if (v === undefined) return null
+    ;(db as Record<string, unknown>)[r] = v
+  }
+  return db as Db
+}
+
+/**
+ * Sends a command to the server. The cache is updated straight away with the
+ * same reducer the server uses, then refetched once the server confirms.
+ */
+export const useSend = () => {
+  const qc = useQueryClient()
+  const m = useMutation({
+    mutationFn: (cmd: Command) => server.send(cmd),
+    onMutate: async cmd => {
+      const keys = touches(cmd)
+      await Promise.all(keys.map(k => qc.cancelQueries({ queryKey: [k] })))
+      const prev = Object.fromEntries(keys.map(k => [k, qc.getQueryData([k])]))
+      const db = cachedDb(qc)
+      if (db) {
+        const next = reduce(db, cmd)
+        keys.forEach(k => qc.setQueryData([k], next[k]))
+      }
+      return { prev }
+    },
+    onError: (_err, _cmd, ctx) => {
+      if (ctx) Object.entries(ctx.prev).forEach(([k, v]) => qc.setQueryData([k], v))
+    },
+    onSettled: () => {
+      // Refetching while later writes are still in flight would briefly undo
+      // them, so only the last write to finish refetches (everything it and
+      // the earlier skipped writes touched).
+      if (qc.isMutating() > 1) return
+      RESOURCES.forEach(k => qc.invalidateQueries({ queryKey: [k] }))
+    },
+  })
+  return m.mutate
+}
+
+/** Refetches everything when another tab changes the data. */
+export const useLiveSync = () => {
+  const qc = useQueryClient()
+  useEffect(() => server.subscribe(() => qc.invalidateQueries()), [qc])
+}
