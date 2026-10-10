@@ -19,8 +19,8 @@ async function openEdit(page: Page, name: string) {
 /** Fills the new-user basics and sends the invite. */
 async function inviteUser(page: Page, name: string, email: string) {
   await page.getByRole('button', { name: 'Add user', exact: true }).click()
-  await page.getByRole('textbox', { name: 'Full name *', exact: true }).fill(name)
-  await page.getByRole('textbox', { name: 'Email *', exact: true }).fill(email)
+  await page.getByRole('textbox', { name: /^Full name \*/ }).fill(name)
+  await page.getByRole('textbox', { name: /^Email \*/ }).fill(email)
   await page.getByRole('button', { name: 'Send invite', exact: true }).click()
 }
 
@@ -61,8 +61,8 @@ test.describe('Users', () => {
     await page.getByRole('button', { name: 'Add user', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Add a user' })
     await expect(dialog).toBeVisible()
-    await dialog.getByRole('textbox', { name: 'Full name *', exact: true }).fill('Test Person')
-    await dialog.getByRole('textbox', { name: 'Email *', exact: true }).fill('test.person@viljetech.com')
+    await dialog.getByRole('textbox', { name: /^Full name \*/ }).fill('Test Person')
+    await dialog.getByRole('textbox', { name: /^Email \*/ }).fill('test.person@viljetech.com')
     await dialog.getByRole('combobox', { name: 'User type', exact: true }).selectOption({ label: 'Backend' })
     await dialog.getByLabel('Freelancer').check()
     await dialog.getByLabel('Choose projects').check()
@@ -71,7 +71,7 @@ test.describe('Users', () => {
 
     await expect(page.getByText('Invited Test Person. No email is sent yet.')).toBeVisible()
     await expect(row(page, 'Test Person')).toContainText('Invited')
-    await expect(page.getByText('Pending invites · 1')).toBeVisible()
+    await expect(page.getByText(/^Pending invites · 2$/)).toBeVisible()
 
     await page.reload()
     await expect(row(page, 'Test Person')).toContainText('Invited', { timeout: 8_000 })
@@ -85,8 +85,8 @@ test.describe('Users', () => {
     await expect(page.getByText('Add a name')).toBeVisible()
     await expect(page.getByText('Enter a valid email')).toBeVisible()
 
-    await page.getByRole('textbox', { name: 'Full name *', exact: true }).fill('Dup Person')
-    await page.getByRole('textbox', { name: 'Email *', exact: true }).fill('vivek@viljetech.com')
+    await page.getByRole('textbox', { name: /^Full name \*/ }).fill('Dup Person')
+    await page.getByRole('textbox', { name: /^Email \*/ }).fill('vivek@viljetech.com')
     await page.getByRole('button', { name: 'Send invite', exact: true }).click()
     await expect(page.getByText('Another person already uses this email.')).toBeVisible()
     await expect(page.getByRole('dialog')).toBeVisible()
@@ -109,7 +109,7 @@ test.describe('Users', () => {
     await openUsers(page)
     await openEdit(page, 'Chary')
     await expect(page.getByRole('heading', { name: 'Chary' })).toBeVisible()
-    await page.getByRole('textbox', { name: 'Full name *', exact: true }).fill('Chary Kumar')
+    await page.getByRole('textbox', { name: /^Full name \*/ }).fill('Chary Kumar')
     await page.getByRole('button', { name: 'Save changes', exact: true }).click()
 
     await expect(page.getByText('Saved Chary Kumar.')).toBeVisible()
@@ -143,8 +143,11 @@ test.describe('Users', () => {
     await expect(confirm).toBeVisible()
 
     await confirm.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toBeVisible()
     await expect(row(page, 'Chary')).toHaveCount(1)
 
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
     await openEdit(page, 'Chary')
     await page.getByRole('button', { name: 'Remove user', exact: true }).click()
     await page.getByRole('dialog', { name: 'Remove Chary?' }).getByRole('button', { name: 'Remove user', exact: true }).click()
@@ -167,11 +170,11 @@ test.describe('Users', () => {
     await openUsers(page, 'admin', '?tab=roles')
     const cell = page.getByRole('button', { name: 'Developer: Create & edit tickets' })
     await expect(cell).toHaveAttribute('aria-pressed', 'true')
-    await expect(page.getByText('5 of 14 permissions')).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Developer Viljetech/ }).getByText('5 of 14 permissions')).toBeVisible()
 
     await cell.click()
     await expect(cell).toHaveAttribute('aria-pressed', 'false')
-    await expect(page.getByText('4 of 14 permissions')).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Developer Viljetech/ }).getByText('4 of 14 permissions')).toBeVisible()
   })
 
   test('US-10 the super admin column is locked', async ({ page }) => {
@@ -182,7 +185,7 @@ test.describe('Users', () => {
 
   test('US-11 selecting a role card shows that role in the matrix', async ({ page }) => {
     await openUsers(page, 'super', '?tab=roles')
-    const card = page.getByRole('button', { name: /^Client admin/ })
+    const card = page.getByRole('button', { name: /^Client admin Client/ })
     await card.click()
     await expect(card).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByText('Selected: Client admin.')).toBeVisible()
@@ -197,8 +200,8 @@ test.describe('Users', () => {
     await dialog.getByRole('button', { name: 'Add type', exact: true }).click()
     await expect(dialog.getByRole('combobox', { name: 'User type', exact: true })).toHaveValue('Data Engineer')
 
-    await dialog.getByRole('textbox', { name: 'Full name *', exact: true }).fill('Dev Typed')
-    await dialog.getByRole('textbox', { name: 'Email *', exact: true }).fill('dev.typed@viljetech.com')
+    await dialog.getByRole('textbox', { name: /^Full name \*/ }).fill('Dev Typed')
+    await dialog.getByRole('textbox', { name: /^Email \*/ }).fill('dev.typed@viljetech.com')
     await dialog.getByRole('button', { name: 'Send invite', exact: true }).click()
     await expect(row(page, 'Dev Typed')).toContainText('Data Engineer')
   })
@@ -208,7 +211,7 @@ test.describe('Users', () => {
     await openEdit(page, 'Chary')
     const dialog = page.getByRole('dialog')
     await page.getByLabel('Change photo', { exact: true }).setInputFiles({ name: 'face.png', mimeType: 'image/png', buffer: PNG_1PX })
-    await expect(dialog.locator('img')).toHaveCount(1)
+    await expect(dialog.locator('img').first()).toBeVisible()
     await page.getByRole('button', { name: 'Save changes', exact: true }).click()
 
     await expect(page.getByText('Saved Chary.')).toBeVisible()

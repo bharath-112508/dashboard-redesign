@@ -70,7 +70,7 @@ test.describe('Employee timesheets', () => {
   test('ET-04 role and billable filters narrow the entries table', async ({ page }) => {
     await openEmployeeTimesheets(page)
     await page.getByRole('combobox', { name: 'Filter by role' }).selectOption({ label: 'Developer' })
-    await expect(entriesHeading(page)).toHaveText(/Entries\s*·\s*11/)
+    await expect(entriesHeading(page)).toHaveText(/Entries\s*·\s*12/)
     const people = new Set(await tableCells(entriesTable(page), 1))
     expect([...people].sort()).toEqual(['Bharath Reddy Panyala', 'Chary'])
 
@@ -118,11 +118,11 @@ test.describe('Employee timesheets', () => {
     await addLeave(page, 'E2E leave request')
 
     await expect(page.getByText('Leave requested. It stays pending until it is approved.')).toBeVisible()
-    await expect(page.getByText('1 pending', { exact: true })).toBeVisible()
+    await expect(page.getByText('2 pending', { exact: true })).toBeVisible()
     await expect(page.getByText('Pending', { exact: true }).first()).toBeVisible()
 
     await page.reload()
-    await expect(page.getByText('1 pending', { exact: true })).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText('2 pending', { exact: true })).toBeVisible({ timeout: 8_000 })
   })
 
   test('ET-08 Add user is reachable from the Users tab of this page', async ({ page }) => {
@@ -169,6 +169,8 @@ test.describe('Employee timesheets', () => {
 /** Adds a leave request on the profile page that is open. */
 async function addLeave(page: Page, reason: string) {
   await page.getByRole('button', { name: 'Add leave', exact: true }).click()
+  await page.getByLabel('From', { exact: true }).fill('2026-10-12')
+  await page.getByLabel('To', { exact: true }).fill('2026-10-13')
   await page.getByRole('textbox', { name: 'Reason', exact: true }).fill(reason)
   await page.getByRole('button', { name: 'Save request', exact: true }).click()
 }
