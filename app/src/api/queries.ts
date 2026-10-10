@@ -8,6 +8,7 @@ export const qk = {
   workspace: ['workspace'] as const,
   tasks: ['tasks'] as const,
   entries: ['entries'] as const,
+  weekSubmissions: ['weekSubmissions'] as const,
   questions: ['questions'] as const,
   requests: ['requests'] as const,
   devops: ['devops'] as const,
@@ -16,7 +17,7 @@ export const qk = {
   internalProjects: ['internalProjects'] as const,
 }
 
-const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'questions', 'requests', 'devops', 'people', 'companies', 'internalProjects']
+const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'weekSubmissions', 'questions', 'requests', 'devops', 'people', 'companies', 'internalProjects']
 
 export const useWorkspace = () => useQuery({ queryKey: qk.workspace, queryFn: () => server.get('workspace') })
 export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => server.get('tasks') })
@@ -88,3 +89,8 @@ export const useLiveSync = () => {
   const qc = useQueryClient()
   useEffect(() => server.subscribe(() => qc.invalidateQueries()), [qc])
 }
+
+export const useInternalProjects = () =>
+  useQuery({ queryKey: qk.internalProjects, queryFn: () => server.get('internalProjects') })
+export const useWeekSubmissions = () =>
+  useQuery({ queryKey: qk.weekSubmissions, queryFn: () => server.get('weekSubmissions') })

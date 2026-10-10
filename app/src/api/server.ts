@@ -60,6 +60,8 @@ const isDb = (v: unknown): v is Db => {
  * Everything else is kept, so nobody loses their tickets on upgrade.
  */
 const migrate = (v: unknown): unknown => {
+  // Weeks submitted before the weekSubmissions collection existed: none.
+  if (isObj(v) && v.version === DB_VERSION && !Array.isArray(v.weekSubmissions)) return { ...v, weekSubmissions: [] }
   if (!isObj(v) || v.version !== 2) return v
   const entries = Array.isArray(v.entries)
     ? v.entries.map(e => (isObj(e) && e.userId === undefined ? { ...e, userId: personIdByName(String(e.user)) } : e))
@@ -71,6 +73,7 @@ const migrate = (v: unknown): unknown => {
     companies: clone(COMPANIES_SEED),
     internalProjects: [],
     entries,
+    weekSubmissions: [],
   }
 }
 

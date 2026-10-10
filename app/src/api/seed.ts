@@ -240,6 +240,7 @@ export const createSeed = (): Db => {
     },
     tasks: buildTasks(sprints),
     entries: ENTRIES,
+    weekSubmissions: [],
     people: PEOPLE_SEED,
     companies: COMPANIES_SEED,
     internalProjects: [],

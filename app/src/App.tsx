@@ -6,6 +6,7 @@ import { PlanView } from './pages/clients/PlanView'
 import { TimelineView } from './pages/clients/TimelineView'
 import { TicketsRoutes } from './pages/tickets/TicketsRoutes'
 import { DevopsRoutes } from './pages/devops/DevopsRoutes'
+import { TimesheetPage } from './pages/timesheet/TimesheetPage'
 import { ComingSoon } from './pages/shell/ComingSoon'
 import { Shell } from './pages/shell/Shell'
 import { LoginPage } from './pages/login/LoginPage'
@@ -37,7 +38,7 @@ export function App() {
             <Route path="companies" element={<ComingSoon page="Companies" />} />
             <Route path="projects" element={<ComingSoon page="Projects" />} />
             <Route path="my-tickets" element={<ComingSoon page="My tickets" />} />
-            <Route path="timesheet" element={<ComingSoon page="Timesheet" />} />
+            <Route path="timesheet" element={<TimesheetPage />} />
             <Route path="employee-timesheets" element={<ComingSoon page="Employee timesheets" />} />
             <Route path="users" element={<ComingSoon page="Users" />} />
             <Route path="clients">
