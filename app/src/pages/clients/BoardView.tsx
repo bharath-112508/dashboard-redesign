@@ -1,22 +1,24 @@
-import { useState, type DragEvent } from 'react'
-import { useQuestions, useRequests, useSend, useTasks, useWorkspace } from '../../api/queries'
+import { useState, type DragEvent, type KeyboardEvent } from 'react'
 import type { DevopsRequest, Priority, Task } from '../../api/types'
 import { Icon, PATHS } from '../../components/ui'
 import { diff, short, TODAY } from '../../lib/dates'
-import { ME, questionTags } from '../../lib/theme'
+import { activeSprint, nextTaskId } from '../../domain/tasks'
+import { questionTags } from '../../lib/theme'
 import { useOverlay, useUi } from '../../state/ui'
 import { assigneesOf, blurb, cardAvatars, taskKey } from '../../domain/tasks'
 import { usePerson } from '../../state/page'
 import { clientQuestionState } from '../../domain/questions'
 import { TaskCard, type CardModel } from './TaskCard'
 import { useOpenTask } from '../../features/useOpenTask'
+import { useActorName, useActorSend, useIsClient, useScopedQuestions, useScopedRequests, useScopedTasks, useScopedWorkspace } from '../../state/access'
 
 const REQ_STATUS: Record<string, string> = { Open: 'todo', 'In progress': 'prog', Done: 'done' }
 
 /** Tasks matching the board's epic, sprint, search and filter settings. */
 export function useBoardTasks() {
   const ui = useUi()
-  const tasks = useTasks().data ?? []
+  const tasks = useScopedTasks() ?? []
+  const me = useActorName()
   const q = ui.q.trim().toLowerCase()
   const EPS = ui.epSel.includes(ui.epic) ? ui.epSel : [ui.epic]
   return tasks.filter(
@@ -25,7 +27,7 @@ export function useBoardTasks() {
       EPS.includes(t.epic) &&
       (!ui.spSel || ui.spSel.includes(t.sprint || 'backlog')) &&
       (!q || (t.title + ' ' + taskKey(t)).toLowerCase().includes(q)) &&
-      (!ui.mine || t.assignee === ME) &&
+      (!ui.mine || t.assignee === me) &&
       (!ui.typeF || t.type === ui.typeF) &&
       (!ui.prioF || t.prio === ui.prioF),
   )
@@ -33,14 +35,20 @@ export function useBoardTasks() {
 
 export function BoardView() {
   const person = usePerson()
-  const ws = useWorkspace().data!
+  const ws = useScopedWorkspace()!
   const ui = useUi()
-  const send = useSend()
+  const send = useActorSend()
+  // Client users cannot move tasks; they only report bugs and answer questions.
+  const isClient = useIsClient()
+  const me = useActorName()
+  const tasks = useScopedTasks() ?? []
   const overlay = useOverlay()
   const list = useBoardTasks()
-  const requests = useRequests().data ?? []
-  const questions = useQuestions().data ?? []
+  const requests = useScopedRequests() ?? []
+  const questions = useScopedQuestions() ?? []
   const [dragId, setDragId] = useState<number | null>(null)
+  /** The column with the quick-add field open, and what is typed in it. */
+  const [adding, setAdding] = useState<{ status: string; title: string } | null>(null)
   const [over, setOver] = useState<string | null>(null)
 
   const sprintShort = (id: string | null) => {
@@ -64,7 +72,7 @@ export function BoardView() {
       dueWeight: overdue ? 800 : 600,
       avatars: cardAvatars(assigneesOf(t), person),
       subLabel: t.subs.length ? t.subs.filter(x => x.done).length + '/' + t.subs.length : undefined,
-      draggable: true,
+      draggable: !isClient,
     }
   }
 
@@ -92,6 +100,7 @@ export function BoardView() {
   const first = ws.statuses[0].id
   const drop = (target: string) => (e: DragEvent) => {
     e.preventDefault()
+    if (isClient) return
     const t = list.find(x => x.id === dragId)
     setDragId(null)
     setOver(null)
@@ -243,7 +252,63 @@ export function BoardView() {
               <div className="flex items-center gap-2 px-1.5 py-1">
                 <span className="text-[13.5px] font-semibold text-ink">{s.name}</span>
                 <span className="tnum text-[13px] text-ink-2">{cards.length + rcs.length}</span>
+                {!isClient && (
+                  <button
+                    type="button"
+                    onClick={() => setAdding({ status: s.id, title: '' })}
+                    title={'Add to ' + s.name}
+                    aria-label={'Add to ' + s.name}
+                    className="ml-auto grid size-[26px] cursor-pointer place-items-center rounded-[7px] border-[1.5px] border-line bg-white p-0 text-blue-ink hover:border-blue hover:bg-sky-2"
+                  >
+                    <Icon d={PATHS.plus} size={12} sw={3} />
+                  </button>
+                )}
               </div>
+              {adding?.status === s.id && (
+                <input
+                  autoFocus
+                  value={adding.title}
+                  onChange={e => setAdding({ status: s.id, title: e.target.value })}
+                  onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                    if (e.key === 'Escape') {
+                      e.stopPropagation()
+                      setAdding(null)
+                    }
+                    if (e.key !== 'Enter') return
+                    const title = adding.title.trim()
+                    if (!title) return
+                    const epic = ui.epic
+                    send({
+                      type: 'task.create',
+                      task: {
+                        id: nextTaskId(tasks),
+                        title,
+                        type: 'Task',
+                        status: s.id,
+                        prio: 'Medium',
+                        due: '',
+                        assignee: '',
+                        assignees: [],
+                        contribs: [],
+                        est: '',
+                        desc: '',
+                        atts: [],
+                        subs: [],
+                        deps: [],
+                        epic,
+                        sprint: activeSprint(ws.sprints, epic)?.id ?? null,
+                        start: TODAY,
+                        time: {},
+                        acts: [{ kind: 'history', who: me, what: 'created the task', when: 'just now' }],
+                      },
+                    })
+                    setAdding({ status: s.id, title: '' })
+                  }}
+                  placeholder="Enter to add · Esc to cancel"
+                  aria-label={'New task in ' + s.name}
+                  className="h-9 w-full rounded-[10px] border-[1.5px] border-blue bg-white px-2.5 text-[13.5px] text-ink outline-0"
+                />
+              )}
               {cards.map(t => (
                 <TaskCard key={t.id} c={taskCard(t)} onOpen={() => openTask(t)} {...cardProps(t)} />
               ))}

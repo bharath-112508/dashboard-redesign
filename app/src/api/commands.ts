@@ -3,6 +3,7 @@ import { nextTaskId } from '../domain/tasks'
 import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, Question, RequestComment, Sprint, Task, TimeEntry } from './types'
 import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
 import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/commands'
+import { reduceClients, touchesClients, type ClientsCommand } from './clients/commands'
 
 /**
  * Every write the page makes is one of these commands. The same reducer runs
@@ -17,7 +18,7 @@ export type Command =
   | { type: 'task.create'; task: Task; top?: boolean }
   | { type: 'task.update'; id: number; patch: Partial<Task>; log?: string; who?: string }
   | { type: 'task.delete'; id: number }
-  | { type: 'task.comment'; id: number; text: string }
+  | { type: 'task.comment'; id: number; text: string; who?: string }
   | { type: 'bug.message'; id: number; message: ChatMessage }
   | { type: 'question.message'; id: number; message: ChatMessage }
   | { type: 'request.comment'; id: number; comment: RequestComment }
@@ -39,8 +40,9 @@ export type Command =
   | { type: 'batch'; cmds: Command[] }
   | TicketsCommand
   | DevopsCommand
+  | ClientsCommand
 
-export type Resource = 'workspace' | 'tasks' | 'entries' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects'
+export type Resource = 'workspace' | 'tasks' | 'entries' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects' | 'clientTeam'
 
 export const touches = (cmd: Command): Resource[] => {
   switch (cmd.type) {
@@ -73,7 +75,7 @@ export const touches = (cmd: Command): Resource[] => {
     case 'batch':
       return [...new Set(cmd.cmds.flatMap(touches))]
     default:
-      return [...touchesTickets(cmd), ...touchesDevops(cmd)]
+      return [...touchesTickets(cmd), ...touchesDevops(cmd), ...touchesClients(cmd)]
   }
 }
 
@@ -134,7 +136,7 @@ export const reduce = (db: Db, input: Command): Db => {
     case 'task.delete':
       return { ...db, tasks: db.tasks.filter(t => t.id !== cmd.id) }
     case 'task.comment':
-      return mapTask(db, cmd.id, t => ({ ...t, acts: [{ kind: 'comment', who: ME, text: cmd.text, when: 'just now' }, ...t.acts] }))
+      return mapTask(db, cmd.id, t => ({ ...t, acts: [{ kind: 'comment', who: cmd.who ?? ME, text: cmd.text, when: 'just now' }, ...t.acts] }))
     case 'bug.message':
       return mapTask(db, cmd.id, t =>
         t.clientBug ? { ...t, clientBug: { ...t.clientBug, chat: [...t.clientBug.chat, cmd.message] } } : t,
@@ -150,7 +152,7 @@ export const reduce = (db: Db, input: Command): Db => {
                 comments: [...(q.comments || []), cmd.message],
                 // The client's first message is also stored as their answer.
                 ...(cmd.message.side === 'client' && !q.answer
-                  ? { answer: cmd.message.text || 'Sent files', answeredWhen: cmd.message.when }
+                  ? { answer: cmd.message.text || 'Sent files', answeredWhen: cmd.message.when, answerBy: cmd.message.who }
                   : {}),
               },
         ),
@@ -221,6 +223,6 @@ export const reduce = (db: Db, input: Command): Db => {
     case 'batch':
       return cmd.cmds.reduce(reduce, db)
     default:
-      return reduceDevops(reduceTickets(db, cmd), cmd)
+      return reduceDevops(reduceTickets(reduceClients(db, cmd), cmd), cmd)
   }
 }

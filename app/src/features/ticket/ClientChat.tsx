@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSend } from '../../api/queries'
+import { useActorName, useActorSend } from '../../state/access'
 import type { ChatFile, Task } from '../../api/types'
 import { Avatar, Icon, PATHS } from '../../components/ui'
 import { readFiles } from '../../lib/files'
-import { ME } from '../../lib/theme'
 import { usePerson } from '../../state/page'
 
 /**
@@ -11,7 +10,8 @@ import { usePerson } from '../../state/page'
  * same conversation the client has in their bug window on the Clients page.
  */
 export function ClientChat({ bug }: { bug: Task }) {
-  const send = useSend()
+  const send = useActorSend()
+  const me = useActorName()
   const person = usePerson()
   const [draft, setDraft] = useState('')
   const [pend, setPend] = useState<ChatFile[]>([])
@@ -24,7 +24,7 @@ export function ClientChat({ bug }: { bug: Task }) {
   const ok = !!draft.trim() || pend.length > 0
   const post = () => {
     if (!ok) return
-    send({ type: 'bug.message', id: bug.id, message: { who: ME, side: 'team', text: draft.trim(), when: 'just now', files: pend } })
+    send({ type: 'bug.message', id: bug.id, message: { who: me, side: 'team', text: draft.trim(), when: 'just now', files: pend } })
     setDraft('')
     setPend([])
   }

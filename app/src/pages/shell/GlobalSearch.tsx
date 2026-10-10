@@ -2,7 +2,7 @@ import { useMemo, useState, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { useCompanies, useTasks } from '../../api/queries'
 import { usePeople } from '../../api/people/directory'
-import { canAccess } from '../../api/session/access'
+import { canAccess, isClientRole } from '../../api/session/access'
 import { PAGE_PATH } from '../../api/session/pages'
 import { useSession } from '../../api/session/store'
 import { initials } from '../../lib/media'
@@ -75,9 +75,11 @@ export function GlobalSearch() {
           .filter(c => has(c.name, c.industry, c.country))
           .map(c => ({ key: 'company-' + c.id, tag: 'Co', tone: TONE.company, title: c.name, meta: `${c.projects.length} projects`, to: PAGE_PATH.Companies }))
       : []
+    // Client admins see their own colleagues only.
+    const ownOrgOnly = isClientRole(role)
     const humans: Hit[] = ok('Users')
       ? people
-          .filter(p => has(p.name, p.email))
+          .filter(p => has(p.name, p.email) && (!ownOrgOnly || p.org === session?.orgId))
           .map(p => ({ key: 'person-' + p.id, tag: initials(p.name), tone: TONE.person, title: p.name, meta: p.email, to: PAGE_PATH.Users }))
       : []
 
@@ -90,7 +92,7 @@ export function GlobalSearch() {
     ]
       .filter(g => g.hits.length)
       .map(g => ({ ...g, hits: g.hits.slice(0, LIMIT) }))
-  }, [q, role, tasks, companies, people])
+  }, [q, role, session?.orgId, tasks, companies, people])
 
   if (!session) return null
 

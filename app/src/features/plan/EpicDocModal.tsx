@@ -1,11 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { useSend, useTasks, useWorkspace } from '../../api/queries'
+import { useSend } from '../../api/queries'
 import type { Epic, EpicListField } from '../../api/types'
 import { Avatar, CloseButton } from '../../components/ui'
 import { fmt, range } from '../../lib/dates'
 import { pal, SPRINT_STATE } from '../../lib/theme'
 import { usePage } from '../../state/page'
+import { useIsClient, useScopedTasks, useScopedWorkspace } from '../../state/access'
 import { useOverlay, useUi } from '../../state/ui'
 import { sprintsOf } from '../../domain/tasks'
 import { useEscape } from '../useEscape'
@@ -27,9 +28,11 @@ const MARK_COLOR = (m: string) => (m === '−' ? '#A5502C' : m === '+' ? '#3F907
 /** The epic's requirement document. */
 export function EpicDocModal({ id }: { id: string }) {
   const { person, base } = usePage()
-  const ws = useWorkspace().data!
-  const tasks = (useTasks().data ?? []).filter(t => !t.parent)
+  const ws = useScopedWorkspace()!
+  const tasks = (useScopedTasks() ?? []).filter(t => !t.parent)
   const send = useSend()
+  // Client users read the requirement doc; only the team edits it.
+  const ro = useIsClient()
   const ui = useUi()
   const overlay = useOverlay()
   const navigate = useNavigate()
@@ -47,7 +50,9 @@ export function EpicDocModal({ id }: { id: string }) {
   const pct = ts.length ? Math.round((dn / ts.length) * 100) : 0
   const mem = [...new Set(sp.flatMap(x => x.members))]
   const cd = ev.critDone || {}
-  const update = (patch: Partial<Epic>) => send({ type: 'epic.update', id: ev.id, patch })
+  const update = (patch: Partial<Epic>) => {
+    if (!ro) send({ type: 'epic.update', id: ev.id, patch })
+  }
   const facts = [
     { l: 'Status', v: sp.some(x => x.state === 'active') ? 'In progress' : sp.length && sp.every(x => x.state === 'done') ? 'Done' : 'Planned', c: '#1F3FAF' },
     { l: 'Progress', v: pct + '%', c: '#1B2D45' },
@@ -65,25 +70,29 @@ export function EpicDocModal({ id }: { id: string }) {
               {m}
             </span>
             <span className="flex-1 text-[14px] leading-normal text-ink">{t}</span>
-            <button
-              type="button"
-              onClick={() => update({ [k]: (ev[k] || []).filter((_, j) => j !== i) })}
-              className="cursor-pointer border-0 bg-transparent p-0 text-[16px] text-faint hover:text-rust"
-            >
-              ×
-            </button>
+            {!ro && (
+              <button
+                type="button"
+                onClick={() => update({ [k]: (ev[k] || []).filter((_, j) => j !== i) })}
+                className="cursor-pointer border-0 bg-transparent p-0 text-[16px] text-faint hover:text-rust"
+              >
+                ×
+              </button>
+            )}
           </div>
         )
       })}
-      <DraftInput
-        value={drafts[k] || ''}
-        onChange={v => setDrafts(d => ({ ...d, [k]: v }))}
-        onEnter={v => {
-          update({ [k]: [...(ev[k] || []), v] })
-          setDrafts(d => ({ ...d, [k]: '' }))
-        }}
-        placeholder={placeholder}
-      />
+      {!ro && (
+        <DraftInput
+          value={drafts[k] || ''}
+          onChange={v => setDrafts(d => ({ ...d, [k]: v }))}
+          onEnter={v => {
+            update({ [k]: [...(ev[k] || []), v] })
+            setDrafts(d => ({ ...d, [k]: '' }))
+          }}
+          placeholder={placeholder}
+        />
+      )}
     </div>
   )
 
@@ -195,15 +204,17 @@ export function EpicDocModal({ id }: { id: string }) {
                   </div>
                 )
               })}
-              <DraftInput
-                value={drafts.criteria || ''}
-                onChange={v => setDrafts(d => ({ ...d, criteria: v }))}
-                onEnter={v => {
-                  update({ criteria: [...(ev.criteria || []), v] })
-                  setDrafts(d => ({ ...d, criteria: '' }))
-                }}
-                placeholder="+ Add an acceptance criterion"
-              />
+              {!ro && (
+                <DraftInput
+                  value={drafts.criteria || ''}
+                  onChange={v => setDrafts(d => ({ ...d, criteria: v }))}
+                  onEnter={v => {
+                    update({ criteria: [...(ev.criteria || []), v] })
+                    setDrafts(d => ({ ...d, criteria: '' }))
+                  }}
+                  placeholder="+ Add an acceptance criterion"
+                />
+              )}
             </div>
           </Section>
           <Section n={5} id="plan" title="Delivery plan">
@@ -246,13 +257,15 @@ export function EpicDocModal({ id }: { id: string }) {
                 )
               })}
             </div>
-            <button
-              type="button"
-              onClick={() => overlay.open('newSprint', ev.id)}
-              className="mt-2.5 h-9 cursor-pointer rounded-[10px] border-[1.5px] border-dashed border-faint bg-white px-3.5 text-[13px] font-bold text-blue-ink"
-            >
-              + Add new sprint
-            </button>
+            {!ro && (
+              <button
+                type="button"
+                onClick={() => overlay.open('newSprint', ev.id)}
+                className="mt-2.5 h-9 cursor-pointer rounded-[10px] border-[1.5px] border-dashed border-faint bg-white px-3.5 text-[13px] font-bold text-blue-ink"
+              >
+                + Add new sprint
+              </button>
+            )}
           </Section>
           <Section n={6} id="risks" title="Risks & dependencies">
             {list('risks', '!', '+ Add a risk or dependency')}

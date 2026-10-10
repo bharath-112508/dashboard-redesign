@@ -1,8 +1,7 @@
 import { useCallback } from 'react'
-import { useSendAsync, useTasks, useWorkspace } from '../api/queries'
+import { useScopedTasks, useScopedWorkspace, useActorSendAsync, useActorName } from '../state/access'
 import type { Task } from '../api/types'
 import { TODAY } from '../lib/dates'
-import { ME } from '../lib/theme'
 import { activeSprint, nextTaskId } from '../domain/tasks'
 import { useOverlay } from '../state/ui'
 import { usePage } from '../state/page'
@@ -27,9 +26,10 @@ export const useOpenTask = () => {
  * suggested here. If it does, the window moves to the id the server gave.
  */
 export const useCreateTicket = () => {
-  const tasks = useTasks().data ?? []
-  const ws = useWorkspace().data
-  const send = useSendAsync()
+  const tasks = useScopedTasks() ?? []
+  const ws = useScopedWorkspace()
+  const send = useActorSendAsync()
+  const me = useActorName()
   const overlay = useOverlay()
   /** Whether the ticket window still shows `id` (the user may have moved on). */
   const showing = (id: number) => new URLSearchParams(window.location.search).get('ticket') === String(id)
@@ -63,7 +63,7 @@ export const useCreateTicket = () => {
           sprint,
           start: TODAY,
           time: {},
-          acts: [{ kind: 'history', who: ME, what: 'created the task', when: 'just now' }],
+          acts: [{ kind: 'history', who: me, what: 'created the task', when: 'just now' }],
         },
       })
     } catch {

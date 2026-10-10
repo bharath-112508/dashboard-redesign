@@ -1,4 +1,6 @@
-import { useSend, useTasks, useWorkspace } from '../../api/queries'
+import { useState } from 'react'
+import type { Sprint } from '../../api/types'
+import { useActorSend, useIsClient, useScopedTasks, useScopedWorkspace } from '../../state/access'
 import { CloseButton } from '../../components/ui'
 import { diff, range, short, TODAY, weeks } from '../../lib/dates'
 import { SPRINT_STATE } from '../../lib/theme'
@@ -11,12 +13,23 @@ import { onActivate } from './keyboard'
 
 const C = 2 * Math.PI * 50
 
+/** Other sprints of the epic: the one running now (if any) and the next planned one. */
+const siblingsOf = (sprints: Sprint[], x: Sprint) => ({
+  active: sprints.find(y => y.epic === x.epic && y.state === 'active' && y.id !== x.id),
+  next: sprints
+    .filter(y => y.epic === x.epic && y.state === 'planned' && y.id !== x.id)
+    .sort((a, b) => (a.start < b.start ? -1 : 1))[0],
+})
+
 /** Sprint overview: goal, why it matters, goals checklist and tasks. */
 export function SprintViewModal({ id }: { id: string }) {
   const person = usePerson()
-  const ws = useWorkspace().data!
-  const tasks = (useTasks().data ?? []).filter(t => !t.parent)
-  const send = useSend()
+  const ws = useScopedWorkspace()!
+  const tasks = (useScopedTasks() ?? []).filter(t => !t.parent)
+  const send = useActorSend()
+  // Client users read sprints; starting, completing and planning them is the team's job.
+  const isClient = useIsClient()
+  const [picking, setPicking] = useState(false)
   const overlay = useOverlay()
   const openTask = useOpenTask()
   const close = () => overlay.close('sprint')
@@ -32,6 +45,27 @@ export function SprintViewModal({ id }: { id: string }) {
   const gd = x.goalsDone || {}
   const ep = ws.epics.find(e => e.id === x.epic)
   const goals = x.goals || []
+  const { active: runningNow, next: nextPlanned } = siblingsOf(ws.sprints, x)
+  const startSprint = () => send({ type: 'sprint.update', id: x.id, patch: { state: 'active' } })
+  /** Unfinished tasks move to the next planned sprint of the epic, or to the backlog when there is none. */
+  const completeSprint = () =>
+    send({
+      type: 'batch',
+      cmds: [
+        { type: 'sprint.update', id: x.id, patch: { state: 'done', summary: 'Completed' } },
+        ...ts
+          .filter(t => t.status !== 'done')
+          .map(t => ({
+            type: 'task.update' as const,
+            id: t.id,
+            patch: { sprint: nextPlanned?.id ?? null },
+            log: nextPlanned ? 'moved it to ' + nextPlanned.name : 'moved it to the backlog',
+          })),
+      ],
+    })
+  const backlog = tasks.filter(t => t.epic === x.epic && !t.sprint)
+  const actionBtn =
+    'h-[34px] cursor-pointer rounded-lg border-0 bg-white px-3.5 text-[13px] font-bold text-blue-ink shadow-[0_0_0_1.5px_#C9D2DD] hover:shadow-[0_0_0_1.5px_#4870E8] disabled:cursor-default disabled:opacity-50'
 
   return (
     <>
@@ -53,6 +87,27 @@ export function SprintViewModal({ id }: { id: string }) {
               </div>
               <div className="mt-2.5 font-serif text-[40px] leading-[1.05] text-ink">{x.name}</div>
               <div className="mt-3 max-w-[560px] text-[19px] font-semibold leading-[1.45] text-ink [text-wrap:pretty]">{x.goal || 'No sprint goal yet.'}</div>
+              {!isClient && (x.state === 'planned' || x.state === 'active') && (
+                <div className="mt-3.5 flex flex-wrap items-center gap-2">
+                  {x.state === 'planned' && (
+                    <button
+                      type="button"
+                      onClick={startSprint}
+                      disabled={!!runningNow}
+                      title={runningNow ? `Finish ${runningNow.name} first` : undefined}
+                      className={actionBtn}
+                    >
+                      Start sprint
+                    </button>
+                  )}
+                  {x.state === 'active' && (
+                    <button type="button" onClick={completeSprint} className={actionBtn}>
+                      Complete sprint
+                    </button>
+                  )}
+                  {runningNow && x.state === 'planned' && <span className="text-[12.5px] font-semibold text-ink-2">Finish {runningNow.name} first.</span>}
+                </div>
+              )}
               <div className="mt-3.5 flex items-center gap-2">
                 {x.members.map(n => {
                   const m = person(n)
@@ -132,6 +187,30 @@ export function SprintViewModal({ id }: { id: string }) {
                 {dn}/{ts.length} done
               </span>
             </div>
+            {!isClient && x.state !== 'done' && (
+              <div className="mt-3">
+                <button type="button" onClick={() => setPicking(!picking)} className={actionBtn}>
+                  + Add from backlog
+                </button>
+                {picking && (
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    {backlog.map(t => (
+                      <div key={t.id} className="flex items-center gap-2 rounded-[10px] bg-canvas px-3 py-2 shadow-[inset_0_0_0_1.5px_#E4EAF0]">
+                        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{t.title}</span>
+                        <button
+                          type="button"
+                          onClick={() => send({ type: 'task.update', id: t.id, patch: { sprint: x.id }, log: 'moved it to ' + x.name })}
+                          className="h-7 cursor-pointer rounded-md border-0 bg-blue px-2.5 text-[12px] font-bold text-white"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    ))}
+                    {!backlog.length && <div className="text-[12.5px] text-muted">No backlog tasks in this epic.</div>}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="mt-3 flex flex-col gap-1.5">
               {ts.map(t => {
                 const st = statusOf(ws.statuses, t.status)

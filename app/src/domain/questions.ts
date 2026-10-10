@@ -2,7 +2,7 @@ import type { ChatMessage, Question } from '../api/types'
 
 /** The conversation as shown in the chat: the client's first answer, then every message. */
 export const threadOf = (q: Question): ChatMessage[] => [
-  ...(q.answer ? [{ who: 'Client', side: 'client' as const, text: q.answer, when: q.answeredWhen || '', files: [] }] : []),
+  ...(q.answer ? [{ who: q.answerBy || 'Client', side: 'client' as const, text: q.answer, when: q.answeredWhen || '', files: [] }] : []),
   ...(q.comments || []),
 ]
 

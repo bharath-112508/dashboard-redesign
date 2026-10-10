@@ -1,11 +1,11 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import { useTasks, useWorkspace } from '../../api/queries'
 import type { Task } from '../../api/types'
 import { Avatar, Icon, PATHS } from '../../components/ui'
 import { diff, range, TODAY, weeks } from '../../lib/dates'
 import { pal, SPRINT_STATE } from '../../lib/theme'
 import { usePerson } from '../../state/page'
 import { useOverlay, useUi } from '../../state/ui'
+import { useIsClient, useScopedTasks, useScopedWorkspace } from '../../state/access'
 import { assigneesOf, cardAvatars, sprintsOf, statusOf, taskKey } from '../../domain/tasks'
 import { useCreateTicket, useOpenTask } from '../../features/useOpenTask'
 import { onActivate } from '../../features/plan/keyboard'
@@ -17,7 +17,7 @@ const btn =
 
 function PlanTaskCard({ t, onOpen }: { t: Task; onOpen: () => void }) {
   const person = usePerson()
-  const ws = useWorkspace().data!
+  const ws = useScopedWorkspace()!
   const st = statusOf(ws.statuses, t.status)
   const overdue = !!t.due && diff(t.due, TODAY) < 0 && t.status !== 'done'
   return (
@@ -63,8 +63,10 @@ function PlanTaskCard({ t, onOpen }: { t: Task; onOpen: () => void }) {
 /** Epic → Sprints → Tasks tree. */
 export function PlanView() {
   const person = usePerson()
-  const ws = useWorkspace().data!
-  const tasks = (useTasks().data ?? []).filter(t => !t.parent)
+  const ws = useScopedWorkspace()!
+  const tasks = (useScopedTasks() ?? []).filter(t => !t.parent)
+  // Client users read the plan; creating epics, sprints and tickets is the team's job.
+  const isClient = useIsClient()
   const ui = useUi()
   const overlay = useOverlay()
   const openTask = useOpenTask()
@@ -120,6 +122,7 @@ export function PlanView() {
         </span>
         <button type="button" onClick={() => setAll(true)} className={btn}>Expand all</button>
         <button type="button" onClick={() => setAll(false)} className={btn}>Collapse all</button>
+        {!isClient && (
         <button
           type="button"
           onClick={() => overlay.open('newEpic')}
@@ -128,6 +131,7 @@ export function PlanView() {
           <Icon d={PATHS.plus} size={14} sw={2.6} />
           Epic
         </button>
+        )}
       </div>
 
       {ws.epics.map(e => {
@@ -173,9 +177,11 @@ export function PlanView() {
                     >
                       Overview
                     </button>
-                    <button type="button" onClick={newSprint} className="h-8 flex-1 cursor-pointer rounded-lg border-0 bg-blue text-[12.5px] font-semibold text-white">
-                      + Sprint
-                    </button>
+                    {!isClient && (
+                      <button type="button" onClick={newSprint} className="h-8 flex-1 cursor-pointer rounded-lg border-0 bg-blue text-[12.5px] font-semibold text-white">
+                        + Sprint
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -258,6 +264,7 @@ export function PlanView() {
                                 ))}
                                 <div className="flex items-center">
                                   <span className="h-0.5 w-3.5 flex-none bg-line" />
+                                  {!isClient && (
                                   <button
                                     type="button"
                                     onClick={() => createTicket({ epic: e.id, sprint: x.id })}
@@ -265,6 +272,7 @@ export function PlanView() {
                                   >
                                     + Create ticket
                                   </button>
+                                  )}
                                 </div>
                               </div>
                             </>
@@ -284,13 +292,15 @@ export function PlanView() {
                     })}
                     <div className="flex items-center">
                       <span className="h-0.5 w-[18px] flex-none bg-line" />
-                      <button
+                      {!isClient && (
+                    <button
                         type="button"
                         onClick={newSprint}
                         className="h-10 w-[270px] cursor-pointer rounded-xl border-[1.5px] border-dashed border-faint bg-white text-[13px] font-semibold text-blue-ink hover:border-blue hover:bg-sky"
                       >
                         + New sprint
                       </button>
+                    )}
                     </div>
                   </div>
                 </>

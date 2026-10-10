@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useLocation } from 'react-router'
-import { useEntries, useSend, useTasks, useWorkspace } from '../../api/queries'
+import { useEntries } from '../../api/queries'
 import type { Command } from '../../api/commands'
 import type { Attachment, Subtask, Task } from '../../api/types'
 import { Markdown } from '../../components/Markdown'
 import { Avatar, Backdrop, CloseButton, CountPill, Icon, Label, PATHS, Scrim, TabButton, unassigned } from '../../components/ui'
 import { diff, fmt, short, TODAY } from '../../lib/dates'
 import { focusField } from '../../lib/focusField'
-import { ME, pal, PEOPLE, PRIO, PRIO_LIST, TYPE_LIST, TYPES } from '../../lib/theme'
+import { pal, PEOPLE, PRIO, PRIO_LIST, TYPE_LIST, TYPES } from '../../lib/theme'
 import { usePage } from '../../state/page'
 import { ClientChat } from './ClientChat'
 import { useOverlay } from '../../state/ui'
+import { useActorName, useActorSend, useIsClient, useScopedTasks, useScopedWorkspace } from '../../state/access'
 import {
   assigneesOf,
   entryCount,
@@ -48,12 +49,19 @@ const subsOf = (raw: Task, tasks: Task[]): Subtask[] =>
 
 /** The full ticket, opened from the board, plan or timeline. Subtasks open in the same drawer. */
 export function TicketDrawer({ id }: { id: number }) {
-  const tasks = useTasks().data ?? []
+  const tasks = useScopedTasks() ?? []
   const overlay = useOverlay()
+  const isClient = useIsClient()
   const [navStack, setNavStack] = useState<number[]>([])
   const [initialTab, setInitialTab] = useState<Tab>('details')
   const [railHide, setRailHide] = useState<boolean | null>(null)
   const raw0 = tasks.find(t => t.id === id)
+  // Client-reported bugs open in the bug window; a link to one of them lands there.
+  const isBug = !!raw0?.clientBug
+  useEffect(() => {
+    if (isClient && isBug) overlay.open('bug', id, { replace: true })
+    // Only the item and the role decide the redirect.
+  }, [isClient, isBug, id])
 
   const go = (to: number, tab: Tab = 'details', stack = navStack) => {
     setNavStack(stack)
@@ -113,12 +121,16 @@ function TicketBody({
   go: (to: number, tab?: Tab, stack?: number[]) => void
   onClose: () => void
 }) {
-  const ws = useWorkspace().data!
+  const ws = useScopedWorkspace()!
   const entries = useEntries().data ?? []
-  const send = useSend()
+  const send = useActorSend()
+  const me = useActorName()
   const loc = useLocation()
   const { person, side } = usePage()
   const view = loc.pathname.split('/')[2] || 'board'
+  // Client users can comment on any ticket, but only change their own bugs (View only otherwise).
+  const isClient = useIsClient()
+  const ro = isClient && !raw0.clientBug
 
   const [tab, setTab] = useState<Tab>(raw0.parent && initialTab === 'subs' ? 'details' : initialTab)
   const [tdd, setTdd] = useState<string | null>(null)
@@ -181,7 +193,10 @@ function TicketBody({
 
   const raw: Task = { ...raw0, subs: subsOf(raw0, tasks) }
   const id = raw.id
-  const upd = (patch: Partial<Task>, log?: string) => send({ type: 'task.update', id, patch, log })
+  const upd = (patch: Partial<Task>, log?: string) => {
+    if (ro) return
+    send({ type: 'task.update', id, patch, log })
+  }
   const key = taskKey(raw)
   const st = statusOf(ws.statuses, raw.status)
   const ty = TYPES[raw.type]
@@ -231,7 +246,7 @@ function TicketBody({
       sprint: parent.sprint,
       start: parent.start || TODAY,
       time: {},
-      acts: [{ kind: 'history', who: ME, what: 'opened subtask of ' + taskKey(parent), when: 'just now' }],
+      acts: [{ kind: 'history', who: me, what: 'opened subtask of ' + taskKey(parent), when: 'just now' }],
     }
     send({
       type: 'batch',
@@ -243,6 +258,7 @@ function TicketBody({
     go(sid, 'details', stack)
   }
   const toggleSub = (i: number) => {
+    if (ro) return
     const x = raw.subs[i]
     const done = !x.done
     const cmds: Command[] = [
@@ -258,7 +274,7 @@ function TicketBody({
   }
   const addSub = () => {
     const v = subDraft.trim()
-    if (!v) return
+    if (!v || ro) return
     upd({ subs: [...raw0.subs, { t: v, done: false }] }, 'added subtask “' + v + '”')
     setSubDraft('')
   }
@@ -294,6 +310,7 @@ function TicketBody({
 
   // ---------- sidebar dropdowns
   const pick = (onPick: () => void) => () => {
+    if (ro) return
     setTdd(null)
     onPick()
   }
@@ -428,6 +445,7 @@ function TicketBody({
     ...raw.contribs.map(n => ({ ...person(n), role: 'Contributor' })),
   ].concat(A.length ? [] : [{ name: 'Nobody assigned', i: '–', bg: '#A9B6C5', role: 'Use Edit assignees' }])
   const editAssignees = () => {
+    if (ro) return
     setAsAll(false)
     setTdd('d_assignee')
   }
@@ -617,9 +635,11 @@ function TicketBody({
                 onChange={e => setTitleDraft(e.target.value)}
                 onBlur={saveTitle}
                 onKeyDown={e => e.key === 'Enter' && e.currentTarget.blur()}
+                readOnly={ro}
                 title={raw.title}
                 className="min-w-0 flex-1 border-0 bg-transparent p-0 text-[22px] font-bold tracking-[-0.02em] text-ink outline-0 [text-overflow:ellipsis]"
               />
+              {ro && <span className="flex-none whitespace-nowrap rounded-md bg-sky px-2 py-1 text-[12px] font-semibold text-ink-2">View only</span>}
               <span className="tnum flex-none whitespace-nowrap rounded-md bg-sky-2 px-2 py-1 text-[12px] font-semibold text-blue-ink">{key}</span>
             </div>
 
@@ -632,7 +652,8 @@ function TicketBody({
                       type="button"
                       onClick={() => x.id !== raw.status && upd({ status: x.id }, 'changed status to ' + x.name)}
                       title={'Move to ' + x.name}
-                      className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1.5 border-0 bg-transparent p-0 text-left"
+                      disabled={ro}
+                      className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1.5 border-0 bg-transparent p-0 text-left disabled:cursor-default"
                     >
                       <span className="h-[5px] rounded-[3px]" style={{ background: i <= ci ? curC : '#DDE3E8' }} />
                       <span className="truncate text-[12px]" style={{ fontWeight: i === ci ? 700 : 500, color: i === ci ? '#1B2D45' : '#3B4A5E' }}>
@@ -645,7 +666,8 @@ function TicketBody({
                   <button
                     type="button"
                     onClick={() => upd({ status: nxt.id }, 'changed status to ' + nxt.name)}
-                    className="inline-flex h-[34px] flex-none cursor-pointer items-center gap-2 rounded-[10px] border-0 bg-blue px-3.5 text-[13px] font-semibold text-white shadow-[0_1px_2px_rgba(27,45,69,0.12)] hover:bg-blue-600"
+                    disabled={ro}
+                    className="inline-flex h-[34px] flex-none cursor-pointer items-center gap-2 rounded-[10px] border-0 bg-blue px-3.5 text-[13px] font-semibold text-white shadow-[0_1px_2px_rgba(27,45,69,0.12)] hover:bg-blue-600 disabled:cursor-default disabled:bg-faint"
                   >
                     {/* Separate flex items, so the 8px gap sits before the status name as in the prototype. */}
                     <span>Move to </span>
@@ -663,9 +685,9 @@ function TicketBody({
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={() => !raw.due && focusField('tk-due')}
-                  onKeyDown={keyOpen(() => !raw.due && focusField('tk-due'))}
-                  className={fact}
+                  onClick={() => !raw.due && !ro && focusField('tk-due')}
+                  onKeyDown={keyOpen(() => !raw.due && !ro && focusField('tk-due'))}
+                  className={ro ? factBase : fact}
                 >
                   <Label>Due</Label>
                   <span className="truncate text-[16px] font-bold" style={{ color: late ? '#C0392B' : '#1B2D45' }}>
@@ -684,9 +706,9 @@ function TicketBody({
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={() => focusField('tk-log')}
-                  onKeyDown={keyOpen(() => focusField('tk-log'))}
-                  className={fact}
+                  onClick={() => !ro && focusField('tk-log')}
+                  onKeyDown={keyOpen(() => !ro && focusField('tk-log'))}
+                  className={ro ? factBase : fact}
                 >
                   <div className="flex items-center gap-2">
                     <Label>Time</Label>
@@ -787,15 +809,17 @@ function TicketBody({
                     ) : (
                       <div className="flex items-start gap-4">
                         <div
-                          onClick={() => setDescEdit(true)}
+                          onClick={() => !ro && setDescEdit(true)}
                           className="-mx-2.5 -my-1.5 min-w-0 flex-1 cursor-text whitespace-pre-wrap [overflow-wrap:anywhere] rounded-[10px] px-2.5 py-1.5 text-[14.5px] leading-[1.65] [text-wrap:pretty] hover:bg-canvas"
                           style={{ color: raw.desc ? '#1B2D45' : '#3B4A5E' }}
                         >
                           {raw.desc ? <Markdown src={raw.desc} /> : 'No description yet. Add what should happen and why.'}
                         </div>
-                        <button type="button" onClick={() => setDescEdit(true)} className="cursor-pointer whitespace-nowrap border-0 bg-transparent p-0 text-[13px] font-semibold text-blue-ink">
-                          Edit
-                        </button>
+                        {!ro && (
+                          <button type="button" onClick={() => setDescEdit(true)} className="cursor-pointer whitespace-nowrap border-0 bg-transparent p-0 text-[13px] font-semibold text-blue-ink">
+                            Edit
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -837,7 +861,7 @@ function TicketBody({
                         </div>
                       ))}
                     </div>
-                    <label
+                    {!ro && <label
                       onDragOver={(e: DragEvent) => {
                         e.preventDefault()
                         if (!dropOn) setDropOn(true)
@@ -865,7 +889,7 @@ function TicketBody({
                           e.target.value = ''
                         }}
                       />
-                    </label>
+                    </label>}
                   </div>
                 </div>
                 <div className="grid border-t-[1.5px] border-line py-[18px]" style={{ gridTemplateColumns: rowCols, gap: rowGap }}>
@@ -880,20 +904,20 @@ function TicketBody({
                           <span className="tnum flex-none text-[12px] text-ink-2">{taskKey(o)}</span>
                           <span className="min-w-0 flex-1 truncate text-[14px]">{o.title}</span>
                           <StatusPill name={os.name} c={os.c} soft={os.soft} ink={os.ink} />
-                          <button
+                          {!ro && <button
                             type="button"
                             onClick={() => upd({ deps: raw.deps.filter(x => x !== depId) }, 'unlinked ' + taskKey(o))}
                             title="Unlink"
                             className="cursor-pointer border-0 bg-transparent text-[16px] text-faint hover:text-rust"
                           >
                             ×
-                          </button>
+                          </button>}
                         </div>
                       )
                     })}
                     <div className="flex items-center gap-4">
                       {!raw.deps.length && <span className="text-[14.5px] text-ink-2">Nothing</span>}
-                      <span className="relative ml-auto inline-flex items-center">
+                      {!ro && <span className="relative ml-auto inline-flex items-center">
                         <span className="pointer-events-none whitespace-nowrap text-[13px] font-semibold text-blue-ink">+ Link task</span>
                         <select
                           value=""
@@ -912,7 +936,7 @@ function TicketBody({
                               </option>
                             ))}
                         </select>
-                      </span>
+                      </span>}
                     </div>
                   </div>
                 </div>
@@ -959,7 +983,7 @@ function TicketBody({
                     <SubtaskRow key={i} parent={raw} x={x} i={i} tasks={tasks} onOpen={() => openSub(raw0, i)} onToggle={() => toggleSub(i)} />
                   ))}
                 </div>
-                <div className="flex gap-2">
+                {!ro && <div className="flex gap-2">
                   <input
                     value={subDraft}
                     onChange={e => setSubDraft(e.target.value)}
@@ -975,7 +999,7 @@ function TicketBody({
                   >
                     Add
                   </button>
-                </div>
+                </div>}
               </>
             )}
 
@@ -1067,6 +1091,7 @@ function TicketBody({
                   onClose={() => setTdd(null)}
                   options={r.options}
                   up={i >= 4}
+                  disabled={ro}
                 />
               </div>
             ))}
@@ -1090,6 +1115,7 @@ function TicketBody({
                 <button
                   type="button"
                   onClick={() => setTdd(tdd === 'd_contrib' ? null : 'd_contrib')}
+                  disabled={ro}
                   className="flex cursor-pointer items-center gap-1.5 rounded-md border-0 bg-sky px-1.5 py-1 text-[12px] font-semibold text-ink hover:!shadow-[0_0_0_1.5px_#4870E8]"
                   style={{ boxShadow: tdd === 'd_contrib' ? '0 0 0 2px #4870E8' : 'inset 0 0 0 1.5px rgba(27,45,69,0.14)' }}
                 >
@@ -1172,6 +1198,7 @@ function TicketBody({
               <input
                 type="date"
                 value={raw.start || ''}
+                disabled={ro}
                 onChange={e => upd({ start: e.target.value }, e.target.value ? 'set start date to ' + fmt(e.target.value) : 'cleared the start date')}
                 className={`${tnumSm} border-0 bg-transparent text-right outline-0`}
               />
@@ -1189,6 +1216,7 @@ function TicketBody({
                 <input
                   id="tk-due"
                   type="date"
+                  disabled={ro}
                   value=""
                   onChange={e => e.target.value && upd({ due: e.target.value }, 'set due date to ' + fmt(e.target.value))}
                   className={`${tnumSm} border-0 bg-transparent text-right outline-0`}
@@ -1202,6 +1230,7 @@ function TicketBody({
               ) : (
                 <input
                   id="tk-est"
+                  disabled={ro}
                   value={estDraft}
                   onChange={e => setEstDraft(e.target.value)}
                   onBlur={() => {
@@ -1217,7 +1246,7 @@ function TicketBody({
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 text-[13px] text-ink-2">
                   Hours
-                  <button
+                  {!ro && <button
                     type="button"
                     onClick={() => focusField('tk-log')}
                     title="Log hours"
@@ -1225,7 +1254,7 @@ function TicketBody({
                     className="inline-grid size-[18px] cursor-pointer place-items-center rounded-[5px] border-0 bg-blue p-0 align-middle text-white"
                   >
                     <Icon d={PATHS.plus} size={10} sw={3.2} />
-                  </button>
+                  </button>}
                 </div>
                 <div className="mt-px text-[11.5px] font-semibold text-muted">{nEnt ? nEnt + ' entr' + (nEnt > 1 ? 'ies' : 'y') : 'Nothing logged yet'}</div>
               </div>
@@ -1233,7 +1262,7 @@ function TicketBody({
                 {logged ? rh(logged) : '0h'}
               </span>
             </div>
-            <div data-fx="1" className="flex items-center gap-2 rounded-b-[14px] border-t-[1.5px] border-line bg-canvas px-3.5 py-2.5">
+            {!ro && <div data-fx="1" className="flex items-center gap-2 rounded-b-[14px] border-t-[1.5px] border-line bg-canvas px-3.5 py-2.5">
               <span className="flex-1 text-[13px] font-semibold text-ink">Log time</span>
               <MiniSelect id="tk-log" value={logHr} onChange={setLogHr} options={Array.from({ length: 25 }, (_, i) => [i, i + 'h'])} />
               <MiniSelect value={logMin} onChange={setLogMin} options={[0, 5, 10, 15, 30, 45].map(m => [m, m + 'm'])} />
@@ -1253,7 +1282,7 @@ function TicketBody({
               >
                 Add
               </button>
-            </div>
+            </div>}
           </div>
           {created?.who && (
             <div className="px-1 pt-3.5 text-[12px] text-ink-2">
@@ -1378,7 +1407,7 @@ function SubtaskRow({
   onOpen: () => void
   onToggle: () => void
 }) {
-  const ws = useWorkspace().data!
+  const ws = useScopedWorkspace()!
   const entries = useEntries().data ?? []
   const { person } = usePage()
   const rec = x.sid ? tasks.find(y => y.id === x.sid) : undefined

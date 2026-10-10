@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router'
 import { ClientsLayout } from './pages/clients/ClientsLayout'
+import { PortalHome } from './pages/clients/portal/PortalHome'
 import { BoardView } from './pages/clients/BoardView'
 import { PlanView } from './pages/clients/PlanView'
 import { TimelineView } from './pages/clients/TimelineView'
@@ -41,12 +42,12 @@ export function App() {
             <Route path="employee-timesheets" element={<ComingSoon page="Employee timesheets" />} />
             <Route path="users" element={<ComingSoon page="Users" />} />
             <Route path="clients">
-              <Route index element={<ComingSoon page="Your projects" />} />
+              <Route index element={<PortalHome />} />
               <Route element={<ClientsLayout />}>
                 <Route path="board" element={<BoardView />} />
                 <Route path="plan" element={<PlanView />} />
                 <Route path="timeline" element={<TimelineView />} />
-                <Route path="*" element={<Navigate to="board" replace />} />
+                <Route path="*" element={<Navigate to="/clients/board" replace />} />
               </Route>
             </Route>
             <Route path="devops/*" element={<DevopsRoutes />} />

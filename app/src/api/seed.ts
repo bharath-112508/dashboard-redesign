@@ -3,6 +3,7 @@ import { createDevopsSeed } from './devops/seed'
 import type { Activity, ChatMessage, Db, Epic, Sprint, Task, TimeEntry } from './types'
 import { PEOPLE_SEED } from './people/seed'
 import { COMPANIES_SEED } from './companies/seed'
+import { CLIENT_TEAM_SEED } from './clients/seed'
 
 const hist = (who: string, what: string, when: string): Activity => ({ kind: 'history', who, what, when })
 
@@ -243,6 +244,7 @@ export const createSeed = (): Db => {
     people: PEOPLE_SEED,
     companies: COMPANIES_SEED,
     internalProjects: [],
+    clientTeam: CLIENT_TEAM_SEED,
     questions: [
       {
         id: 1,

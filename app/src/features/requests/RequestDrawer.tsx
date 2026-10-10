@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { useRequests, useSend, useWorkspace } from '../../api/queries'
+import { useActorName, useActorSend, useScopedRequests, useScopedWorkspace } from '../../state/access'
 import { Markdown } from '../../components/Markdown'
 import { Avatar, Backdrop, CloseButton, CountPill, Icon, Label, PATHS, TabButton } from '../../components/ui'
 import { diff, fmt, TODAY } from '../../lib/dates'
-import { ME, PRIO, REQUEST_STATUS } from '../../lib/theme'
+import { PRIO, REQUEST_STATUS } from '../../lib/theme'
 import { usePerson } from '../../state/page'
 import { useOverlay, useUi } from '../../state/ui'
 import { rh } from '../../domain/tasks'
@@ -20,10 +20,11 @@ const lockIcon = (
 /** A DevOps request linked to this project. Managed by DevOps; only comments can be added here. */
 export function RequestDrawer({ id }: { id: number }) {
   const person = usePerson()
-  const r = (useRequests().data ?? []).find(x => x.id === id)
-  const ws = useWorkspace().data!
+  const r = (useScopedRequests() ?? []).find(x => x.id === id)
+  const ws = useScopedWorkspace()!
   const ui = useUi()
-  const send = useSend()
+  const send = useActorSend()
+  const me = useActorName()
   const overlay = useOverlay()
   const [tab, setTab] = useState<'ov' | 'act'>('ov')
   const [draft, setDraft] = useState('')
@@ -57,7 +58,7 @@ export function RequestDrawer({ id }: { id: number }) {
   const post = () => {
     const t = draft.trim()
     if (!t) return
-    send({ type: 'request.comment', id: r.id, comment: { by: ME, text: t, when: 'just now', side: 'tickets' } })
+    send({ type: 'request.comment', id: r.id, comment: { by: me, text: t, when: 'just now', side: 'tickets' } })
     setDraft('')
   }
 

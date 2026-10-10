@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { useQuestions, useSend, useTasks, useWorkspace } from '../../api/queries'
 import type { Attachment, ChatFile, ChatMessage, ClientPriority, Question, Task } from '../../api/types'
 import { Avatar, CloseButton, Icon, Label, PATHS } from '../../components/ui'
 import { diff, fmt, todayLabel, TODAY } from '../../lib/dates'
 import { isImageName, readFiles } from '../../lib/files'
-import { ME, questionTags } from '../../lib/theme'
+import { questionTags } from '../../lib/theme'
+import { initials } from '../../lib/media'
 import { usePage } from '../../state/page'
 import { useOverlay } from '../../state/ui'
+import { useActorName, useActorSend, useScopedQuestions, useScopedTasks, useScopedWorkspace } from '../../state/access'
 import { statusOf, taskKey, fileExt } from '../../domain/tasks'
 import { clientQuestionState, threadOf } from '../../domain/questions'
 import { EscapeHoldContext, useEscapeHold, type EscapeHold } from './escapeHold'
@@ -43,12 +44,14 @@ interface Model {
   waitLbl: string
   teamWait: boolean
   send: (m: ChatMessage) => void
+  /** Edit of the viewer's own messages. Absent when the thread is read-only. */
+  edit?: { canEdit: (c: ChatMessage, i: number) => boolean; save: (i: number, text: string) => void }
 }
 
 /** A question from the team, or a bug the client reported: the item on the left, the chat on the right. */
 export function ConversationModal({ bugId, questionId }: { bugId?: number; questionId?: number }) {
-  const tasks = useTasks().data ?? []
-  const questions = useQuestions().data ?? []
+  const tasks = useScopedTasks() ?? []
+  const questions = useScopedQuestions() ?? []
   const overlay = useOverlay()
   const close = () => overlay.close('bug', 'question')
 
@@ -75,7 +78,8 @@ export function ConversationModal({ bugId, questionId }: { bugId?: number; quest
 }
 
 function QuestionConversation({ q, close }: { q: Question; close: () => void }) {
-  const send = useSend()
+  const send = useActorSend()
+  const me = useActorName()
   const { side, person } = usePage()
   const team = side === 'team'
   const st = clientQuestionState(q)
@@ -103,23 +107,21 @@ function QuestionConversation({ q, close }: { q: Question; close: () => void }) 
     when: q.when,
     status: team ? { label: tst, color: sTx, dot: sDot } : { label: st.label, color: st.boxC },
     pill: team ? { label: tst, bg: pBg, c: pC } : undefined,
-    solve: team
-      ? {
-          solved: !!q.solved,
-          toggle: () =>
-            send({
-              type: 'batch',
-              cmds: [
-                { type: 'question.update', id: q.id, patch: { solved: !q.solved } },
-                {
-                  type: 'question.message',
-                  id: q.id,
-                  message: { who: ME, side: 'team', text: q.solved ? 'Reopened the question' : 'Marked as solved', when: 'just now', files: [] },
-                },
-              ],
-            }),
-        }
-      : undefined,
+    solve: {
+      solved: !!q.solved,
+      toggle: () =>
+        send({
+          type: 'batch',
+          cmds: [
+            { type: 'question.update', id: q.id, patch: { solved: !q.solved } },
+            {
+              type: 'question.message',
+              id: q.id,
+              message: { who: me, side, text: q.solved ? 'Reopened the question' : 'Marked as solved', when: 'just now', files: [] },
+            },
+          ],
+        }),
+    },
     photos: q.photos || [],
     thread: T,
     chatSub: team ? 'Chat with the client · they reply from the Clients page' : 'Answer and attach documents for the Viljetech team',
@@ -128,6 +130,14 @@ function QuestionConversation({ q, close }: { q: Question; close: () => void }) 
     waitLbl: team ? 'Waiting for the client to answer' : 'The team is waiting for your answer',
     teamWait: !team && !!last && last.side === 'client',
     send: message => send({ type: 'question.message', id: q.id, message }),
+    // The first client answer is stored as `answer` (index -1), not in `comments`, so comment indexes start after it.
+    edit: {
+      canEdit: c => c.side === side && c.who === me,
+      save: (i, text) => {
+        const first = !!q.answer && i === 0
+        send({ type: 'question.editMessage', id: q.id, index: first ? -1 : i - (q.answer ? 1 : 0), who: me, text })
+      },
+    },
   }
   return (
     <Shell m={m} close={close}>
@@ -154,8 +164,8 @@ function QuestionConversation({ q, close }: { q: Question; close: () => void }) 
 }
 
 function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
-  const ws = useWorkspace().data!
-  const send = useSend()
+  const ws = useScopedWorkspace()!
+  const send = useActorSend()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const descRef = useRef<HTMLTextAreaElement>(null)
@@ -179,7 +189,9 @@ function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
     img: isImageName(a.name),
     i,
   }))
-  const update = (patch: Partial<Task>, log: string) => send({ type: 'task.update', id: bug.id, patch, log, who: 'Client' })
+  const update = (patch: Partial<Task>, log: string) => send({ type: 'task.update', id: bug.id, patch, log })
+  // The client who reported it (the first history line), so the window names them.
+  const reporter = bug.acts.find(a => a.what === 'reported this bug')?.who || 'Client'
 
   const m: Model = {
     kind: 'Bug report',
@@ -190,7 +202,7 @@ function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
     qkey: taskKey(bug),
     tags: [],
     title: bug.title,
-    by: { name: 'You', i: 'Y', bg: '#56657A' },
+    by: { name: reporter, i: initials(reporter), bg: '#56657A' },
     when: bug.clientBug?.reported || bug.atts[0]?.date || 'Today',
     status: { label: st.name, color: '#A5502C' },
     photos,
@@ -492,8 +504,13 @@ function Shell({ m, close, children }: { m: Model; close: () => void; children: 
 
 function Chat({ m, close }: { m: Model; close: () => void }) {
   const { side: SIDE, person } = usePage()
+  const me = useActorName()
   const [draft, setDraft] = useState('')
   const [pend, setPend] = useState<ChatFile[]>([])
+  const [editing, setEditing] = useState<number | null>(null)
+  const [editDraft, setEditDraft] = useState('')
+  // Escape cancels an edit in progress instead of closing the window (see escapeHold.ts).
+  useEscapeHold('edit', editing !== null)
   const list = useRef<HTMLDivElement>(null)
   // Scroll the message list itself. scrollIntoView would also scroll the window's
   // overflow-hidden panel and push its header off the top.
@@ -507,7 +524,7 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
   useEscapeHold('composer', ok)
   const send = () => {
     if (!ok) return
-    m.send({ who: SIDE === 'client' ? 'Client' : ME, side: SIDE, text: draft.trim(), when: 'just now', files: pend })
+    m.send({ who: me, side: SIDE, text: draft.trim(), when: 'just now', files: pend })
     setDraft('')
     setPend([])
   }
@@ -537,8 +554,54 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
                   <div className="flex min-w-0 gap-2 text-[11.5px] font-bold" style={{ color: isC ? '#195040' : '#3F2E94' }}>
                     {c.who}
                     <span className="font-medium text-muted">{c.when}</span>
+                    {m.edit?.canEdit(c, i) && editing !== i && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditDraft(c.text)
+                          setEditing(i)
+                        }}
+                        className="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[11.5px] font-bold text-blue-ink"
+                      >
+                        Edit
+                      </button>
+                    )}
                   </div>
-                  {c.text && <div className="mt-[3px] whitespace-pre-wrap text-[14px] leading-normal text-ink [overflow-wrap:anywhere]">{c.text}</div>}
+                  {editing === i ? (
+                    <div className="mt-1.5">
+                      <textarea
+                        value={editDraft}
+                        onChange={e => setEditDraft(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Escape') {
+                            e.stopPropagation()
+                            setEditing(null)
+                          }
+                        }}
+                        rows={3}
+                        aria-label="Edit message"
+                        className="w-full resize-y rounded-lg border-[1.5px] border-blue px-2.5 py-2 text-[14px] leading-normal text-ink outline-0"
+                      />
+                      <div className="mt-1.5 flex justify-end gap-1.5">
+                        <button type="button" onClick={() => setEditing(null)} className="h-7 cursor-pointer rounded-lg border-[1.5px] border-faint bg-white px-2.5 text-[12px] font-semibold text-ink">
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const v = editDraft.trim()
+                            if (v && v !== c.text) m.edit?.save(i, v)
+                            setEditing(null)
+                          }}
+                          className="h-7 cursor-pointer rounded-lg border-0 bg-blue px-3 text-[12px] font-bold text-white"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    c.text && <div className="mt-[3px] whitespace-pre-wrap text-[14px] leading-normal text-ink [overflow-wrap:anywhere]">{c.text}</div>
+                  )}
                 </div>
                 {c.files?.length > 0 && (
                   <div className="flex flex-wrap gap-1.5" style={{ justifyContent: mine ? 'flex-end' : 'flex-start' }}>

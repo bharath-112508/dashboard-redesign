@@ -1,4 +1,5 @@
 import { useOverlay } from '../state/ui'
+import { useIsClient } from '../state/access'
 import { TicketDrawer } from './ticket/TicketDrawer'
 import { ConversationModal } from './conversation/ConversationModal'
 import { RequestDrawer } from './requests/RequestDrawer'
@@ -22,6 +23,8 @@ export function Overlays() {
   const sprint = get('sprint')
   const epic = get('epic')
   const newSprint = get('newSprint')
+  // Creating epics and sprints is the team's job, even when a client opens the link.
+  const client = useIsClient()
   return (
     <>
       {ticket != null && <TicketDrawer id={ticket} />}
@@ -29,8 +32,8 @@ export function Overlays() {
       {(bug != null || question != null) && <ConversationModal bugId={bug ?? undefined} questionId={question ?? undefined} />}
       {epic && <EpicDocModal id={epic} />}
       {sprint && <SprintViewModal id={sprint} />}
-      {get('newEpic') && <EpicFormModal />}
-      {newSprint && <SprintFormModal key={newSprint} epicId={newSprint} />}
+      {get('newEpic') && !client && <EpicFormModal />}
+      {newSprint && !client && <SprintFormModal key={newSprint} epicId={newSprint} />}
       {get('report') && <ReportBugModal />}
     </>
   )

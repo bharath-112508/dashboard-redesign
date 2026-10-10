@@ -20,6 +20,7 @@ export function PillDropdown({
   onClose,
   options,
   up,
+  disabled = false,
 }: {
   label: string
   value: string
@@ -32,13 +33,16 @@ export function PillDropdown({
   options: PillOption[]
   /** Open the menu above the pill (for fields low in the panel). */
   up?: boolean
+  /** Read-only: the pill shows its value and cannot be opened. */
+  disabled?: boolean
 }) {
   return (
     <div className="relative flex-none">
       <button
         type="button"
-        onClick={onToggle}
-        className="flex max-w-[160px] cursor-pointer items-center gap-1.5 rounded-md border-0 py-[5px] pl-2.5 pr-1.5 text-[12px] font-semibold"
+        onClick={disabled ? undefined : onToggle}
+        disabled={disabled}
+        className="flex max-w-[160px] cursor-pointer items-center gap-1.5 rounded-md border-0 py-[5px] pl-2.5 pr-1.5 text-[12px] font-semibold disabled:cursor-default"
         style={{
           background: bg,
           color,
@@ -55,7 +59,7 @@ export function PillDropdown({
         <span className="min-w-0 truncate">{value}</span>
         <Caret />
       </button>
-      {open && (
+      {open && !disabled && (
         <>
           <Scrim onClick={onClose} z={50} />
           <div
