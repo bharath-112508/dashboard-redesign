@@ -13,6 +13,7 @@ import {
   settingsOf,
   settingsRow,
   statusModal,
+  storedLadderHours,
 } from './helpers/devops'
 
 /** Board tests run as Arjun (DevOps). Seed: OPS-102 Inoff (client, step 1), OPS-108 OSBY (dev team), OPS-101 DACO (not started). */
@@ -168,7 +169,7 @@ test.describe('DevOps board', () => {
     await openProject(page, 'OPS-102')
     const panel = panelOf(page)
     await panel.getByPlaceholder('Add a note for this project…').fill('Customer prefers Swedish invoices')
-    await panel.getByRole('button', { name: 'Add note', exact: true }).click()
+    await panel.getByRole('button', { name: 'Add note', exact: true }).last().click()
     await expect(panel.getByText('Customer prefers Swedish invoices', { exact: true })).toBeVisible()
     await openPanelTab(page, 'Activity')
     await expect(panel.getByText('Added note to Inoff', { exact: true })).toBeVisible()
@@ -314,6 +315,7 @@ test.describe('DevOps board', () => {
     await openSettings(page, 'seq')
     await settingsRow(page, 'Reminder 1').locator('input[type="number"]').fill('36')
     await settingsOf(page).getByRole('button', { name: 'Save changes', exact: true }).click()
+    await expect.poll(() => storedLadderHours(page, 1)).toBe(36)
     await openSettings(page, 'seq')
     await expect(settingsRow(page, 'Reminder 1').locator('input[type="number"]')).toHaveValue('36')
   })

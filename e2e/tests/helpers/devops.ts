@@ -49,3 +49,13 @@ export async function openSettings(page: Page, tab: string) {
 
 /** Dismisses the top window with Escape, as a user does. */
 export const pressEscape = (page: Page) => page.keyboard.press('Escape')
+
+/** Hours of the client follow-up step at `index` as saved in the browser store (the mock backend commits after a short delay). */
+export const storedLadderHours = (page: Page, index: number) =>
+  page.evaluate(
+    (i: number) => {
+      const db = JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}')
+      return db.devops?.settings?.ladder?.[i]?.hours ?? null
+    },
+    index,
+  )
