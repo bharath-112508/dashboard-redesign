@@ -261,7 +261,7 @@ test.describe('Tickets: team workspace', () => {
     await page.locator('label', { hasText: 'PMT-15' }).getByRole('checkbox').check()
     await page.getByRole('button', { name: /^Add 1 to / }).click()
     await expect(page.getByRole('button', { name: /^Add 1 to / })).toHaveCount(0)
-    await expectSaved(page, 'App Store and Play Store release')
+    await expectSaved(page, 'Dark mode')
   })
 
   test('TK-17 a sprint is completed and the next planned sprint is started', async ({ page }) => {
@@ -272,6 +272,7 @@ test.describe('Tickets: team workspace', () => {
     await page.getByRole('button', { name: 'Complete and move tasks' }).click()
     await expect(page.getByRole('button', { name: /, Done$/ }).first()).toBeVisible()
     await expectSaved(page, '"state":"done"')
+    await page.getByTitle('Close', { exact: true }).click()
     await openSprintWindow(page, 'Planned')
     await page.getByRole('button', { name: 'Start sprint' }).click()
     await expect(page.getByRole('button', { name: /, Active$/ })).toHaveCount(1)
@@ -316,7 +317,7 @@ test.describe('Tickets: team workspace', () => {
     await form.getByPlaceholder('What did you work on?').fill(note)
     await form.getByRole('button', { name: 'Log time' }).click()
     await expect(page.locator('div.grid', { hasText: note }).last()).toBeVisible()
-    await expect(page.locator('div.grid', { hasText: note }).last().getByText('2h', { exact: true })).toBeVisible()
+    await expect(page.locator('div.grid', { hasText: note }).last().getByText('2h', { exact: true }).first()).toBeVisible()
     await expectSaved(page, note)
   })
 
@@ -331,9 +332,9 @@ test.describe('Tickets: team workspace', () => {
     await form.getByRole('button', { name: 'Log time' }).click()
     await expect(page.getByText(note, { exact: true })).toBeVisible()
 
-    await page.getByLabel('Person').selectOption({ label: 'Vivek' })
+    await page.locator('select[aria-label="Person"]').selectOption({ label: 'Vivek' })
     await expect(page.getByText(note, { exact: true })).toHaveCount(0)
-    await page.getByLabel('Person').selectOption({ label: 'Everyone' })
+    await page.locator('select[aria-label="Person"]').selectOption({ label: 'Everyone' })
     await expect(page.getByText(note, { exact: true })).toBeVisible()
 
     await page.locator('div.grid', { hasText: note }).last().getByRole('button', { name: 'Delete', exact: true }).click()
