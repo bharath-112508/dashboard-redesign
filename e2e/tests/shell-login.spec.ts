@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { signIn, USERS, type Role } from './helpers/session'
 import {
   EXPECTED_NAV,
+  shellBack,
   clickNav,
   loginWith,
   mainNav,
@@ -14,7 +15,6 @@ import {
   signOutFromSidebar,
 } from './helpers/shell'
 
-const BACK = { name: 'Back', exact: true } as const
 const BAD_PASSWORD_MESSAGE = 'That password is not right.'
 
 test.describe('Login (01-login.md)', () => {
@@ -130,10 +130,11 @@ test.describe('App shell (00-shell.md)', () => {
     await page.getByRole('button', { name: 'Collapse menu' }).click()
     await expect(sidebar(page)).toHaveCSS('width', '60px')
     await expect(page.getByRole('button', { name: 'Expand menu' })).toBeVisible()
-    await expect(mainNav(page).getByRole('link', { name: 'Companies', exact: true })).toBeHidden()
+    await expect(mainNav(page).locator('a span')).toHaveCount(0)
     await page.getByRole('button', { name: 'Expand menu' }).click()
     await expect(sidebar(page)).toHaveCSS('width', '232px')
     await expect(mainNav(page).getByRole('link', { name: 'Companies', exact: true })).toBeVisible()
+    await expect(mainNav(page).locator('a span').first()).toBeVisible()
   })
 
   test('SH-02 the collapsed state is remembered after reload (vt.sideCol)', async ({ page }) => {
@@ -151,14 +152,14 @@ test.describe('App shell (00-shell.md)', () => {
     await expect(page.getByText('Search pages, tickets, projects, companies and people.')).toBeVisible()
     const results = await search(page, 'Dash')
     await expect(results.getByText('Pages', { exact: true })).toBeVisible()
-    await expect(results.getByRole('option', { name: /^Dashboard/ })).toBeVisible()
+    await expect(results.getByRole('option').filter({ hasText: 'Dashboard' }).first()).toBeVisible()
   })
 
   test('SH-03 results are grouped by Projects, Companies and People for a matching term', async ({ page }) => {
     await signIn(page, 'super')
     const results = await search(page, 'Daco')
     await expect(results.getByText('Companies', { exact: true })).toBeVisible()
-    await expect(results.getByRole('option', { name: /^Daco/ }).first()).toBeVisible()
+    await expect(results.getByRole('option').filter({ hasText: 'Daco platform' }).first()).toBeVisible()
     await search(page, 'Daco platform')
     await expect(results.getByText('Projects', { exact: true })).toBeVisible()
     await search(page, 'Chary')
@@ -197,41 +198,41 @@ test.describe('App shell (00-shell.md)', () => {
     await signIn(page, 'super')
     await clickNav(page, 'Companies')
     await search(page, 'Dash')
-    await page.getByRole('option', { name: /^Dashboard/ }).click()
+    await page.getByRole('option').filter({ hasText: 'Dashboard' }).first().click()
     await expect(page).toHaveURL(/\/dashboard$/)
   })
 
   test('SH-04 opening a ticket result goes to the Tickets page with that ticket', async ({ page }) => {
     await signIn(page, 'super')
     await search(page, 'Link tickets')
-    await page.getByRole('option', { name: /Link tickets to the DevOps board/ }).click()
+    await page.getByRole('option').filter({ hasText: 'Link tickets to the DevOps board' }).first().click()
     await expect(page).toHaveURL(/\/tickets\/board\?ticket=4$/)
   })
 
   test('SH-04 opening a project result goes to Projects', async ({ page }) => {
     await signIn(page, 'super')
     await search(page, 'Daco platform')
-    await page.getByRole('option', { name: /^Daco platform/ }).click()
+    await page.getByRole('option').filter({ hasText: 'Daco platform' }).first().click()
     await expect(page).toHaveURL(/\/projects$/)
   })
 
   test('SH-04 opening a company result goes to Companies', async ({ page }) => {
     await signIn(page, 'super')
     await search(page, 'Nordlys')
-    await page.getByRole('option', { name: /^Nordlys Energi/ }).click()
+    await page.getByRole('option').filter({ hasText: 'Nordlys Energi' }).first().click()
     await expect(page).toHaveURL(/\/companies$/)
   })
 
   test('SH-04 opening a person result goes to Users', async ({ page }) => {
     await signIn(page, 'super')
     await search(page, 'Sofia')
-    await page.getByRole('option', { name: /^Sofia/ }).click()
+    await page.getByRole('option').filter({ hasText: 'Sofia' }).first().click()
     await expect(page).toHaveURL(/\/users$/)
   })
 
   test('SH-05 Back is disabled with no history and returns to the previous page once navigated', async ({ page }) => {
     await signIn(page, 'super')
-    const back = page.getByRole('button', BACK)
+    const back = shellBack(page)
     await expect(back).toBeDisabled()
     await clickNav(page, 'Companies')
     await expect(back).toBeEnabled()
@@ -242,8 +243,10 @@ test.describe('App shell (00-shell.md)', () => {
 
   test('SH-05 Back is not shown on the Clients page, which carries its own back link', async ({ page }) => {
     await signIn(page, 'super')
+    await page.goto('/companies')
+    await expect(shellBack(page)).toHaveCount(1)
     await page.goto('/clients/board')
-    await expect(page.locator('button[title^="Back"]')).toHaveCount(0)
+    await expect(shellBack(page)).toHaveCount(0)
   })
 
   test('SH-06 the sidebar profile row opens Profile settings with the session draft', async ({ page }) => {

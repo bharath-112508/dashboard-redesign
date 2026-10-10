@@ -66,7 +66,7 @@ test.describe('My timesheet', () => {
       await expect(page.getByText('2h 30m logged', { exact: true })).toBeVisible()
       await expect(page.getByText('E2E ticket entry')).toBeVisible()
 
-      await expect.poll(async () => (await storedDb(page)).entries.some(e => e.notes === 'E2E ticket entry')).toBe(true)
+      await expect.poll(async () => ((await storedDb(page)).entries ?? []).some(e => e.notes === 'E2E ticket entry')).toBe(true)
       await page.reload()
       await expect(page.getByText('2h 30m logged', { exact: true })).toBeVisible({ timeout: 8_000 })
       await expect(page.getByText('E2E ticket entry')).toBeVisible()
@@ -98,9 +98,9 @@ test.describe('My timesheet', () => {
     await expect(page.getByText('1h logged', { exact: true })).toBeVisible()
     await expect(page.locator('span').filter({ hasText: /^Code review$/ })).toBeVisible()
 
-    await expect.poll(async () => (await storedDb(page)).entries.some(e => e.area === 'Code review')).toBe(true)
+    await expect.poll(async () => ((await storedDb(page)).entries ?? []).some(e => e.area === 'Code review')).toBe(true)
     await page.reload()
-    await expect(page.getByRole('listitem').filter({ hasText: 'Code review' })).toBeVisible({ timeout: 8_000 })
+    await expect(page.locator('span').filter({ hasText: /^Code review$/ })).toBeVisible({ timeout: 8_000 })
   })
 
   test('TS-04 text mode: a custom task needs a description', async ({ page }) => {
@@ -135,7 +135,7 @@ test.describe('My timesheet', () => {
     await expect(page.getByText('This week is locked.')).toBeVisible()
     await expect(logButton(page)).toBeDisabled()
 
-    await expect.poll(async () => (await storedDb(page)).weekSubmissions.length).toBe(1)
+    await expect.poll(async () => ((await storedDb(page)).weekSubmissions ?? []).length).toBe(1)
     await page.reload()
     await expect(page.getByRole('button', { name: 'Reopen week', exact: true })).toBeVisible({ timeout: 8_000 })
   })
@@ -147,7 +147,7 @@ test.describe('My timesheet', () => {
     await expect(page.getByRole('button', { name: 'Submit week', exact: true })).toBeVisible()
     await expect(logButton(page)).toBeEnabled()
 
-    await expect.poll(async () => (await storedDb(page)).weekSubmissions.length).toBe(0)
+    await expect.poll(async () => ((await storedDb(page)).weekSubmissions ?? []).length).toBe(0)
     await page.reload()
     await expect(page.getByRole('button', { name: 'Submit week', exact: true })).toBeVisible({ timeout: 8_000 })
   })

@@ -38,6 +38,9 @@ export async function openProfile(page: Page) {
   await expect(profileDialog(page)).toBeVisible()
 }
 
+/** The Back button the shell renders above the page (not the page's own back link). */
+export const shellBack = (page: Page) => page.locator('div.px-7.pt-4').getByRole('button', { name: 'Back', exact: true })
+
 /** Signs out from the sidebar. */
 export async function signOutFromSidebar(page: Page) {
   await sidebar(page).getByRole('button', { name: 'Sign out' }).click()
