@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { useDevops, useWorkspace } from '../../api/queries'
+import { useDevops } from '../../api/queries'
 import { CheckSquare, Icon, PATHS, Scrim } from '../../components/ui'
 import { range } from '../../lib/dates'
 import { devopsTone, pal } from '../../lib/theme'
 import { useOverlay, useUi } from '../../state/ui'
+import { useScopedWorkspace } from '../../state/access'
 import { sprintsOf } from '../../domain/tasks'
 
 export const SPRINT_DOT = { done: '#3F9079', active: '#4870E8', planned: '#A9B6C5' }
@@ -59,7 +60,7 @@ const chevron = <Icon d={PATHS.chevron} size={11} sw={2.8} className="text-ink-2
 /** Epic and sprint pickers, "Report a bug" and the DevOps status. */
 export function EpicBar({ showSprints }: { showSprints: boolean }) {
   const ui = useUi()
-  const ws = useWorkspace().data
+  const ws = useScopedWorkspace()
   // The DevOps board owns the projects; the epic bar only shows the linked one's status.
   const devops = useDevops().data
   const overlay = useOverlay()
@@ -107,7 +108,7 @@ export function EpicBar({ showSprints }: { showSprints: boolean }) {
         ? range(eSp[0].start, eSp[eSp.length - 1].end) + ' · ' + eSp.length + ' sprints'
         : ''
 
-  const project = devops.projects.find(x => x.key === ws.devopsLinks[ui.epic]) || devops.projects[0]
+  const project = devops.projects.find(x => x.key === ws.devopsLinks[ui.epic])
   const [dvC, dvBg, dvDot] = devopsTone(project?.infra ?? '')
 
   return (

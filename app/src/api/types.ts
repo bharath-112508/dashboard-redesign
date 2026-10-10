@@ -412,3 +412,17 @@ export interface Db {
   notifications: Notification[]
   access: AccessConfig
 }
+
+/**
+ * A member a client company added to its team on the Clients portal. Company
+ * contacts are not copied here: the team reads them from the company, and this
+ * list only holds people who are not contacts (DECISIONS item 3).
+ */
+export interface ClientTeamMember {
+  id: string
+  /** The client company (Company.id) the member belongs to. */
+  companyId: string
+  name: string
+  email: string
+  title?: string
+}

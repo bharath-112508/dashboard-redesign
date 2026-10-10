@@ -223,6 +223,8 @@ const hydrate = async (raw: string | null): Promise<Db> => {
     setSaveProblem(DAMAGED)
     return createSeed()
   }
+  // Stores written before the Clients portal have no client team yet.
+  if (!Array.isArray(parsed.clientTeam)) parsed.clientTeam = []
 
   const ids = new Set<string>()
   eachUrlHolder(parsed, o => {

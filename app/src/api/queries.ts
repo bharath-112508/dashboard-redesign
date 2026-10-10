@@ -19,9 +19,10 @@ export const qk = {
   access: ['access'] as const,
   leave: ['leave'] as const,
   notifications: ['notifications'] as const,
+  clientTeam: ['clientTeam'] as const,
 }
 
-const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'weekSubmissions', 'questions', 'requests', 'devops', 'people', 'companies', 'internalProjects', 'access', 'leave', 'notifications']
+const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'weekSubmissions', 'questions', 'requests', 'devops', 'people', 'companies', 'internalProjects', 'access', 'leave', 'notifications', 'clientTeam']
 
 export const useWorkspace = () => useQuery({ queryKey: qk.workspace, queryFn: () => server.get('workspace') })
 export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => server.get('tasks') })
@@ -31,6 +32,7 @@ export const useRequests = () => useQuery({ queryKey: qk.requests, queryFn: () =
 export const useDevops = () => useQuery({ queryKey: qk.devops, queryFn: () => server.get('devops') })
 export const useCompanies = () => useQuery({ queryKey: qk.companies, queryFn: () => server.get('companies') })
 export const useInternalProjects = () => useQuery({ queryKey: qk.internalProjects, queryFn: () => server.get('internalProjects') })
+export const useClientTeam = () => useQuery({ queryKey: qk.clientTeam, queryFn: () => server.get('clientTeam') })
 
 /**
  * Builds a Db from the cache so the shared reducer can run on it. Only the

@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useSend, useTasks, useWorkspace } from '../../api/queries'
+import { useSend } from '../../api/queries'
 import type { ChatFile } from '../../api/types'
 import { CloseButton, Icon, PATHS } from '../../components/ui'
 import { todayLabel, TODAY } from '../../lib/dates'
 import { readFiles } from '../../lib/files'
 import { useOverlay, useUi } from '../../state/ui'
+import { useActorName, useScopedTasks, useScopedWorkspace } from '../../state/access'
 import { activeSprint, fileExt, nextTaskId } from '../../domain/tasks'
 
 const PRIOS = ['Low', 'Medium', 'High', 'Critical'] as const
@@ -32,9 +33,10 @@ const DOT = { Low: '#A9B6C5', Medium: '#4870E8', High: '#B98A2F', Critical: '#C0
 export function ReportBugModal() {
   const overlay = useOverlay()
   const ui = useUi()
-  const ws = useWorkspace().data!
-  const tasks = useTasks().data ?? []
+  const ws = useScopedWorkspace()!
+  const tasks = useScopedTasks() ?? []
   const send = useSend()
+  const me = useActorName()
   const [files, setFiles] = useState<ChatFile[]>([])
   const [drag, setDrag] = useState(false)
   const close = () => overlay.close('report')
@@ -85,7 +87,7 @@ export function ReportBugModal() {
         sprint: activeSprint(ws.sprints, ui.epic)?.id ?? null,
         start: TODAY,
         time: {},
-        acts: [{ kind: 'history', who: 'Client', what: 'reported this bug', when: 'just now' }],
+        acts: [{ kind: 'history', who: me, what: 'reported this bug', when: 'just now' }],
         clientBug: { reported: ds, chat: [] },
       },
     })

@@ -5,6 +5,7 @@ import { PEOPLE_SEED } from './people/seed'
 import { COMPANIES_SEED } from './companies/seed'
 import { INTERNAL_PROJECTS_SEED } from './projects/seed'
 import { USERS_SEED } from './users/seed'
+import { CLIENT_TEAM_SEED } from './clients/seed'
 
 const hist = (who: string, what: string, when: string): Activity => ({ kind: 'history', who, what, when })
 
@@ -247,6 +248,7 @@ export const createSeed = (): Db => {
     companies: COMPANIES_SEED,
     internalProjects: INTERNAL_PROJECTS_SEED,
     ...USERS_SEED,
+    clientTeam: CLIENT_TEAM_SEED,
     questions: [
       {
         id: 1,

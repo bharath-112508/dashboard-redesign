@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { useTasks } from '../../api/queries'
 import type { Priority, TaskType } from '../../api/types'
 import { Avatar, Icon, PATHS, Scrim } from '../../components/ui'
-import { ME, person, PRIO, PRIO_ICON, PRIO_ICON_COLOR, PRIO_LIST, TYPE_ICON, TYPE_LIST, TYPES } from '../../lib/theme'
+import { PRIO, PRIO_ICON, PRIO_ICON_COLOR, PRIO_LIST, TYPE_ICON, TYPE_LIST, TYPES } from '../../lib/theme'
+import { initials } from '../../lib/media'
+import { useActorName, useScopedTasks } from '../../state/access'
 import { useUi } from '../../state/ui'
 
 type Opt = { v: string; label: string; vb: string; path: string; ic: string; soft: string; n: number }
@@ -80,12 +81,12 @@ function FilterDropdown({
 /** Search, "My tasks" and the type and priority filters above the board. */
 export function Toolbar() {
   const ui = useUi()
-  const tasks = useTasks().data ?? []
+  const tasks = useScopedTasks() ?? []
   const [open, setOpen] = useState<'t' | 'p' | null>(null)
   const EPS = ui.epSel.includes(ui.epic) ? ui.epSel : [ui.epic]
   const base = tasks.filter(t => !t.parent && EPS.includes(t.epic))
   const all: Opt = { v: '', label: 'All', vb: '0 0 24 24', path: 'M4 6h16M4 12h16M4 18h16', ic: '#22354C', soft: '#EEF3FB', n: base.length }
-  const me = person(ME)
+  const me = useActorName()
 
   return (
     <div className="mb-[18px] mt-3 flex flex-wrap items-center gap-2">
@@ -114,7 +115,7 @@ export function Toolbar() {
           color: ui.mine ? '#1F3FAF' : '#1B2D45',
         }}
       >
-        <Avatar i={me.i} bg="#1B2D45" size={24} radius={6} font={10.5} className="!font-bold" />
+        <Avatar i={initials(me)} bg="#1B2D45" size={24} radius={6} font={10.5} className="!font-bold" />
         My tasks
       </button>
       {ui.hasFilters && (
