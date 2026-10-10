@@ -91,7 +91,5 @@ export const useLiveSync = () => {
   useEffect(() => server.subscribe(() => qc.invalidateQueries()), [qc])
 }
 
-export const useInternalProjects = () =>
-  useQuery({ queryKey: qk.internalProjects, queryFn: () => server.get('internalProjects') })
 export const useWeekSubmissions = () =>
   useQuery({ queryKey: qk.weekSubmissions, queryFn: () => server.get('weekSubmissions') })

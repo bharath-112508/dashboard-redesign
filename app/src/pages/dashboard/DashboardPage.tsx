@@ -35,7 +35,6 @@ function DashboardView({ me }: { me: Session }) {
             tickets={tasks.filter(t => !t.parent && t.status !== 'done')}
             statuses={statuses}
             allTasks={tasks}
-            allEntries={entries}
             todays={entries.filter(e => e.userId === me.personId && e.date === today)}
             today={today}
             dayShort={model.dayShort}

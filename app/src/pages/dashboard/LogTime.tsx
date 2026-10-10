@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSend } from '../../api/queries'
 import { hm } from '../../api/dashboard/time'
+import { logTime } from '../../api/timesheet'
 import { avatarOf } from '../../api/people/avatar'
 import type { Person, Session, Status, Task, TimeEntry } from '../../api/types'
 import { statusOf, taskKey } from '../../domain/tasks'
@@ -47,7 +48,6 @@ interface Props {
   /** All tasks, for looking up the title of a logged entry. */
   allTasks: Task[]
   /** Every time entry, to pick the next id. */
-  allEntries: TimeEntry[]
   /** The signed-in person's entries for today. */
   todays: TimeEntry[]
   today: string
@@ -55,7 +55,7 @@ interface Props {
 }
 
 /** The quick-log card for developers and DevOps: writes a TimeEntry through the shared time command. */
-export function LogTime({ me, person, tickets, statuses, allTasks, allEntries, todays, today, dayShort }: Props) {
+export function LogTime({ me, person, tickets, statuses, allTasks, todays, today, dayShort }: Props) {
   const send = useSend()
   const { control, register, handleSubmit, reset, setValue, getValues } = useForm<LogForm>({
     resolver: zodResolver(schema),
@@ -70,11 +70,7 @@ export function LogTime({ me, person, tickets, statuses, allTasks, allEntries, t
 
   const onSave = handleSubmit(v => {
     const task = v.mode === 'ticket' ? allTasks.find(t => t.id === +v.task) : undefined
-    const id = Math.max(0, ...allEntries.map(e => e.id)) + 1
-    send({
-      type: 'entry.create',
-      entry: {
-        id,
+    send(logTime({
         date: today,
         userId: me.personId,
         user: me.name,
@@ -85,12 +81,11 @@ export function LogTime({ me, person, tickets, statuses, allTasks, allEntries, t
         notes: v.notes,
         bill: v.billMin / 60,
         non: v.nonMin / 60,
-      },
-    })
+    }))
     reset({ ...BLANK, mode: v.mode })
   })
 
-  const remove = (id: number) => send({ type: 'entry.delete', id })
+  const remove = (id: number) => send({ type: 'time.remove', id })
   const byId = useMemo(() => new Map(allTasks.map(t => [t.id, t])), [allTasks])
 
   const saveBg = valid ? '#3F9079' : '#A9B6C5'
