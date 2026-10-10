@@ -29,6 +29,7 @@ const {
     storyFindByIdMock,
     sprintFindByIdMock,
     userFindMock,
+    userFindByIdMock,
     loadProjectForCallerMock,
     buildProjectVisibilityFilterMock,
     recordAuditMock,
@@ -46,6 +47,7 @@ const {
     storyFindByIdMock: vi.fn(),
     sprintFindByIdMock: vi.fn(),
     userFindMock: vi.fn(),
+    userFindByIdMock: vi.fn(),
     loadProjectForCallerMock: vi.fn(),
     buildProjectVisibilityFilterMock: vi.fn(),
     recordAuditMock: vi.fn(),
@@ -75,7 +77,7 @@ vi.mock('../models/sprint.model.js', () => ({
 }));
 
 vi.mock('../models/user.model.js', () => ({
-    User: { find: userFindMock },
+    User: { find: userFindMock, findById: userFindByIdMock },
 }));
 
 vi.mock('../models/project.model.js', () => ({
@@ -244,6 +246,10 @@ beforeEach(() => {
     // Default: every create reserves key #1 unless a test overrides it.
     projectFindOneAndUpdateMock.mockReturnValue({
         lean: () => Promise.resolve({ task_seq: 1 }),
+    });
+    // Default: getTask's reporter lookup finds 'Rita Mehta'.
+    userFindByIdMock.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve({ full_name: 'Rita Mehta' }) }),
     });
     // Default: no logged time unless a getTask test overrides it.
     sumLoggedTimeForTaskMock.mockResolvedValue({
@@ -1492,6 +1498,17 @@ describe('project visibility', () => {
         expect(sumLoggedTimeForTaskMock).toHaveBeenCalledWith(task._id);
         expect(out.time_tracking.logged_minutes).toBe(330);
         expect(out.time_tracking.billable_minutes).toBe(300);
+    });
+
+    // Regression: ISSUE-021 — clients can't read /users/:id, so the issue view
+    // showed Reporter "—". The reporter's name now rides on the task.
+    it('getTask embeds the reporter name', async () => {
+        const task = makeTask();
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(makeProject());
+
+        const out = (await svc.getTask(task._id, adminCaller())) as { reporter: { id: string; full_name: string } };
+        expect(out.reporter).toEqual({ id: task.created_by.toString(), full_name: 'Rita Mehta' });
     });
 });
 

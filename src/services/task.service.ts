@@ -763,10 +763,16 @@ export const getTask = async (taskId: Types.ObjectId, caller: ProjectCaller): Pr
     const { task, project } = await loadTaskAndProject(taskId, caller);
     // Actual time spent, rolled up from every timesheet entry on this task
     // (all users) — powers the Estimate popover on the detail page.
-    const time_tracking = await sumLoggedTimeForTask(task._id);
+    // The reporter's display name rides along so callers without `user.read`
+    // (clients) can still show who raised it — name only, nothing else.
+    const [time_tracking, reporterDoc] = await Promise.all([
+        sumLoggedTimeForTask(task._id),
+        User.findById(task.created_by).select('full_name').lean<{ full_name: string } | null>(),
+    ]);
     return {
         ...toPublic(task),
         time_tracking,
+        reporter: { id: task.created_by.toString(), full_name: reporterDoc?.full_name ?? null },
         project: {
             id: project._id.toString(),
             name: project.name,
