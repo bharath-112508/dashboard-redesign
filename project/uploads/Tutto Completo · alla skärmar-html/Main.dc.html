@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<title>Tutto Completo, alla skärmar</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&amp;family=Zilla+Slab:wght@700&amp;family=DM+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#1E4D2B}a:hover{color:#15301F}
+</style>
+</helmet>
+<div style="width: 4680px; height: 10500px; box-sizing: border-box; padding: 120px; background: #F3F1EB; color: #111311; font-family: 'Schibsted Grotesk', system-ui, sans-serif; display: flex; flex-direction: column; gap: 120px">
+
+<header style="display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; align-items: center; gap: 32px">
+<div style="display: inline-flex; flex-direction: column; align-items: center; justify-content: center; padding: 14px 26px; border: 4px solid #1E4D2B; border-radius: 14px; color: #1E4D2B; font-family: 'Zilla Slab', Georgia, serif; font-weight: 700; font-size: 34px; line-height: 0.95; letter-spacing: 0.04em; transform: rotate(-3deg)"><span>TUTTO</span><span>COMPLETO</span></div>
+<p style="margin: 0; font-family: 'DM Mono', ui-monospace, monospace; font-size: 24px; letter-spacing: 0.06em; text-transform: uppercase; color: #696C66">Viljetech · Tutto Completo AB · Frontend phase, October 2026</p>
+</div>
+<h1 style="margin: 0; font-weight: 800; font-size: 128px; line-height: 1.0; letter-spacing: -0.035em">Tutto Completo, every <span style="color: #1E4D2B">screen</span></h1>
+<p style="margin: 0; max-width: 2100px; font-size: 34px; line-height: 1.45">The customer app, the staff app and the admin portal after the design update of 5 October 2026: support tickets instead of direct chat, a confirmed map pin on every address, live tracking on moving day, the three-step order line with a full timeline on the booking, and Före-bilder in the crew checklist. Captured from the working prototype on its demo data; the maps here are the drawn card, the prototype shows Google Maps when it may. Swedish is the default; every screen also has English.</p>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px 48px; margin-top: 12px">
+<p style="margin: 0; font-size: 26px"><strong>Kundapp</strong> 21 screens · phone 390 × 844</p>
+<p style="margin: 0; font-size: 26px"><strong>Personalapp</strong> 3 screens · phone 390 × 844</p>
+<p style="margin: 0; font-size: 26px"><strong>Admin</strong> 13 screens · desktop 1440 × 900</p>
+<p style="margin: 0; font-family: 'DM Mono', ui-monospace, monospace; font-size: 22px; color: #696C66">Pine #1E4D2B on white and paper #F3F1EB · Schibsted Grotesk, Zilla Slab, DM Mono · pill buttons 48 / 36 px · inputs 52 px</p>
+</div>
+</header>
+
+<section style="display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-weight: 800; font-size: 72px; line-height: 1.05; letter-spacing: -0.025em">Kundapp <span style="font-weight: 500; font-size: 30px; letter-spacing: 0; color: #696C66">customer app, phone</span></h2>
+<div style="display: grid; grid-template-columns: repeat(7, 390px); gap: 64px 56px; width: 3066px">
+<sc-for list="{{kund}}" as="s" hint-placeholder-count="21">
+<figure style="margin: 0; width: 390px; display: flex; flex-direction: column; gap: 14px">
+<div style="width: 390px; height: 844px; border-radius: 28px; overflow: hidden; border: 1px solid #E6E3DC; background: #FFFFFF">
+<img src="{{s.src}}" alt="{{s.en}}" style="display: block; width: 390px; height: 844px; object-fit: cover; object-position: top">
+</div>
+<figcaption style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-weight: 700; font-size: 22px; line-height: 1.25">{{s.sv}}</span>
+<span style="font-size: 18px; line-height: 1.35; color: #696C66">{{s.en}}</span>
+</figcaption>
+</figure>
+</sc-for>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-weight: 800; font-size: 72px; line-height: 1.05; letter-spacing: -0.025em">Personalapp <span style="font-weight: 500; font-size: 30px; letter-spacing: 0; color: #696C66">staff app, phone</span></h2>
+<div style="display: grid; grid-template-columns: repeat(3, 390px); gap: 64px 56px; width: 1282px">
+<sc-for list="{{personal}}" as="s" hint-placeholder-count="3">
+<figure style="margin: 0; width: 390px; display: flex; flex-direction: column; gap: 14px">
+<div style="width: 390px; height: 844px; border-radius: 28px; overflow: hidden; border: 1px solid #E6E3DC; background: #FFFFFF">
+<img src="{{s.src}}" alt="{{s.en}}" style="display: block; width: 390px; height: 844px; object-fit: cover; object-position: top">
+</div>
+<figcaption style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-weight: 700; font-size: 22px; line-height: 1.25">{{s.sv}}</span>
+<span style="font-size: 18px; line-height: 1.35; color: #696C66">{{s.en}}</span>
+</figcaption>
+</figure>
+</sc-for>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-weight: 800; font-size: 72px; line-height: 1.05; letter-spacing: -0.025em">Admin <span style="font-weight: 500; font-size: 30px; letter-spacing: 0; color: #696C66">office portal, desktop</span></h2>
+<div style="display: grid; grid-template-columns: repeat(3, 1440px); gap: 64px 56px; width: 4432px">
+<sc-for list="{{admin}}" as="s" hint-placeholder-count="13">
+<figure style="margin: 0; width: 1440px; display: flex; flex-direction: column; gap: 14px">
+<div style="width: 1440px; height: 900px; border-radius: 20px; overflow: hidden; border: 1px solid #E6E3DC; background: #FFFFFF">
+<img src="{{s.src}}" alt="{{s.en}}" style="display: block; width: 1440px; height: 900px; object-fit: cover; object-position: top">
+</div>
+<figcaption style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-weight: 700; font-size: 22px; line-height: 1.25">{{s.sv}}</span>
+<span style="font-size: 18px; line-height: 1.35; color: #696C66">{{s.en}}</span>
+</figcaption>
+</figure>
+</sc-for>
+</div>
+</section>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"":{"width":4680,"height":10500}}'>
+class Component extends DCLogic {
+renderVals() {
+const b = (id) => '/_blob/' + id;
+return {
+kund: [
+{ src: b('73524a0cd730f1e6e5baa7c3ecd838dd'), sv: 'Hem, ny besökare', en: 'Home, new visitor' },
+{ src: b('2c8a8449a4c5d3f64f6a235f7008c4cf'), sv: 'Förfrågan, välj tjänst', en: 'Request, choose the service' },
+{ src: b('f5bc467a9a1d38c5190ae80de7c1521c'), sv: 'Var flyttar du från? Karta', en: 'Moving from, confirm the pin' },
+{ src: b('292209512ba265882d37fb36a9a272f3'), sv: 'Platsen bekräftad', en: 'Location confirmed' },
+{ src: b('bc91a3e7c916d5635e65e5ea84a9f4cb'), sv: 'Hem, offerten är klar', en: 'Home, the quote is ready' },
+{ src: b('9736e007cece105d84e51358e21bce7d'), sv: 'Offert till företag', en: 'Company quote, excl. VAT' },
+{ src: b('e9afcd1543541cba243ec1652a3dcc95'), sv: 'Hem, flytten är bokad', en: 'Home, move booked' },
+{ src: b('1be5483eee99b0002fa78672db915c63'), sv: 'Bokningen med tidslinje', en: 'Booking with the timeline' },
+{ src: b('0c4aee4de6a59f111e9d66469a0bd54b'), sv: 'Bokningen, kartnålar', en: 'Booking, the confirmed pins' },
+{ src: b('d6174fea7f8e96bec6cfde8103f0b5e1'), sv: 'Förbered så här', en: 'Prepare for moving day' },
+{ src: b('493479ac9ba10cd6bcf327206695c626'), sv: 'Hem, imorgon kommer vi', en: 'Home, we come tomorrow' },
+{ src: b('d7c447cb756133336722e52f92acbb12'), sv: 'Hem på flyttdagen', en: 'Home on moving day' },
+{ src: b('cdf191ffa8a485bdf5c90da504599692'), sv: 'Bokningen, live', en: 'Booking, live' },
+{ src: b('d6f7422588395b15fb960c08ea2c3327'), sv: 'Följ på kartan', en: 'Live tracking' },
+{ src: b('e20587807050581c8b926831ac85e997'), sv: 'Ärenden', en: 'Orders' },
+{ src: b('3e7bf6c8a730d636af4422464db7a5d2'), sv: 'Support', en: 'Support' },
+{ src: b('cac75d106a2f48503b81730be3754376'), sv: 'Supportärende', en: 'Ticket thread' },
+{ src: b('699ed82f09193c860c6d88928343a56d'), sv: 'Nytt supportärende', en: 'New ticket' },
+{ src: b('db2be64416776d563ed17df3389f1318'), sv: 'Nytt supportärende, ämne', en: 'New ticket, booking and topic' },
+{ src: b('d6dbbfaf97bb53ad20bb698998580a32'), sv: 'Profil', en: 'Profile' },
+{ src: b('cdda3814922f2066de950612d978efd3'), sv: 'Notiser', en: 'Notifications' }
+],
+personal: [
+{ src: b('a0d43496e4998977f61d81929b867ad3'), sv: 'Idag', en: 'Today’s jobs' },
+{ src: b('b1dd8ceefc5c2ec1a6a972ac9e98eb16'), sv: 'Arbetsorder med kartor', en: 'Work order with maps' },
+{ src: b('c2465ab71eff382c1a353924ef0b8067'), sv: 'På plats, Före-bilder', en: 'On site, before photos' }
+],
+admin: [
+{ src: b('1b48eaaa16116e14ff8363e0fa3e6e06'), sv: 'Idag', en: 'Today: bookings and to-do' },
+{ src: b('df6509845d77c10082279d38a10350e4'), sv: 'Förfrågningar', en: 'Requests' },
+{ src: b('902339a0f00ada19df19485c82529557'), sv: 'En förfrågan med kartnålar', en: 'A request with the pins' },
+{ src: b('60575d4a97c6ad16bc9181a8e863d455'), sv: 'Offertverktyget', en: 'Quote builder' },
+{ src: b('3336be5346ca9c75c3ffe56059238ec1'), sv: 'Skickad offert', en: 'A sent quote' },
+{ src: b('57f33cfaa52f9c48cd57e245f7ef0751'), sv: 'Kalender', en: 'Calendar' },
+{ src: b('387a492bde1bbd3eeae7df3d7e4b6252'), sv: 'Bokning med kartnålar', en: 'Booking with the pins' },
+{ src: b('fc8bd951f61242342bbe2e4ea42876c8'), sv: 'Arbetsorder', en: 'Work order' },
+{ src: b('90c9866655914d1c9db654afe5dc4873'), sv: 'Fakturaunderlag', en: 'Invoice basis' },
+{ src: b('bb686b4d10147056e037bb6974a69f9b'), sv: 'Kund', en: 'Customer record' },
+{ src: b('dee4eb3c25ef9fc73d1336494b5dd248'), sv: 'Fortnox', en: 'Fortnox' },
+{ src: b('8b9d13e86858ab08b5a3512922509034'), sv: 'Meddelanden med supportärenden', en: 'Messages with tickets' },
+{ src: b('a554fb40fa44a08adc9b6b032cafa56d'), sv: 'Supportärenden (kommer)', en: 'Ticket inbox (not designed yet)' }
+]
+};
+}
+}
+</script>
+</body>
+</html>
