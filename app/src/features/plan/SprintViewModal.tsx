@@ -1,25 +1,18 @@
 import { useState } from 'react'
-import type { Sprint } from '../../api/types'
 import { useActorSend, useIsClient, useScopedTasks, useScopedWorkspace } from '../../state/access'
 import { CloseButton } from '../../components/ui'
 import { diff, range, short, TODAY, weeks } from '../../lib/dates'
 import { SPRINT_STATE } from '../../lib/theme'
-import { usePerson } from '../../state/page'
+import { usePage, usePerson } from '../../state/page'
+import { useMe } from '../tickets/useMe'
 import { useOverlay } from '../../state/ui'
-import { statusOf } from '../../domain/tasks'
+import { statusOf, taskKey } from '../../domain/tasks'
 import { useOpenTask } from '../useOpenTask'
 import { useEscape } from '../useEscape'
+import type { Command } from '../../api/commands'
 import { onActivate } from './keyboard'
 
 const C = 2 * Math.PI * 50
-
-/** Other sprints of the epic: the one running now (if any) and the next planned one. */
-const siblingsOf = (sprints: Sprint[], x: Sprint) => ({
-  active: sprints.find(y => y.epic === x.epic && y.state === 'active' && y.id !== x.id),
-  next: sprints
-    .filter(y => y.epic === x.epic && y.state === 'planned' && y.id !== x.id)
-    .sort((a, b) => (a.start < b.start ? -1 : 1))[0],
-})
 
 /** Sprint overview: goal, why it matters, goals checklist and tasks. */
 export function SprintViewModal({ id }: { id: string }) {
@@ -27,16 +20,55 @@ export function SprintViewModal({ id }: { id: string }) {
   const ws = useScopedWorkspace()!
   const tasks = (useScopedTasks() ?? []).filter(t => !t.parent)
   const send = useActorSend()
-  // Client users read sprints; starting, completing and planning them is the team's job.
-  const isClient = useIsClient()
-  const [picking, setPicking] = useState(false)
   const overlay = useOverlay()
   const openTask = useOpenTask()
   const close = () => overlay.close('sprint')
   useEscape(close)
+  const me = useMe()
+  const { side } = usePage()
+  const [picking, setPicking] = useState(false)
+  const [picked, setPicked] = useState<number[]>([])
+  const [confirming, setConfirming] = useState(false)
 
   const x = ws.sprints.find(y => y.id === id)
   if (!x) return null
+  // Lifecycle rules (decision 2): one active sprint per epic; completing a sprint moves its unfinished tasks to the next planned sprint of the epic, or to the backlog when there is none.
+  const activeOther = ws.sprints.find(y => y.epic === x.epic && y.state === 'active' && y.id !== x.id)
+  const nextPlanned = ws.sprints
+    .filter(y => y.epic === x.epic && y.state === 'planned' && y.id !== x.id)
+    .sort((a, b) => (a.start < b.start ? -1 : 1))[0]
+  const unfinished = tasks.filter(t => t.sprint === x.id && t.status !== 'done')
+  const backlog = tasks.filter(t => t.epic === x.epic && !t.sprint && t.status !== 'done')
+  // Client users read sprints; starting, completing and planning them is the team's job.
+  const isClient = useIsClient()
+  const teamSide = side === 'team' && !isClient
+  const startSprint = () => send({ type: 'sprint.update', id: x.id, patch: { state: 'active' } })
+  const completeSprint = () => {
+    const cmds: Command[] = [{ type: 'sprint.update', id: x.id, patch: { state: 'done', summary: 'Completed' } }]
+    unfinished.forEach(t =>
+      cmds.push({
+        type: 'task.update',
+        who: me.name,
+        id: t.id,
+        patch: { sprint: nextPlanned?.id ?? null },
+        log: nextPlanned ? 'moved it to ' + nextPlanned.name + ' when ' + x.name + ' completed' : 'moved it to the backlog when ' + x.name + ' completed',
+      }),
+    )
+    send({ type: 'batch', cmds })
+    setConfirming(false)
+  }
+  const addPicked = () => {
+    const cmds: Command[] = picked.map(tid => ({
+      type: 'task.update',
+      who: me.name,
+      id: tid,
+      patch: { sprint: x.id },
+      log: 'moved it to ' + x.name,
+    }))
+    if (cmds.length) send({ type: 'batch', cmds })
+    setPicked([])
+    setPicking(false)
+  }
   const [stInk, stSoft, stDot, stLabel] = SPRINT_STATE[x.state]
   const ts = tasks.filter(t => t.sprint === x.id)
   const dn = ts.filter(t => t.status === 'done').length
@@ -45,27 +77,6 @@ export function SprintViewModal({ id }: { id: string }) {
   const gd = x.goalsDone || {}
   const ep = ws.epics.find(e => e.id === x.epic)
   const goals = x.goals || []
-  const { active: runningNow, next: nextPlanned } = siblingsOf(ws.sprints, x)
-  const startSprint = () => send({ type: 'sprint.update', id: x.id, patch: { state: 'active' } })
-  /** Unfinished tasks move to the next planned sprint of the epic, or to the backlog when there is none. */
-  const completeSprint = () =>
-    send({
-      type: 'batch',
-      cmds: [
-        { type: 'sprint.update', id: x.id, patch: { state: 'done', summary: 'Completed' } },
-        ...ts
-          .filter(t => t.status !== 'done')
-          .map(t => ({
-            type: 'task.update' as const,
-            id: t.id,
-            patch: { sprint: nextPlanned?.id ?? null },
-            log: nextPlanned ? 'moved it to ' + nextPlanned.name : 'moved it to the backlog',
-          })),
-      ],
-    })
-  const backlog = tasks.filter(t => t.epic === x.epic && !t.sprint)
-  const actionBtn =
-    'h-[34px] cursor-pointer rounded-lg border-0 bg-white px-3.5 text-[13px] font-bold text-blue-ink shadow-[0_0_0_1.5px_#C9D2DD] hover:shadow-[0_0_0_1.5px_#4870E8] disabled:cursor-default disabled:opacity-50'
 
   return (
     <>
@@ -87,27 +98,6 @@ export function SprintViewModal({ id }: { id: string }) {
               </div>
               <div className="mt-2.5 font-serif text-[40px] leading-[1.05] text-ink">{x.name}</div>
               <div className="mt-3 max-w-[560px] text-[19px] font-semibold leading-[1.45] text-ink [text-wrap:pretty]">{x.goal || 'No sprint goal yet.'}</div>
-              {!isClient && (x.state === 'planned' || x.state === 'active') && (
-                <div className="mt-3.5 flex flex-wrap items-center gap-2">
-                  {x.state === 'planned' && (
-                    <button
-                      type="button"
-                      onClick={startSprint}
-                      disabled={!!runningNow}
-                      title={runningNow ? `Finish ${runningNow.name} first` : undefined}
-                      className={actionBtn}
-                    >
-                      Start sprint
-                    </button>
-                  )}
-                  {x.state === 'active' && (
-                    <button type="button" onClick={completeSprint} className={actionBtn}>
-                      Complete sprint
-                    </button>
-                  )}
-                  {runningNow && x.state === 'planned' && <span className="text-[12.5px] font-semibold text-ink-2">Finish {runningNow.name} first.</span>}
-                </div>
-              )}
               <div className="mt-3.5 flex items-center gap-2">
                 {x.members.map(n => {
                   const m = person(n)
@@ -121,6 +111,47 @@ export function SprintViewModal({ id }: { id: string }) {
                   )
                 })}
               </div>
+              {teamSide && x.state !== 'done' && (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {x.state === 'planned' && (
+                    <button
+                      type="button"
+                      onClick={startSprint}
+                      disabled={!!activeOther}
+                      title={activeOther ? 'Complete ' + activeOther.name + ' first' : undefined}
+                      className="h-9 cursor-pointer rounded-[10px] border-0 bg-blue px-3.5 text-[13.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      Start sprint
+                    </button>
+                  )}
+                  {x.state === 'active' && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(c => !c)}
+                      className="h-9 cursor-pointer rounded-[10px] border-[1.5px] border-line bg-white px-3.5 text-[13.5px] font-semibold text-ink"
+                    >
+                      Complete sprint
+                    </button>
+                  )}
+                </div>
+              )}
+              {teamSide && confirming && x.state === 'active' && (
+                <div className="mt-3 rounded-xl bg-white px-3.5 py-3 text-[13px] text-ink-2 shadow-[0_0_0_1.5px_#C9D2DD]">
+                  <div>
+                    {unfinished.length
+                      ? unfinished.length + ' unfinished task' + (unfinished.length === 1 ? '' : 's') + ' move to ' + (nextPlanned ? nextPlanned.name : 'the backlog') + '.'
+                      : 'Every task is done. Nothing moves.'}
+                  </div>
+                  <div className="mt-2.5 flex gap-2">
+                    <button type="button" onClick={completeSprint} className="h-8 cursor-pointer rounded-lg border-0 bg-ink px-3 text-[12.5px] font-semibold text-white">
+                      Complete and move tasks
+                    </button>
+                    <button type="button" onClick={() => setConfirming(false)} className="h-8 cursor-pointer rounded-lg border-[1.5px] border-line bg-white px-3 text-[12.5px] font-semibold text-ink">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="relative size-[140px] flex-none">
               <svg viewBox="0 0 120 120" width="140" height="140" style={{ transform: 'rotate(-90deg)' }}>
@@ -186,28 +217,47 @@ export function SprintViewModal({ id }: { id: string }) {
               <span className="ml-auto text-[12px] font-bold text-ink-2">
                 {dn}/{ts.length} done
               </span>
-            </div>
-            {!isClient && x.state !== 'done' && (
-              <div className="mt-3">
-                <button type="button" onClick={() => setPicking(!picking)} className={actionBtn}>
+              {teamSide && x.state !== 'done' && (
+                <button
+                  type="button"
+                  onClick={() => setPicking(p => !p)}
+                  className="ml-3 h-7 cursor-pointer rounded-lg border-0 bg-sky-2 px-2.5 text-[12px] font-semibold text-blue-ink"
+                >
                   + Add from backlog
                 </button>
-                {picking && (
-                  <div className="mt-2 flex flex-col gap-1.5">
-                    {backlog.map(t => (
-                      <div key={t.id} className="flex items-center gap-2 rounded-[10px] bg-canvas px-3 py-2 shadow-[inset_0_0_0_1.5px_#E4EAF0]">
-                        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{t.title}</span>
-                        <button
-                          type="button"
-                          onClick={() => send({ type: 'task.update', id: t.id, patch: { sprint: x.id }, log: 'moved it to ' + x.name })}
-                          className="h-7 cursor-pointer rounded-md border-0 bg-blue px-2.5 text-[12px] font-bold text-white"
-                        >
-                          Add
-                        </button>
-                      </div>
-                    ))}
-                    {!backlog.length && <div className="text-[12.5px] text-muted">No backlog tasks in this epic.</div>}
-                  </div>
+              )}
+            </div>
+            {teamSide && picking && (
+              <div className="mt-3 rounded-xl bg-canvas p-2.5">
+                {backlog.length ? (
+                  <>
+                    <div className="flex flex-col gap-1">
+                      {backlog.map(t => {
+                        const on = picked.includes(t.id)
+                        return (
+                          <label key={t.id} className="flex cursor-pointer items-center gap-2.5 rounded-lg bg-white px-2.5 py-2 text-[13px]">
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={() => setPicked(p => (on ? p.filter(v => v !== t.id) : [...p, t.id]))}
+                            />
+                            <span className="min-w-0 flex-1 truncate font-semibold">{t.title}</span>
+                            <span className="flex-none text-[12px] text-ink-2">{taskKey(t)}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addPicked}
+                      disabled={!picked.length}
+                      className="mt-2.5 h-8 cursor-pointer rounded-lg border-0 bg-blue px-3 text-[12.5px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      Add {picked.length || ''} to {x.name}
+                    </button>
+                  </>
+                ) : (
+                  <div className="text-[13px] text-muted">No backlog tasks in this epic.</div>
                 )}
               </div>
             )}
