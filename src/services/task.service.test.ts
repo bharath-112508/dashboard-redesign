@@ -1223,6 +1223,41 @@ describe('assignTaskStory', () => {
 
 // ─── moveTaskToSprint ────────────────────────────────────────────────────
 
+// Regression: the Sprints tab offered completed sprints as "Move to" targets,
+// and the BE accepted it — the ticket vanished into a closed sprint.
+describe('moving into a completed sprint', () => {
+    const stubCompletedSprint = (project_id: Types.ObjectId): void => {
+        sprintFindByIdMock.mockReturnValueOnce({
+            select: () => ({ lean: () => Promise.resolve({ project_id, status: 'completed' }) }),
+        });
+    };
+
+    it('move-sprint refuses a completed sprint', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, sprint_id: null });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubCompletedSprint(project._id);
+
+        await expect(
+            svc.moveTaskToSprint(task._id, { sprint_id: new Types.ObjectId().toString() }, adminCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.SPRINT_INVALID_TRANSITION });
+        expect(task.save).not.toHaveBeenCalled();
+    });
+
+    it('PATCH refuses moving into a completed sprint', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, sprint_id: null });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubCompletedSprint(project._id);
+
+        await expect(
+            svc.updateTask(task._id, { sprint_id: new Types.ObjectId().toString() }, adminCaller())
+        ).rejects.toMatchObject({ code: ERROR_CODES.SPRINT_INVALID_TRANSITION });
+    });
+});
+
 describe('moveTaskToSprint', () => {
     it('rejects employees with TASK_WRITE_FORBIDDEN', async () => {
         await expect(

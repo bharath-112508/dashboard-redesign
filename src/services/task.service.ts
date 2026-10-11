@@ -27,6 +27,7 @@ import {
 } from '../constants/task.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
+import { SPRINT_STATUSES } from '../constants/project.js';
 import { TASK_ACTIVITY_TYPES } from '../constants/task-activity.js';
 import { notifyClientTaskReported, notifyTaskAssigned } from './notification-dispatcher.service.js';
 import { recordAudit } from './audit.service.js';
@@ -269,12 +270,22 @@ const assertActiveInternalUsers = async (
 
 // ─── Sprint / Story / Parent task validation ─────────────────────────────
 
+/** The sprint must be this project's, and not completed — a closed sprint is
+ *  history (Jira refuses moving work into one). */
 const assertSprintBelongsToProject = async (sprintId: Types.ObjectId, projectId: Types.ObjectId): Promise<void> => {
-    const sprint = await Sprint.findById(sprintId).select('project_id').lean<{ project_id: Types.ObjectId } | null>();
+    const sprint = await Sprint.findById(sprintId)
+        .select('project_id status')
+        .lean<{ project_id: Types.ObjectId; status?: string } | null>();
     if (!sprint || !sprint.project_id.equals(projectId)) {
         throw AppError.unprocessable(
             'Sprint does not belong to the task project',
             ERROR_CODES.TASK_SPRINT_PROJECT_MISMATCH
+        );
+    }
+    if (sprint.status === SPRINT_STATUSES.COMPLETED) {
+        throw AppError.unprocessable(
+            'That sprint is completed — move it to an active or planned sprint, or the backlog.',
+            ERROR_CODES.SPRINT_INVALID_TRANSITION
         );
     }
 };
@@ -825,7 +836,7 @@ export const updateTask = async (
 
     if (patch.sprint_id !== undefined) {
         const sid = patch.sprint_id ? new Types.ObjectId(patch.sprint_id) : null;
-        if (sid) await assertSprintBelongsToProject(sid, project._id);
+        if (sid && !objectIdEq(sid, task.sprint_id)) await assertSprintBelongsToProject(sid, project._id);
         task.sprint_id = sid;
     }
 

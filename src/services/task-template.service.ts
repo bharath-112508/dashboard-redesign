@@ -244,8 +244,10 @@ const validateStoryRef = async (storyId: Types.ObjectId, projectId: Types.Object
     return Boolean(exists);
 };
 
+/** A completed sprint counts as stale too — tasks can't be added to one, so the
+ *  instance drops to the backlog instead of failing the (recurring) run. */
 const validateSprintRef = async (sprintId: Types.ObjectId, projectId: Types.ObjectId): Promise<boolean> => {
-    const exists = await Sprint.findOne({ _id: sprintId, project_id: projectId })
+    const exists = await Sprint.findOne({ _id: sprintId, project_id: projectId, status: { $ne: 'completed' } })
         .select('_id')
         .lean<{ _id: Types.ObjectId } | null>();
     return Boolean(exists);
