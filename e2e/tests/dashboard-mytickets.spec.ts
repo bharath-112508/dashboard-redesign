@@ -83,7 +83,8 @@ test.describe('Dashboard', () => {
 
   test('DB-03 dev: a row in My tickets opens the ticket', async ({ page }) => {
     await openDashboard(page, 'dev', 'Chary')
-    await page.getByRole('link', { name: /PMT-10 Login with BankID/ }).click()
+    // v4 design: the row shows the title first, then the key, project and epic.
+    await page.getByRole('link', { name: /Login with BankID PMT-10/ }).click()
     await expect(page).toHaveURL(/\/tickets\/board\?ticket=10$/)
     await expect(page.getByRole('button', { name: 'Close', exact: true })).toBeVisible()
   })
@@ -117,7 +118,8 @@ test.describe('Dashboard', () => {
     await page.getByRole('button', { name: 'Choose a ticket' }).click()
     const search = page.getByLabel('Search tickets')
     await search.fill('login with bankid')
-    await expect(page.getByRole('option')).toHaveCount(1)
+    // v4 design: the new Project select has options too, so count inside the ticket list.
+    await expect(page.getByRole('listbox', { name: 'Tickets' }).getByRole('option')).toHaveCount(1)
     await expect(page.getByRole('option', { name: /PMT-10/ })).toBeVisible()
     await search.fill('zzzz-no-such-ticket')
     await expect(page.getByText('No tickets found')).toBeVisible()
@@ -233,6 +235,29 @@ test.describe('Dashboard', () => {
     await waitForStored(page, 'Sprint planning', false)
     await page.reload()
     await expect(page.getByText('Today 0m', { exact: true })).toBeVisible()
+  })
+
+  test('DB-12 the Project field starts on the person\'s project and filters the ticket picker (v4)', async ({ page }) => {
+    await openDashboard(page, 'dev', 'Chary')
+    const project = page.getByLabel('Project', { exact: true })
+    await expect(project).toHaveValue('c:dacop')
+
+    await project.selectOption({ label: 'Internal · DevOps board' })
+    await expect(page.getByPlaceholder('Area worked on, e.g. Sprint planning')).toBeVisible()
+    await page.getByRole('button', { name: 'Ticket', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'No tickets, use Text' })).toBeVisible()
+
+    await project.selectOption('')
+    await expect(page.getByRole('button', { name: 'Choose a project first' })).toBeVisible()
+    await page.getByRole('button', { name: 'Text', exact: true }).click()
+    await page.getByLabel('Area worked on').fill('Sprint planning')
+    await setDuration(page, 'Billable', 1, 0)
+    await expect(page.getByRole('button', { name: 'Save time entry' })).toHaveAttribute('aria-disabled', 'true')
+
+    await project.selectOption({ label: 'Daco · Daco platform' })
+    await page.getByRole('button', { name: 'Save time entry' }).click()
+    const row = page.locator('li', { has: page.getByRole('button', { name: 'Remove Sprint planning' }) })
+    await expect(row).toContainText('Daco · Daco platform')
   })
 
   test('DB-11 a client question in the widget opens that question', async ({ page }) => {

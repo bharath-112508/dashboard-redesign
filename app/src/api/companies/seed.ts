@@ -1,4 +1,5 @@
 import type { Company } from '../types'
+import { DRIVER_APP_SUPPORT } from '../projects/seed'
 
 /**
  * Client companies, from the prototype's Companies seed (CO0). The Projects
@@ -45,8 +46,8 @@ export const COMPANIES_SEED: Company[] = [
     notes: '', contacts: [],
     projects: [
       {
-        id: 'fjp', name: 'Driver app', desc: 'Route planning and proof of delivery for drivers.', state: 'done', pct: 100,
-        due: '2026-08-30', team: [2],
+        id: 'fjp', name: 'Driver app', desc: 'Route planning and proof of delivery for drivers.', state: 'maint', pct: 100,
+        due: '2026-08-30', team: [2], sup: DRIVER_APP_SUPPORT,
         epics: [
           { id: 'f1', name: 'Route planning', state: 'done', pct: 100, sprints: 0 },
           { id: 'f2', name: 'Proof of delivery', state: 'done', pct: 100, sprints: 0 },

@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { useSession } from '../../api/session/store'
 import { TONE, type Dashboard, type Kpi } from '../../api/dashboard/model'
 import type { Session } from '../../api/types'
 import { findPerson } from '../../api/people/directory'
+import { clientValue, entryProject, findProject, internalValue, projectOptions } from '../../api/timesheet/projects'
 import { CriticalDrawer } from './CriticalDrawer'
 import { LogTime } from './LogTime'
 import { WidgetView } from './Widgets'
@@ -17,9 +18,22 @@ export function DashboardPage() {
 }
 
 function DashboardView({ me }: { me: Session }) {
-  const { ready, model, people, tasks, entries, statuses, today } = useDashboard(me)
+  const { ready, model, people, companies, internal, tasks, entries, statuses, today } = useDashboard(me)
   const [drawer, setDrawer] = useState<'critical' | 'overdue' | null>(null)
   const person = findPerson(people, me.personId)
+  const projects = useMemo(() => projectOptions(companies, internal), [companies, internal])
+  /** The form starts on the first project the person is on. */
+  const defaultProject = useMemo(() => {
+    const onTeam = new Set([
+      ...companies.flatMap(c => c.projects.filter(p => p.team.includes(me.personId)).map(p => clientValue(p.id))),
+      ...internal.filter(p => p.team.includes(me.personId)).map(p => internalValue(p.id)),
+    ])
+    return projects.find(p => onTeam.has(p.value))?.value ?? ''
+  }, [projects, companies, internal, me.personId])
+  const projectLabel = (e: (typeof entries)[number]) => {
+    const v = entryProject(e, tasks, companies)
+    return v ? (findProject(v, companies, internal)?.label ?? '') : ''
+  }
 
   return (
     <main className="mx-auto w-full max-w-[1360px] px-4 pb-14 pt-5 md:px-7">
@@ -32,6 +46,9 @@ function DashboardView({ me }: { me: Session }) {
           <LogTime
             me={me}
             person={person}
+            projects={projects}
+            defaultProject={defaultProject}
+            projectLabel={projectLabel}
             tickets={tasks.filter(t => !t.parent && t.status !== 'done')}
             statuses={statuses}
             allTasks={tasks}

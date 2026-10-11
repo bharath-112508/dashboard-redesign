@@ -1,5 +1,5 @@
 import type { DevopsDb } from '../devops/types'
-import type { Company, DevopsRequest, Person, Priority, Question, Role, Session, Task, TimeEntry, Workspace } from '../types'
+import type { Company, DevopsRequest, Person, Priority, Question, Role, Session, Task, TaskType, TimeEntry, Workspace } from '../types'
 import { activeSprint, assigneesOf, estimateHours, loggedHours, statusOf, taskKey } from '../../domain/tasks'
 import { addDays, diff, short } from '../../lib/dates'
 import { isClientRole } from '../session/access'
@@ -28,6 +28,7 @@ export const TONE: Record<Tone, { bg: string; ink: string }> = {
 export const ROUTE = {
   projects: '/projects',
   tickets: '/tickets/board',
+  myTickets: '/my-tickets',
   timesheet: '/timesheet',
   employee: '/employee-timesheets',
   devops: '/devops/board',
@@ -86,6 +87,38 @@ export interface ProgRow {
   href: string
 }
 
+/** A ticket row with its type icon, project and epic, due date and status pill (the developer's My tickets). */
+export interface TixRow {
+  id: string
+  key: string
+  title: string
+  type: TaskType
+  /** Client project name, or '' when the epic is not on a client project. */
+  project: string
+  epic: string
+  /** Reported by the client. */
+  client: boolean
+  due: string
+  late: boolean
+  status: string
+  statusTone: { bg: string; ink: string; dot: string }
+  href: string
+}
+
+/** Type icon colours and path, from the design. */
+export const TASK_TYPE_ICON: Record<TaskType, { bg: string; ink: string; path: string }> = {
+  Task: { bg: '#DCE5FA', ink: '#1F3FAF', path: 'M9 11l3 3 8-8M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h11' },
+  Story: { bg: '#D6E9E2', ink: '#195040', path: 'M6 4h12v16l-6-4-6 4z' },
+  Bug: { bg: '#FBE7E3', ink: '#8E2A1F', path: 'M8 9h8v6a4 4 0 0 1-8 0zM12 9V6M9 6L7 4M15 6l2-2M4 13h4M16 13h4' },
+}
+
+/** Status pill colours by status id; other statuses use the To do grey. */
+const STATUS_PILL: Record<string, { bg: string; ink: string; dot: string }> = {
+  todo: { bg: '#EEF2F6', ink: '#33445A', dot: '#A9B6C5' },
+  prog: { bg: '#DCE5FA', ink: '#1F3FAF', dot: '#4870E8' },
+  review: { bg: '#E6DFFA', ink: '#3F2E94', dot: '#7C5CD6' },
+}
+
 export interface BarDay {
   label: string
   date: string
@@ -109,6 +142,7 @@ export type WidgetBody =
   | { kind: 'prog'; rows: ProgRow[]; empty: string }
   | { kind: 'bars'; days: BarDay[]; foot: string; idle: boolean }
   | { kind: 'status'; rows: StatusRow[]; empty: string }
+  | { kind: 'tix'; rows: TixRow[]; empty: string }
 
 export interface Widget {
   id: string
@@ -221,6 +255,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
   const isMine = (t: Task) => assigneesOf(t).includes(me.name)
   const mine = open.filter(isMine)
   const epicName = (id: string) => d.workspace.epics.find(e => e.id === id)?.name ?? id
+  const projectOfEpic = (id: string) => d.companies.flatMap(c => c.projects).find(p => p.epics.some(e => e.id === id))?.name ?? ''
   const statusLabel = (id: string) => statusOf(d.workspace.statuses, id).name
   const staff = d.people.filter(p => p.org === 'vt' && p.active)
   const countable = staff.filter(p => p.emp !== 'freelancer')
@@ -642,6 +677,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
     const inProgress = mine.filter(t => t.status === 'prog').length
     const dueMine = mine.filter(dueThisWeek)
     const overdueMine = dueMine.filter(isOverdue).length
+    const lateMine = mine.filter(isOverdue).length
     const epicIds = [...new Set(top.filter(t => isMine(t) && t.epic).map(t => t.epic))]
     const epicProgress = epicIds
       .map(id => {
@@ -703,25 +739,29 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
         {
           id: 'my-tickets',
           title: 'My tickets',
-          sub: 'Sorted by due date',
-          link: 'Tickets',
-          href: ROUTE.tickets,
+          sub: lateMine ? `Sorted by due date · ${lateMine} overdue` : 'Sorted by due date',
+          link: 'My tickets',
+          href: ROUTE.myTickets,
           icon: 'tix',
           body: {
-            kind: 'list',
+            kind: 'tix',
             empty: 'No open tickets',
             rows: mine
               .slice()
               .sort((a, b) => ((a.due || '9999') < (b.due || '9999') ? -1 : 1))
               .slice(0, 6)
-              .map((t): ListRow => ({
+              .map((t): TixRow => ({
                 id: `m-${t.id}`,
-                tag: taskKey(t),
-                tone: t.type === 'Bug' ? 'red' : t.type === 'Story' ? 'green' : 'blue',
+                key: taskKey(t),
                 title: t.title,
-                meta: `${statusLabel(t.status)} · ${hm(loggedHours(t, d.entries))} / ${estimateHours(t) || 0}h`,
-                right: t.due ? dueLabel(t.due, today) : '',
-                rightTone: isOverdue(t) ? 'red' : undefined,
+                type: t.type,
+                project: projectOfEpic(t.epic),
+                epic: epicName(t.epic),
+                client: !!t.clientBug,
+                due: t.due ? dueLabel(t.due, today) : '',
+                late: isOverdue(t),
+                status: statusLabel(t.status),
+                statusTone: STATUS_PILL[t.status] ?? STATUS_PILL.todo,
                 href: taskHref(t),
               })),
           },
@@ -764,7 +804,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
                   tag: `Q-${q.id}`,
                   tone: 'amber',
                   title: q.title,
-                  meta: `${t ? taskKey(t) : ''} · no reply yet`,
+                  meta: [t ? taskKey(t) : '', t ? projectOfEpic(t.epic) : '', 'no reply yet'].filter(Boolean).join(' · '),
                   right: q.when,
                   href: questionHref(q),
                 }

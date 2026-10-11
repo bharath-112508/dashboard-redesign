@@ -2,7 +2,7 @@ import { assignIds, createdId, reduce, type Command } from './commands'
 import { createSeed, DB_VERSION, personIdByName } from './seed'
 import { PEOPLE_SEED } from './people/seed'
 import { COMPANIES_SEED } from './companies/seed'
-import { INTERNAL_PROJECTS_SEED } from './projects/seed'
+import { INTERNAL_PROJECTS_SEED, withDriverAppSupport } from './projects/seed'
 import type { Db } from './types'
 import { setSaveProblem } from '../components/SaveNotice'
 
@@ -79,6 +79,7 @@ const migrate3 = (v: Record<string, unknown>): unknown => ({
   clientTeam: Array.isArray(v.clientTeam) ? v.clientTeam : [],
   internalProjects: Array.isArray(v.internalProjects) && v.internalProjects.length ? v.internalProjects : clone(INTERNAL_PROJECTS_SEED),
   weekSubmissions: Array.isArray(v.weekSubmissions) ? v.weekSubmissions : [],
+  companies: withDriverAppSupport(v.companies),
 })
 
 /** Version 2 gains people, companies, internal projects and per-entry person ids. */

@@ -12,6 +12,7 @@ const PROJECT_STATE: Record<ProjectState, [string, string, string]> = {
   active: ['Active', '#1F3FAF', '#DCE5FA'],
   planned: ['Planned', '#22354C', '#E7EEFB'],
   hold: ['On hold', '#7A5C0E', '#FBEDC2'],
+  maint: ['Maintenance', '#1F6F6E', '#DFF1F0'],
   done: ['Done', '#195040', '#D6E9E2'],
 }
 

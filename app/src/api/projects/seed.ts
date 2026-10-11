@@ -1,4 +1,25 @@
-import type { InternalProject } from '../types'
+import type { InternalProject, SupportPlan } from '../types'
+
+/** Fjordline's Driver app is delivered and in Maintenance with this support agreement (v4 design). */
+export const DRIVER_APP_SUPPORT: SupportPlan = { until: '2027-08-30', used: 6, quota: 10 }
+
+/**
+ * Moves a stored Driver app without a support agreement to Maintenance, as the
+ * prototype does on load, so stores saved before the v4 design pick it up.
+ * Returns the same array when there is nothing to change.
+ */
+export const withDriverAppSupport = (companies: unknown): unknown => {
+  if (!Array.isArray(companies)) return companies
+  let changed = false
+  const next = companies.map(c => {
+    if (!c || typeof c !== 'object' || !Array.isArray(c.projects)) return c
+    const i = c.projects.findIndex((p: { id?: string; sup?: unknown }) => p && p.id === 'fjp' && !p.sup)
+    if (i < 0) return c
+    changed = true
+    return { ...c, projects: c.projects.map((p: object, j: number) => (j === i ? { ...p, state: 'maint', sup: { ...DRIVER_APP_SUPPORT } } : p)) }
+  })
+  return changed ? next : companies
+}
 
 /**
  * Internal projects, from the prototype's Projects seed (INT0). Team ids are

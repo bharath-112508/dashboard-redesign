@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
-import { ICON_PATH, TONE, type BarDay, type ListRow, type ProgRow, type StatusRow, type Tone, type Widget } from '../../api/dashboard/model'
+import { ICON_PATH, TASK_TYPE_ICON, TONE, type BarDay, type ListRow, type ProgRow, type StatusRow, type TixRow, type Tone, type Widget } from '../../api/dashboard/model'
 import { hm } from '../../api/dashboard/time'
 
 /** Card shell shared by every widget: icon, title, subtitle and the link to the page. */
@@ -69,6 +69,68 @@ export function ListWidget({ widget, rows, empty }: { widget: Widget; rows: List
               </Link>
             </li>
           ))}
+        </ul>
+      )}
+    </WidgetCard>
+  )
+}
+
+/** Tickets with their type icon, key, project and epic, a "From client" tag, the due date and a status pill. */
+export function TixWidget({ widget, rows, empty }: { widget: Widget; rows: TixRow[]; empty: string }) {
+  return (
+    <WidgetCard widget={widget}>
+      {rows.length === 0 ? (
+        <Empty text={empty} />
+      ) : (
+        <ul>
+          {rows.map(r => {
+            const ty = TASK_TYPE_ICON[r.type]
+            return (
+              <li key={r.id} className="border-t-[1.5px] border-sky">
+                <Link to={r.href} className="grid grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3 px-[18px] py-3 text-ink no-underline hover:bg-canvas">
+                  <span title={r.type} className="grid size-[30px] place-items-center rounded-lg" style={{ background: ty.bg, color: ty.ink }}>
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d={ty.path} />
+                    </svg>
+                    <span className="sr-only">{r.type}</span>
+                  </span>
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="truncate text-[14px] font-[650] leading-[1.25]">{r.title}</div>
+                    <div className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12px] text-muted">
+                      <span className="flex-none rounded-[5px] bg-sky-2 px-1.5 py-px text-[11px] font-bold text-blue-ink tabular-nums">{r.key}</span>
+                      <span className="size-1.5 flex-none rounded-[2px] bg-blue" aria-hidden="true" />
+                      <span className="min-w-0 truncate">
+                        {r.project ? (
+                          <>
+                            <b className="font-[650] text-ink">{r.project}</b> · {r.epic}
+                          </>
+                        ) : (
+                          r.epic
+                        )}
+                      </span>
+                      {r.client && (
+                        <span className="flex-none rounded-[5px] bg-[#F6DDD0] px-1.5 py-px text-[11px] font-bold text-[#7A3818]">From client</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-[5px]">
+                    {r.due && (
+                      <span className="whitespace-nowrap text-[12.5px] font-bold" style={{ color: r.late ? '#C0392B' : '#1B2D45' }}>
+                        {r.due}
+                      </span>
+                    )}
+                    <span
+                      className="inline-flex h-5 items-center gap-[5px] whitespace-nowrap rounded-full px-2 text-[11.5px] font-bold"
+                      style={{ background: r.statusTone.bg, color: r.statusTone.ink }}
+                    >
+                      <span className="size-1.5 rounded-full" style={{ background: r.statusTone.dot }} aria-hidden="true" />
+                      {r.status}
+                    </span>
+                  </div>
+                </Link>
+              </li>
+            )
+          })}
         </ul>
       )}
     </WidgetCard>
@@ -217,5 +279,7 @@ export function WidgetView({ widget }: { widget: Widget }) {
       return <BarsWidget widget={widget} days={b.days} foot={b.foot} idle={b.idle} />
     case 'status':
       return <StatusWidget widget={widget} rows={b.rows} empty={b.empty} />
+    case 'tix':
+      return <TixWidget widget={widget} rows={b.rows} empty={b.empty} />
   }
 }

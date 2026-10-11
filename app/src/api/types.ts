@@ -229,7 +229,14 @@ export interface CompanyContact {
   admin?: boolean
 }
 
-export type ProjectState = 'active' | 'planned' | 'done' | 'hold'
+export type ProjectState = 'active' | 'planned' | 'done' | 'hold' | 'maint'
+
+/** A delivered project's support agreement: hours used this month of a monthly quota, until a date. */
+export interface SupportPlan {
+  until: string
+  used: number
+  quota: number
+}
 
 export interface EpicSummary {
   id: string
@@ -250,6 +257,8 @@ export interface ClientProject {
   /** Directory person ids. */
   team: number[]
   epics: EpicSummary[]
+  /** Support agreement, for projects in Maintenance. */
+  sup?: SupportPlan
 }
 
 export interface Company {
