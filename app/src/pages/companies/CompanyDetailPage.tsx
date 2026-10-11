@@ -179,7 +179,7 @@ export function CompanyDetailPage() {
           ) : (
             <ul className="m-0 list-none divide-y divide-line-3 p-0">
               {visibleProjects.map(p => {
-                const due = dueLabel(p.due, p.state)
+                const due = dueLabel(p.due, p.state, p.sup)
                 return (
                   <li key={p.id}>
                     <Link to="/tickets/board" className="flex items-center gap-4 py-3 text-ink no-underline hover:text-blue-ink">

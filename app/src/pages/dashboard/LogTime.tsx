@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { useSend } from '../../api/queries'
 import { hm } from '../../api/dashboard/time'
 import { logTime } from '../../api/timesheet'
+import type { ProjectOption } from '../../api/timesheet/projects'
 import { avatarOf } from '../../api/people/avatar'
 import type { Person, Session, Status, Task, TimeEntry } from '../../api/types'
 import { statusOf, taskKey } from '../../domain/tasks'
@@ -17,6 +18,8 @@ const MINUTES = [0, 5, 10, 15, 30, 45]
 
 const schema = z
   .object({
+    /** `c:<client project id>` or `i:<internal project id>`. */
+    project: z.string(),
     mode: z.enum(['ticket', 'text']),
     task: z.string(),
     area: z.string().trim(),
@@ -26,6 +29,7 @@ const schema = z
     nonMin: z.number().int().min(0).max(24 * 60),
   })
   .superRefine((v, ctx) => {
+    if (!v.project) ctx.addIssue({ code: 'custom', path: ['project'], message: 'Choose a project' })
     if (v.mode === 'ticket' && !v.task) ctx.addIssue({ code: 'custom', path: ['task'], message: 'Choose a ticket' })
     if (v.mode === 'text' && !v.area) ctx.addIssue({ code: 'custom', path: ['area'], message: 'Say what you worked on' })
     if (v.billMin + v.nonMin <= 0) ctx.addIssue({ code: 'custom', path: ['billMin'], message: 'Enter a duration' })
@@ -33,7 +37,7 @@ const schema = z
 
 type LogForm = z.infer<typeof schema>
 
-const BLANK: LogForm = { mode: 'ticket', task: '', area: '', notes: '', billMin: 0, nonMin: 0 }
+const BLANK: LogForm = { project: '', mode: 'ticket', task: '', area: '', notes: '', billMin: 0, nonMin: 0 }
 
 const minutesLabel = (m: number) => (m ? hm(m / 60) : '0h 0m')
 
@@ -42,7 +46,13 @@ const TONE_BADGE = { blue: ['#E7EEFB', '#1F3FAF'], amber: ['#FBEDC2', '#7A5C0E']
 interface Props {
   me: Session
   person: Person | undefined
-  /** Open top-level tickets, the ones the picker offers. */
+  /** Projects time can be booked to, as on My timesheet. */
+  projects: ProjectOption[]
+  /** The project the form starts on: one the person is on, or ''. */
+  defaultProject: string
+  /** Label of an entry's project, or '' when it has none. */
+  projectLabel: (e: TimeEntry) => string
+  /** Open top-level tickets; the picker offers the ones in the chosen project. */
   tickets: Task[]
   statuses: Status[]
   /** All tasks, for looking up the title of a logged entry. */
@@ -55,16 +65,28 @@ interface Props {
 }
 
 /** The quick-log card for developers and DevOps: writes a TimeEntry through the shared time command. */
-export function LogTime({ me, person, tickets, statuses, allTasks, todays, today, dayShort }: Props) {
+export function LogTime({ me, person, projects, defaultProject, projectLabel, tickets, statuses, allTasks, todays, today, dayShort }: Props) {
   const send = useSend()
   const { control, register, handleSubmit, reset, setValue, getValues } = useForm<LogForm>({
     resolver: zodResolver(schema),
-    defaultValues: BLANK,
+    defaultValues: { ...BLANK, project: defaultProject },
     mode: 'onChange',
   })
   const watched = useWatch({ control })
   const valid = useMemo(() => schema.safeParse({ ...BLANK, ...watched }).success, [watched])
   const mode = useWatch({ control, name: 'mode' })
+  const projectValue = useWatch({ control, name: 'project' })
+  const project = projects.find(p => p.value === projectValue)
+  const projectTickets = project ? tickets.filter(t => project.epics.includes(t.epic)) : []
+  /** A new project clears the ticket; a project without tickets switches to Text. */
+  const pickProject = (value: string) => {
+    const next = projects.find(p => p.value === value)
+    setValue('project', value, { shouldValidate: true })
+    setValue('task', '', { shouldValidate: true })
+    if (next && !tickets.some(t => next.epics.includes(t.epic))) setValue('mode', 'text', { shouldValidate: true })
+  }
+  /** Clears what was typed and picked, keeping the project and the mode. */
+  const clear = () => reset({ ...BLANK, project: getValues('project'), mode: getValues('mode') })
   const total = todays.reduce((a, e) => a + e.bill + e.non, 0)
   const initials = avatarOf(person ?? { name: me.name, colour: '#1B2D45', photo: '' }, { showPhoto: false }).initials
 
@@ -76,13 +98,14 @@ export function LogTime({ me, person, tickets, statuses, allTasks, todays, today
         user: me.name,
         type: 'General',
         task: task?.id ?? null,
+        project: v.project,
         ...(v.mode === 'text' ? { area: v.area } : {}),
         ...(task?.epic ? { epic: task.epic } : {}),
         notes: v.notes,
         bill: v.billMin / 60,
         non: v.nonMin / 60,
     }))
-    reset({ ...BLANK, mode: v.mode })
+    reset({ ...BLANK, project: v.project, mode: v.mode })
   })
 
   const remove = (id: number) => send({ type: 'time.remove', id })
@@ -110,11 +133,30 @@ export function LogTime({ me, person, tickets, statuses, allTasks, todays, today
 
       <form
         onSubmit={onSave}
-        className="grid grid-cols-1 items-end gap-3 p-4 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_140px_140px_auto]"
+        className="flex flex-wrap items-end gap-3 p-4"
       >
-        <div className="min-w-0">
+        <div className="min-w-0 flex-[1_1_220px]">
+          <label htmlFor="log-project" className={`${label} mb-1.5`}>
+            Project
+          </label>
+          <select
+            id="log-project"
+            value={projectValue}
+            onChange={e => pickProject(e.target.value)}
+            className={`h-[42px] w-full cursor-pointer rounded-[10px] border-[1.5px] border-line bg-white px-2.5 text-[14px] font-semibold outline-0 focus:border-blue ${projectValue ? 'text-ink' : 'text-muted'}`}
+          >
+            <option value="">Choose a project</option>
+            {projects.map(p => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="min-w-0 flex-[2_1_320px]">
           <div className="mb-1.5 flex h-[22px] items-center gap-2">
-            <span className={label}>Log against</span>
+            <span className={`${label} whitespace-nowrap`}>Log against</span>
             <div role="group" aria-label="Log against" className="inline-flex gap-0.5 rounded-lg bg-white p-0.5 shadow-[inset_0_0_0_1.5px_#A9B6C5]">
               {(['ticket', 'text'] as const).map(m => (
                 <button
@@ -141,14 +183,20 @@ export function LogTime({ me, person, tickets, statuses, allTasks, todays, today
               control={control}
               name="task"
               render={({ field }) => (
-                <TicketPicker value={field.value} onChange={field.onChange} tickets={tickets} statuses={statuses} />
+                <TicketPicker
+                  value={field.value}
+                  onChange={field.onChange}
+                  tickets={projectTickets}
+                  statuses={statuses}
+                  empty={!project ? 'Choose a project first' : projectTickets.length ? 'Choose a ticket' : 'No tickets, use Text'}
+                />
               )}
             />
           )}
         </div>
 
-        <div className="min-w-0">
-          <label htmlFor="log-notes" className={`${label} whitespace-nowrap`}>
+        <div className="min-w-0 flex-[1_1_220px]">
+          <label htmlFor="log-notes" className={`${label} mb-1.5 whitespace-nowrap`}>
             Notes
           </label>
           <input
@@ -185,7 +233,7 @@ export function LogTime({ me, person, tickets, statuses, allTasks, todays, today
             type="button"
             title="Clear"
             aria-label="Clear form"
-            onClick={() => reset({ ...BLANK, mode: getValues('mode') })}
+            onClick={clear}
             className="grid size-[42px] cursor-pointer place-items-center rounded-[10px] border-[1.5px] border-line bg-white p-0 text-muted hover:border-blue"
           >
             <Icon d={PATHS.close} size={14} sw={2.4} />
@@ -212,7 +260,9 @@ export function LogTime({ me, person, tickets, statuses, allTasks, todays, today
                     )}
                     <span className="min-w-0 truncate text-[13.5px] font-semibold">{t ? t.title : e.area || 'Area'}</span>
                   </span>
-                  <span className="min-w-0 truncate text-[12.5px] text-muted max-md:hidden">{e.notes || '—'}</span>
+                  <span className="min-w-0 truncate text-[12.5px] text-muted max-md:hidden">
+                    {[projectLabel(e), e.notes].filter(Boolean).join(' · ') || '—'}
+                  </span>
                   <span className="text-[13.5px] font-extrabold tabular-nums">{hm(hours)}</span>
                   <span className="flex gap-1 max-md:hidden">
                     {e.bill > 0 && <KindPill tone="blue" text="Billable" />}
@@ -247,7 +297,20 @@ function KindPill({ tone, text }: { tone: keyof typeof TONE_BADGE; text: string 
 }
 
 /** The ticket picker: a button that opens a searchable list of open tickets. */
-function TicketPicker({ value, onChange, tickets, statuses }: { value: string; onChange: (v: string) => void; tickets: Task[]; statuses: Status[] }) {
+function TicketPicker({
+  value,
+  onChange,
+  tickets,
+  statuses,
+  empty,
+}: {
+  value: string
+  onChange: (v: string) => void
+  tickets: Task[]
+  statuses: Status[]
+  /** Button text with no ticket chosen: "Choose a ticket", or why there is none to choose. */
+  empty: string
+}) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const current = tickets.find(t => String(t.id) === value)
@@ -270,7 +333,7 @@ function TicketPicker({ value, onChange, tickets, statuses }: { value: string; o
             <span className="min-w-0 truncate font-semibold">{current.title}</span>
           </>
         ) : (
-          <span className="text-muted">Choose a ticket</span>
+          <span className="text-muted">{empty}</span>
         )}
         <span className="ml-auto flex-none text-muted" aria-hidden="true">▾</span>
       </button>
@@ -323,7 +386,7 @@ function DurationField({ label, tone, value, onChange }: { label: string; tone: 
   const colour = tone === 'blue' ? '#195040' : '#7A5C0E'
   const pick = (h: number, m: number) => onChange(h * 60 + m)
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 flex-[0_0_130px]">
       <div className="mb-1.5 flex h-[22px] items-center whitespace-nowrap text-[12px] font-bold uppercase tracking-[0.05em]" style={{ color: colour }}>
         {label}
       </div>

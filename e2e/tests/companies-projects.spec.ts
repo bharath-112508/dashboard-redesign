@@ -195,15 +195,17 @@ test.describe('Companies', () => {
   })
 
   test('CO-10 filters a company\'s projects by Ongoing and Done', async ({ page }) => {
+    // v4 design: the Driver app is in Maintenance (support until 30 Aug 2027), so it counts as ongoing.
     await openCompany(page, 'fjord')
     await expect(page.getByRole('link', { name: /Driver app/ })).toBeVisible()
 
-    await page.getByRole('tab', { name: 'Ongoing', exact: true }).click()
+    await page.getByRole('tab', { name: 'Done', exact: true }).click()
     await expect(page.getByText('No projects in this view.')).toBeVisible()
     await expect(page.getByRole('link', { name: /Driver app/ })).toHaveCount(0)
 
-    await page.getByRole('tab', { name: 'Done', exact: true }).click()
+    await page.getByRole('tab', { name: 'Ongoing', exact: true }).click()
     await expect(page.getByRole('link', { name: /Driver app/ })).toBeVisible()
+    await expect(page.getByText('Support until 30 Aug 2027')).toBeVisible()
   })
 
   test('CO-11 adds a client contact and keeps it after reload', async ({ page }) => {
@@ -396,11 +398,19 @@ test.describe('Projects', () => {
   test('PR-03 filters by status, including On hold', async ({ page }) => {
     await openProjects(page)
     const status = page.getByRole('combobox', { name: 'Status' })
-    await expect(status.locator('option')).toHaveText(['Any status', 'Active', 'Planned', 'On hold', 'Done'])
+    await expect(status.locator('option')).toHaveText(['Any status', 'Active', 'Planned', 'On hold', 'Maintenance', 'Completed'])
 
-    await status.selectOption('done')
+    // v4 design: the Driver app is in Maintenance; Completed holds the shared CI/CD templates.
+    await status.selectOption('maint')
     await expect(page.getByRole('link', { name: 'Open Driver app' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Open Daco platform' })).toHaveCount(0)
+    await expect(page.getByText('Support until 30 Aug 2027').first()).toBeVisible()
+    await expect(page.getByText('6h of 10h used this month')).toBeVisible()
+
+    await status.selectOption('done')
+    await expect(page.getByRole('link', { name: 'Open Shared CI/CD templates' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Open Driver app' })).toHaveCount(0)
+    await expect(page.getByText('Completed 20 Sep')).toBeVisible()
 
     await status.selectOption('hold')
     await expect(page.getByRole('link', { name: 'Open Driver app' })).toHaveCount(0)

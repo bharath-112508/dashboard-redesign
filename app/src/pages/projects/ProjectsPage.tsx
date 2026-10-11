@@ -3,10 +3,10 @@ import { Link } from 'react-router'
 import { useCompanies, useInternalProjects, useSend } from '../../api/queries'
 import { usePeople } from '../../api/people/directory'
 import { useSession } from '../../api/session/store'
-import type { ProjectRef, ProjectState } from '../../api/types'
+import type { ProjectRef, ProjectState, SupportPlan } from '../../api/types'
 import { Icon, PATHS, CountPill, TabButton } from '../../components/ui'
 import { PersonDot, ProgressRing, SearchGlyph, StatePill } from '../../components/Bits'
-import { STATE_COLUMNS, STATE_LABEL, STATE_TONE, dueLabel, isOverdue, projectItems, refKey, sortProjects, type ProjectItem } from '../../domain/projects'
+import { STATE_COLUMNS, STATE_LABEL, STATE_TONE, dueLabel, isOverdue, projectItems, refKey, sortProjects, supportUntil, type ProjectItem } from '../../domain/projects'
 import { plural } from '../../lib/dates'
 import { NewProjectDialog } from './NewProjectDialog'
 
@@ -19,8 +19,12 @@ const STATE_OPTIONS: { value: StateFilter; label: string }[] = [
   { value: 'active', label: 'Active' },
   { value: 'planned', label: 'Planned' },
   { value: 'hold', label: 'On hold' },
-  { value: 'done', label: 'Done' },
+  { value: 'maint', label: 'Maintenance' },
+  { value: 'done', label: 'Completed' },
 ]
+
+/** The prototype's wrench, on the Maintenance support box. */
+const WRENCH = 'M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z'
 
 const DUE_TONE = { overdue: 'text-red', soon: 'text-amber-ink', normal: 'text-muted', none: 'text-muted' } as const
 
@@ -152,7 +156,7 @@ export function ProjectsPage() {
           {isDev ? 'You are not on any project yet.' : 'No projects yet. Start one with New project.'}
         </div>
       ) : view === 'board' ? (
-        <div className="mt-5 grid grid-cols-4 items-start gap-3.5 max-[1100px]:grid-cols-2 max-[640px]:grid-cols-1">
+        <div className="mt-5 grid grid-cols-5 items-start gap-3 max-[1280px]:grid-cols-3 max-[900px]:grid-cols-2 max-[640px]:grid-cols-1">
           {STATE_COLUMNS.map(state => {
             const items = sortProjects(filtered.filter(p => p.state === state))
             const over = dragOver === state
@@ -216,7 +220,7 @@ export function ProjectsPage() {
 }
 
 function ProjectCard({ item: p, people, onMove }: { item: ProjectItem; people: { id: number; name: string; colour: string }[]; onMove: (state: ProjectState) => void }) {
-  const due = dueLabel(p.due, p.state)
+  const due = dueLabel(p.due, p.state, p.sup)
   const team = p.team.map(id => people.find(x => x.id === id)).filter((x): x is { id: number; name: string; colour: string } => !!x)
   return (
     <article
@@ -243,10 +247,11 @@ function ProjectCard({ item: p, people, onMove }: { item: ProjectItem; people: {
         {p.name}
       </Link>
       <p className="m-0 mt-1 line-clamp-2 text-[12.5px] leading-[1.45] text-muted">{p.desc || 'No description'}</p>
+      {p.state === 'maint' && p.sup && <SupportBox sup={p.sup} />}
       <div className="mt-3 flex items-center gap-2.5">
         <ProgressRing pct={p.pct} size={36} color={STATE_TONE[p.state].dot} />
-        <span className="min-w-0 flex-1 text-[11.5px] text-muted">{p.kind === 'client' ? (p.epics ? plural(p.epics, 'epic') : 'No epics') : ''}</span>
-        <span className={`text-right text-[11.5px] font-semibold ${DUE_TONE[due.tone]}`}>{due.text}</span>
+        <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted">{p.kind === 'client' ? (p.epics ? plural(p.epics, 'epic') : 'No epics') : ''}</span>
+        <span className={`whitespace-nowrap text-right text-[11.5px] font-semibold ${DUE_TONE[due.tone]}`}>{due.text}</span>
       </div>
       <div className="mt-3 flex items-center gap-2 border-t border-line-3 pt-2.5">
         <div className="flex -space-x-1.5">
@@ -291,7 +296,7 @@ function ProjectList({ items, people }: { items: ProjectItem[]; people: { id: nu
         </thead>
         <tbody>
           {items.map(p => {
-            const due = dueLabel(p.due, p.state)
+            const due = dueLabel(p.due, p.state, p.sup)
             return (
               <tr key={refKey(p.ref)} className="border-b border-line-3 last:border-0 hover:bg-canvas">
                 <td className="px-4 py-2.5">
@@ -321,6 +326,23 @@ function ProjectList({ items, people }: { items: ProjectItem[]; people: { id: nu
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+/** Maintenance projects: the support agreement's end date and this month's hours against the quota. */
+function SupportBox({ sup }: { sup: SupportPlan }) {
+  const pct = sup.quota > 0 ? Math.min(100, (sup.used / sup.quota) * 100) : 0
+  return (
+    <div className="mt-2.5 flex flex-col gap-1.5 rounded-[10px] bg-[#DFF1F0] px-3 py-2.5">
+      <div className="flex items-center gap-1.5 text-[12.5px] font-bold text-[#1F6F6E]">
+        <Icon d={WRENCH} size={14} sw={2.2} />
+        {supportUntil(sup)}
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-[3px] bg-white" role="progressbar" aria-label="Support hours used this month" aria-valuemin={0} aria-valuemax={sup.quota} aria-valuenow={sup.used}>
+        <span className="block h-full bg-[#3E908F]" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="text-[12px] font-semibold text-[#1F6F6E]">{`${sup.used}h of ${sup.quota}h used this month`}</div>
     </div>
   )
 }

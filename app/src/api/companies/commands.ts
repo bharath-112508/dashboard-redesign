@@ -31,7 +31,7 @@ export type CompaniesCommand =
   /** Removes the responsibility, the role and the membership in every project of the company. */
   | { type: 'company.responsible.remove'; companyId: string; personId: number }
   | { type: 'company.project.create'; companyId: string; project: ClientProject }
-  /** Moves a client project between Planned, Active, On hold and Done. Internal projects use project.internal.setState. */
+  /** Moves a client project between Planned, Active, On hold, Maintenance and Completed. Internal projects use project.internal.setState. */
   | { type: 'project.client.setState'; companyId: string; id: string; state: ProjectState }
 
 export const touchesCompanies = (cmd: { type: string }): Resource[] => {

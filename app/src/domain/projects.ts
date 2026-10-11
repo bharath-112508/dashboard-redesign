@@ -1,19 +1,20 @@
-import type { Company, CompanyRole, InternalProject, ProjectRef, ProjectState } from '../api/types'
+import type { Company, CompanyRole, InternalProject, ProjectRef, ProjectState, SupportPlan } from '../api/types'
 import { TODAY, diff, short } from '../lib/dates'
 
-export const STATE_LABEL: Record<ProjectState, string> = { planned: 'Planned', active: 'Active', hold: 'On hold', done: 'Done' }
+export const STATE_LABEL: Record<ProjectState, string> = { planned: 'Planned', active: 'Active', hold: 'On hold', maint: 'Maintenance', done: 'Completed' }
 
 /** Board columns, left to right. */
-export const STATE_COLUMNS: readonly ProjectState[] = ['planned', 'active', 'hold', 'done']
+export const STATE_COLUMNS: readonly ProjectState[] = ['planned', 'active', 'hold', 'maint', 'done']
 
-/** Lists sort active first, then on hold, planned and done. */
-const SORT_RANK: Record<ProjectState, number> = { active: 0, hold: 1, planned: 2, done: 3 }
+/** Lists sort active first, then on hold, planned, maintenance and completed. */
+const SORT_RANK: Record<ProjectState, number> = { active: 0, hold: 1, planned: 2, maint: 3, done: 4 }
 
 /** Pill colours: text, background and dot. */
 export const STATE_TONE: Record<ProjectState, { ink: string; soft: string; dot: string }> = {
   active: { ink: '#1F3FAF', soft: '#DCE5FA', dot: '#4870E8' },
   planned: { ink: '#22354C', soft: '#E7EEFB', dot: '#A9B6C5' },
   hold: { ink: '#7A5C0E', soft: '#FBEDC2', dot: '#C99A2E' },
+  maint: { ink: '#1F6F6E', soft: '#DFF1F0', dot: '#3E908F' },
   done: { ink: '#195040', soft: '#D6E9E2', dot: '#3F9079' },
 }
 
@@ -36,6 +37,8 @@ export interface ProjectItem {
   /** The internal project's area, or '' for client projects. */
   area: string
   epics: number
+  /** Support agreement of a client project in Maintenance. */
+  sup: SupportPlan | null
 }
 
 /**
@@ -60,6 +63,7 @@ export const projectItems = (companies: readonly Company[], internal: readonly I
         companyName: c.name,
         area: '',
         epics: p.epics.length,
+        sup: p.sup ?? null,
       })),
     ),
   ...internal.map<ProjectItem>(p => ({
@@ -76,6 +80,7 @@ export const projectItems = (companies: readonly Company[], internal: readonly I
     companyName: '',
     area: p.area,
     epics: 0,
+    sup: null,
   })),
 ]
 
@@ -88,13 +93,28 @@ export const sortProjects = <T extends { state: ProjectState; due: string; name:
 
 const dueSort = (due: string) => (due ? Date.parse(due) : Number.MAX_SAFE_INTEGER)
 
-/** The deadline is past, and the project is not done. */
-export const isOverdue = (p: { due: string; state: ProjectState }) => p.state !== 'done' && !!p.due && p.due < TODAY
+/** The deadline is past, and the project is not completed or in maintenance. */
+export const isOverdue = (p: { due: string; state: ProjectState }) => p.state !== 'done' && p.state !== 'maint' && !!p.due && p.due < TODAY
 
-/** Due label and tone: "Overdue 3 Oct", "12 Oct · 2d" within 14 days, or the date. */
-export const dueLabel = (due: string, state: ProjectState): { text: string; tone: 'overdue' | 'soon' | 'normal' | 'none' } => {
+/** "30 Aug", with the year when it is not this year ("30 Aug 2027"). */
+const shortYear = (iso: string) => (iso.slice(0, 4) === TODAY.slice(0, 4) ? short(iso) : `${short(iso)} ${iso.slice(0, 4)}`)
+
+/** "Support until 30 Aug 2027". */
+export const supportUntil = (sup: SupportPlan) => `Support until ${shortYear(sup.until)}`
+
+/**
+ * Due label and tone: "Support until …" in maintenance, "Completed 20 Sep",
+ * "Overdue 3 Oct", "12 Oct · 2d" within 14 days, or the date.
+ */
+export const dueLabel = (
+  due: string,
+  state: ProjectState,
+  sup?: SupportPlan | null,
+): { text: string; tone: 'overdue' | 'soon' | 'normal' | 'none' } => {
+  if (state === 'maint' && sup) return { text: supportUntil(sup), tone: 'normal' }
   if (!due) return { text: 'No deadline', tone: 'none' }
   if (isOverdue({ due, state })) return { text: `Overdue ${short(due)}`, tone: 'overdue' }
+  if (state === 'done') return { text: `Completed ${short(due)}`, tone: 'normal' }
   const days = diff(due, TODAY)
   if (days >= 0 && days <= 14) return { text: `${short(due)} · ${days}d`, tone: 'soon' }
   return { text: short(due), tone: 'normal' }

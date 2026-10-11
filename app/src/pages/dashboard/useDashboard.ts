@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useCompanies, useDevops, useEntries, useQuestions, useRequests, useTasks, useWorkspace } from '../../api/queries'
+import { useCompanies, useDevops, useEntries, useInternalProjects, useQuestions, useRequests, useTasks, useWorkspace } from '../../api/queries'
 import { usePeople } from '../../api/people/directory'
 import { buildDashboard, type Dashboard } from '../../api/dashboard/model'
 import { todayIso } from '../../api/dashboard/time'
@@ -18,6 +18,7 @@ export const useDashboard = (me: Session) => {
   const workspace = useWorkspace()
   const devops = useDevops()
   const requests = useRequests()
+  const internal = useInternalProjects()
 
   const ready =
     people.data !== undefined &&
@@ -27,7 +28,8 @@ export const useDashboard = (me: Session) => {
     questions.data !== undefined &&
     workspace.data !== undefined &&
     devops.data !== undefined &&
-    requests.data !== undefined
+    requests.data !== undefined &&
+    internal.data !== undefined
 
   const model: Dashboard | null = useMemo(() => {
     if (!ready) return null
@@ -52,6 +54,8 @@ export const useDashboard = (me: Session) => {
     ready,
     model,
     people: people.data ?? [],
+    companies: companies.data ?? [],
+    internal: internal.data ?? [],
     tasks: tasks.data ?? [],
     statuses: workspace.data?.statuses ?? [],
     entries: entries.data ?? [],
