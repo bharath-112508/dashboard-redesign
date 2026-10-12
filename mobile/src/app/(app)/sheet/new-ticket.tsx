@@ -1,10 +1,10 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderSheet } from '@/components/Placeholder';
+import { NewTicketSheet } from '@/features/tickets/NewTicketSheet';
 import type { SheetQuery } from '@/nav/routes';
 
-/** SH-NEWTICKET Create ticket (URL sheet `new-ticket`) — placeholder; W1 replaces this body. */
+/** SH-NEWTICKET Create ticket (URL sheet `new-ticket`, `{pid}`). */
 export default function NewTicketSheetRoute() {
-  const params = useLocalSearchParams<SheetQuery<'new-ticket'>>();
-  return <PlaceholderSheet spec="SH-NEWTICKET Create ticket" owner="W1" title="Create ticket" id="new-ticket" params={params} />;
+  const { pid } = useLocalSearchParams<SheetQuery<'new-ticket'>>();
+  return <NewTicketSheet pid={String(pid ?? '')} />;
 }

@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { TicketScreen } from '@/features/tickets/TicketScreen';
 
-/** S5-TICKET Ticket — placeholder; W1 replaces this body. */
+/** S5-TICKET Ticket (`/ticket/PMT-11`). */
 export default function TicketRoute() {
-  const params = useLocalSearchParams<{ key?: string }>();
-  return <PlaceholderScreen spec="S5-TICKET Ticket" owner="W1" title="Ticket" id="ticket" params={params} />;
+  const { key } = useLocalSearchParams<{ key?: string }>();
+  return <TicketScreen ticketKey={String(key ?? '')} />;
 }

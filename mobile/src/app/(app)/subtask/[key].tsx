@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { SubtaskScreen } from '@/features/tickets/SubtaskScreen';
 
-/** S5-SUB Subtask — placeholder; W1 replaces this body. */
+/** S5-SUB Subtask (`/subtask/PMT-11.s2`, the stable subtask id, A-11). */
 export default function SubtaskRoute() {
-  const params = useLocalSearchParams<{ key?: string }>();
-  return <PlaceholderScreen spec="S5-SUB Subtask" owner="W1" title="Subtask" id="subtask" params={params} />;
+  const { key } = useLocalSearchParams<{ key?: string }>();
+  return <SubtaskScreen subId={String(key ?? '')} />;
 }
