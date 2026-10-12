@@ -1,6 +1,6 @@
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { SearchScreen } from '@/features/search/SearchScreen';
 
-/** S5-SEARCH Search — placeholder; W1 replaces this body. */
+/** S5-SEARCH Search (staff). */
 export default function SearchRoute() {
-  return <PlaceholderScreen spec="S5-SEARCH Search" owner="W1" title="Search" id="search" />;
+  return <SearchScreen />;
 }
