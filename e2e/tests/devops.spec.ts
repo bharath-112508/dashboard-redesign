@@ -391,7 +391,7 @@ test.describe('DevOps board', () => {
     const panel = panelOf(page)
     await expect(panel.getByRole('heading', { name: 'Fast' })).toBeVisible()
     await expect(panel.getByText('Deployments', { exact: true })).toBeVisible()
-    await expect(panel.locator('[data-release]')).toHaveCount(5)
+    await expect(panel.locator('[data-release]')).toHaveCount(6)
     await expect(panel.locator('[data-release="2.5.3"]')).toContainText('rolled back')
     await openProject(page, 'OPS-102')
     await expect(panelOf(page).getByText('Deployments', { exact: true })).toHaveCount(0)

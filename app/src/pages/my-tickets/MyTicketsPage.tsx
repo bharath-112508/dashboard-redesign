@@ -1,25 +1,13 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
-import { usePeople } from '../../api/people/directory'
 import { useEntries, useTasks, useWorkspace } from '../../api/queries'
 import type { Task } from '../../api/types'
-import { Avatar } from '../../components/ui'
-import { fmt, range, short, TODAY } from '../../lib/dates'
-import { PRIO, TYPES } from '../../lib/theme'
+import type { Priority } from '../../api/types'
+import { range } from '../../lib/dates'
+import { pal, TYPE_ICON, TYPES } from '../../lib/theme'
 import { isCritical, isOverdue, loggedHours, statusOf, taskKey } from '../../domain/tasks'
-import { avatarFor, useMe } from '../../features/tickets/useMe'
-import {
-  dueLabel,
-  filterMine,
-  groupMine,
-  kpisOf,
-  mineOf,
-  needsYou,
-  weekDays,
-  weekHours,
-  WEEK_TARGET_HOURS,
-  type MineFilter,
-} from './model'
+import { useMe } from '../../features/tickets/useMe'
+import { daysTo, dueLabel, filterMine, groupMine, kpisOf, mineOf, needsYou, newCommentsFor, type MineFilter } from './model'
 
 /** "2h 30m"; "0h" for nothing. */
 const fh = (n: number) => {
@@ -28,6 +16,17 @@ const fh = (n: number) => {
   const M = m % 60
   return (H ? H + 'h' : '') + (M ? (H ? ' ' : '') + M + 'm' : '') || '0h'
 }
+
+/** Priority icon and colour on a row: [colour, 16px path]. Critical gets a third chevron. */
+const PRIO_MARK: Record<Priority, [string, string]> = {
+  Critical: ['#C0392B', 'M4 10l4-4 4 4M4 14l4-4 4 4M4 6l4-4 4 4'],
+  Urgent: ['#D2724A', 'M4 10l4-4 4 4M4 14l4-4 4 4'],
+  High: ['#B98A2F', 'M4 11l4-4 4 4'],
+  Medium: ['#4870E8', 'M4 6h8M4 10h8'],
+  Low: ['#A9B6C5', 'M4 6l4 4 4-4'],
+}
+
+const COMMENT = 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'
 
 const card = 'rounded-2xl border-[1.5px] border-line-2 bg-white'
 const chipBase = 'inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border-[1.5px] px-3 text-[13px] font-semibold'
@@ -41,7 +40,6 @@ export function MyTicketsPage() {
   const tasks = useTasks().data ?? []
   const entries = useEntries().data ?? []
   const ws = useWorkspace().data
-  const people = usePeople().data ?? []
   const [f, setF] = useState<MineFilter>({ tab: 'open', proj: '', q: '' })
   const [by, setBy] = useState<'due' | 'sprint' | 'proj'>('due')
 
@@ -65,27 +63,10 @@ export function MyTicketsPage() {
     setBy(sort)
   }
 
-  // Week bars: Monday to Friday of this week, from the shared time store.
-  const days = weekDays(TODAY)
-  const hours = weekHours(entries, me.id, days)
-  const weekTotal = hours.reduce((a, b) => a + b, 0)
-  const barMax = Math.max(WEEK_TARGET_HOURS / 5, ...hours)
-  const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
-
   // Sprints and epics with open work of mine.
   const openSprintIds = [...new Set(k.open.map(t => t.sprint).filter((x): x is string => !!x))]
   const mySprints = ws.sprints.filter(s => openSprintIds.includes(s.id))
   const myEpics = ws.epics.filter(e => k.open.some(t => t.epic === e.id))
-
-  // The feed: the latest activity on my tickets, newest first.
-  const feed = mine
-    .flatMap(t => t.acts.slice(0, 3).map(a => ({ a, t })))
-    .slice(0, 5)
-
-  const avatar = (name: string) => {
-    const m = avatarFor(people, name)
-    return <Avatar i={m.i} bg={m.bg} size={22} radius={6} font={9} title={name} />
-  }
 
   const kpis = [
     { id: 'open', label: 'Open tickets', value: String(k.open.length), sub: 'Across ' + k.projects + (k.projects === 1 ? ' project' : ' projects'), tone: '#4870E8', go: () => kpiGo('open') },
@@ -119,41 +100,78 @@ export function MyTicketsPage() {
   const row = (t: Task) => {
     const st = statusOf(ws.statuses, t.status)
     const ty = TYPES[t.type]
-    const pr = PRIO[t.prio] || PRIO.Low
+    const pr = PRIO_MARK[t.prio] || PRIO_MARK.Medium
     const sp = ws.sprints.find(s => s.id === t.sprint)
-    const late = isOverdue(t)
+    const ep = ws.epics.find(e => e.id === t.epic)
+    const done = t.status === 'done'
+    const d = daysTo(t)
+    const subsDone = t.subs.filter(x => x.done).length
+    const msgs = newCommentsFor(t, me.name)
     return (
       <Link
         key={t.id}
         to={`/tickets/board?ticket=${taskKey(t)}`}
         data-row={taskKey(t)}
-        className="grid cursor-pointer items-center gap-3 border-t-[1.5px] border-line-3 px-4 py-3 no-underline hover:bg-canvas"
-        style={{ gridTemplateColumns: 'minmax(0,1fr) auto' }}
+        className="flex cursor-pointer flex-wrap items-center gap-x-6 gap-y-2.5 border-t-[1.5px] border-line-3 px-4 py-3 text-ink no-underline hover:bg-canvas"
       >
-        <span className="min-w-0">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className="tnum flex-none text-[12px] font-semibold text-blue-ink">{taskKey(t)}</span>
-            <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{t.title}</span>
+        <div className="flex min-w-0 flex-[1_1_320px] items-center gap-3">
+          <span title={t.type} className="grid size-[30px] flex-none place-items-center rounded-lg" style={{ background: ty[1], color: ty[2] }}>
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d={TYPE_ICON[t.type]} />
+            </svg>
           </span>
-          <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12px] text-ink-2">
-            <span className="inline-flex items-center gap-1 rounded-full px-2 py-px font-semibold" style={{ background: st.soft, color: st.ink }}>
+          <div className="flex min-w-0 flex-col gap-1">
+            <div className="truncate text-[14px] font-[650] leading-[1.25]">{t.title}</div>
+            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12px] text-muted">
+              <span className="tnum flex-none rounded-[5px] bg-sky-2 px-1.5 py-px text-[11px] font-bold text-blue-ink">{taskKey(t)}</span>
+              <span className="size-1.5 flex-none rounded-sm" style={{ background: ep ? pal(ep.p)[0] : '#A9B6C5' }} />
+              <span className="min-w-0 truncate">
+                <b className="font-[650] text-ink">{ep?.name ?? t.epic}</b> · {sp ? sp.name : 'Backlog'}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="ml-auto flex flex-none items-center gap-5">
+          <span title="Priority" className="flex w-[82px] items-center gap-1.5 whitespace-nowrap text-[12.5px] font-semibold" style={{ color: pr[0] }}>
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d={pr[1]} />
+            </svg>
+            {t.prio}
+          </span>
+          <span title="Subtasks done" className="flex w-[110px] flex-col gap-1">
+            <span className="tnum whitespace-nowrap text-[12px] font-semibold" style={{ color: t.subs.length ? '#1B2D45' : '#A9B6C5' }}>
+              {t.subs.length ? `${subsDone} of ${t.subs.length} subtasks` : 'No subtasks'}
+            </span>
+            <span className="h-1 overflow-hidden rounded-sm bg-[#EEF2F6]">
+              <span className="block h-full bg-green" style={{ width: (t.subs.length ? (subsDone / t.subs.length) * 100 : 0) + '%' }} />
+            </span>
+          </span>
+          <span title={msgs ? msgs + ' new comments' : undefined} className="flex w-[34px] items-center">
+            {msgs > 0 && (
+              <span className="inline-flex h-5 items-center gap-1 rounded-[10px] bg-blue px-[7px] text-[11px] font-bold text-white">
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d={COMMENT} />
+                </svg>
+                {msgs}
+              </span>
+            )}
+          </span>
+          <span
+            className="tnum w-[72px] whitespace-nowrap text-right text-[12.5px]"
+            style={{
+              color: !done && d !== null && d < 0 ? '#C0392B' : !done && d === 0 ? '#7A5C0E' : t.due ? '#1B2D45' : '#3B4A5E',
+              fontWeight: !done && d !== null && d <= 0 ? 800 : 600,
+            }}
+          >
+            {dueLabel(t)}
+          </span>
+          <span className="flex w-[100px] justify-end">
+            <span className="inline-flex h-[22px] items-center gap-[5px] whitespace-nowrap rounded-full px-[9px] text-[11.5px] font-bold" style={{ background: st.soft, color: st.ink }}>
               <span className="size-1.5 rounded-full" style={{ background: st.c }} />
               {st.name}
             </span>
-            <span className="rounded-full px-2 py-px font-semibold" style={{ background: ty[1], color: ty[0] }}>
-              {t.type}
-            </span>
-            <span className="rounded-full px-2 py-px font-semibold" style={{ background: pr[1], color: pr[0] }}>
-              {t.prio}
-            </span>
-            {sp && <span>{sp.name}</span>}
-            <span className="tnum" style={{ color: late ? '#C0392B' : undefined, fontWeight: late ? 700 : 500 }}>
-              {dueLabel(t)}
-            </span>
-            {loggedHours(t, entries) > 0 && <span className="tnum">{fh(loggedHours(t, entries))} logged</span>}
           </span>
-        </span>
-        <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-blue-ink">Open ›</span>
+        </div>
       </Link>
     )
   }
@@ -208,188 +226,145 @@ export function MyTicketsPage() {
         </section>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <section className={`${card} min-w-0 overflow-hidden`}>
-          <div className="flex flex-wrap items-center gap-2.5 px-4 pt-3.5">
-            <div className="inline-flex rounded-[10px] bg-canvas p-[3px]" role="tablist">
-              {(
-                [
-                  ['open', 'Open', counts.open],
-                  ['done', 'Done', counts.done],
-                  ['all', 'All', counts.all],
-                ] as const
-              ).map(([id, label, n]) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={f.tab === id}
-                  onClick={() => setTab(id)}
-                  className="h-8 cursor-pointer rounded-[8px] border-0 px-3 text-[13px] font-semibold"
-                  style={{ background: f.tab === id ? '#fff' : 'transparent', color: f.tab === id ? '#1B2D45' : '#56657A' }}
-                >
-                  {label} <span className="tnum text-ink-2">{n}</span>
-                </button>
-              ))}
-            </div>
-            <input
-              value={f.q}
-              onChange={e => setF(p => ({ ...p, q: e.target.value }))}
-              placeholder="Search my tickets"
-              aria-label="Search my tickets"
-              className="h-8 min-w-[180px] flex-1 rounded-[10px] border-[1.5px] border-line bg-white px-3 text-[13.5px] text-ink outline-0"
-            />
-            <select
-              value={by}
-              onChange={e => setBy(e.target.value as typeof by)}
-              aria-label="Group by"
-              className="h-8 cursor-pointer rounded-[10px] border-[1.5px] border-line bg-white px-2.5 text-[13px] font-semibold text-ink"
-            >
-              <option value="due">Group by due date</option>
-              <option value="sprint">Group by sprint</option>
-              <option value="proj">Group by project</option>
-            </select>
+      <section className={`${card} min-w-0 overflow-hidden`}>
+        <div className="flex flex-wrap items-center gap-2.5 px-4 pt-3.5">
+          <h2 className="m-0 mr-1 text-[15px] font-bold text-ink">All my tickets</h2>
+          <div className="inline-flex rounded-[10px] bg-canvas p-[3px]" role="tablist">
+            {(
+              [
+                ['open', 'Open', counts.open],
+                ['done', 'Done', counts.done],
+                ['all', 'All', counts.all],
+              ] as const
+            ).map(([id, label, n]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={f.tab === id}
+                onClick={() => setTab(id)}
+                className="h-8 cursor-pointer rounded-[8px] border-0 px-3 text-[13px] font-semibold"
+                style={{ background: f.tab === id ? '#fff' : 'transparent', color: f.tab === id ? '#1B2D45' : '#56657A' }}
+              >
+                {label} <span className="tnum text-ink-2">{n}</span>
+              </button>
+            ))}
           </div>
-          <div className="flex flex-wrap gap-1.5 px-4 pb-3 pt-2.5">
-            <button
-              type="button"
-              onClick={() => setF(p => ({ ...p, proj: '' }))}
-              className={chipBase}
-              style={{ borderColor: f.proj ? '#E4EAF0' : '#4870E8', color: f.proj ? '#3B4A5E' : '#1F3FAF', background: f.proj ? '#fff' : '#EEF3FB' }}
-            >
-              All projects
-            </button>
-            {projects.map(e => {
-              const on = f.proj === e.id
-              return (
-                <button
-                  key={e.id}
-                  type="button"
-                  onClick={() => setF(p => ({ ...p, proj: on ? '' : e.id }))}
-                  className={chipBase}
-                  style={{ borderColor: on ? '#4870E8' : '#E4EAF0', color: on ? '#1F3FAF' : '#3B4A5E', background: on ? '#EEF3FB' : '#fff' }}
-                >
-                  {e.name}
-                </button>
-              )
-            })}
-          </div>
-
-          {groups.length === 0 && <Empty>No tickets match these filters.</Empty>}
-          {groups.map(g => {
-            const hrs = g.tasks.reduce((a, t) => a + loggedHours(t, entries), 0)
+          <input
+            value={f.q}
+            onChange={e => setF(p => ({ ...p, q: e.target.value }))}
+            placeholder="Search my tickets"
+            aria-label="Search my tickets"
+            className="h-8 min-w-[180px] flex-1 rounded-[10px] border-[1.5px] border-line bg-white px-3 text-[13.5px] text-ink outline-0"
+          />
+          <select
+            value={by}
+            onChange={e => setBy(e.target.value as typeof by)}
+            aria-label="Group by"
+            className="h-8 cursor-pointer rounded-[10px] border-[1.5px] border-line bg-white px-2.5 text-[13px] font-semibold text-ink"
+          >
+            <option value="due">Group by due date</option>
+            <option value="sprint">Group by sprint</option>
+            <option value="proj">Group by project</option>
+          </select>
+        </div>
+        <div className="flex flex-wrap gap-1.5 px-4 pb-3 pt-2.5">
+          <button
+            type="button"
+            onClick={() => setF(p => ({ ...p, proj: '' }))}
+            className={chipBase}
+            style={{ borderColor: f.proj ? '#E4EAF0' : '#4870E8', color: f.proj ? '#3B4A5E' : '#1F3FAF', background: f.proj ? '#fff' : '#EEF3FB' }}
+          >
+            All projects
+          </button>
+          {projects.map(e => {
+            const on = f.proj === e.id
             return (
-              <div key={g.key}>
-                <div className="flex items-center gap-2 bg-canvas px-4 py-2 text-[12.5px] font-semibold text-ink-2">
-                  <span className="text-ink">{g.label}</span>
-                  <span className="tnum">{g.tasks.length}</span>
-                  {hrs > 0 && <span className="tnum ml-auto">{fh(hrs)} logged</span>}
-                </div>
-                {g.tasks.map(row)}
-              </div>
+              <button
+                key={e.id}
+                type="button"
+                onClick={() => setF(p => ({ ...p, proj: on ? '' : e.id }))}
+                className={chipBase}
+                style={{ borderColor: on ? '#4870E8' : '#E4EAF0', color: on ? '#1F3FAF' : '#3B4A5E', background: on ? '#EEF3FB' : '#fff' }}
+              >
+                {e.name}
+              </button>
             )
           })}
+        </div>
+
+        {groups.length === 0 && <Empty>No tickets match these filters.</Empty>}
+        {groups.map(g => {
+          const hrs = g.tasks.reduce((a, t) => a + loggedHours(t, entries), 0)
+          return (
+            <div key={g.key}>
+              <div className="flex items-center gap-2 bg-canvas px-4 py-2 text-[12.5px] font-semibold text-ink-2">
+                <span className="text-ink">{g.label}</span>
+                <span className="tnum">{g.tasks.length}</span>
+                {hrs > 0 && <span className="tnum ml-auto">{fh(hrs)} logged</span>}
+              </div>
+              {g.tasks.map(row)}
+            </div>
+          )
+        })}
+      </section>
+
+      <div className="grid items-start gap-[18px]" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,380px),1fr))' }}>
+        <section className={`${card} p-4`}>
+          <h2 className="m-0 text-[15px] font-bold text-ink">My sprints</h2>
+          <div className="mt-2.5 flex flex-col gap-1.5">
+            {mySprints.map(s => {
+              const ep = ws.epics.find(e => e.id === s.epic)
+              const ts = tasks.filter(t => t.sprint === s.id && !t.parent)
+              const dn = ts.filter(t => t.status === 'done').length
+              return (
+                <Link
+                  key={s.id}
+                  to={`/tickets/plan?sprint=${s.id}`}
+                  className="rounded-xl bg-canvas px-3 py-2.5 no-underline hover:bg-sky-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-ink">
+                      {s.name} · {ep?.name}
+                    </span>
+                    <span className="tnum flex-none text-[12px] text-ink-2">
+                      {dn}/{ts.length} done
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-[12px] text-ink-2">{range(s.start, s.end)}</div>
+                </Link>
+              )
+            })}
+            {!mySprints.length && <div className="text-[13px] text-muted">No sprints with your open tickets.</div>}
+          </div>
         </section>
 
-        <aside className="flex flex-col gap-4">
-          <section className={`${card} p-4`}>
-            <div className="flex items-baseline">
-              <h2 className="m-0 text-[15px] font-bold text-ink">My hours this week</h2>
-              <span className="ml-auto text-[12px] text-ink-2">
-                {short(days[0])} – {fmt(days[4])}
-              </span>
-            </div>
-            <div className="mt-3 flex h-[120px] items-end gap-2.5">
-              {hours.map((h, i) => (
-                <div key={days[i]} className="flex h-full flex-1 flex-col items-center justify-end gap-1.5">
-                  <span className="tnum text-[12px] font-semibold text-ink-2">{h ? fh(h) : '–'}</span>
-                  <div className="w-full rounded-t-md" style={{ height: `${Math.max(4, (h / barMax) * 84)}px`, background: days[i] === TODAY ? '#4870E8' : '#B7C8F3' }} />
-                  <span className="text-[12px] font-semibold text-ink-2">{DOW[i]}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 flex items-center text-[13px]">
-              <span className="tnum font-semibold text-ink">{fh(weekTotal)}</span>
-              <span className="ml-1.5 text-ink-2">of {fh(WEEK_TARGET_HOURS)}</span>
-              <Link to="/timesheet" className="ml-auto font-semibold text-blue-ink no-underline">
-                Log time ›
-              </Link>
-            </div>
-          </section>
-
-          <section className={`${card} p-4`}>
-            <h2 className="m-0 text-[15px] font-bold text-ink">My sprints</h2>
-            <div className="mt-2.5 flex flex-col gap-1.5">
-              {mySprints.map(s => {
-                const ep = ws.epics.find(e => e.id === s.epic)
-                const ts = tasks.filter(t => t.sprint === s.id && !t.parent)
-                const dn = ts.filter(t => t.status === 'done').length
-                return (
-                  <Link
-                    key={s.id}
-                    to={`/tickets/plan?sprint=${s.id}`}
-                    className="rounded-xl bg-canvas px-3 py-2.5 no-underline hover:bg-sky-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-ink">
-                        {s.name} · {ep?.name}
-                      </span>
-                      <span className="tnum flex-none text-[12px] text-ink-2">
-                        {dn}/{ts.length} done
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-[12px] text-ink-2">{range(s.start, s.end)}</div>
-                  </Link>
-                )
-              })}
-              {!mySprints.length && <div className="text-[13px] text-muted">No sprints with your open tickets.</div>}
-            </div>
-          </section>
-
-          <section className={`${card} p-4`}>
-            <h2 className="m-0 text-[15px] font-bold text-ink">My epics</h2>
-            <div className="mt-2.5 flex flex-col gap-1.5">
-              {myEpics.map(e => {
-                const ts = tasks.filter(t => t.epic === e.id && !t.parent)
-                const dn = ts.filter(t => t.status === 'done').length
-                const pct = ts.length ? Math.round((dn / ts.length) * 100) : 0
-                const mineOpen = k.open.filter(t => t.epic === e.id).length
-                return (
-                  <Link key={e.id} to={`/tickets/plan?epic=${e.id}`} className="rounded-xl bg-canvas px-3 py-2.5 no-underline hover:bg-sky-2">
-                    <div className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-ink">{e.name}</span>
-                      <span className="tnum flex-none text-[12px] text-ink-2">{mineOpen} open</span>
-                    </div>
-                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white">
-                      <div className="h-full rounded-full bg-blue" style={{ width: pct + '%' }} />
-                    </div>
-                    <div className="mt-1 text-[12px] text-ink-2">
-                      {dn}/{ts.length} tasks done · {pct}%
-                    </div>
-                  </Link>
-                )
-              })}
-              {!myEpics.length && <div className="text-[13px] text-muted">No epics with your open tickets.</div>}
-            </div>
-          </section>
-
-          <section className={`${card} p-4`}>
-            <h2 className="m-0 text-[15px] font-bold text-ink">Recent on my tickets</h2>
-            <div className="mt-2.5 flex flex-col gap-2.5">
-              {feed.map(({ a, t }, i) => (
-                <Link key={i} to={`/tickets/board?ticket=${taskKey(t)}`} className="flex items-start gap-2.5 text-[13px] text-ink no-underline">
-                  {avatar(a.who)}
-                  <span className="min-w-0">
-                    <span className="font-semibold">{a.who}</span> {a.kind === 'comment' ? 'commented' : a.what} ·{' '}
-                    <span className="text-blue-ink">{taskKey(t)}</span>
-                    <span className="block text-[12px] text-ink-2">{a.when}</span>
-                  </span>
+        <section className={`${card} p-4`}>
+          <h2 className="m-0 text-[15px] font-bold text-ink">My epics</h2>
+          <div className="mt-2.5 flex flex-col gap-1.5">
+            {myEpics.map(e => {
+              const ts = tasks.filter(t => t.epic === e.id && !t.parent)
+              const dn = ts.filter(t => t.status === 'done').length
+              const pct = ts.length ? Math.round((dn / ts.length) * 100) : 0
+              const mineOpen = k.open.filter(t => t.epic === e.id).length
+              return (
+                <Link key={e.id} to={`/tickets/plan?epic=${e.id}`} className="rounded-xl bg-canvas px-3 py-2.5 no-underline hover:bg-sky-2">
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-ink">{e.name}</span>
+                    <span className="tnum flex-none text-[12px] text-ink-2">{mineOpen} open</span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white">
+                    <div className="h-full rounded-full bg-blue" style={{ width: pct + '%' }} />
+                  </div>
+                  <div className="mt-1 text-[12px] text-ink-2">
+                    {dn}/{ts.length} tasks done · {pct}%
+                  </div>
                 </Link>
-              ))}
-              {!feed.length && <div className="text-[13px] text-muted">No activity on your tickets yet.</div>}
-            </div>
-          </section>
-        </aside>
+              )
+            })}
+            {!myEpics.length && <div className="text-[13px] text-muted">No epics with your open tickets.</div>}
+          </div>
+        </section>
       </div>
     </div>
   )

@@ -73,6 +73,8 @@ const P: SeedProject[] = [
     deploys: {
       first: '2026-09-28',
       rel: [
+        // The prototype brings 2.6.2 in live while the Tickets page is open; here it is part of the data.
+        { v: '2.6.2', name: 'Bug fixes for ticket import', st: 'Live', when: '2026-10-10T11:40' },
         // The prototype shows this one as "Today"; it is kept on the app's today (10 Oct).
         { v: '2.6.1', name: 'Ticket import and BankID login', st: 'Live', when: '2026-10-10T10:20' },
         { v: '2.6.0', name: 'Push notifications', st: 'Live', when: '2026-10-09T13:12' },

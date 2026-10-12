@@ -9,6 +9,7 @@ import { useMe } from './useMe'
 import { usePerson } from '../../state/page'
 import { useOverlay } from '../../state/ui'
 import { Caret } from '../ticket/PillDropdown'
+import { deploys, isUnseen, latestRelease, releaseDay, useDeployState } from './deploys'
 
 const LADDER = ['Waiting for client', 'Reminder 1', 'Reminder 2', 'Reminder 3', 'Inform Marcus', 'Escalate']
 const REQ_TYPES = ['Deployment', 'Environment', 'Access', 'Bug in infra', 'Other']
@@ -48,8 +49,10 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
   const send = useActorSend()
   const person = usePerson()
   const openRequest = useOpenRequest()
-  const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<'status' | 'req'>('status')
+  const dstate = useDeployState()
+  const { open, tab } = dstate.panel
+  const setOpen = (v: boolean) => deploys.setPanel(v)
+  const setTab = deploys.setTab
   const [form, setForm] = useState(false)
   const [dd, setDd] = useState<string | null>(null)
   const [rq, setRq] = useState<Draft>({ type: 'Deployment', prio: 'Medium', to: '', text: '' })
@@ -59,6 +62,7 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
   const p = {
     key: src?.key ?? '',
     name: src?.name ?? '',
+    client: src?.client ?? '',
     infra: src?.infra ?? '',
     deploy: src?.deploy ?? '',
     due: src?.latestDue ? fmt(src.latestDue) : '',
@@ -66,7 +70,11 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
     step: src?.step ?? null,
     owner: src?.owner ?? '',
   }
-  const [c, bg, dot] = devopsTone(p.infra)
+  // A project with releases shows its live version; the others show their status.
+  const live = latestRelease(src)
+  const [c, bg, dot] = live ? ['#195040', '#D6E9E2', '#3F9079'] : devopsTone(p.infra)
+  const isNew = isUnseen(dstate.marks, me.id, src)
+  const releases = src?.deploys?.rel ?? []
   const reqs = requests.filter(r => r.key === p.key)
   const unread = reqs.reduce((a, r) => a + unreadOf(r), 0)
 
@@ -149,7 +157,10 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
       )}
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (!open) deploys.seen(me.id, src)
+          setOpen(!open)
+        }}
         className="inline-flex h-[34px] cursor-pointer items-center gap-2 rounded-lg border-0 pl-3 pr-2.5 text-[13.5px] font-semibold"
         style={{
           background: bg,
@@ -161,7 +172,8 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
       >
         <span className="text-[11px] font-bold uppercase tracking-[0.05em] opacity-80">DevOps</span>
         <span className="size-[7px] rounded-full" style={{ background: dot }} />
-        {p.infra}
+        {live ? 'Live ' + live.v : p.infra}
+        {isNew && <span className="inline-flex h-[17px] items-center rounded-[9px] bg-green px-1.5 text-[10.5px] font-extrabold text-white">NEW</span>}
         <Icon d={PATHS.chevron} size={11} sw={2.8} />
       </button>
       {open && (
@@ -171,6 +183,7 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
             <div className="flex items-center gap-2">
               <span className="tnum rounded-md bg-sky-2 px-[7px] py-[3px] text-[11.5px] font-semibold text-blue-ink">{p.key}</span>
               <span className="text-[15px] font-bold text-ink">{p.name}</span>
+              {p.client && <span className="text-[12.5px] text-muted">{p.client}</span>}
             </div>
             <div className="mt-1 text-[12.5px] text-ink-2">Linked to epic {epicName}</div>
             <div className="mt-3 flex gap-[18px] shadow-[inset_0_-1.5px_0_#C9D2DD]">
@@ -244,6 +257,31 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
                     Read only · updated by the DevOps team
                   </div>
                 </div>
+                {releases.length > 0 && (
+                  <>
+                    <div className="mb-2 mt-4 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Deployments</div>
+                    <div className="relative pl-[18px]">
+                      <span className="absolute bottom-2 left-1 top-2 w-0.5 bg-line-2" />
+                      {releases.map(r => {
+                        const ok = r.st === 'Live'
+                        return (
+                          <div key={r.v} className="relative flex items-baseline gap-2 py-[5px]">
+                            <span
+                              className="absolute -left-[18px] top-2.5 size-2.5 rounded-full shadow-[0_0_0_2px_#fff]"
+                              style={{ background: ok ? '#3F9079' : '#C0392B' }}
+                            />
+                            <span className="tnum text-[13px] font-bold text-ink">{r.v}</span>
+                            <span className="min-w-0 flex-1 truncate text-[13px] text-ink-2" title={r.note}>
+                              {r.name}
+                              {!ok && <span className="text-[#8E2A1F]"> · rolled back</span>}
+                            </span>
+                            <span className="flex-none text-[12px] text-muted">{releaseDay(r)}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </>
+                )}
               </>
             )}
 

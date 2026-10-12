@@ -1,4 +1,4 @@
-import { addDays, diff, TODAY } from '../../lib/dates'
+import { diff, TODAY } from '../../lib/dates'
 import type { Epic, Sprint, Task, TimeEntry } from '../../api/types'
 import { assigneesOf, estimateHours, isCritical, isOverdue, loggedHours } from '../../domain/tasks'
 
@@ -6,9 +6,6 @@ import { assigneesOf, estimateHours, isCritical, isOverdue, loggedHours } from '
  * My tickets is a view over the same ticket and time store as the Tickets page,
  * so every number here is computed from it (nothing is typed in).
  */
-
-/** Hours a person is expected to work in a week: five days of 7.5 hours. Used only as the bar target. */
-export const WEEK_TARGET_HOURS = 37.5
 
 /** Top-level tickets assigned to this person. Subtasks are not counted; they belong to their ticket. */
 export const mineOf = (tasks: Task[], name: string) => tasks.filter(t => !t.parent && assigneesOf(t).includes(name))
@@ -45,19 +42,6 @@ export const dueGroupOf = (t: Pick<Task, 'due' | 'status'>): DueGroup => {
 export const hoursOn = (tasks: Task[], entries: TimeEntry[]) => tasks.reduce((a, t) => a + loggedHours(t, entries), 0)
 
 export const estimateOn = (tasks: Task[]) => tasks.reduce((a, t) => a + estimateHours(t), 0)
-
-/** Monday to Friday of the week that contains TODAY. */
-export const weekDays = (anchor = TODAY) => {
-  const d = new Date(anchor + 'T12:00:00Z').getUTCDay() // 0 = Sunday
-  const monday = addDays(anchor, -((d + 6) % 7))
-  return [0, 1, 2, 3, 4].map(i => addDays(monday, i))
-}
-
-/** Hours this person logged per weekday, from the shared time store. */
-export const weekHours = (entries: TimeEntry[], userId: number, days: string[]) =>
-  days.map(day =>
-    entries.filter(e => e.userId === userId && e.date === day).reduce((a, e) => a + (e.bill || 0) + (e.non || 0), 0),
-  )
 
 export type MineFilter = { tab: 'open' | 'done' | 'all'; proj: string; q: string }
 
@@ -147,3 +131,16 @@ export const needsYou = (mine: Task[]) =>
       const kb = b.due || '\uffff'
       return ka < kb ? -1 : ka > kb ? 1 : a.id - b.id
     })
+
+/**
+ * Comments others left on a ticket since this person last did anything on it
+ * (activity is newest first). Shown as the "new comments" badge.
+ */
+export const newCommentsFor = (t: Pick<Task, 'acts'>, name: string) => {
+  let n = 0
+  for (const a of t.acts) {
+    if (a.who === name) break
+    if (a.kind === 'comment') n++
+  }
+  return n
+}
