@@ -1,10 +1,9 @@
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { Avatar, Card, Composer, EmptyState, Icon, KeyChip, Screen, StatusPill, Txt } from '@/components';
+import { Avatar, Card, ChatBubble, Composer, EmptyState, Icon, KeyChip, Screen, StatusPill, Txt } from '@/components';
 import { SCREEN_TITLES } from '@/nav/titles';
 import { me, questionById, questionStatus } from '@/data/selectors';
 import { useActions, useAppState } from '@/data/store';
-import type { QMsg } from '@/data/types';
 import { colors, radii } from '@/theme';
 
 /** S-QUESTION: question card, solved banner, message thread and composer (M-23). */
@@ -67,7 +66,17 @@ export function QuestionScreen({ id }: { id: number }) {
       ) : null}
       <View style={styles.thread} testID="question-thread">
         {q.msgs.map((m, i) => (
-          <QuestionMessage key={i} m={m} />
+          <ChatBubble
+            key={i}
+            who={m.who}
+            text={m.t}
+            when={m.when}
+            att={m.att}
+            mine={m.side === 'client'}
+            initialsOnly
+            attIcon={false}
+            testID={`question-msg-${m.side}`}
+          />
         ))}
       </View>
     </Screen>
@@ -84,46 +93,6 @@ function AttachmentTile({ name }: { name: string }) {
       <Txt v="small" style={styles.tileName} numberOfLines={1}>
         {name}
       </Txt>
-    </View>
-  );
-}
-
-/**
- * One message: the client's side is right-aligned and blue, Viljetech's is left-aligned
- * on the soft track colour. Name and time sit above the bubble (prototype layout).
- */
-function QuestionMessage({ m }: { m: QMsg }) {
-  const client = m.side === 'client';
-  return (
-    <View
-      style={[styles.msg, client && styles.msgClient]}
-      accessible
-      accessibilityLabel={`${m.who}, ${m.when}: ${m.t}`}
-      testID={`question-msg-${m.side}`}
-    >
-      <Avatar name={m.who} size={30} radius={8} initialsOnly />
-      <View style={[styles.msgCol, client && styles.msgColClient]}>
-        <Txt v="small" w={400} color={colors.ink3}>
-          <Txt v="small" w={700}>
-            {m.who}
-          </Txt>
-          {` · ${m.when}`}
-        </Txt>
-        <View style={[styles.bubble, { backgroundColor: client ? colors.primary : colors.track }]}>
-          <Txt v="body" color={client ? colors.white : colors.ink}>
-            {m.t}
-          </Txt>
-        </View>
-        {m.att?.length ? (
-          <View style={styles.msgAtts}>
-            {m.att.map((f) => (
-              <View key={f} style={styles.msgAtt}>
-                <Txt v="small">{f}</Txt>
-              </View>
-            ))}
-          </View>
-        ) : null}
-      </View>
     </View>
   );
 }
@@ -149,11 +118,4 @@ const styles = StyleSheet.create({
     backgroundColor: colors.greenSoft,
   },
   thread: { gap: 12 },
-  msg: { flexDirection: 'row', gap: 9 },
-  msgClient: { flexDirection: 'row-reverse' },
-  msgCol: { maxWidth: '78%', minWidth: 0, alignItems: 'flex-start' },
-  msgColClient: { alignItems: 'flex-end' },
-  bubble: { marginTop: 4, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 14 },
-  msgAtts: { marginTop: 5, flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  msgAtt: { height: 26, paddingHorizontal: 9, borderRadius: 7, backgroundColor: colors.track, justifyContent: 'center' },
 });

@@ -69,6 +69,7 @@ export function SupportPlanSheet() {
       iconBg={colors.tealSoft}
       iconFg={colors.tealInk}
       showClose={false}
+      variant="plan"
       maxHeight="90%"
       footer={p && allowed ? footer : undefined}
       testID="sheet-support-plan"

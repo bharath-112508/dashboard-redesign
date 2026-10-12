@@ -19,10 +19,12 @@ export interface TicketCardProps {
   variant?: 'full' | 'compact';
   /** default opens the ticket (M-11) */
   onPress?: () => void;
+  /** compact only: Critical badge right-aligned (prototype project cards, default) or after the key */
+  critAlign?: 'left' | 'right';
 }
 
 /** Ticket card (SPEC S-TICKETS). Clients see client status labels and no Critical badge. */
-export function TicketCard({ ticket, variant = 'full', onPress }: TicketCardProps) {
+export function TicketCard({ ticket, variant = 'full', onPress, critAlign = 'right' }: TicketCardProps) {
   const isClient = useAppState((s) => myRole(s) === 'client');
   const vm = ticketCardVM(ticket, isClient);
   const open = onPress ?? (() => toTicket(ticket.id));
@@ -30,18 +32,27 @@ export function TicketCard({ ticket, variant = 'full', onPress }: TicketCardProp
 
   if (variant === 'compact') {
     return (
-      <Card onPress={open} label={label} ring={vm.ring} radius={radii.compactCard} pad={12} style={styles.gap8} testID={`ticket-card-${vm.key}`}>
-        <View style={styles.row}>
+      <Card
+        onPress={open}
+        label={label}
+        ring={vm.ring}
+        radius={radii.compactCard}
+        pad={12}
+        style={styles.gap8}
+        testID={`ticket-card-${vm.key}`}
+      >
+        <View style={styles.row7}>
           <TypeIcon type={vm.type} />
           <KeyChip k={vm.key} />
+          {critAlign === 'right' ? <View style={styles.flex} /> : null}
           {vm.critical ? <CriticalBadge /> : null}
         </View>
-        <Txt v="rowTitle" numberOfLines={2}>
+        <Txt v="bodyLg" w={700} style={styles.compactTitle} numberOfLines={2}>
           {vm.title}
         </Txt>
         <View style={styles.row}>
           <AvatarStack names={vm.assignees} size={22} />
-          <Txt v="small" w={400} color={colors.ink3} style={styles.flex} numberOfLines={1}>
+          <Txt v="small" w={400} color={colors.ink3} style={[styles.flex, styles.ml6]} numberOfLines={1}>
             {`${vm.epic} · ${vm.sprint}`}
           </Txt>
           <Txt v="small" w={vm.due.weight} color={vm.due.color}>
@@ -90,6 +101,9 @@ export function TicketCard({ ticket, variant = 'full', onPress }: TicketCardProp
 
 const styles = StyleSheet.create({
   gap8: { gap: 8 },
+  compactTitle: { lineHeight: 19 },
+  row7: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  ml6: { marginLeft: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   flex: { flex: 1 },
   foot: {

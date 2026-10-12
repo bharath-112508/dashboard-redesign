@@ -11,6 +11,8 @@ export interface SelectFieldProps {
   onChange: (value: string) => void;
   /** blue border */
   highlight?: boolean;
+  /** larger value (16/700, Hours and Minutes); default 15/600 as the prototype selects */
+  strong?: boolean;
   testID?: string;
 }
 

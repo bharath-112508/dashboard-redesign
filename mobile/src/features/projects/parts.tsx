@@ -3,12 +3,9 @@ import type { ReactNode } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated from 'react-native-reanimated';
 
-import { AvatarStack, Card, CriticalBadge, Icon, KeyChip, Press, TypeIcon, Txt, type IconName } from '@/components';
+import { Card, Icon, KeyChip, Press, Txt, type IconName } from '@/components';
 import { PROJECT_STATUS } from '@/data/constants';
-import { myRole, ticketCardVM } from '@/data/selectors';
-import { useAppState } from '@/data/store';
-import type { ProjectStatus, Ticket } from '@/data/types';
-import { toTicket } from '@/nav/routes';
+import type { ProjectStatus } from '@/data/types';
 import { colors, motion, radii } from '@/theme';
 
 import type { RequestVM, TaskVM } from './maintenance';
@@ -24,42 +21,6 @@ export function Eyebrow4({ children, color = colors.ink3 }: { children: string; 
     <Txt v="eyebrow" color={color} style={styles.eyebrow} accessibilityRole="header">
       {children}
     </Txt>
-  );
-}
-
-/** Compact ticket card of the project List and Board views (prototype card, radius 16). */
-export function ProjectTicketCard({ ticket }: { ticket: Ticket }) {
-  const isClient = useAppState((s) => myRole(s) === 'client');
-  const vm = ticketCardVM(ticket, isClient);
-  return (
-    <Card
-      onPress={() => toTicket(ticket.id)}
-      label={`${vm.key} ${vm.title}, ${vm.statusLabel}, due ${vm.due.label}`}
-      ring={vm.ring}
-      radius={radii.compactCard}
-      pad={12}
-      style={styles.tcard}
-      testID={`ticket-card-${vm.key}`}
-    >
-      <View style={styles.row7}>
-        <TypeIcon type={vm.type} />
-        <KeyChip k={vm.key} />
-        <View style={styles.flex} />
-        {vm.critical ? <CriticalBadge /> : null}
-      </View>
-      <Txt v="bodyLg" w={700} style={styles.tTitle} numberOfLines={2}>
-        {vm.title}
-      </Txt>
-      <View style={styles.row8}>
-        <AvatarStack names={vm.assignees} size={22} />
-        <Txt v="small" w={400} color={colors.ink3} style={[styles.flex, styles.ml6]} numberOfLines={1}>
-          {`${vm.epic} · ${vm.sprint}`}
-        </Txt>
-        <Txt v="small" w={vm.due.weight} color={vm.due.color}>
-          {vm.due.label}
-        </Txt>
-      </View>
-    </Card>
   );
 }
 
@@ -230,16 +191,11 @@ export const partStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   flexShrink: { flexShrink: 1 },
-  ml6: { marginLeft: 6 },
   mt3: { marginTop: 3 },
   lh13: { lineHeight: 19.5 },
   lhTight: { lineHeight: 19 },
   strike: { textDecorationLine: 'line-through' },
   eyebrow: { paddingHorizontal: 4 },
-  tcard: { gap: 8 },
-  tTitle: { lineHeight: 19 },
-  row7: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  row8: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   statusBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 28, paddingHorizontal: 10, borderRadius: 14, flexShrink: 0 },
   infoTile: { flex: 1, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 12, backgroundColor: colors.bg },
   infoLabel: { fontSize: 11, letterSpacing: 0.66 },

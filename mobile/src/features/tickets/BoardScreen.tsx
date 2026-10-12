@@ -1,14 +1,12 @@
 import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { Dot } from '@/components/Chips';
-import { ChipRow } from '@/components/Controls';
-import { Icon, type IconName } from '@/components/Icon';
-import { Press } from '@/components/Press';
+import { ChipRow, SegmentedControl } from '@/components/Controls';
 import { Screen } from '@/components/Screen';
 import { TicketCard } from '@/components/TicketCard';
 import { Txt } from '@/components/Txt';
 import { useActions, useAppState } from '@/data/store';
-import { colors, radii, shadows, space } from '@/theme';
+import { colors, radii, space } from '@/theme';
 
 import { boardColumns, boardSprintGroups, boardState } from './selectors';
 
@@ -36,10 +34,17 @@ export function BoardScreen() {
         options={[{ key: 'all', label: 'All epics' }, ...b.epics.map((e) => ({ key: e, label: e }))]}
         style={styles.chips}
       />
-      <View style={styles.views} accessibilityRole="tablist" accessibilityLabel="Board view">
-        <ViewButton icon="square-kanban" label="Board" on={b.view === 'board'} onPress={() => setUi({ boardView: 'board' })} />
-        <ViewButton icon="list" label="List" on={b.view === 'list'} onPress={() => setUi({ boardView: 'list' })} />
-      </View>
+      <SegmentedControl
+        variant="pill"
+        label="Board view"
+        value={b.view}
+        onChange={(v) => setUi({ boardView: v })}
+        segments={[
+          { key: 'board', label: 'Board', icon: 'square-kanban' },
+          { key: 'list', label: 'List', icon: 'list' },
+        ]}
+        testIDPrefix="board-view-"
+      />
 
       {b.view === 'board' ? (
         <ScrollView
@@ -94,23 +99,9 @@ export function BoardScreen() {
   );
 }
 
-function ViewButton({ icon, label, on, onPress }: { icon: IconName; label: string; on: boolean; onPress: () => void }) {
-  return (
-    <Press label={label} a11yRole="tab" selected={on} onPress={onPress} scale={0.97} style={[styles.viewBtn, on && styles.viewOn]} testID={`board-view-${label.toLowerCase()}`}>
-      <Icon name={icon} size={15} color={colors.ink} />
-      <Txt v="bodySm" w={on ? 800 : 600}>
-        {label}
-      </Txt>
-    </Press>
-  );
-}
-
 const styles = StyleSheet.create({
   content: { paddingTop: 8 },
   chips: { flexGrow: 0, marginHorizontal: -2, paddingVertical: 2 },
-  views: { flexDirection: 'row', padding: 3, gap: 2, borderRadius: radii.pill, backgroundColor: colors.primarySoft },
-  viewBtn: { flex: 1, height: 38, borderRadius: radii.pill, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-  viewOn: { backgroundColor: colors.surface, ...shadows.segmentActive },
   colScroll: { marginHorizontal: -space.gutter, flexGrow: 0 },
   colInner: { paddingHorizontal: space.gutter, paddingBottom: 6, gap: COL_GAP },
   col: { width: COL_W, gap: 8, padding: 10, borderRadius: radii.boardCol, backgroundColor: colors.boardCol },

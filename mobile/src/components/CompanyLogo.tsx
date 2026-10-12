@@ -1,4 +1,4 @@
-import { StyleSheet, View } from 'react-native';
+import { Image, Platform, StyleSheet, View } from 'react-native';
 import { SvgXml } from 'react-native-svg';
 
 import { ini } from '@/data/format';
@@ -14,18 +14,26 @@ export interface CompanyLogoProps {
   radius?: number;
 }
 
-/** Company logo tile; navy with initials when there is no logo (SPEC §5.8). */
+/**
+ * Company logo tile; navy with initials when there is no logo (SPEC §5.8). The tile has
+ * no background of its own (a white tile bled through as thin white corners at the
+ * rounded edge). On web the logo is drawn as one image, so the rounded clip is applied
+ * once, as with the prototype's background image (an inline SVG is clipped shape by
+ * shape and leaves a hairline fringe at the corners).
+ */
 export function CompanyLogo({ company, size = 32, radius }: CompanyLogoProps) {
-  const xml = LOGO_XML[company];
   const r = radius ?? Math.round(size * 0.28);
+  const xml = LOGO_XML[company];
   return (
     <View
-      style={[styles.box, { width: size, height: size, borderRadius: r, backgroundColor: xml ? colors.white : colors.ink }]}
+      style={[styles.box, { width: size, height: size, borderRadius: r, backgroundColor: xml ? 'transparent' : colors.ink }]}
       accessible
       accessibilityRole="image"
       accessibilityLabel={`${company} logo`}
     >
-      {xml ? (
+      {xml && Platform.OS === 'web' ? (
+        <Image source={{ uri: `data:image/svg+xml;base64,${btoa(xml)}` }} style={{ width: size, height: size }} />
+      ) : xml ? (
         <SvgXml xml={xml} width={size} height={size} />
       ) : (
         <Txt v="small" w={800} color={colors.white} style={{ fontSize: Math.round(size * 0.36) }}>

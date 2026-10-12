@@ -137,7 +137,7 @@ export function Section({ title, count, link, onLink, variant = 'section', child
             </Txt>
           )}
           {count !== undefined ? (
-            <Txt v="meta" color={colors.ink3}>
+            <Txt v="meta" w={700} color={colors.ink3}>
               {String(count)}
             </Txt>
           ) : null}
@@ -168,6 +168,6 @@ const styles = StyleSheet.create({
   rowDivider: { borderTopWidth: 1, borderTopColor: colors.divider },
   rowText: { flex: 1, gap: 2 },
   section: { gap: 10 },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 },
   sectionTitle: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
 });

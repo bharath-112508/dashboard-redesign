@@ -27,6 +27,14 @@ export interface BottomSheetProps {
   maxHeight?: DimensionValue;
   /** sticky footer (error + save button) */
   footer?: ReactNode;
+  /**
+   * form (default): 40px icon tile (radius 14), 20/800 title, subtitle under the header row,
+   * no dividers. plan (support plan): 36px circular icon, 18/800 title with the subtitle
+   * under it, dividers under the header and above the footer.
+   */
+  variant?: 'form' | 'plan';
+  /** title size: md 20 (default for form), sm 18 (plan, project status) */
+  titleSize?: 'md' | 'sm';
   children: ReactNode;
   testID?: string;
 }
@@ -46,9 +54,18 @@ export function BottomSheet({
   showClose = true,
   maxHeight = '88%',
   footer,
+  variant = 'form',
+  titleSize,
   children,
   testID = 'sheet',
 }: BottomSheetProps) {
+  const plan = variant === 'plan';
+  const titleV = (titleSize ?? (plan ? 'sm' : 'md')) === 'sm' ? 'sheetTitle' : 'titleMd';
+  const sub = subtitle ? (
+    <Txt v={plan ? 'meta' : 'bodySm'} w={400} color={colors.ink3} numberOfLines={2} style={plan ? null : styles.subBelow}>
+      {subtitle}
+    </Txt>
+  ) : null;
   const insets = useSafeAreaInsets();
   const reducedUp = useLoop(motion.sheetUp());
   const drift = useLoop(motion.drift());
@@ -74,36 +91,41 @@ export function BottomSheet({
           testID={testID}
         >
           <View style={styles.handle} />
-          <View style={styles.head}>
-            {icon ? (
-              <Animated.View style={drift}>
-                <IconTile icon={icon} bg={iconBg} fg={iconFg} size={40} radius={12} iconSize={20} />
-              </Animated.View>
-            ) : null}
-            <View style={styles.headText}>
-              <Txt v="titleMd" accessibilityRole="header" numberOfLines={2}>
-                {title}
-              </Txt>
-              {subtitle ? (
-                <Txt v="caption" color={colors.ink3} numberOfLines={2}>
-                  {subtitle}
+          <View style={[styles.headWrap, plan && styles.headPlan]}>
+            <View style={[styles.head, plan && { gap: 10 }]}>
+              {icon ? (
+                <Animated.View style={plan ? null : drift}>
+                  {plan ? (
+                    <IconTile icon={icon} bg={iconBg} fg={iconFg} size={36} radius={18} iconSize={18} />
+                  ) : (
+                    <IconTile icon={icon} bg={iconBg} fg={iconFg} size={40} radius={14} iconSize={19} />
+                  )}
+                </Animated.View>
+              ) : null}
+              <View style={styles.headText}>
+                <Txt v={titleV} accessibilityRole="header" numberOfLines={2}>
+                  {title}
                 </Txt>
+                {plan ? sub : null}
+              </View>
+              {showClose ? (
+                <Press label="Close" onPress={onClose} style={styles.close} scale={0.94} testID="sheet-close">
+                  <Icon name="x" size={16} color={colors.destructiveInk} strokeWidth={2.6} />
+                </Press>
               ) : null}
             </View>
-            {showClose ? (
-              <Press label="Close" onPress={onClose} style={styles.close} scale={0.94} testID="sheet-close">
-                <Icon name="x" size={18} color={colors.destructiveInk} strokeWidth={2.4} />
-              </Press>
-            ) : null}
+            {plan ? null : sub}
           </View>
           <ScrollView
             style={styles.scroll}
-            contentContainerStyle={[styles.body, !footer && { paddingBottom: insets.bottom + 34 }]}
+            contentContainerStyle={[styles.body, plan && styles.bodyPlan, !footer && { paddingBottom: insets.bottom + 34 }]}
             keyboardShouldPersistTaps="handled"
           >
             {children}
           </ScrollView>
-          {footer ? <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>{footer}</View> : null}
+          {footer ? (
+            <View style={[styles.footer, plan && styles.footerPlan, { paddingBottom: insets.bottom + (plan ? 30 : 34) }]}>{footer}</View>
+          ) : null}
         </Animated.View>
       </KeyboardAvoidingView>
     </View>
@@ -120,9 +142,12 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radii.sheet,
     overflow: 'hidden',
   },
-  handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: colors.lineInput, marginTop: 8 },
-  head: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12 },
-  headText: { flex: 1, gap: 2 },
+  handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: colors.lineInput, marginTop: 10 },
+  headWrap: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12 },
+  headPlan: { paddingTop: 6, borderBottomWidth: 1, borderBottomColor: colors.divider2 },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headText: { flex: 1, gap: 1 },
+  subBelow: { marginTop: 6 },
   close: {
     width: 34,
     height: 34,
@@ -135,5 +160,7 @@ const styles = StyleSheet.create({
   },
   scroll: { flexGrow: 0 },
   body: { paddingHorizontal: 20, paddingTop: 4, gap: 14 },
-  footer: { paddingHorizontal: 20, paddingTop: 12, gap: 10, borderTopWidth: 1, borderTopColor: colors.divider2 },
+  bodyPlan: { paddingTop: 14, paddingBottom: 14 },
+  footer: { paddingHorizontal: 20, paddingTop: 16, gap: 12 },
+  footerPlan: { paddingTop: 12, gap: 8, borderTopWidth: 1, borderTopColor: colors.divider2 },
 });

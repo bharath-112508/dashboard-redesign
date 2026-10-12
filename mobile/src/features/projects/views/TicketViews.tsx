@@ -2,7 +2,7 @@
 import { ScrollView, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
-import { Dot, EmptyState, Icon, IconTile, Press, Txt } from '@/components';
+import { Dot, EmptyState, Icon, IconTile, Press, TicketCard, Txt } from '@/components';
 import { SPRINT_STATE } from '@/data/constants';
 import { TICKET_STATUS } from '@/data/constants';
 import { useActions, useAppState } from '@/data/store';
@@ -10,7 +10,7 @@ import { toTicket } from '@/nav/routes';
 import { colors, motion, radii, useLoop } from '@/theme';
 
 import { epicsTree, type TreeEpic, type TreeSprint } from '../epicsTree';
-import { ProjectTicketCard, ViewIn } from '../parts';
+import { ViewIn } from '../parts';
 import { projectFiles, statusGroups } from '../selectors';
 import { timeline } from '../timeline';
 
@@ -32,7 +32,7 @@ export function ListView({ project }: { project: string }) {
           </View>
           <View style={styles.cards}>
             {g.tickets.map((t) => (
-              <ProjectTicketCard key={t.id} ticket={t} />
+              <TicketCard key={t.id} ticket={t} variant="compact" />
             ))}
           </View>
         </View>
@@ -66,7 +66,7 @@ export function BoardView({ project }: { project: string }) {
             </View>
             <View style={styles.cards}>
               {g.tickets.map((t) => (
-                <ProjectTicketCard key={t.id} ticket={t} />
+                <TicketCard key={t.id} ticket={t} variant="compact" />
               ))}
             </View>
           </View>

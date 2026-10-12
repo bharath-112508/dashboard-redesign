@@ -25,20 +25,38 @@ export interface SegmentedControlProps<K extends string> {
   onChange: (k: K) => void;
   /**
    * square: radius 12 / inner 10 (Tickets filter, sheets)
-   * pill: fully rounded (Projects filter, Companies tabs)
+   * pill: fully rounded, icon before the label (Projects filter, Companies tabs, Board/List)
    * icon: icon over label, 52 high, radius 18 (project view switcher)
    */
   variant?: 'square' | 'pill' | 'icon';
   /** accessible name of the group */
   label: string;
   style?: StyleProp<ViewStyle>;
+  /** segment testID prefix, default "seg-" (testID = prefix + key) */
+  testIDPrefix?: string;
 }
 
-/** Segmented control; the active segment is white with a shadow and weight 800. */
-export function SegmentedControl<K extends string>({ segments, value, onChange, variant = 'square', label, style }: SegmentedControlProps<K>) {
+/**
+ * Segmented control (prototype): soft-blue track with 3px padding; the active segment is
+ * white with a shadow and weight 800, inactive labels stay ink at 600, counts ink-3.
+ * square: 36px segments, radius 10 (Tickets filter; sheets pass a taller style).
+ * pill: 38px rounded segments, optional 15px icon before the label (Projects filter,
+ * Companies tabs, Board/List). icon: 52px segments with the icon over an 11.5px label.
+ */
+export function SegmentedControl<K extends string>({
+  segments,
+  value,
+  onChange,
+  variant = 'square',
+  label,
+  style,
+  testIDPrefix = 'seg-',
+}: SegmentedControlProps<K>) {
   const outerR = variant === 'pill' ? radii.pill : variant === 'icon' ? radii.viewSwitch : 12;
-  const innerR = variant === 'pill' ? radii.pill : variant === 'icon' ? 14 : radii.segmentInner;
-  const h = variant === 'icon' ? 52 : control.segmented + 4;
+  const innerR = variant === 'pill' ? radii.pill : variant === 'icon' ? 15 : radii.segmentInner;
+  const h = variant === 'icon' ? 58 : variant === 'pill' ? 44 : 42;
+  const anyIcon = segments.some((s) => s.icon);
+  const v = variant === 'icon' ? 'chip' : variant === 'pill' ? (anyIcon ? 'bodySm' : 'meta') : 'body';
   return (
     <View style={[styles.seg, { borderRadius: outerR, height: h }, style]} accessibilityRole="tablist" accessibilityLabel={label}>
       {segments.map((s) => {
@@ -55,19 +73,19 @@ export function SegmentedControl<K extends string>({ segments, value, onChange, 
             style={[
               styles.segItem,
               { borderRadius: innerR },
-              variant === 'icon' && styles.segIcon,
+              variant === 'icon' ? styles.segIcon : styles.segRow,
               on && styles.segOn,
             ]}
-            testID={`seg-${s.key}`}
+            testID={`${testIDPrefix}${s.key}`}
           >
-            {variant === 'icon' && s.icon ? <Icon name={s.icon} size={18} color={on ? colors.primaryInk : colors.ink3} /> : null}
+            {s.icon && variant !== 'square' ? <Icon name={s.icon} size={variant === 'icon' ? 17 : 15} color={colors.ink} /> : null}
             <View style={styles.segLabel}>
-              {s.dot ? <Dot color={s.dot} size={8} /> : null}
-              <Txt v={variant === 'icon' ? 'small' : 'bodySm'} w={on ? 800 : 600} color={on ? colors.ink : colors.ink3} numberOfLines={1}>
+              {s.dot ? <Dot color={s.dot} size={8} radius={2} /> : null}
+              <Txt v={v} w={on ? 800 : 600} color={colors.ink} numberOfLines={1} style={styles.segText}>
                 {s.label}
               </Txt>
               {s.count !== undefined ? (
-                <Txt v={variant === 'icon' ? 'small' : 'bodySm'} w={on ? 800 : 600} color={on ? colors.ink3 : colors.muted}>
+                <Txt v={v} w={600} color={colors.ink3}>
                   {String(s.count)}
                 </Txt>
               ) : null}
@@ -97,7 +115,10 @@ export interface ChipRowProps<K extends string> {
   style?: StyleProp<ViewStyle>;
 }
 
-/** Choice chips; the selected chip is dark ink with white text. */
+/**
+ * Choice chips; the selected chip is dark ink with white text. Scrolling filter chips are
+ * 36px / 13px; wrapped sheet choices are 38px / 13.5px with a 6px gap (prototype).
+ */
 export function ChipRow<K extends string>({ options, value, onChange, label, wrap, style }: ChipRowProps<K>) {
   const chips = options.map((o) => {
     const on = o.key === value;
@@ -109,10 +130,10 @@ export function ChipRow<K extends string>({ options, value, onChange, label, wra
         checked={on}
         onPress={() => onChange(o.key)}
         scale={0.97}
-        style={[styles.chip, on ? styles.chipOn : styles.chipOff]}
+        style={[styles.chip, wrap && styles.chipLg, on ? styles.chipOn : styles.chipOff]}
       >
         {o.icon ? <Icon name={o.icon} size={14} color={on ? colors.white : colors.ink} /> : null}
-        <Txt v="meta" w={700} color={on ? colors.white : colors.ink} numberOfLines={1}>
+        <Txt v={wrap ? 'bodySm' : 'meta'} w={700} color={on ? colors.white : colors.ink} numberOfLines={1}>
           {o.label}
         </Txt>
       </Press>
@@ -191,9 +212,13 @@ export interface StepperProps {
   format?: (v: number) => string;
 }
 
-/** −/+ stepper: round 44px buttons and a 22/800 value (support plan hours). */
+/**
+ * −/+ stepper (prototype): flat round buttons on the stepper grey, no ring; 44px with a
+ * 22/800 value (support plan hours) or 32px with a 13.5/700 value (`compact`, settings).
+ * At the limit the button stays visible: the icon turns faint and it stops responding.
+ */
 export function Stepper({ value, onChange, min = -Infinity, max = Infinity, label, unit, compact, format }: StepperProps) {
-  const size = compact ? 30 : 44;
+  const size = compact ? 32 : 44;
   const btn = (dir: -1 | 1) => {
     const next = value + dir;
     const disabled = next < min || next > max;
@@ -203,17 +228,17 @@ export function Stepper({ value, onChange, min = -Infinity, max = Infinity, labe
         onPress={() => onChange(next)}
         disabled={disabled}
         scale={0.94}
-        style={[styles.stepBtn, { width: size, height: size, borderRadius: size / 2, opacity: disabled ? 0.4 : 1 }]}
+        style={[styles.stepBtn, { width: size, height: size, borderRadius: size / 2 }]}
       >
-        <Icon name={dir < 0 ? 'minus' : 'plus'} size={compact ? 14 : 18} color={colors.ink} />
+        <Icon name={dir < 0 ? 'minus' : 'plus'} size={compact ? 15 : 18} color={disabled ? colors.faint : colors.ink} />
       </Press>
     );
   };
   return (
     <View style={styles.stepper} accessibilityLabel={label}>
       {btn(-1)}
-      <View style={styles.stepValue}>
-        <Txt v={compact ? 'bodySm' : 'titleTicket'} w={800}>
+      <View style={[styles.stepValue, compact && { minWidth: 84 }]}>
+        <Txt v={compact ? 'bodySm' : 'titleTicket'} w={compact ? 700 : 800} color={compact ? colors.ink2 : colors.ink}>
           {format ? format(value) : String(value)}
         </Txt>
         {unit ? (
@@ -229,26 +254,29 @@ export function Stepper({ value, onChange, min = -Infinity, max = Infinity, labe
 
 const styles = StyleSheet.create({
   seg: { flexDirection: 'row', backgroundColor: colors.primarySoft, padding: 3, gap: 2 },
-  segItem: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  segIcon: { gap: 2 },
+  segItem: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+  segRow: { flexDirection: 'row', gap: 6 },
+  segIcon: { gap: 4, paddingHorizontal: 2 },
+  segText: { flexShrink: 1 },
   segOn: { backgroundColor: colors.surface, ...shadows.segmentActive },
-  segLabel: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  segLabel: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 1, maxWidth: '100%' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     height: control.segmented,
-    paddingHorizontal: 14,
+    paddingHorizontal: 13, // 14 in the prototype, minus the 1px ring (a box-shadow there)
     borderRadius: radii.pill,
     borderWidth: 1,
   },
+  chipLg: { height: 38 },
   chipOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   chipOff: { backgroundColor: colors.surface, borderColor: colors.line },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   chipScroll: { gap: 8, paddingRight: 8 },
   toggle: { padding: 3, flexDirection: 'row', alignItems: 'center' },
   knob: { backgroundColor: colors.white, ...shadows.knob },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  stepBtn: { backgroundColor: colors.stepper, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line },
-  stepValue: { minWidth: 48, alignItems: 'center' },
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stepBtn: { backgroundColor: colors.stepper, alignItems: 'center', justifyContent: 'center' },
+  stepValue: { minWidth: 60, alignItems: 'center' },
 });

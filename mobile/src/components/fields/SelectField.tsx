@@ -14,7 +14,7 @@ import type { SelectFieldProps } from './types';
  * Select (native): a field that opens an option list sheet. The web build uses a real
  * <select> (SelectField.web.tsx) like the prototype.
  */
-export function SelectField({ label, value, options, onChange, highlight, testID }: SelectFieldProps) {
+export function SelectField({ label, value, options, onChange, highlight, strong, testID }: SelectFieldProps) {
   const [open, setOpen] = useState(false);
   const insets = useSafeAreaInsets();
   const current = options.find((o) => o.value === value);
@@ -27,10 +27,10 @@ export function SelectField({ label, value, options, onChange, highlight, testID
         style={[inputStyles.box, styles.row, highlight && inputStyles.focus]}
         testID={testID}
       >
-        <Txt v="bodyLg" style={{ flex: 1 }} numberOfLines={1}>
+        <Txt v="rowTitle" w={strong ? 700 : 600} style={[{ flex: 1 }, strong && { fontSize: 16 }]} numberOfLines={1}>
           {current?.label ?? ''}
         </Txt>
-        <Icon name="chevron-down" size={18} color={colors.muted} />
+        <Icon name="chevron-down" size={14} color={colors.ink} strokeWidth={2.6} />
       </Press>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} accessibilityLabel="Close" accessibilityRole="button" />

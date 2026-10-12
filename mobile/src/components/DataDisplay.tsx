@@ -144,21 +144,22 @@ export interface KpiTileProps {
   testID?: string;
 }
 
-/** Home KPI tile: label, big value, sub; icon square top right. */
+/**
+ * Home KPI tile (prototype): one-line label (ellipsis) with room for the 36px icon square
+ * pinned top right, 26/800 value, one-line sub.
+ */
 export function KpiTile({ label, value, sub, icon, accent, accentSoft, valueColor = colors.ink, iconAnim, index = 0, onPress, testID }: KpiTileProps) {
   return (
     <Animated.View style={[styles.kpiWrap, motion.fadeUp(index, 0.05, 0.06)]}>
       <Card onPress={onPress} label={`${label}: ${value}`} style={styles.kpi} testID={testID}>
-        <View style={styles.kpiTop}>
-          <Txt v="caption" w={600} color={colors.ink2} style={styles.kpiLabel}>
-            {label}
-          </Txt>
-          <IconTile icon={icon} bg={accentSoft} fg={accent} size={36} radius={12} iconSize={18} anim={iconAnim} />
-        </View>
-        <Txt v="kpi" color={valueColor}>
+        <IconTile icon={icon} bg={accentSoft} fg={accent} size={36} radius={12} iconSize={18} anim={iconAnim} style={styles.kpiIcon} />
+        <Txt v="caption" w={600} color={colors.ink2} numberOfLines={1} style={styles.kpiLabel}>
+          {label}
+        </Txt>
+        <Txt v="kpi" color={valueColor} numberOfLines={1} style={styles.kpiValue}>
           {value}
         </Txt>
-        <Txt v="small" w={400} color={colors.ink3} numberOfLines={1}>
+        <Txt v="small" w={400} color={colors.ink3} numberOfLines={1} style={styles.kpiSub}>
           {sub}
         </Txt>
       </Card>
@@ -214,9 +215,11 @@ export function FactTile({ label, locked, value, valueColor = colors.ink, sub, s
 const styles = StyleSheet.create({
   stack: { overflow: 'hidden' },
   kpiWrap: { flexBasis: '47%', flexGrow: 1, maxWidth: '48.7%' },
-  kpi: { gap: 4, minHeight: 118 },
-  kpiTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6, marginBottom: 2 },
-  kpiLabel: { flex: 1, paddingTop: 2 },
+  kpi: { position: 'relative' },
+  kpiIcon: { position: 'absolute', top: 12, right: 12 },
+  kpiLabel: { paddingRight: 36 },
+  kpiValue: { marginTop: 6 },
+  kpiSub: { marginTop: 1 },
   fact: {
     flexBasis: '47%',
     flexGrow: 1,

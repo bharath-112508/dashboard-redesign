@@ -23,8 +23,8 @@ export function CompaniesScreen() {
         value={archived ? 'archived' : 'active'}
         onChange={(k) => setUi({ showArchived: k === 'archived' })}
         segments={[
-          { key: 'active', label: 'Active', icon: 'building-2' },
-          { key: 'archived', label: 'Archived', icon: 'archive' },
+          { key: 'active', label: 'Active' },
+          { key: 'archived', label: 'Archived' },
         ]}
       />
       {rows.length ? (

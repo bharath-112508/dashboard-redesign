@@ -136,10 +136,10 @@ export function LogTimeSheet() {
 
       <View style={styles.pair}>
         <Field label="Hours" style={styles.flex}>
-          <SelectField label="Hours" value={f.h} options={HOURS} onChange={(v) => set({ h: v })} testID="log-hours" />
+          <SelectField label="Hours" value={f.h} options={HOURS} onChange={(v) => set({ h: v })} strong testID="log-hours" />
         </Field>
         <Field label="Minutes" style={styles.flex}>
-          <SelectField label="Minutes" value={f.m} options={MINUTES} onChange={(v) => set({ m: v })} testID="log-minutes" />
+          <SelectField label="Minutes" value={f.m} options={MINUTES} onChange={(v) => set({ m: v })} strong testID="log-minutes" />
         </Field>
       </View>
 

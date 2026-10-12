@@ -7,8 +7,8 @@ import { colors, motion, radii, useLoop } from '@/theme';
 import { Icon, type IconName } from './Icon';
 import { Txt } from './Txt';
 
-export function Dot({ color, size = 8 }: { color: string; size?: number }) {
-  return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }} />;
+export function Dot({ color, size = 8, radius }: { color: string; size?: number; /** default round */ radius?: number }) {
+  return <View style={{ width: size, height: size, borderRadius: radius ?? size / 2, backgroundColor: color }} />;
 }
 
 export interface ChipProps {

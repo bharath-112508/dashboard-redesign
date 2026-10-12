@@ -23,7 +23,13 @@ interface Look {
   border?: string;
   height: number;
   radius: number;
-  v: 'titleSm' | 'rowTitle' | 'bodySm';
+  v: 'titleSm' | 'rowTitle' | 'bodySm' | 'body';
+  /** side padding (default 16) */
+  padX?: number;
+  /** icon–label gap (default 8) */
+  gap?: number;
+  /** icon size (default 18) */
+  iconSize?: number;
 }
 
 function make(look: Look) {
@@ -37,12 +43,19 @@ function make(look: Look) {
         testID={testID}
         style={[
           styles.base,
-          { backgroundColor: look.bg, height: look.height, borderRadius: look.radius, opacity: disabled ? 0.5 : 1 },
+          {
+            backgroundColor: look.bg,
+            height: look.height,
+            borderRadius: look.radius,
+            paddingHorizontal: look.padX ?? 16,
+            gap: look.gap ?? 8,
+            opacity: disabled ? 0.5 : 1,
+          },
           look.border ? { borderWidth: 1, borderColor: look.border } : null,
           style,
         ]}
       >
-        {icon ? <Icon name={icon} size={18} color={look.fg} strokeWidth={2.4} /> : null}
+        {icon ? <Icon name={icon} size={look.iconSize ?? 18} color={look.fg} strokeWidth={2.4} /> : null}
         <Txt v={look.v} w={700} color={look.fg} numberOfLines={1}>
           {label}
         </Txt>
@@ -61,11 +74,11 @@ export const SecondaryButton = make({ bg: colors.surface, fg: colors.ink, border
 export const DestructiveButton = make({ bg: colors.destructiveBg, fg: colors.destructiveInk, border: colors.dangerRing, height: control.input, radius: radii.pill, v: 'rowTitle' });
 /** Green 42px button (Approve). */
 export const ApproveButton = make({ bg: colors.green, fg: colors.white, height: control.composer, radius: 12, v: 'rowTitle' });
-/** Soft blue 36px pill (small-header actions: "Mark all read", "+ New"). */
-export const SoftPillButton = make({ bg: colors.primarySoft, fg: colors.primaryInk, height: 36, radius: radii.pill, v: 'bodySm' });
-/** Blue 40px pill with a plus (large-header actions: "Log", "Report"). */
-export const HeaderActionButton = make({ bg: colors.primary, fg: colors.white, height: 40, radius: radii.pill, v: 'rowTitle' });
+/** Soft blue 36px button, radius 10 (small-header actions: "Mark all read", "+ New"). */
+export const SoftPillButton = make({ bg: colors.primarySoft, fg: colors.primaryInk, height: 36, radius: 10, v: 'bodySm', padX: 12, gap: 6, iconSize: 16 });
+/** Blue 40px pill with a plus (large-header actions: "Log", "Report"): 14px side padding, 14/700 label, 16px icon. */
+export const HeaderActionButton = make({ bg: colors.primary, fg: colors.white, height: 40, radius: radii.pill, v: 'body', padX: 14, gap: 6, iconSize: 16 });
 
 const styles = StyleSheet.create({
-  base: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16 },
+  base: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
 });

@@ -13,7 +13,7 @@ use `useLoop()` so they stop when the system asks for reduced motion. See them a
 | `Screen` | Screen | Screen scaffold: safe area, `LargeHeader`/`SmallHeader`, scroll content with room for the tab bar, fade-up enter, `footer` (composer), `noTabBar` |
 | `LargeHeader`, `SmallHeader`, `BellButton`, `AvatarButton` | Headers | Root header (brand, title, blue action, bell, avatar) and pushed header (Back, title, soft action) |
 | `TabBar` | TabBar | Floating role tab bar; drawn once by `(app)/_layout` |
-| `BottomSheet` | BottomSheet | Sheet chrome: backdrop, handle, icon + title + subtitle, close X, scroll body, sticky `footer` |
+| `BottomSheet` | BottomSheet | Sheet chrome: backdrop, handle, icon + title + subtitle, close X, scroll body, sticky `footer` (no divider); `variant="plan"` (circular 36px icon, 18px title, header/footer dividers), `titleSize="sm"` (18px) |
 | `showToast`, `useToast`, `ToastHost` | Toast | Dark toast for 2.2 s after a mutation |
 | `Card` | Card | White card, radius 20, ring; `onPress` + `label` make it pressable (.98) |
 | `ListCard`, `ListRow` | Card | Card of rows with dividers: icon tile / leading, title, sub, chevron / trailing |
@@ -24,17 +24,17 @@ use `useLoop()` so they stop when the system asks for reduced motion. See them a
 | `TypeIcon`, `PriorityGlyph` | TicketBits | Bug/Task/Story tile; priority glyph + label (Critical → badge, or High for clients) |
 | `Avatar`, `AvatarStack` | Avatar | Photo or initials; clients see initials only |
 | `CompanyLogo`, `BrandMark` | CompanyLogo | Company logo (navy initials fallback); blue "V" |
-| `KpiTile` | DataDisplay | Home KPI tile with icon square and stagger |
+| `KpiTile` | DataDisplay | Home KPI tile: one-line label, value, sub; icon square top right; stagger |
 | `ProgressBar`, `StackedBar`, `ProgressRing` | DataDisplay | Bars (billable/non/idle, vertical or horizontal) and ring |
 | `FactTile` | DataDisplay | Ticket fact tile (label, lock, value, sub, "+" action) |
-| `SegmentedControl` | Controls | `square` (Tickets filter), `pill` (Projects filter), `icon` (project views); `dot` per segment |
-| `ChipRow` | Controls | Dark-selected choice chips; scrolls or `wrap`s |
+| `SegmentedControl` | Controls | `square` (Tickets filter), `pill` (Projects filter, Companies, Board/List; optional `icon` per segment), `icon` (project views); `dot` per segment; `testIDPrefix` (default `seg-`) |
+| `ChipRow` | Controls | Dark-selected choice chips; scrolls (36px filters) or `wrap`s (38px sheet choices) |
 | `Toggle` | Controls | Switch (md/sm, `onColor`, `readOnly`) |
-| `Stepper` | Controls | −/+ with value (`compact` for settings rows) |
+| `Stepper` | Controls | Flat round −/+ with value (`compact` for settings rows); at the limit the icon turns faint |
 | `PrimaryButton`, `DarkButton`, `SecondaryButton`, `DestructiveButton`, `ApproveButton`, `SoftPillButton`, `HeaderActionButton` | Buttons | CTA styles from SPEC §5.3 |
 | `Field`, `FieldError`, `TextField`, `TextArea`, `SelectField`, `DateField` | fields/ | Labelled fields; Select and Date use native `<select>`/`<input type=date>` on web and a sheet / ISO text field on native |
-| `TicketCard` | TicketCard | Ticket card, `full` or `compact`; opens the ticket by default |
-| `ChatBubble`, `Composer` | Chat | Chat bubbles (mine / client / staff); fixed composer with attach + send |
+| `TicketCard` | TicketCard | Ticket card, `full` or `compact` (project List/Board; `critAlign` right by default); opens the ticket by default |
+| `ChatBubble`, `Composer` | Chat | Chat message: top-aligned avatar, "**name** · time" above the bubble (mine / client / staff; `initialsOnly`, `attIcon`); fixed composer with attach + send |
 | `Placeholder`, `PlaceholderSheet` | Placeholder | Stand-ins for routes P1–P4 replace |
 
 Test ids: screens use `screen-<name>`, sheets `sheet-<name>`, tabs `tab-<key>`; the header

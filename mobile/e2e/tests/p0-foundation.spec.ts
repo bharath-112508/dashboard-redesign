@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import {
   ACCOUNTS,
@@ -33,6 +33,21 @@ const MORE_TILES: Record<Role, string[]> = {
 const HOME_LAYOUT: Record<Role, string> = {
   dev: 'ic', free: 'ic', pm: 'staffAll', admin: 'staffAll', super: 'staffAll', devops: 'devops', client: 'client',
 };
+
+/** Large-header title of each tab root per role (SPEC.md §1.3). */
+function tabTitle(role: Role, label: string): string {
+  const staffAll = role === 'pm' || role === 'admin' || role === 'super';
+  if (label === 'Tickets') return staffAll ? 'Tickets' : 'My tickets';
+  if (label === 'Time') return 'Timesheet';
+  if (label === 'Projects') return role === 'client' ? 'Your projects' : 'Projects';
+  if (label === 'Bugs') return 'Your bugs';
+  return label;
+}
+
+/** The header title (role heading) of the visible screen `screen-<id>`. */
+function heading(page: Page, id: string, title: string): Locator {
+  return screen(page, id).getByRole('heading', { name: title, exact: true }).first();
+}
 
 const TAB_KEYS: Record<string, string> = {
   Home: 'home', Tickets: 'tickets', Time: 'time', Projects: 'projects', DevOps: 'devops', Questions: 'questions', Bugs: 'bugs', More: 'more',
@@ -83,12 +98,16 @@ test.describe('roles: tabs, Home layout and More tiles', () => {
       await signInAs(page, role);
       expect(await tabLabels(page)).toEqual(TAB_LABELS[role]);
       expect(await selectedTab(page)).toBe('Home');
-      await expect(byTestId(page, 'placeholder-params')).toContainText(`"layout":"${HOME_LAYOUT[role]}"`);
+      await expect(byTestId(page, `home-${HOME_LAYOUT[role]}`)).toBeVisible();
+      for (const other of new Set(Object.values(HOME_LAYOUT))) {
+        if (other !== HOME_LAYOUT[role]) await expect(byTestId(page, `home-${other}`)).toHaveCount(0);
+      }
 
       for (const label of TAB_LABELS[role]) {
         const key = TAB_KEYS[label];
         await goTab(page, key);
         expect(await selectedTab(page)).toBe(label);
+        await expect(heading(page, key, tabTitle(role, label))).toBeVisible();
       }
 
       const tiles = await screen(page, 'more')
@@ -186,10 +205,11 @@ test.describe('navigation shell', () => {
     await signInAs(page, 'admin');
     await page.goto('/ticket/1');
     await expectScreen(page, 'ticket');
-    await expect(byTestId(page, 'placeholder-title')).toHaveText('PMT-11');
+    await expect(heading(page, 'ticket', 'PMT-11')).toBeVisible();
     await expect(tabBar(page)).toHaveCount(0);
     await page.goto('/question/1');
     await expectScreen(page, 'question');
+    await expect(heading(page, 'question', 'Question')).toBeVisible();
     await expect(tabBar(page)).toHaveCount(0);
   });
 
@@ -214,7 +234,7 @@ test.describe('navigation shell', () => {
   });
 });
 
-/** Every placeholder route a feature package replaces, reached by URL. */
+/** Every pushed route, reached by URL: screen testID and header title. */
 const ROUTES: { url: string; screen: string; title: string }[] = [
   { url: '/ticket/1', screen: 'ticket', title: 'PMT-11' },
   { url: '/question/2', screen: 'question', title: 'Question' },
@@ -235,50 +255,68 @@ const ROUTES: { url: string; screen: string; title: string }[] = [
   { url: '/stack/tickets', screen: 'stack-tickets', title: 'Tickets' },
 ];
 
-const SHEETS: { url: string; id: string; title: string; params?: string }[] = [
-  { url: '/sheet/log-time?ticketId=1', id: 'log-time', title: 'Log time', params: '"ticketId":"1"' },
-  { url: '/sheet/report?project=Daco%20website&kind=Change', id: 'report', title: 'Report a problem', params: '"kind":"Change"' },
+/** Every sheet route with its params; `check` asserts the params reached the sheet. */
+const SHEETS: { url: string; id: string; title: string; check?: (page: Page, sheet: Locator) => Promise<void> }[] = [
+  {
+    url: '/sheet/log-time?ticketId=1',
+    id: 'log-time',
+    title: 'Log time',
+    check: async (_page, sheet) => {
+      await expect(sheet.getByLabel('Project', { exact: true })).toHaveValue('Daco platform');
+      await expect(sheet.getByLabel('Ticket', { exact: true })).toHaveValue('1');
+    },
+  },
+  {
+    url: '/sheet/report?project=Daco%20website&kind=Change',
+    id: 'report',
+    title: 'Request a change',
+    check: async (page) => {
+      await expect(page.getByTestId('report-project-Daco website')).toHaveAttribute('aria-checked', 'true');
+    },
+  },
   { url: '/sheet/leave', id: 'leave', title: 'New request' },
-  { url: '/sheet/project-status?project=Daco%20platform', id: 'project-status', title: 'Project status', params: '"project":"Daco platform"' },
-  { url: '/sheet/support-plan?project=Daco%20intranet', id: 'support-plan', title: 'Set up maintenance', params: '"project":"Daco intranet"' },
+  {
+    url: '/sheet/project-status?project=Daco%20platform',
+    id: 'project-status',
+    title: 'Project status',
+    check: async (_page, sheet) => {
+      await expect(sheet.getByTestId('status-option-active')).toHaveAttribute('aria-checked', 'true');
+    },
+  },
+  {
+    url: '/sheet/support-plan?project=Daco%20intranet',
+    id: 'support-plan',
+    title: 'Set up maintenance',
+    check: async (_page, sheet) => {
+      await expect(sheet).toContainText('Daco intranet');
+    },
+  },
 ];
 
-test.describe('every placeholder route is reachable', () => {
+test.describe('every route is reachable', () => {
   test('pushed screens by URL', async ({ page }) => {
     test.setTimeout(240_000); // each URL is a full page load
     await signInAs(page, 'admin');
     for (const r of ROUTES) {
       await page.goto(r.url);
       await expectScreen(page, r.screen);
-      await expect(byTestId(page, 'placeholder-title')).toHaveText(r.title);
+      await expect(heading(page, r.screen, r.title)).toBeVisible();
     }
   });
 
-  test('sheet routes by URL, with their params', async ({ page }) => {
+  test('sheet routes by URL, with their params, and they close', async ({ page }) => {
     test.setTimeout(120_000);
     await signInAs(page, 'admin');
     for (const s of SHEETS) {
       await page.goto(s.url);
       const sheet = page.getByTestId(`sheet-${s.id}`);
       await expect(sheet).toBeVisible();
-      await expect(sheet).toContainText(s.title);
-      if (s.params) await expect(sheet.getByTestId('placeholder-params')).toContainText(s.params);
-    }
-  });
-
-  test('Home placeholder links reach every route and Back returns Home', async ({ page }) => {
-    test.setTimeout(120_000);
-    await signInAs(page, 'super');
-    const links = await screen(page, 'home').locator('[data-testid^="link-"]').evaluateAll((els) =>
-      els.map((e) => e.getAttribute('data-testid') ?? ''),
-    );
-    expect(links.length).toBe(22);
-    for (const id of links.filter((l) => !l.startsWith('link-Sheet'))) {
-      await byTestId(page, id).click();
-      await expect(page.locator('[data-testid^="screen-"]').filter({ visible: true }).first()).toBeVisible();
-      await expect(screen(page, 'home')).toHaveCount(0);
-      await byTestId(page, 'header-back').click();
-      await expectScreen(page, 'home');
+      await expect(sheet.getByRole('heading', { name: s.title, exact: true })).toBeVisible();
+      if (s.check) await s.check(page, sheet);
+      // close: the X where the sheet has one, else the backdrop
+      if (await sheet.getByTestId('sheet-close').count()) await sheet.getByTestId('sheet-close').click();
+      else await page.getByTestId('sheet-backdrop').click({ position: { x: 20, y: 20 } });
+      await expect(page.getByTestId(`sheet-${s.id}`)).toHaveCount(0);
     }
   });
 

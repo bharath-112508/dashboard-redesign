@@ -19,6 +19,9 @@ npx expo start --web --port 8091   # web at http://localhost:8091
 Expo Go works for everything in this app (all native modules are in the SDK). Sign in with a
 sample account row, or with an email from the list and the demo password `demo`.
 
+Time history "Download CSV" downloads the file on web; on iOS / Android it writes a real
+`.csv` to the cache directory (expo-file-system) and opens the share sheet (expo-sharing).
+
 Checks:
 
 ```bash
@@ -109,8 +112,7 @@ More tiles (`moreTiles(state)`) are in `src/nav`.
 
 ## Route map and owners
 
-P1–P4 replace the body of their route files (each is a placeholder now) and put the screen
-code under `src/features/<area>/`. Keep the `testID="screen-<name>"` on the screen root
+Each route file renders a screen from `src/features/<area>/` (P1–P4). Keep the `testID="screen-<name>"` on the screen root
 (`<Screen testID=…>`) so the shell tests keep working.
 
 | Route file (src/app/…) | Screen | Owner |

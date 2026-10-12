@@ -16,35 +16,50 @@ export interface ChatBubbleProps {
   text: string;
   when: string;
   att?: string[];
-  /** mine: right-aligned blue */
+  /** mine: right-aligned blue (on a question thread: the client side) */
   mine?: boolean;
-  /** from a client person: amber bubble, initials avatar */
+  /** from a client person: amber bubble (unless mine), initials avatar */
   fromClient?: boolean;
+  /** initials avatar without the amber bubble (question threads) */
+  initialsOnly?: boolean;
+  /** show an image icon on attachment chips (ticket comments), default true */
+  attIcon?: boolean;
+  testID?: string;
 }
 
-/** Chat message bubble (ticket comments, question thread). Max width 78%. */
-export function ChatBubble({ who, text, when, att, mine, fromClient }: ChatBubbleProps) {
+/**
+ * Chat message (ticket comments, question thread), prototype layout: 30px avatar at the
+ * top, then a column (max 78%) with the "**name** · time" caption, the bubble and the
+ * attachment chips. Mine is right-aligned and blue.
+ */
+export function ChatBubble({ who, text, when, att, mine, fromClient, initialsOnly, attIcon = true, testID }: ChatBubbleProps) {
   const bg = mine ? colors.primary : fromClient ? colors.amberSoft : colors.track;
   const fg = mine ? colors.white : colors.ink;
   return (
-    <View style={[styles.msg, mine && styles.msgMine]} accessible accessibilityLabel={`${who}, ${when}: ${text}`}>
-      <Avatar name={who} size={28} radius={8} initialsOnly={fromClient} />
+    <View style={[styles.msg, mine && styles.msgMine]} accessible accessibilityLabel={`${who}, ${when}: ${text}`} testID={testID}>
+      <Avatar name={who} size={30} radius={8} initialsOnly={fromClient || initialsOnly} />
       <View style={[styles.col, mine && styles.colMine]}>
+        <Txt v="small" w={400} color={colors.ink3}>
+          <Txt v="small" w={700}>
+            {who}
+          </Txt>
+          {` · ${when}`}
+        </Txt>
         <View style={[styles.bubble, { backgroundColor: bg }]}>
           <Txt v="body" color={fg}>
             {text}
           </Txt>
-          {att?.length ? (
-            <View style={styles.atts}>
-              {att.map((a) => (
-                <Chip key={a} label={a} icon="paperclip" bg={mine ? 'rgba(255,255,255,0.2)' : colors.surface} fg={fg} />
-              ))}
-            </View>
-          ) : null}
         </View>
-        <Txt v="small" w={400} color={colors.ink3}>
-          {`${who} · ${when}`}
-        </Txt>
+        {att?.length ? (
+          <View style={styles.atts}>
+            {att.map((a) => (
+              <View key={a} style={styles.att}>
+                {attIcon ? <Icon name="image" size={12} color={colors.ink} strokeWidth={2.4} /> : null}
+                <Txt v="small">{a}</Txt>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </View>
     </View>
   );
@@ -123,12 +138,21 @@ export function Composer({ placeholder, onSend, attachName = (n) => `photo-${n}.
 }
 
 const styles = StyleSheet.create({
-  msg: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, maxWidth: '100%' },
+  msg: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, maxWidth: '100%' },
   msgMine: { flexDirection: 'row-reverse' },
-  col: { maxWidth: '78%', gap: 4, alignItems: 'flex-start' },
+  col: { maxWidth: '78%', minWidth: 0, alignItems: 'flex-start' },
   colMine: { alignItems: 'flex-end' },
-  bubble: { borderRadius: 14, paddingVertical: 9, paddingHorizontal: 12, gap: 6 },
-  atts: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  bubble: { marginTop: 4, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12 },
+  atts: { marginTop: 5, flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  att: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    height: 26,
+    paddingHorizontal: 9,
+    borderRadius: 7,
+    backgroundColor: colors.track,
+  },
   composer: {
     backgroundColor: colors.surface,
     borderTopWidth: 1,

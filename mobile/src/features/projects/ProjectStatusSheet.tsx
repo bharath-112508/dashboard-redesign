@@ -29,7 +29,7 @@ export function ProjectStatusSheet() {
   };
 
   return (
-    <BottomSheet title="Project status" showClose={false} testID="sheet-project-status">
+    <BottomSheet title="Project status" titleSize="sm" showClose={false} testID="sheet-project-status">
       <View style={styles.list}>
         {!p || !allowed ? (
           <Txt v="bodySm" w={400} color={colors.ink3}>
