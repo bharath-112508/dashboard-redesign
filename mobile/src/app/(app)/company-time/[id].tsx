@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { CompanyTimeScreen } from '@/features/time/EmpScreen';
 
-/** S5-COTS Company timesheets — placeholder; W3 replaces this body. */
+/** S5-COTS Company timesheets (`?pf=c:<project>`, W3). */
 export default function CompanyTimeRoute() {
-  const params = useLocalSearchParams<{ id?: string; pf?: string }>();
-  return <PlaceholderScreen spec="S5-COTS Company timesheets" owner="W3" title="Timesheets" id="company-time" params={params} />;
+  const { id, pf } = useLocalSearchParams<{ id: string; pf?: string }>();
+  return <CompanyTimeScreen key={`${id}|${pf ?? ''}`} id={id ?? ''} pf={pf} />;
 }

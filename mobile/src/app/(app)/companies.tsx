@@ -1,6 +1,6 @@
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { CompaniesScreen } from '@/features/admin/CompaniesScreen';
 
-/** S5-COMPANIES Companies — placeholder; W3 replaces this body. */
+/** S5-COMPANIES Companies (W3). */
 export default function CompaniesRoute() {
-  return <PlaceholderScreen spec="S5-COMPANIES Companies" owner="W3" title="Companies" id="companies" sub="Workspace" />;
+  return <CompaniesScreen />;
 }

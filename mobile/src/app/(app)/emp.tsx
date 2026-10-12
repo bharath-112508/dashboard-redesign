@@ -1,6 +1,6 @@
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { EmpScreen } from '@/features/time/EmpScreen';
 
-/** S5-EMP Employee timesheets — placeholder; W3 replaces this body. */
+/** S5-EMP Employee timesheets (W3). */
 export default function EmployeeTimesheetsRoute() {
-  return <PlaceholderScreen spec="S5-EMP Employee timesheets" owner="W3" title="Employee timesheets" id="emp" sub="All projects and employees" />;
+  return <EmpScreen />;
 }

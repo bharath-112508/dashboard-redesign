@@ -30,7 +30,8 @@ export function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [err, setErr] = useState<{ field?: string; message: string } | null>(null);
-  const [picked, setPicked] = useState<number | null>(null);
+  
+  const picked = email.trim().toLowerCase();
 
   const submit = () => {
     const r = signIn(email, password);
@@ -76,14 +77,13 @@ export function SignInScreen() {
               lead={<TextTile text={ini(p.name)} />}
               title={p.name + (p.emp === 'freelancer' ? ' · Freelancer' : '')}
               sub={`${p.email} · ${orgs[p.id]}`}
-              badge={{ label: roleLabel({ role: p.role }), tone: { bg: ROLE_COLOURS[p.role].bg, ink: ROLE_COLOURS[p.role].ink }, dot: false }}
-              bg={picked === p.id ? colors.rowSelected : undefined}
+              badge={{ label: roleLabel({ role: p.role }), tone: { bg: ROLE_COLOURS[p.role].bg, ink: ROLE_COLOURS[p.role].ink, dot: ROLE_COLOURS[p.role].ink } }}
+              bg={picked === p.email ? colors.rowSelected : undefined}
               chevron={false}
               label={`Use ${p.name}`}
               onPress={() => {
                 setEmail(p.email);
                 setPassword(DEMO_PASSWORD);
-                setPicked(p.id);
                 setErr(null);
               }}
               testID={`account-${accountKey(p)}`}

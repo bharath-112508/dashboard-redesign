@@ -4,9 +4,10 @@ import { store } from '@/data/store';
 import { openSheet, type SheetParams } from '@/nav/routes';
 
 /**
- * Open SH-LOG for everyone (V-10). Embed placeholder owned by W3: until W3 lands it
- * opens the placeholder `log-time` sheet. Roles without Timesheet access get the toast
- * "Your role does not log time" instead of the sheet.
+ * Open SH-LOG for everyone (V-10; owned by W3). It opens the `log-time` URL sheet
+ * (`LogTimeSheet`) with the preset; a positional subtask key ("PMT-11.2") is turned into
+ * the stable id there. Roles without Timesheet access get the toast "Your role does not
+ * log time" instead of the sheet.
  *
  *   openLog()                                     // empty (Dashboard "Log your time")
  *   openLog({ date: '2026-10-08' })               // Timesheet Log for a day
