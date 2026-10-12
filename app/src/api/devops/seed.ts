@@ -1,4 +1,5 @@
 import type { DevopsDb, DvLog, DvProject } from './types'
+import { SEED_RELEASES } from './releases'
 
 /**
  * The prototype's sample projects (DevOps Board v6). Dates the prototype
@@ -111,6 +112,7 @@ export const createDevopsSeed = (): DevopsDb => ({
     const by = p.updatedBy || 'Rahul'
     return {
       ...p,
+      ...(SEED_RELEASES[p.key] ? { releases: SEED_RELEASES[p.key] } : {}),
       kind: 'client',
       overdue: !!p.overdue,
       updatedBy: by,

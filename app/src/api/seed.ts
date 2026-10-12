@@ -258,7 +258,7 @@ export const createSeed = (): Db => {
       ],
       epics: EPICS,
       sprints,
-      devopsLinks: { mob: 'OPS-101', web: 'OPS-107' },
+      devopsLinks: { mob: 'OPS-101', web: 'OPS-106' },
     },
     tasks: buildTasks(sprints),
     entries: ALL_ENTRIES,

@@ -340,9 +340,25 @@ test.describe('My tickets', () => {
     await expect(listCard(page).getByText('Later', { exact: true })).toBeVisible()
   })
 
-  test('MT-08 Log time opens My timesheet', async ({ page }) => {
+  test('MT-08 All my tickets comes before My sprints; the week hours and recent activity cards are gone', async ({ page }) => {
     await openMyTickets(page, 'dev')
-    await page.getByRole('link', { name: 'Log time ›' }).click()
-    await expect(page).toHaveURL(/\/timesheet$/)
+    const list = page.getByRole('heading', { name: 'All my tickets' })
+    const sprints = page.getByRole('heading', { name: 'My sprints' })
+    await expect(list).toBeVisible()
+    const [a, b] = [await list.boundingBox(), await sprints.boundingBox()]
+    expect(a!.y).toBeLessThan(b!.y)
+    await expect(page.getByRole('heading', { name: 'My hours this week' })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Recent on my tickets' })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: 'Log time ›' })).toHaveCount(0)
+  })
+
+  test('MT-09 a row shows priority, subtasks done, due date and status', async ({ page }) => {
+    await openMyTickets(page, 'dev')
+    // PMT-10 Login with BankID: High, 1 of 2 subtasks done, In progress.
+    const row = page.locator('[data-row="PMT-10"]')
+    await expect(row.getByTitle('Priority')).toHaveText('High')
+    await expect(row.getByTitle('Subtasks done')).toContainText('1 of 2 subtasks')
+    await expect(row).toContainText('In progress')
+    await expect(row).toContainText('Mobile app')
   })
 })

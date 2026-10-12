@@ -7,6 +7,7 @@ import { Overlays } from '../../features/Overlays'
 import { Toolbar } from '../clients/Toolbar'
 import { useTeamPeople } from '../../features/tickets/useMe'
 import { TicketsEpicBar } from './TicketsEpicBar'
+import { DeployToast } from '../../features/tickets/DeployToast'
 
 export const TICKET_VIEWS = [
   { id: 'overview', label: 'Overview', icon: 'M12 3l2.2 5.3L20 9.2l-4.3 3.9 1.2 5.9L12 16l-4.9 3 1.2-5.9L4 9.2l5.8-.9z' },
@@ -51,6 +52,7 @@ export function TicketsLayout() {
   const ready = loading.every(q => q.data)
 
   const showEpicBar = view !== 'plan' && view !== 'overview'
+  const goView = useGoView()
   const showToolbar = view === 'board' || view === 'tasks'
 
   return (
@@ -107,6 +109,7 @@ export function TicketsLayout() {
         <>
           <Outlet />
           <Overlays />
+          <DeployToast showEpicBar={() => !showEpicBar && goView('board')} />
         </>
       ) : (
         <div className="p-12 text-center text-[14px] text-muted">Loading…</div>

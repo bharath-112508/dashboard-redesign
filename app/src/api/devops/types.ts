@@ -38,9 +38,24 @@ export interface DvNote {
   when: string
 }
 
+/** One release of a project to production. */
+export interface DvRelease {
+  /** Version, e.g. "2.6.1". */
+  v: string
+  name: string
+  st: 'Live' | 'Rolled back'
+  /** When it went out (ISO datetime). */
+  at: string
+  note?: string
+}
+
 export interface DvProject {
   key: string
   name: string
+  /** The client company the project is for. */
+  client?: string
+  /** Production releases, newest first. */
+  releases?: DvRelease[]
   /** All projects are client projects for now; the Sequence switch filters on this. */
   kind: 'client' | 'internal'
   /** The project's status (a name from settings.statuses). */
