@@ -1,6 +1,6 @@
-import { Placeholder } from '@/components/Placeholder';
+import { ProjectsScreen } from '@/features/projects/ProjectsScreen';
 
-/** S-PROJECTS (pushed) Projects. Placeholder: P3 replaces this file (src/app/(app)/stack/projects.tsx). */
+/** S-PROJECTS pushed from More (devops), small header. */
 export default function StackProjectsScreen() {
-  return <Placeholder screen="S-PROJECTS (pushed)" title="Projects" owner="P3" file="src/app/(app)/stack/projects.tsx" testID="screen-stack-projects" />;
+  return <ProjectsScreen pushed />;
 }
