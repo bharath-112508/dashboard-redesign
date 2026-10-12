@@ -1,8 +1,6 @@
-import { PlaceholderScreen } from '@/components/Placeholder';
-import { useRootActions } from '@/nav/useRootActions';
+import { BugsScreen } from '@/features/client/BugsScreen';
 
-/** S5-BUGS Bugs — placeholder; W4 replaces this body. */
+/** S5-BUGS Bugs (clients). */
 export default function BugsTab() {
-  const actions = useRootActions();
-  return <PlaceholderScreen spec="S5-BUGS Bugs" owner="W4" title="Bugs" id="bugs" actions={actions} />;
+  return <BugsScreen />;
 }

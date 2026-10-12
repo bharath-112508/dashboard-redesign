@@ -1,8 +1,6 @@
-import { PlaceholderScreen } from '@/components/Placeholder';
-import { useRootActions } from '@/nav/useRootActions';
+import { QuestionsScreen } from '@/features/client/QuestionsScreen';
 
-/** S5-QUESTIONS Questions — placeholder; W4 replaces this body. */
+/** S5-QUESTIONS Questions (clients). */
 export default function QuestionsTab() {
-  const actions = useRootActions();
-  return <PlaceholderScreen spec="S5-QUESTIONS Questions" owner="W4" title="Questions" id="questions" sub="From the Viljetech team" actions={actions} />;
+  return <QuestionsScreen />;
 }

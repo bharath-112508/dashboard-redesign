@@ -1,9 +1,26 @@
-import { TextBlock } from '@/components/TextBlock';
-import { questionsOf } from '@/data/selectors';
+import { Block, Button, Rows } from '@/components';
+import { isClient, questionsOf } from '@/data/selectors';
 import { useAppState } from '@/data/store';
+import { openSheet } from '@/nav/routes';
 
-/** Project page → Questions tab body (staff and client). Embed placeholder: W4 fills it, W2 mounts it. */
+import { QuestionRow } from './rows';
+
+/** Project page → Questions tab body (staff and client). W2 mounts it. */
 export function ProjectQuestionsTab({ projectId }: { projectId: string }) {
-  const n = useAppState((s) => questionsOf(s, projectId).length);
-  return <TextBlock tone="info" text={`${n} questions — Questions tab, built by W4.`} testID="project-questions" />;
+  const Q = useAppState((s) => questionsOf(s, projectId));
+  const cl = useAppState(isClient);
+  return (
+    <>
+      {cl ? null : (
+        <Button title="Raise question to client" icon="message-circle-question" onPress={() => openSheet('new-question', { pid: projectId })} testID="project-raise-question" />
+      )}
+      <Block title="Questions to client" sub={cl ? 'Answer so the team can continue' : 'Clients see these in their portal'}>
+        <Rows empty="No questions raised yet." testID="project-questions">
+          {Q.map((q) => (
+            <QuestionRow key={q.id} q={q} />
+          ))}
+        </Rows>
+      </Block>
+    </>
+  );
 }

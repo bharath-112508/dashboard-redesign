@@ -1,6 +1,6 @@
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { ClientsScreen } from '@/features/client/ClientsScreen';
 
-/** S5-CLIENTS Clients — placeholder; W4 replaces this body. */
+/** S5-CLIENTS Clients. */
 export default function ClientsRoute() {
-  return <PlaceholderScreen spec="S5-CLIENTS Clients" owner="W4" title="Clients" id="clients" sub="Client portals" />;
+  return <ClientsScreen />;
 }

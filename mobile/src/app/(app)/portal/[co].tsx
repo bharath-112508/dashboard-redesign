@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { PortalScreen } from '@/features/client/PortalScreen';
 
-/** S5-PORTAL Project portal (staff view) — placeholder; W4 replaces this body. */
+/** S5-PORTAL Project portal (staff view of a client's portal). */
 export default function PortalRoute() {
-  const params = useLocalSearchParams<{ co?: string }>();
-  return <PlaceholderScreen spec="S5-PORTAL Project portal (staff view)" owner="W4" title="Project portal" id="portal" sub="Client portal" params={params} />;
+  const { co } = useLocalSearchParams<{ co?: string }>();
+  return <PortalScreen co={co ?? 'daco'} />;
 }
