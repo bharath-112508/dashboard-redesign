@@ -1,6 +1,6 @@
-import { Placeholder } from '@/components/Placeholder';
+import { DevopsBoardScreen } from '@/features/devops/DevopsBoard';
 
-/** S-DEVOPS (pushed) DevOps. Placeholder: P4 replaces this file (src/app/(app)/stack/devops.tsx). */
+/** S-DEVOPS (pushed copy for pm, admin, super). */
 export default function StackDevopsScreen() {
-  return <Placeholder screen="S-DEVOPS (pushed)" title="DevOps" owner="P4" file="src/app/(app)/stack/devops.tsx" testID="screen-stack-devops" />;
+  return <DevopsBoardScreen variant="stack" />;
 }
