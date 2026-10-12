@@ -1,6 +1,6 @@
-import { Placeholder } from '@/components/Placeholder';
+import { TeamScreen } from '@/features/team/TeamScreen';
 
-/** S-TEAM Team hours. Placeholder: P2 replaces this file (src/app/(app)/team.tsx). */
-export default function TeamScreen() {
-  return <Placeholder screen="S-TEAM" title="Team hours" owner="P2" file="src/app/(app)/team.tsx" testID="screen-team" />;
+/** S-TEAM Team hours. */
+export default function TeamRoute() {
+  return <TeamScreen />;
 }
