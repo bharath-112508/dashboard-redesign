@@ -1,6 +1,6 @@
-import { Placeholder } from '@/components/Placeholder';
+import { BoardScreen } from '@/features/tickets/BoardScreen';
 
-/** S-BOARD Ticket board. Placeholder: P1 replaces this file (src/app/(app)/board.tsx). */
-export default function BoardScreen() {
-  return <Placeholder screen="S-BOARD" title="Ticket board" owner="P1" file="src/app/(app)/board.tsx" testID="screen-board" />;
+/** S-BOARD Ticket board. */
+export default function BoardRoute() {
+  return <BoardScreen />;
 }

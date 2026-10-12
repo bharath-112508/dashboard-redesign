@@ -1,6 +1,6 @@
-import { Placeholder } from '@/components/Placeholder';
+import { TicketsScreen } from '@/features/tickets/TicketsScreen';
 
-/** S-TICKETS (pushed) Tickets. Placeholder: P1 replaces this file (src/app/(app)/stack/tickets.tsx). */
+/** S-TICKETS pushed from More (small header). */
 export default function StackTicketsScreen() {
-  return <Placeholder screen="S-TICKETS (pushed)" title="Tickets" owner="P1" file="src/app/(app)/stack/tickets.tsx" testID="screen-stack-tickets" />;
+  return <TicketsScreen pushed />;
 }
