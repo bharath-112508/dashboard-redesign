@@ -4,6 +4,7 @@ import { PEOPLE_SEED } from './people/seed'
 import { COMPANIES_SEED } from './companies/seed'
 import { INTERNAL_PROJECTS_SEED, withDriverAppSupport } from './projects/seed'
 import { upgradeDevopsNames } from './devops/seed'
+import { withInvoiceMatch } from '../features/invoice-match/commands'
 import type { Db } from './types'
 import { setSaveProblem } from '../components/SaveNotice'
 
@@ -73,7 +74,8 @@ const migrate = (v: unknown): unknown => {
  * task.time stay where they are (they still count on the tickets).
  */
 const migrate3 = (v: Record<string, unknown>): unknown => ({
-  ...v,
+  // v5: the InvoiceMatch project and its live app's invoices, for stores saved before them.
+  ...withInvoiceMatch(v),
   ...devopsNames(v),
   version: DB_VERSION,
   leave: Array.isArray(v.leave) ? v.leave : [],

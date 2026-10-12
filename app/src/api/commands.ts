@@ -7,6 +7,7 @@ import { reduceProjects, touchesProjects, type ProjectsCommand } from './project
 import { assignTimeIds, reduceTime, touchesTime, type TimeCommand } from './timesheet/commands'
 import { reduceUsers, touchesUsers, type UsersCommand } from './users/commands'
 import { reduceClients, touchesClients, type ClientsCommand } from './clients/commands'
+import { reduceInvoiceMatch, touchesInvoiceMatch, type InvoiceMatchCommand } from '../features/invoice-match/commands'
 
 /**
  * Every write the page makes is one of these commands. The same reducer runs
@@ -47,8 +48,9 @@ export type Command =
   | TimeCommand
   | UsersCommand
   | ClientsCommand
+  | InvoiceMatchCommand
 
-export type Resource = 'workspace' | 'tasks' | 'entries' | 'weekSubmissions' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects' | 'access' | 'leave' | 'notifications' | 'clientTeam'
+export type Resource = 'workspace' | 'tasks' | 'entries' | 'weekSubmissions' | 'questions' | 'requests' | 'devops' | 'people' | 'companies' | 'internalProjects' | 'access' | 'leave' | 'notifications' | 'clientTeam' | 'invoiceMatch'
 
 export const touches = (cmd: Command): Resource[] => {
   switch (cmd.type) {
@@ -78,7 +80,7 @@ export const touches = (cmd: Command): Resource[] => {
     case 'batch':
       return [...new Set(cmd.cmds.flatMap(touches))]
     default:
-      return [...touchesTickets(cmd), ...touchesDevops(cmd), ...touchesCompanies(cmd), ...touchesProjects(cmd), ...touchesTime(cmd), ...touchesUsers(cmd), ...touchesClients(cmd)]
+      return [...touchesTickets(cmd), ...touchesDevops(cmd), ...touchesCompanies(cmd), ...touchesProjects(cmd), ...touchesTime(cmd), ...touchesUsers(cmd), ...touchesClients(cmd), ...touchesInvoiceMatch(cmd)]
   }
 }
 
@@ -222,6 +224,6 @@ export const reduce = (db: Db, input: Command): Db => {
     case 'batch':
       return cmd.cmds.reduce(reduce, db)
     default:
-      return reduceUsers(reduceProjects(reduceCompanies(reduceDevops(reduceTickets(reduceTime(reduceClients(db, cmd), cmd), cmd), cmd), cmd), cmd), cmd)
+      return reduceInvoiceMatch(reduceUsers(reduceProjects(reduceCompanies(reduceDevops(reduceTickets(reduceTime(reduceClients(db, cmd), cmd), cmd), cmd), cmd), cmd), cmd), cmd)
   }
 }

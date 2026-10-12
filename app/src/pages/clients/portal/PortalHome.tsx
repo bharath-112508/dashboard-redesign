@@ -7,6 +7,8 @@ import { useIsClient } from '../../../state/access'
 import { useUi } from '../../../state/ui'
 import { useSession } from '../../../api/session/store'
 import { TeamPanel } from './TeamPanel'
+import { LiveProjectCard } from '../../../features/invoice-match/LiveProjectCard'
+import { hasInvoiceMatch, IM_EPIC_IDS } from '../../../features/invoice-match/data'
 
 const PROJECT_STATE: Record<ProjectState, [string, string, string]> = {
   active: ['Active', '#1F3FAF', '#DCE5FA'],
@@ -54,6 +56,9 @@ export function PortalHome() {
     : companies.find(c => c.id === params.get('client')) ?? companies.find(c => c.projects.length) ?? companies[0]
   const members = company ? teamQ.data.filter(m => m.companyId === company.id) : []
   const projects = company?.projects ?? []
+  // v5: Daco's delivered InvoiceMatch project is listed with its live app.
+  const live = hasInvoiceMatch(company)
+  const count = projects.length + (live ? 1 : 0)
 
   /** Shows the project's board, filtered to its epics. */
   const openProject = (p: ClientProject) => {
@@ -70,7 +75,7 @@ export function PortalHome() {
           <h1 className="mt-1 text-[26px] font-extrabold tracking-[-0.02em] text-ink">Your projects</h1>
           {company && (
             <div className="mt-1 text-[14px] text-ink-2">
-              {company.name} · {projects.length} {projects.length === 1 ? 'project' : 'projects'}
+              {company.name} · {count} {count === 1 ? 'project' : 'projects'}
             </div>
           )}
         </div>
@@ -111,7 +116,7 @@ export function PortalHome() {
       ) : (
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
           <section aria-label="Projects" className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))' }}>
-            {projects.length === 0 && (
+            {count === 0 && (
               <div className="rounded-[14px] border-[1.5px] border-dashed border-line p-8 text-center text-[14px] text-ink-2 [grid-column:1/-1]">
                 No projects yet.
               </div>
@@ -120,7 +125,7 @@ export function PortalHome() {
               const [label, ink, soft] = PROJECT_STATE[p.state]
               const ms = nextMilestone(p, wsQ.data)
               return (
-                <article key={p.id} className="flex flex-col gap-3 rounded-2xl bg-white p-5 shadow-[0_0_0_1.5px_#D6DEE8]">
+                <article key={p.id} aria-label={p.name} className="flex flex-col gap-3 rounded-2xl bg-white p-5 shadow-[0_0_0_1.5px_#D6DEE8]">
                   <div className="flex items-start gap-2.5">
                     <h2 className="min-w-0 flex-1 text-[17px] font-bold leading-snug text-ink">{p.name}</h2>
                     <span className="inline-flex h-[22px] flex-none items-center rounded-md px-2 text-[12px] font-bold" style={{ background: soft, color: ink }}>
@@ -157,6 +162,14 @@ export function PortalHome() {
                 </article>
               )
             })}
+            {live && (
+              <LiveProjectCard
+                onOpen={() => {
+                  ui.setEpics(IM_EPIC_IDS)
+                  navigate('/clients/board')
+                }}
+              />
+            )}
           </section>
 
           <TeamPanel company={company} members={members} canManage={isClient && session?.role === 'cadmin'} />

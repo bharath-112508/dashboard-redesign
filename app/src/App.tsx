@@ -5,6 +5,7 @@ import { PortalHome } from './pages/clients/portal/PortalHome'
 import { BoardView } from './pages/clients/BoardView'
 import { PlanView } from './pages/clients/PlanView'
 import { TimelineView } from './pages/clients/TimelineView'
+import { LiveAppPage } from './features/invoice-match/LiveAppPage'
 import { TicketsRoutes } from './pages/tickets/TicketsRoutes'
 import { DevopsRoutes } from './pages/devops/DevopsRoutes'
 import { MyTicketsPage } from './pages/my-tickets/MyTicketsPage'
@@ -61,6 +62,7 @@ export function App() {
 
             <Route path="clients">
               <Route index element={<PortalHome />} />
+              <Route path="live/invoicematch/*" element={<LiveAppPage />} />
               <Route element={<ClientsLayout />}>
                 <Route path="board" element={<BoardView />} />
                 <Route path="plan" element={<PlanView />} />
