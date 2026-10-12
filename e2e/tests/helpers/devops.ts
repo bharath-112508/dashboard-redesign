@@ -59,3 +59,25 @@ export const storedLadderHours = (page: Page, index: number) =>
     },
     index,
   )
+
+/** The DevOps settings as saved in the browser store (rules, dev phases, …). */
+export const storedDevopsSettings = (page: Page) =>
+  page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}')
+    return (db.devops?.settings ?? null) as {
+      rules: Record<string, unknown>
+      iladder: string[]
+      devPhases: { name: string; days: number | null }[]
+    } | null
+  })
+
+/** One field of a project as saved in the browser store. */
+export const storedProject = (page: Page, key: string, field: string) =>
+  page.evaluate(
+    ([k, f]) => {
+      const db = JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}')
+      const p = db.devops?.projects?.find((x: { key: string }) => x.key === k)
+      return p ? (p[f] ?? null) : null
+    },
+    [key, field] as const,
+  )

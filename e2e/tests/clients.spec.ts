@@ -90,7 +90,11 @@ test.describe('Clients portal: Your projects', () => {
     await page.goto('/clients')
     await page.getByRole('button', { name: 'Remove Anna Lindqvist' }).click()
     await expect(page.getByText('Anna Lindqvist')).toHaveCount(0)
-    await page.waitForFunction(() => !(localStorage.getItem('vt.clients.db') ?? '').includes('anna@daco.se'), undefined, { timeout: 8000 })
+    // Wait for the stored db itself: before the first write there is none, and that must not count as removed.
+    await page.waitForFunction(() => {
+      const raw = localStorage.getItem('vt.clients.db')
+      return !!raw && !raw.includes('anna@daco.se')
+    }, undefined, { timeout: 8000 })
     await page.reload()
     await expect(page.getByText('Anna Lindqvist')).toHaveCount(0)
   })

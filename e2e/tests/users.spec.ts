@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { signIn } from './helpers/session'
-import { PNG_1PX } from './helpers/people-time'
+import { PNG_1PX, storedDb } from './helpers/people-time'
 
 const table = (page: Page) => page.getByRole('table', { name: 'Users' })
 const row = (page: Page, name: string) => table(page).getByRole('row').filter({ hasText: name })
@@ -127,6 +127,8 @@ test.describe('Users', () => {
     await toggle.click()
     await page.getByRole('button', { name: 'Save changes', exact: true }).click()
     await expect(row(page, 'Chary')).toContainText('Deactivated')
+    // The row updates before the mock backend commits; leave the page only once the change is stored.
+    await expect.poll(async () => (await storedDb(page)).people?.find(p => p.name === 'Chary')?.active).toBe(false)
 
     await page.goto('/login')
     await page.getByPlaceholder('name@company.com').fill('chary@viljetech.com')

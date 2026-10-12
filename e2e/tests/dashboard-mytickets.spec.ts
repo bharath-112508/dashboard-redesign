@@ -143,6 +143,9 @@ test.describe('Dashboard', () => {
   })
 
   test('DB-08 saving a ticket entry adds it to the list, updates Today and the week total', async ({ page }) => {
+    // The dashboard's "today" is the real date, but the seeded entries are in the week of 5-11 Oct 2026.
+    // Pin the browser clock to the app-wide today (Sat 10 Oct) so the week total includes them on any run date.
+    await page.clock.setFixedTime(new Date('2026-10-10T10:00:00'))
     await openDashboard(page, 'dev', 'Chary')
     await pickTicket(page, 'PMT-10')
     await setDuration(page, 'Billable', 1, 0)

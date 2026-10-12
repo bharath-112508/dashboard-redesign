@@ -65,6 +65,8 @@ test.describe('Login (01-login.md)', () => {
 
   test('LG-02 clicking a sample user clears an error that was showing', async ({ page }) => {
     await page.goto('/login')
+    // The sample users load after the form and shift the centred card; click only once the page has settled.
+    await expect(page.getByRole('button', { name: /^R Rahul/ })).toBeVisible()
     await page.getByRole('button', { name: 'Sign in', exact: true }).click()
     await expect(page.getByRole('alert')).toHaveText('Enter your email.')
     await page.getByRole('button', { name: /Chary/ }).click()
@@ -80,6 +82,8 @@ test.describe('Login (01-login.md)', () => {
 
   test('LG-04 empty email shows "Enter your email." and does not sign in', async ({ page }) => {
     await page.goto('/login')
+    // The sample users load after the form and shift the centred card; click only once the page has settled.
+    await expect(page.getByRole('button', { name: /^R Rahul/ })).toBeVisible()
     await page.getByRole('button', { name: 'Sign in', exact: true }).click()
     await expect(page.getByRole('alert')).toHaveText('Enter your email.')
     await expect(page).toHaveURL(/\/login$/)
@@ -96,6 +100,8 @@ test.describe('Login (01-login.md)', () => {
 
   test('LG-06 typing in the email field clears the error', async ({ page }) => {
     await page.goto('/login')
+    // The sample users load after the form and shift the centred card; click only once the page has settled.
+    await expect(page.getByRole('button', { name: /^R Rahul/ })).toBeVisible()
     await page.getByRole('button', { name: 'Sign in', exact: true }).click()
     await expect(page.getByRole('alert')).toHaveText('Enter your email.')
     await page.getByPlaceholder('name@company.com').fill('r')

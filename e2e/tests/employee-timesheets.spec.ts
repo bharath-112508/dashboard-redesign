@@ -2,6 +2,13 @@ import { test, expect, type Page } from '@playwright/test'
 import { signIn } from './helpers/session'
 import { escapeRe, tableCells } from './helpers/people-time'
 
+/** Permission ids a role has in the stored db (the mock backend commits after a short delay). */
+const storedPerms = (page: Page, role: string) =>
+  page.evaluate(r => {
+    const db = JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}')
+    return (db.access?.perms?.[r] ?? null) as string[] | null
+  }, role)
+
 const entriesHeading = (page: Page) => page.getByRole('heading', { name: /^Entries/ })
 const entriesTable = (page: Page) => page.getByRole('table', { name: 'Time entries' })
 const entryRows = (page: Page) => entriesTable(page).getByRole('row').filter({ has: page.getByRole('cell') })
@@ -46,6 +53,8 @@ test.describe('Employee timesheets', () => {
 
   test('ET-03 clicking a project bar filters the entries to that project', async ({ page }) => {
     await openEmployeeTimesheets(page)
+    // The table fills in after the data loads; read it only once every row is there.
+    await expect(entryRows(page)).toHaveCount(20)
     const before = await tableCells(entriesTable(page), 2)
     const target = before[0]
     const section = page.getByRole('region', { name: 'By project' })
@@ -143,6 +152,8 @@ test.describe('Employee timesheets', () => {
     await expect(cell).toHaveAttribute('aria-pressed', 'false')
     await expect(page.getByText('7 of 14 permissions')).toBeVisible()
 
+    // The matrix updates before the mock backend commits; reload only once the change is stored.
+    await expect.poll(() => storedPerms(page, 'pm')).not.toContain('ts.export')
     await page.reload()
     await expect(page.getByRole('button', { name: 'Project manager: Export reports' })).toHaveAttribute('aria-pressed', 'false', { timeout: 8_000 })
   })

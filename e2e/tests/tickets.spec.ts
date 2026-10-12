@@ -387,9 +387,10 @@ test.describe('Tickets: team workspace', () => {
   test('TK-32 a new release shows a toast; View deployment opens the DevOps status with the deployments', async ({ page }) => {
     await signIn(page, 'dev')
     await openTickets(page, 'board')
-    // Web app is linked to OPS-106 (ARC Fast), whose newest release (2.6.2) the person hasn't seen.
+    // Web app is linked to OPS-106 (ARC · Fast), whose newest release (2.6.2) the person hasn't seen.
+    // v4 design: the toast title is "<client> · <project> <version> is live".
     const toast = page.getByRole('status').filter({ hasText: 'is live' })
-    await expect(toast).toContainText('ARC Fast 2.6.2 is live')
+    await expect(toast).toContainText('ARC · Fast 2.6.2 is live')
     await expect(toast).toContainText('Bug fixes for ticket import. Deployed automatically.')
     await toast.getByRole('button', { name: 'View deployment' }).click()
     await expect(toast).toHaveCount(0)

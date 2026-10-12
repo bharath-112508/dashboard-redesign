@@ -13,6 +13,8 @@ import {
   settingsOf,
   settingsRow,
   statusModal,
+  storedDevopsSettings,
+  storedProject,
   storedLadderHours,
 } from './helpers/devops'
 
@@ -199,6 +201,7 @@ test.describe('DevOps board', () => {
     await panel.locator('label', { hasText: 'Due date' }).locator('input').fill('2026-10-30')
     await panel.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(panel.getByText('Next: Build the Azure landing zone · due 30 Oct 2026', { exact: true })).toBeVisible()
+    await expect.poll(() => storedProject(page, 'OPS-102', 'devStepTitle')).toBe('Build the Azure landing zone')
     await page.reload()
     await expect(panelOf(page).getByText('Next: Build the Azure landing zone · due 30 Oct 2026', { exact: true })).toBeVisible()
   })
@@ -256,6 +259,9 @@ test.describe('DevOps board', () => {
     await page.getByPlaceholder('Reply to the team…').fill('Staging is ready, access sent tomorrow')
     await page.getByRole('button', { name: 'Send', exact: true }).click()
     await expect(page.getByText('Staging is ready, access sent tomorrow', { exact: true })).toBeVisible()
+    await expect
+      .poll(() => page.evaluate(() => (localStorage.getItem('vt.clients.db') ?? '').includes('Staging is ready, access sent tomorrow')))
+      .toBe(true)
     await page.reload()
     await expect(page.getByText('Staging is ready, access sent tomorrow', { exact: true })).toBeVisible()
   })
@@ -324,6 +330,7 @@ test.describe('DevOps board', () => {
     await openSettings(page, 'seq')
     await settingsInput(page, 'Follow-up 1').fill('Chase dev team')
     await settingsOf(page).getByRole('button', { name: 'Save changes', exact: true }).click()
+    await expect.poll(async () => (await storedDevopsSettings(page))?.iladder).toContain('Chase dev team')
     await openSettings(page, 'seq')
     await expect(settingsInput(page, 'Chase dev team')).toBeVisible()
   })
@@ -332,6 +339,7 @@ test.describe('DevOps board', () => {
     await openSettings(page, 'dates')
     await settingsOf(page).getByRole('button', { name: 'Require next reminder date', exact: true }).click()
     await settingsOf(page).getByRole('button', { name: 'Save changes', exact: true }).click()
+    await expect.poll(async () => (await storedDevopsSettings(page))?.rules.requireReminder).toBe(false)
     await openProject(page, 'OPS-102')
     const panel = panelOf(page)
     await panel.getByRole('button', { name: 'Move to Reminder 2', exact: true }).click()
@@ -345,6 +353,9 @@ test.describe('DevOps board', () => {
     await openSettings(page, 'dev')
     await settingsRow(page, 'Development').locator('input[type="number"]').fill('45')
     await settingsOf(page).getByRole('button', { name: 'Save changes', exact: true }).click()
+    await expect
+      .poll(async () => (await storedDevopsSettings(page))?.devPhases.find(p => p.name === 'Development')?.days)
+      .toBe(45)
     await openSettings(page, 'dev')
     await expect(settingsRow(page, 'Development').locator('input[type="number"]')).toHaveValue('45')
   })
