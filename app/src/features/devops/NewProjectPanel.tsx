@@ -1,9 +1,11 @@
-import { useState, type CSSProperties } from 'react'
+import { useMemo, useState, type CSSProperties } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useCompanies, useSend } from '../../api/queries'
+import { useSend } from '../../api/queries'
 import type { DvProject, DvSettings } from '../../api/devops/types'
+import type { ProjectRef } from '../../api/types'
+import { projectItems, refKey, sortProjects, type ProjectItem } from '../../domain/projects'
 import { useDv } from './ctx'
 import {
   addD,
@@ -25,10 +27,11 @@ import {
 } from './model'
 import { Caret, GlassMenu, PrioIcon, Switch } from './ui'
 
-const makeSchema = (s: DvSettings, names: string[]) =>
+const makeSchema = (s: DvSettings, onBoard: Set<string>) =>
   z
     .object({
-      name: z.string(),
+      /** refKey of the picked project ('' until one is picked). */
+      project: z.string(),
       infra: z.string(),
       prio: z.string(),
       from: z.string(),
@@ -47,14 +50,14 @@ const makeSchema = (s: DvSettings, names: string[]) =>
     })
     .superRefine((v, ctx) => {
       // One message at a time, in the prototype's order.
-      const err = !v.name.trim()
-        ? ['name', 'Name is required']
+      const err = !v.project
+        ? ['project', 'Pick a project']
         : !v.initDue
           ? ['initDue', 'Initial due date is required']
           : v.phase.trim() && s.rules.requirePhaseDue && !v.phaseDue
             ? ['phaseDue', 'Phase due date is required']
-            : names.includes(v.name.trim().toLowerCase())
-              ? ['name', 'A project with this name exists']
+            : onBoard.has(v.project)
+              ? ['project', 'This project is already on the board']
               : null
       if (err) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [err[0]], message: err[1] })
     })
@@ -68,19 +71,18 @@ const card = 'rounded-[14px] bg-white shadow-[0_0_0_0.5px_rgba(0,0,0,0.06),0_1px
 
 /** "New project": the same layout as an open project, with the fields in the sidebar. */
 export function NewProjectPanel() {
-  const { db, open, dd, setDd, me } = useDv()
+  const { db, open, dd, setDd, me, companies, internal } = useDv()
   const send = useSend()
-  const companies = useCompanies().data
   const s = db.settings
   const [dateOpen, setDateOpen] = useState<DateKey | null>(null)
-  const schema = makeSchema(
-    s,
-    db.projects.map(p => p.name.toLowerCase()),
-  )
+  // Projects already on the board, by refKey, with their DevOps key.
+  const onBoard = useMemo(() => new Map(db.projects.filter(p => p.project).map(p => [refKey(p.project as ProjectRef), p.key])), [db.projects])
+  const items = useMemo(() => sortProjects(projectItems(companies, internal)), [companies, internal])
+  const schema = makeSchema(s, new Set(onBoard.keys()))
   const { register, setValue, control, handleSubmit, formState } = useForm<Form>({
     resolver: zodResolver(schema),
     defaultValues: {
-      name: '',
+      project: '',
       infra: s.statuses[0]?.name ?? 'Not started',
       prio: 'Medium',
       from: 'Client',
@@ -102,9 +104,12 @@ export function NewProjectPanel() {
   const valid = schema.safeParse(v)
   const firstErr = valid.success ? '' : valid.error.issues[0]?.message || ''
   const close = () => open({ new: null }, true)
-  const nm = (v.name || '').trim()
+  const picked = items.find(x => refKey(x.ref) === v.project)
+  const nm = picked?.name ?? ''
 
   const create = handleSubmit(n => {
+    const item = items.find(x => refKey(x.ref) === n.project)
+    if (!item) return
     const num = Math.max(100, ...db.projects.map(p => +p.key.split('-')[1] || 0)) + 1
     const key = 'OPS-' + num
     const rt = s.rules.remTime
@@ -112,10 +117,10 @@ export function NewProjectPanel() {
     const latest = n.latestDue && n.latestDue !== n.initDue ? n.latestDue : null
     const project: DvProject = {
       key,
-      name: n.name.trim(),
-      // The client is the company that has a project of this name (none for a free-typed name).
-      client: companies?.find(c => c.projects.some(x => x.name === n.name.trim()))?.name || '',
-      kind: 'client',
+      // A DevOps item is a project (v5): its name and kind come from the picked project.
+      name: item.name,
+      project: item.ref,
+      kind: item.ref.kind,
       infra: n.infra,
       prio: n.prio,
       from: n.from,
@@ -187,10 +192,13 @@ export function NewProjectPanel() {
               >
                 {nm ? tileText(nm) : '+'}
               </div>
-              <input
-                {...register('name')}
-                placeholder="New project name"
-                className="min-w-0 flex-1 self-center border-0 bg-transparent p-0 text-[28px] font-bold leading-[1.15] tracking-[-0.025em] text-ink outline-0"
+              <ProjectPicker
+                items={items}
+                onBoard={onBoard}
+                picked={picked}
+                open={dd === 'np_project'}
+                setOpen={o => setDd(o ? 'np_project' : null)}
+                onPick={x => setValue('project', refKey(x.ref), { shouldValidate: formState.isSubmitted })}
               />
               <button type="button" onClick={close} className="size-7 flex-none cursor-pointer rounded-full border-0 bg-sky-2 text-[15px] leading-none text-muted">
                 ×
@@ -343,5 +351,128 @@ export function NewProjectPanel() {
         </div>
       </aside>
     </>
+  )
+}
+
+/** "Client project · Daco" or "Internal project · Platform & tooling". */
+const metaOf = (x: ProjectItem) => (x.kind === 'client' ? `Client project · ${x.companyName}` : `Internal project${x.area ? ' · ' + x.area : ''}`)
+
+/**
+ * New project's name field (v5): a searchable select over the Projects list. Picking a project sets
+ * the DevOps item's name and link. Projects already on the board are shown with their key and can't be picked.
+ */
+function ProjectPicker({
+  items,
+  onBoard,
+  picked,
+  open,
+  setOpen,
+  onPick,
+}: {
+  items: ProjectItem[]
+  onBoard: Map<string, string>
+  picked: ProjectItem | undefined
+  open: boolean
+  setOpen: (o: boolean) => void
+  onPick: (x: ProjectItem) => void
+}) {
+  const [q, setQ] = useState('')
+  const [hi, setHi] = useState(0)
+  const needle = q.trim().toLowerCase()
+  const shown = items.filter(x => !needle || [x.name, x.companyName, x.area].some(t => t.toLowerCase().includes(needle)))
+  const free = shown.filter(x => !onBoard.has(refKey(x.ref)))
+  const choose = (x: ProjectItem) => {
+    if (onBoard.has(refKey(x.ref))) return
+    onPick(x)
+    setQ('')
+    setOpen(false)
+  }
+  const groups: [string, ProjectItem[]][] = [
+    ['Client projects', shown.filter(x => x.kind === 'client')],
+    ['Internal projects', shown.filter(x => x.kind === 'internal')],
+  ]
+  return (
+    <div className="relative min-w-0 flex-1 self-center">
+      <input
+        role="combobox"
+        aria-label="Project"
+        aria-expanded={open}
+        aria-controls="np-project-list"
+        aria-autocomplete="list"
+        value={open ? q : picked?.name ?? ''}
+        placeholder={picked ? picked.name : 'Pick a project'}
+        onFocus={() => {
+          setQ('')
+          setHi(0)
+          setOpen(true)
+        }}
+        onClick={() => !open && setOpen(true)}
+        onChange={e => {
+          setQ(e.target.value)
+          setHi(0)
+          if (!open) setOpen(true)
+        }}
+        onKeyDown={e => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setHi(h => Math.min(h + 1, Math.max(free.length - 1, 0)))
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setHi(h => Math.max(h - 1, 0))
+          } else if (e.key === 'Enter') {
+            e.preventDefault()
+            if (open && free[hi]) choose(free[hi])
+          } else if (e.key === 'Tab') setOpen(false)
+        }}
+        className="w-full min-w-0 border-0 bg-transparent p-0 text-[28px] font-bold leading-[1.15] tracking-[-0.025em] text-ink outline-0 placeholder:text-slate"
+      />
+      <div className="mt-1 truncate text-[13px] text-muted">{picked ? metaOf(picked) : 'Every DevOps item is a project from the Projects list.'}</div>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-[52]" onClick={() => setOpen(false)} />
+          <div
+            id="np-project-list"
+            role="listbox"
+            aria-label="Projects"
+            className="absolute left-0 top-[calc(100%+6px)] z-[53] max-h-[340px] w-[420px] max-w-[calc(100vw-80px)] overflow-y-auto rounded-[14px] bg-white p-1.5 shadow-[0_18px_50px_rgba(27,45,69,0.2),0_0_0_0.5px_rgba(0,0,0,0.1)]"
+          >
+            {!shown.length && <div className="px-3 py-2.5 text-[13px] text-muted">No projects match “{q.trim()}”.</div>}
+            {groups
+              .filter(([, list]) => list.length)
+              .map(([label, list]) => (
+                <div key={label} role="group" aria-label={label}>
+                  <div className="px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">{label}</div>
+                  {list.map(x => {
+                    const k = refKey(x.ref)
+                    const taken = onBoard.get(k)
+                    const active = !taken && free[hi] === x
+                    return (
+                      <div
+                        key={k}
+                        role="option"
+                        aria-selected={picked === x}
+                        aria-disabled={!!taken}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => choose(x)}
+                        onMouseEnter={() => !taken && setHi(free.indexOf(x))}
+                        className={`flex items-center gap-2.5 rounded-[9px] px-2.5 py-2 ${taken ? 'cursor-not-allowed opacity-55' : 'cursor-pointer'} ${active ? 'bg-sky' : ''}`}
+                      >
+                        <span className="flex size-7 flex-none items-center justify-center rounded-md text-[10.5px] font-bold text-white" style={{ background: tileOf(x.name) }}>
+                          {tileText(x.name)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13.5px] font-semibold text-ink">{x.name}</span>
+                          <span className="block truncate text-[11.5px] text-muted">{metaOf(x)}</span>
+                        </span>
+                        {taken && <span className="tnum flex-none rounded-[5px] bg-sky-2 px-1.5 py-[3px] text-[11px] font-medium text-blue-ink">On the board · {taken}</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+          </div>
+        </>
+      )}
+    </div>
   )
 }

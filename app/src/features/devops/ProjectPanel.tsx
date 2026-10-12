@@ -60,7 +60,6 @@ export function ProjectPanel({ p }: { p: DvProject }) {
                   <h2 title={p.name} className="m-0 truncate whitespace-nowrap text-[22px] font-bold leading-[1.2] tracking-[-0.02em]">
                     {p.name}
                   </h2>
-                  {p.client && <div className="mt-0.5 text-[13px] text-muted">{p.client}</div>}
                 </div>
               </div>
               <div className="flex flex-none items-center gap-2.5">

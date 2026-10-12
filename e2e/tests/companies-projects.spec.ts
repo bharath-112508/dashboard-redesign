@@ -50,7 +50,8 @@ async function openNewProjectDialog(page: Page) {
 test.describe('Companies', () => {
   test('CO-01 search matches name, industry or country and shows a no-match message', async ({ page }) => {
     await openCompanies(page)
-    await expect(page.getByText('4 companies · 2 active projects')).toBeVisible()
+    // v5: the DevOps board's clients are companies too (each DevOps item is one of their projects).
+    await expect(page.getByText('13 companies · 9 active projects')).toBeVisible()
 
     const search = page.getByPlaceholder('Search companies…')
     await search.fill('Energi')
@@ -340,6 +341,13 @@ test.describe('Companies', () => {
     await expect(page).toHaveURL(/\/tickets\/board/)
   })
 
+  test('CO-20 a project row has a Timesheet button that opens the timesheet for that project (v5)', async ({ page }) => {
+    await openCompany(page, 'daco')
+    await page.getByRole('main').getByRole('link', { name: 'Timesheet', exact: true }).first().click()
+    await expect(page).toHaveURL(/\/timesheet\?project=dacop&name=Daco(\+|%20)platform/)
+    await expect(page.getByRole('heading', { name: 'Timesheets · Daco platform' })).toBeVisible()
+  })
+
   test('CO-19 edits company notes from Edit and shows them under About', async ({ page }) => {
     await openCompany(page, 'hav')
     await page.getByRole('button', { name: 'Edit', exact: true }).click()
@@ -357,7 +365,8 @@ test.describe('Companies', () => {
 test.describe('Projects', () => {
   test('PR-01 switches between Cards and List views', async ({ page }) => {
     await openProjects(page)
-    await expect(page.getByText('6 projects · 3 active')).toBeVisible()
+    // v5: 10 client projects of the DevOps board's clients join the seed.
+    await expect(page.getByText('16 projects · 10 active')).toBeVisible()
     await expect(page.getByRole('link', { name: 'Open Daco platform' })).toBeVisible()
 
     await page.getByRole('button', { name: 'List', exact: true }).click()
@@ -372,10 +381,25 @@ test.describe('Projects', () => {
   test('PR-01 KPI cards show active, client, internal and overdue counts', async ({ page }) => {
     await openProjects(page)
     const kpi = (label: string) => page.locator('dl').first().locator('div').filter({ hasText: label })
-    await expect(kpi('Active projects').locator('dd')).toHaveText('3')
-    await expect(kpi('Client projects').locator('dd')).toHaveText('3')
+    await expect(kpi('Active projects').locator('dd')).toHaveText('10')
+    await expect(kpi('Client projects').locator('dd')).toHaveText('13')
     await expect(kpi('Internal projects').locator('dd')).toHaveText('3')
     await expect(kpi('Overdue').locator('dd')).toHaveText('1')
+  })
+
+  test('PR-20 a project card has a Timesheet button that opens the timesheet for that project (v5)', async ({ page }) => {
+    await openProjects(page)
+    const card = page.locator('article').filter({ has: page.getByRole('link', { name: 'Open DevOps board' }) })
+    await card.getByRole('link', { name: 'Timesheet', exact: true }).click()
+    await expect(page).toHaveURL(/\/timesheet\?project=i1&name=DevOps(\+|%20)board/)
+    await expect(page.getByRole('heading', { name: 'Timesheets · DevOps board' })).toBeVisible()
+  })
+
+  test('PR-21 ?q= pre-fills the project search (the DevOps board link)', async ({ page }) => {
+    await signIn(page, 'super')
+    await page.goto('/projects?q=Fast')
+    await expect(page.getByRole('link', { name: 'Open Fast' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Open Daco platform' })).toHaveCount(0)
   })
 
   test('PR-02 filters the board by Client and Internal kind', async ({ page }) => {

@@ -110,7 +110,7 @@ The team's page, at `/tickets`, built from `project/Tickets.dc.html`. It works o
 - **Questions and requests use their ids.** A new question gets the next free id. A new request gets the next free id and `REQ-<count>`, rather than `Date.now()`.
 
 - **The DevOps board is built (see below); Tickets may still be a placeholder.** Data the prototype shares between pages (client bugs, questions, DevOps requests) lives in the mock backend.
-- **The DevOps status in the epic bar is live.** It reads the linked project (`workspace.devopsLinks`: Mobile app → OPS-101, Web app → OPS-106) from the DevOps board's data, so a status change on the board shows here. The label keeps the Clients page's own colours. On Tickets, a project with releases (`DvProject.releases`) shows "Live <version>" in green instead of its status, plus the client's name next to the project name when the project has one.
+- **The DevOps status in the epic bar is live.** It reads the linked project (`workspace.devopsLinks`: Mobile app → OPS-101, Web app → OPS-106) from the DevOps board's data, so a status change on the board shows here. The label keeps the Clients page's own colours. On Tickets, a project with releases (`DvProject.releases`) shows "Live <version>" in green instead of its status, plus the company of the linked project (v5: `DvProject.project`) next to the project name when it is a client project.
 - **Release notices (v4).** When a project linked to an epic has a release the signed-in person hasn't seen, the DevOps button shows **NEW** and a "<client> · <project> <version> is live" toast appears once (9 s, View deployment / Dismiss). View deployment switches to that epic and opens the Status tab. Opening the panel marks the release as seen. Seen releases are kept per person in `localStorage` (`vt.deploySeen`). The prototype fakes the 2.6.2 release arriving six seconds after load; here 2.6.2 is in the release seed (`api/devops/releases.ts`), so the notice shows on first visit.
 - **Today is fixed at 10 Oct 2026**, as in the design, so overdue and "days left" labels match the mock data.
 
@@ -120,11 +120,12 @@ Front-end build of `project/DevOps Board v6.dc.html`, at `/devops/board` and `/d
 
 ## What's on the page
 
+- **Search** matches the project name (the linked project's) and the DevOps key, plus the phase, next step and owner.
 - **Header:** the project count with overdue, client and dev team totals, a List / Board switch and "New project". The search box, the due-now bell (it selects "Due now") and Settings sit in the shared top bar.
 - **Filters:** All, Due now, Client, Dev team, Escalated and Rescheduled tabs with counts, plus the All / Client / Internal "Sequence" switch.
 - **Board:** one column per status, each with its default description. Dragging a card to another column opens the status change window.
 - **List:** one line per project, with a sort arrow on every column. Status and priority sort in workflow order, dates by date, and empty values always go last. Hovering a status shows its description, which you can edit and log. Hovering a project name shows its current phase.
-- **Client under the name:** each project has a client company (`client`). The list row, the board card and the panel header show it under the project name, and the initials tile uses the client's initials. A new project takes the client from the company that has a project of that name (Companies), or none.
+- **Each item is a project (v5):** DevOps is project specific, not client specific. Every DevOps item links to a real project (`project: ProjectRef`): a client project inside its company (Companies) or an internal project (Projects). The name and the initials tile come from that project, and its kind sets the item's Client / Internal kind. The board card, list row and panel header show only the name; the panel sidebar starts with a **Project** card: the project's name (a link to `/projects?q=<name>`) and its meta ("Client project · <company>" or "Internal project · <area>"). Every sample item links to a project in the companies seed (the DevOps clients Inoff, Weland, Alnarp, ARC, Fa tech, OSBY, Redare, SST and Tryggrätt are seeded as companies for this).
 - **Critical projects** pulse light red, with a red edge, in both views. The pulse stops when reduced motion is on.
 - **Project panel** (`?project=OPS-101&tab=…`):
   - **Follow-ups:**
@@ -149,14 +150,14 @@ Front-end build of `project/DevOps Board v6.dc.html`, at `/devops/board` and `/d
   - Date rules and the default reminder time.
   - Dev phases with their typical durations, and their rules.
   - Renaming moves projects along with the new name. Projects on a removed item move as the prototype describes.
-- **New project** (`?new=1`): react-hook-form + Zod. It checks that there's a name, an initial due date, a phase due date (when a current phase is set and the rule is on) and that the name is unique. It creates the next OPS key and opens the project.
+- **New project** (`?new=1`): react-hook-form + Zod. The name field is a searchable select over the Projects list (client projects with their company, then internal projects; arrow keys and Enter work). Projects already on the board show "On the board · OPS-…" and can't be picked. It checks that a project is picked, that there's an initial due date and a phase due date (when a current phase is set and the rule is on). It creates the next OPS key and opens the project.
 
 ## Code map
 
 | Path | What it holds |
 | --- | --- |
 | `src/api/devops/types.ts` | `DevopsDb`: projects (ISO dates), settings (sequences, statuses, dev phases, rules, added options, people) |
-| `src/api/devops/seed.ts` | The prototype's 11 sample projects |
+| `src/api/devops/seed.ts` | The prototype's 11 sample projects, their project links (`DEVOPS_PROJECT_LINKS`) and the store upgrades |
 | `src/api/devops/commands.ts` | `devops.project.create`, `devops.project.update` (patch, plus an optional Activity entry), `devops.option.add`, `devops.settings.save` (with rename maps) |
 | `src/features/devops/model.ts` | Colours, date helpers, the sequence and phase maths, filters and field options |
 | `src/features/devops/ctx.tsx` | Board context: data, `update` / `setField`, URL windows, the open menu, the status change window, and layered Escape |
@@ -177,8 +178,15 @@ Front-end build of `project/DevOps Board v6.dc.html`, at `/devops/board` and `/d
 - **New project** doesn't reset the page's filter and search after creating, but it opens the new project straight away.
 - **"Export a backup"** in the footer downloads the board's data as JSON; in the prototype it was a dead link.
 - **Escape** closes the status window, then an open menu, then the top window.
-- **v4 design (client and project name):** the sample projects are renamed (DACO → Daco platform for Daco, and so on). A store saved before keeps its data; sample projects still under their old name get the new name, client and sample releases on load, and requests on them the new project name (`upgradeDevopsNames`, run from `migrate3`). The release the prototype dates "Today" is stored on the app's today (10 Oct).
-- **Left out of the v4 Deployments design:** the second Deployments block in the New project window ("Live on Production", feed, "Notify me when live on" switches, `vt.deployNotify`) reads values the prototype never computes (`dep.prod`, `dep.feed`, `dep.envs`, `dep.auto`) and has no project to show in a new-project form, so it isn't built. The unused release strip and picker (`dep.strip`, `dep.pick`) and the disabled "2.6.2 Just now" release are dead code too. Search still matches the project name, not the client, as in the prototype. The prototype did the same, but for the project panel only.
+- **v4 design (client and project name):** the sample projects are renamed (DACO → Daco platform for Daco, and so on). A store saved before keeps its data; sample projects still under their old name get the new name and sample releases on load, and requests on them the new project name (`upgradeDevopsNames`, run from `migrate3`). The release the prototype dates "Today" is stored on the app's today (10 Oct).
+- **v5: items saved before they were projects** get their link on load (`linkDevopsProjects` in `api/devops/seed.ts`, run from `migrate3` after `upgradeDevopsNames`). A sample item still under its sample name links to its sample project; if the store has no such project (or company) yet, it is added from the companies seed. Any other item links to the client project of the same name (its old client's first), or else the internal project of that name. An item with no match keeps all its data (and its old `client`) with `project: null`, and its panel says it is not linked. Requests, `workspace.devopsLinks` and the deployments stay on the DevOps item by key.
+- **Left out of the v4 Deployments design:** the second Deployments block in the New project window ("Live on Production", feed, "Notify me when live on" switches, `vt.deployNotify`) reads values the prototype never computes (`dep.prod`, `dep.feed`, `dep.envs`, `dep.auto`) and has no project to show in a new-project form, so it isn't built. The unused release strip and picker (`dep.strip`, `dep.pick`) and the disabled "2.6.2 Just now" release are dead code too.  The prototype did the same, but for the project panel only.
+
+# Timesheet, Companies and Projects (v5)
+
+- **Timesheet links on project cards.** Each project card on Projects and each project row on a company page has a **Timesheet** button. It opens `/timesheet?project=<id>&name=<name>`.
+- **Scoped timesheet pages.** A project link (`?project=`) or the company's "Timesheets" link (`?company=`) opens the history as the page itself, with no week view or tabs: "Timesheets · <name>", the period, project and group-by filters, and the download menu. A project page is grouped by day and its project filter is the project alone; a company page is grouped by project and starts on "All <company> projects". "Show all my time" goes back to the plain My timesheet. Without `name`, a client project is titled "<company> · <project>" and an internal one by its name. A link that matches nothing says so and shows no time.
+- **Projects search from the URL.** `/projects?q=<text>` pre-fills the search (the DevOps panel's project link uses it).
 
 # App shell, sign-in and roles
 

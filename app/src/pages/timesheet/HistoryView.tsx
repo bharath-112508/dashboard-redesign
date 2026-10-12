@@ -12,16 +12,37 @@ type GroupBy = 'day' | 'project' | 'task'
 
 const GROUP_LABEL: Record<GroupBy, string> = { day: 'Day', project: 'Project', task: 'Task' }
 
+/**
+ * A history opened from a Companies or Projects "Timesheet" link (v5): it shows as the page itself,
+ * limited to these projects. `single` is a one-project link (`?project=`), grouped by day; a company
+ * link (`?company=`) is grouped by project.
+ */
+export interface HistoryScope {
+  /** Company or project name, for "Timesheets · <name>". */
+  name: string
+  /** Project values (`c:<id>` / `i:<id>`) the page is limited to. Empty when the link matches nothing. */
+  values: string[]
+  single: boolean
+}
+
 /** History: period, project and group-by filters, grouped entries with totals, and the download menu. */
-export function HistoryView({ ctx }: { ctx: TimeCtx }) {
+export function HistoryView({ ctx, scope, onLeaveScope }: { ctx: TimeCtx; scope?: HistoryScope; onLeaveScope?: () => void }) {
   const [period, setPeriod] = useState<Period>('all')
   const [custom, setCustom] = useState({ from: '', to: '' })
   const [projectF, setProjectF] = useState('')
-  const [groupBy, setGroupBy] = useState<GroupBy>('day')
+  const [groupBy, setGroupBy] = useState<GroupBy>(scope && !scope.single ? 'project' : 'day')
 
   // Projects the filter can pick: the company's projects (when filtered) plus any project in the entries.
+  // A scoped page offers its own projects only.
   const choices = useMemo<ProjectOption[]>(() => {
     const byValue = new Map<string, ProjectOption>()
+    if (scope) {
+      for (const v of scope.values) {
+        const p = findProject(v, ctx.companies, ctx.internal)
+        if (p) byValue.set(v, p)
+      }
+      return [...byValue.values()].sort((a, b) => a.label.localeCompare(b.label))
+    }
     for (const p of projectOptions(ctx.companies, ctx.internal, ctx.companyId)) byValue.set(p.value, p)
     for (const e of ctx.mine) {
       const v = entryProject(e, ctx.tasks, ctx.companies)
@@ -37,12 +58,18 @@ export function HistoryView({ ctx }: { ctx: TimeCtx }) {
     () =>
       ctx.mine
         .filter(e => inRange(e.date, range))
-        .filter(e => !projectF || entryProject(e, ctx.tasks, ctx.companies) === projectF)
+        .filter(e => {
+          const v = entryProject(e, ctx.tasks, ctx.companies)
+          if (scope && (!v || !scope.values.includes(v))) return false
+          return !projectF || v === projectF
+        })
         .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id)),
-    [ctx.mine, ctx.tasks, ctx.companies, period, custom.from, custom.to, projectF],
+    [ctx.mine, ctx.tasks, ctx.companies, period, custom.from, custom.to, projectF, scope],
   )
   const totals = totalsOf(rows)
   const filtered = period !== 'all' || !!projectF
+  // "All Daco projects" on a company page; the project's own name on a one-project page.
+  const allLabel = scope ? (scope.single ? scope.name : `All ${scope.name} projects`) : 'All projects'
 
   const groups = useMemo(() => groupRows(rows, groupBy, ctx), [rows, groupBy, ctx])
 
@@ -80,7 +107,7 @@ export function HistoryView({ ctx }: { ctx: TimeCtx }) {
         <label className={`${ui.label} min-w-[220px] flex-1`}>
           Project
           <select value={projectF} onChange={e => setProjectF(e.target.value)} className={ui.select} aria-label="Project filter">
-            <option value="">All projects</option>
+            <option value="">{allLabel}</option>
             {choices.map(p => (
               <option key={p.value} value={p.value}>
                 {p.label}
@@ -102,16 +129,21 @@ export function HistoryView({ ctx }: { ctx: TimeCtx }) {
       </div>
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-[13.5px]">
-        <span className="font-bold">Timesheet history</span>
+        {!scope && <span className="font-bold">Timesheet history</span>}
         <span className="text-ink-2">{rangeText(range, ctx.mine)}</span>
         <span className="tnum text-ink-2">{rows.length} entries</span>
+        {scope && onLeaveScope && (
+          <button type="button" onClick={onLeaveScope} className="cursor-pointer border-0 bg-transparent p-0 font-bold text-blue-ink">
+            Show all my time
+          </button>
+        )}
         <span className="tnum ml-auto">
           Total <b>{fmtHours(totals.total)}</b> <span className="text-green">Billable {fmtHours(totals.bill)}</span>{' '}
           <span className="text-amber">Non-billable {fmtHours(totals.non)}</span>
         </span>
         {filtered && (
           <button type="button" onClick={resetAll} className="cursor-pointer border-0 bg-transparent font-semibold text-blue-ink underline">
-            Show all my time
+            {scope ? 'Clear filters' : 'Show all my time'}
           </button>
         )}
       </div>

@@ -128,7 +128,6 @@ export function ListView({
                     className="flex min-w-0 flex-col"
                   >
                     <span className="truncate whitespace-nowrap text-[14px] font-semibold tracking-[-0.01em]">{p.name}</span>
-                    {p.client && <span className="truncate whitespace-nowrap text-[11.5px] font-medium text-muted">{p.client}</span>}
                   </span>
                 </div>
                 <div onMouseEnter={e => pop.openAt(e, p.key, 'infra')} onMouseLeave={pop.leaveSoon} className="min-w-0 cursor-help py-1.5">

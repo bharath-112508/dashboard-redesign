@@ -62,8 +62,8 @@ export const tileText = (n: string) =>
     .slice(0, 2)
     .toUpperCase() || n[0]
 
-/** The tile shows the client's initials, or the project's when it has no client. */
-export const tileName = (p: { client?: string; name: string }) => p.client || p.name
+/** The tile shows the project's initials (v5: a DevOps item is a project, not a client). */
+export const tileName = (p: { name: string }) => p.name
 
 /** Day label of a release: "Today", or "9 Oct". */
 export const releaseDay = (iso: string) => (iso.slice(0, 10) === TODAY ? 'Today' : shortD(iso))

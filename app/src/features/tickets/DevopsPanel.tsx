@@ -1,6 +1,7 @@
 import { useActorSend } from '../../state/access'
 import { useState } from 'react'
-import { useDevops, useRequests, useWorkspace } from '../../api/queries'
+import { useCompanies, useDevops, useInternalProjects, useRequests, useWorkspace } from '../../api/queries'
+import { linkedProject } from '../../domain/projects'
 import type { DevopsRequest, Priority } from '../../api/types'
 import { Icon, PATHS, Scrim } from '../../components/ui'
 import { fmt, TODAY } from '../../lib/dates'
@@ -45,6 +46,8 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
   const me = useMe()
   const ws = useWorkspace().data!
   const dv = useDevops().data
+  const companies = useCompanies().data
+  const internal = useInternalProjects().data
   const requests = useRequests().data ?? []
   const send = useActorSend()
   const person = usePerson()
@@ -59,10 +62,12 @@ export function DevopsPanel({ epic, epicName }: { epic: string; epicName: string
 
   // The read-only project details this panel shows, mapped from the DevOps board's own data.
   const src = dv?.projects.find(x => x.key === ws.devopsLinks[epic]) || dv?.projects[0]
+  // The client is the company of the project the DevOps item is (none for an internal project).
+  const linked = linkedProject(src?.project, companies, internal)
   const p = {
     key: src?.key ?? '',
     name: src?.name ?? '',
-    client: src?.client ?? '',
+    client: linked?.companyName ?? '',
     infra: src?.infra ?? '',
     deploy: src?.deploy ?? '',
     due: src?.latestDue ? fmt(src.latestDue) : '',

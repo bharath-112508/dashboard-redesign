@@ -140,3 +140,35 @@ export const PERMISSIONS = [
   'Manage contacts and people',
   'Company settings and archiving',
 ] as const
+
+/** The My timesheet page limited to one project (v5 "Timesheet" button on project cards). */
+export const timesheetHref = (projectId: string, name: string) =>
+  `/timesheet?project=${encodeURIComponent(projectId)}&name=${encodeURIComponent(name)}`
+
+/** What a project link shows: the project's name and, for a client project, its company. Null when the project is gone. */
+export interface LinkedProject {
+  ref: ProjectRef
+  name: string
+  kind: 'client' | 'internal'
+  /** The client company's name, or '' for an internal project. */
+  companyName: string
+  /** The internal project's area, or '' for a client project. */
+  area: string
+  state: ProjectState
+}
+
+/** Looks a project link up, including projects of archived companies. */
+export const linkedProject = (
+  ref: ProjectRef | null | undefined,
+  companies: readonly Company[] | undefined,
+  internal: readonly InternalProject[] | undefined,
+): LinkedProject | null => {
+  if (!ref) return null
+  if (ref.kind === 'client') {
+    const c = companies?.find(x => x.id === ref.companyId)
+    const p = c?.projects.find(x => x.id === ref.id)
+    return c && p ? { ref, name: p.name, kind: 'client', companyName: c.name, area: '', state: p.state } : null
+  }
+  const p = internal?.find(x => x.id === ref.id)
+  return p ? { ref, name: p.name, kind: 'internal', companyName: '', area: p.area, state: p.state } : null
+}

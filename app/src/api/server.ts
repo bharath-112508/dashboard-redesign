@@ -3,7 +3,7 @@ import { createSeed, DB_VERSION, personIdByName } from './seed'
 import { PEOPLE_SEED } from './people/seed'
 import { COMPANIES_SEED } from './companies/seed'
 import { INTERNAL_PROJECTS_SEED, withDriverAppSupport } from './projects/seed'
-import { upgradeDevopsNames } from './devops/seed'
+import { linkDevopsProjects, upgradeDevopsNames } from './devops/seed'
 import { withInvoiceMatch } from '../features/invoice-match/commands'
 import type { Db } from './types'
 import { setSaveProblem } from '../components/SaveNotice'
@@ -73,7 +73,9 @@ const migrate = (v: unknown): unknown => {
  * internal project seed for stores that never had one. Per-ticket hours kept in
  * task.time stay where they are (they still count on the tickets).
  */
-const migrate3 = (v: Record<string, unknown>): unknown => ({
+const migrate3 = (v: Record<string, unknown>): unknown => devopsProjects(migrate3base(v))
+
+const migrate3base = (v: Record<string, unknown>): Record<string, unknown> => ({
   // v5: the InvoiceMatch project and its live app's invoices, for stores saved before them.
   ...withInvoiceMatch(v),
   ...devopsNames(v),
@@ -91,6 +93,12 @@ const devopsNames = (v: Record<string, unknown>) =>
   isObj(v.devops) && Array.isArray(v.devops.projects) && Array.isArray(v.requests)
     ? upgradeDevopsNames(v.devops as unknown as Db['devops'], v.requests as Db['requests'])
     : {}
+
+/** v5: DevOps items saved before they were projects get their project link (see linkDevopsProjects). */
+const devopsProjects = (v: Record<string, unknown>): Record<string, unknown> =>
+  isObj(v.devops) && Array.isArray(v.devops.projects) && Array.isArray(v.companies) && Array.isArray(v.internalProjects)
+    ? { ...v, ...linkDevopsProjects(v.devops as unknown as Db['devops'], v.companies as Db['companies'], v.internalProjects as Db['internalProjects']) }
+    : v
 
 /** Version 2 gains people, companies, internal projects and per-entry person ids. */
 const upgrade2 = (v: Record<string, unknown>): Record<string, unknown> => {

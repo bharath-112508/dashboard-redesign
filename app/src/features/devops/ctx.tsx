@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router'
-import { useDevops, useSend } from '../../api/queries'
+import { useCompanies, useDevops, useInternalProjects, useSend } from '../../api/queries'
+import { linkedProject, type LinkedProject } from '../../domain/projects'
+import type { Company, InternalProject } from '../../api/types'
 import { findPerson, usePeople } from '../../api/people/directory'
 import { useSession } from '../../api/session/store'
 import type { DevopsDb, DvLog, DvProject } from '../../api/devops/types'
@@ -24,7 +26,12 @@ type Log = Omit<DvLog, 'by' | 'when'>
 export type SeqTab = 'cl' | 'int' | null
 
 interface DvApi {
+  /** The board's data. Each item's `name` is its linked project's current name. */
   db: DevopsDb
+  /** The project a DevOps item is (v5), with its company for a client project. Null when it is not linked. */
+  projectOf: (p: DvProject) => LinkedProject | null
+  companies: Company[]
+  internal: InternalProject[]
   /** The signed-in DevOps person: the author of every change made from this board. */
   me: string
   /** Changes a project and optionally adds an Activity entry. */
@@ -45,9 +52,26 @@ interface DvApi {
 const Ctx = createContext<DvApi | null>(null)
 
 export function DevopsProvider({ children }: { children: ReactNode }) {
-  const db = useDevops().data
-  if (!db) return null
-  return <Inner db={db}>{children}</Inner>
+  const raw = useDevops().data
+  const companies = useCompanies().data
+  const internal = useInternalProjects().data
+  // DevOps items are projects (v5): the name always comes from the linked project.
+  const db = useMemo(() => {
+    if (!raw || !companies || !internal) return null
+    return {
+      ...raw,
+      projects: raw.projects.map(p => {
+        const lp = linkedProject(p.project, companies, internal)
+        return lp && lp.name !== p.name ? { ...p, name: lp.name } : p
+      }),
+    }
+  }, [raw, companies, internal])
+  if (!db || !companies || !internal) return null
+  return (
+    <Inner db={db} companies={companies} internal={internal}>
+      {children}
+    </Inner>
+  )
 }
 
 /** The signed-in person's name as the directory has it (the session name until the directory loads). */
@@ -58,7 +82,7 @@ const useMe = (): string => {
   return (people && findPerson(people, session.personId)?.name) || session.name
 }
 
-function Inner({ db, children }: { db: DevopsDb; children: ReactNode }) {
+function Inner({ db, companies, internal, children }: { db: DevopsDb; companies: Company[]; internal: InternalProject[]; children: ReactNode }) {
   const send = useSend()
   const me = useMe()
   const [params, setParams] = useSearchParams()
@@ -131,9 +155,10 @@ function Inner({ db, children }: { db: DevopsDb; children: ReactNode }) {
     return () => window.removeEventListener('keydown', h)
   }, [])
 
+  const projectOf = useCallback((p: DvProject) => linkedProject(p.project, companies, internal), [companies, internal])
   const v = useMemo<DvApi>(
-    () => ({ db, me, update, setField, get, open, dd, setDd, chg, setChg, seqTab, setSeqTab }),
-    [db, me, update, setField, get, open, dd, chg, seqTab],
+    () => ({ db, projectOf, companies, internal, me, update, setField, get, open, dd, setDd, chg, setChg, seqTab, setSeqTab }),
+    [db, projectOf, companies, internal, me, update, setField, get, open, dd, chg, seqTab],
   )
   return <Ctx.Provider value={v}>{children}</Ctx.Provider>
 }

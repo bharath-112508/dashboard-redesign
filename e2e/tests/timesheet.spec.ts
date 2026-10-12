@@ -209,19 +209,47 @@ test.describe('My timesheet', () => {
     expect(pdf.suggestedFilename()).toBe('my-timesheet-all-time.pdf')
   })
 
-  test('TS-12 Companies "Timesheets" link limits projects to that company', async ({ page }) => {
+  test('TS-12 Companies "Timesheets" link opens the history as a page limited to that company (v5)', async ({ page }) => {
     await signIn(page, 'super')
     await page.goto('/companies/daco')
     await page.getByRole('link', { name: 'Timesheets', exact: true }).click()
     await expect(page).toHaveURL(/\/timesheet\?company=daco/)
-    await expect(page.getByText(/Showing projects for/)).toContainText('Daco')
+    // v5: the company link opens the history as the page itself (no week view, no tabs), grouped by project.
+    await expect(page.getByRole('heading', { level: 1, name: 'Timesheets · Daco' })).toBeVisible()
+    await expect(page.getByRole('tab', { name: 'This week' })).toHaveCount(0)
+    await expect(page.getByRole('combobox', { name: 'Group by' })).toHaveValue('project')
 
-    const projectOptions = page.getByRole('combobox', { name: 'Project', exact: true }).locator('option')
-    await expect(projectOptions.filter({ hasText: 'Daco platform' })).toHaveCount(1)
-    await expect(projectOptions.filter({ hasText: 'Business portal' })).toHaveCount(0)
+    const filter = page.getByRole('combobox', { name: 'Project filter' })
+    await expect(filter.locator('option').first()).toHaveText('All Daco projects')
+    await expect(filter.locator('option').filter({ hasText: 'Daco platform' })).toHaveCount(1)
+    await expect(filter.locator('option').filter({ hasText: 'Business portal' })).toHaveCount(0)
 
-    await page.getByRole('button', { name: 'Show all projects' }).click()
+    await page.getByRole('button', { name: 'Show all my time' }).click()
     await expect(page).not.toHaveURL(/company=/)
+    await expect(page.getByRole('heading', { level: 1, name: 'My timesheet' })).toBeVisible()
     await expect(page.getByRole('combobox', { name: 'Project', exact: true }).locator('option').filter({ hasText: 'Business portal' })).toHaveCount(1)
+  })
+
+  test('TS-13 a project link (?project=) shows only that project, grouped by day (v5)', async ({ page }) => {
+    await signIn(page, 'super')
+    await page.goto('/timesheet?project=dacop&name=Daco%20platform')
+    await expect(page.getByRole('heading', { level: 1, name: 'Timesheets · Daco platform' })).toBeVisible()
+    await expect(page.getByRole('combobox', { name: 'Group by' })).toHaveValue('day')
+    const filter = page.getByRole('combobox', { name: 'Project filter' })
+    await expect(filter.locator('option')).toHaveText(['Daco platform', 'Daco · Daco platform'])
+    // Every entry shown is on the project.
+    const projectCells = page.locator('tbody tr td:nth-child(2)')
+    await expect(projectCells.first()).toBeVisible()
+    for (const t of await projectCells.allTextContents()) expect(t).toBe('Daco · Daco platform')
+
+    // Without a name the title is the company and project.
+    await page.goto('/timesheet?project=nordp')
+    await expect(page.getByRole('heading', { level: 1, name: 'Timesheets · Nordlys Energi · Business portal' })).toBeVisible()
+    // An internal project uses its own name.
+    await page.goto('/timesheet?project=i1')
+    await expect(page.getByRole('heading', { level: 1, name: 'Timesheets · DevOps board' })).toBeVisible()
+    // A project that does not exist says so.
+    await page.goto('/timesheet?project=nope')
+    await expect(page.getByText('No project matches this link, so no time is shown.')).toBeVisible()
   })
 })
