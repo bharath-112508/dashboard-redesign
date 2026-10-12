@@ -1,8 +1,6 @@
-import { PlaceholderScreen } from '@/components/Placeholder';
-import { useRootActions } from '@/nav/useRootActions';
+import { DevopsBoardScreen } from '@/features/devops/DevopsBoardScreen';
 
-/** S5-DEVOPS DevOps board — placeholder; W4 replaces this body. */
+/** S5-DEVOPS DevOps board (tab for the devops role). */
 export default function DevopsTab() {
-  const actions = useRootActions();
-  return <PlaceholderScreen spec="S5-DEVOPS DevOps board" owner="W4" title="DevOps board" id="devops" actions={actions} />;
+  return <DevopsBoardScreen />;
 }

@@ -1,10 +1,10 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderSheet } from '@/components/Placeholder';
+import { ReportBugSheet } from '@/features/client/ReportBugSheet';
 import type { SheetQuery } from '@/nav/routes';
 
-/** SH-NEWBUG Report a bug (URL sheet `report-bug`) — placeholder; W4 replaces this body. */
+/** SH-NEWBUG Report a bug (URL sheet `report-bug`). */
 export default function ReportBugSheetRoute() {
-  const params = useLocalSearchParams<SheetQuery<'report-bug'>>();
-  return <PlaceholderSheet spec="SH-NEWBUG Report a bug" owner="W4" title="Report a bug" id="report-bug" params={params} />;
+  const { pid } = useLocalSearchParams<SheetQuery<'report-bug'>>();
+  return <ReportBugSheet pid={pid} />;
 }

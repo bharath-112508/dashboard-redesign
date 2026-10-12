@@ -259,11 +259,12 @@ test.describe('every route and URL sheet is reachable', () => {
     await expect(headerTitle(page)).toHaveText('Your team');
   });
 
-  test('route params reach the placeholder', async ({ page }) => {
+  test('route params reach the screen', async ({ page }) => {
     await signInAs(page, 'super');
     await openRoute(page, '/dvp/OPS-103?tab=requests');
-    await expect(byTestId(page, 'param-key')).toHaveText('key: OPS-103');
-    await expect(byTestId(page, 'param-tab')).toHaveText('tab: requests');
+    // W4 replaced the placeholder: the key picks the record, the tab the segment
+    await expect(byTestId(page, 'header-sub')).toHaveText('OPS-103 · Weland');
+    await expect(byTestId(page, 'dvp-tab-requests')).toHaveAttribute('aria-selected', 'true');
   });
 });
 

@@ -1,8 +1,22 @@
-import { TextBlock } from '@/components/TextBlock';
+import { Block, Button, Rows } from '@/components';
 import { useAppState } from '@/data/store';
+import { openSheet } from '@/nav/routes';
 
-/** Project page → Bugs tab body (clients). Embed placeholder: W4 fills it, W2 mounts it. */
+import { BugRow } from './rows';
+
+/** Project page → Bugs tab body (clients): bugs on this project (A-16). W2 mounts it. */
 export function ProjectBugsTab({ projectId }: { projectId: string }) {
-  const n = useAppState((s) => s.bugs.filter((b) => b.projectId === projectId).length);
-  return <TextBlock tone="info" text={`${n} bugs — Bugs tab, built by W4.`} testID="project-bugs" />;
+  const B = useAppState((s) => s.bugs.filter((b) => b.projectId === projectId));
+  return (
+    <>
+      <Button title="Report a bug" icon="bug" onPress={() => openSheet('report-bug', { pid: projectId })} testID="project-report-bug" />
+      <Block title="Bugs reported">
+        <Rows empty="No bugs reported." testID="project-bugs">
+          {B.map((b) => (
+            <BugRow key={b.id} b={b} />
+          ))}
+        </Rows>
+      </Block>
+    </>
+  );
 }

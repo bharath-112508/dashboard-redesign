@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { RequestScreen } from '@/features/devops/RequestScreen';
 
-/** S5-REQ DevOps request — placeholder; W4 replaces this body. */
+/** S5-REQ DevOps request. */
 export default function DevopsRequestRoute() {
-  const params = useLocalSearchParams<{ id?: string }>();
-  return <PlaceholderScreen spec="S5-REQ DevOps request" owner="W4" title="DevOps request" id="request" params={params} />;
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  return <RequestScreen id={id ?? ''} />;
 }

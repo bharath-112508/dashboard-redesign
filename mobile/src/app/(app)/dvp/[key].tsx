@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { DevopsProjectScreen } from '@/features/devops/DevopsProjectScreen';
 
-/** S5-DVP DevOps project — placeholder; W4 replaces this body. */
+/** S5-DVP DevOps project (`?tab=`). */
 export default function DevopsProjectRoute() {
-  const params = useLocalSearchParams<{ key?: string; tab?: string }>();
-  return <PlaceholderScreen spec="S5-DVP DevOps project" owner="W4" title="DevOps project" id="dvp" params={params} />;
+  const { key, tab } = useLocalSearchParams<{ key?: string; tab?: string }>();
+  return <DevopsProjectScreen key={key} dvKey={key ?? ''} tab={tab} />;
 }

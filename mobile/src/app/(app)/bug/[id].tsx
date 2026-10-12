@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { BugScreen } from '@/features/client/BugScreen';
 
-/** S5-BUG Bug — placeholder; W4 replaces this body. */
+/** S5-BUG Bug. */
 export default function BugRoute() {
-  const params = useLocalSearchParams<{ id?: string }>();
-  return <PlaceholderScreen spec="S5-BUG Bug" owner="W4" title="Bug" id="bug" params={params} />;
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  return <BugScreen id={id ?? ''} />;
 }
