@@ -1,71 +1,130 @@
 import { router, type Href } from 'expo-router';
 
-import type { NotificationTarget, Role } from '@/data/types';
+import type { Role } from '@/data/types';
+
 import { isTabOf, type TabKey } from './tabs';
 
 /**
- * Typed route helpers. Features navigate only through these (or plain hrefs built here),
- * so route files can move without touching feature code.
+ * Typed route helpers (DELTA §1). Features navigate only through these, so route files
+ * can move without touching feature code.
  *
  * Navigation model (SPEC §1.2): one stack per session. A tab is the root of the stack;
  * pushed screens sit on top and the tab that started the stack stays highlighted.
  */
 
 const enc = encodeURIComponent;
+const q = (params: Record<string, string | number | null | undefined>) => {
+  const s = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${k}=${enc(String(v))}`)
+    .join('&');
+  return s ? `?${s}` : '';
+};
+
+/** Project detail tabs (`?tab=`). */
+export type ProjectTab = 'overview' | 'support' | 'board' | 'list' | 'sprints' | 'timeline' | 'files' | 'time' | 'team' | 'devops' | 'questions' | 'bugs';
+/** DevOps project tabs (`?tab=`). */
+export type DevopsTab = 'status' | 'details' | 'deploys' | 'requests' | 'notes';
 
 export const href = {
   tab: (key: TabKey) => `/${key}` as Href,
-  ticket: (id: number) => `/ticket/${id}` as Href,
+  /** ticket detail by key (V-20) */
+  ticket: (key: string) => `/ticket/${enc(key)}` as Href,
+  /** subtask by stable id "PMT-11.s2" (A-11) */
+  subtask: (id: string) => `/subtask/${enc(id)}` as Href,
+  project: (id: string, tab?: ProjectTab, extra?: Record<string, string>) => `/project/${enc(id)}${q({ tab, ...extra })}` as Href,
+  company: (id: string) => `/company/${enc(id)}` as Href,
+  /** company timesheets, optionally filtered to one project */
+  companyTime: (co: string, pf?: string) => `/company-time/${enc(co)}${q({ pf })}` as Href,
+  user: (id: number) => `/user/${id}` as Href,
   question: (id: number) => `/question/${id}` as Href,
-  project: (name: string) => `/project/${enc(name)}` as Href,
-  company: (name: string) => `/company/${enc(name)}` as Href,
-  user: (name: string) => `/user/${enc(name)}` as Href,
-  inbox: () => '/inbox' as Href,
-  me: () => '/me' as Href,
-  leave: () => '/leave' as Href,
-  team: () => '/team' as Href,
+  bug: (id: string) => `/bug/${enc(id)}` as Href,
+  dvp: (key: string, tab?: DevopsTab) => `/dvp/${enc(key)}${q({ tab })}` as Href,
+  request: (id: number) => `/request/${id}` as Href,
+  portal: (co: string) => `/portal/${enc(co)}` as Href,
+  search: () => '/search' as Href,
+  emp: () => '/emp' as Href,
+  clients: () => '/clients' as Href,
   companies: () => '/companies' as Href,
   users: () => '/users' as Href,
   dvset: () => '/dvset' as Href,
-  history: () => '/history' as Href,
-  board: () => '/board' as Href,
-  /** pushed copies of tab screens, for roles where they are not a tab */
-  stack: (key: 'projects' | 'devops' | 'tickets') => `/stack/${key}` as Href,
+  me: () => '/me' as Href,
+  /** "My leave" (A-2) */
+  leave: () => '/leave' as Href,
+  /** DevOps board pushed for super/admin */
+  devopsStack: () => '/stack/devops' as Href,
   signIn: () => '/sign-in' as Href,
 };
 
 // ── Sheets ──────────────────────────────────────────────────────────────────
 
-/** Sheet params contract (BUILD-PLAN rule 3). All values travel as strings in the URL. */
+/**
+ * URL sheet params contract (BUILD-PLAN rule 3). Values travel as strings in the URL;
+ * read them with `useLocalSearchParams<SheetQuery<'log-time'>>()`.
+ */
 export interface SheetParams {
-  /** Log time: preset ticket, day, project, or text (support logging M-34) */
-  'log-time': { ticketId?: number; day?: string; project?: string; text?: string };
-  /** Report a problem / Request a change */
-  report: { project?: string; kind?: 'Bug' | 'Change' };
-  /** New leave request */
-  leave: Record<string, never>;
-  /** Project status (staffAll) */
-  'project-status': { project: string };
-  /** Set up maintenance / Edit support plan */
-  'support-plan': { project: string };
+  /** SH-LOG: preset day, project value (c:/i:/x:admin), ticket/subtask key, text; or edit an entry id */
+  'log-time': { date?: string; proj?: string; key?: string; text?: string; id?: number };
+  /** SH-NEWTICKET */
+  'new-ticket': { pid: string };
+  /** SH-NEWPROJECT (preset company hides the client/internal segment) */
+  'new-project': { co?: string };
+  /** SH-PROJSTATUS */
+  'project-status': { id: string };
+  /** SH-SUPTERMS */
+  'support-terms': { id: string };
+  /** SH-SUPREQ */
+  'support-request': { pid: string; kind: 'problem' | 'change' };
+  /** SH-NEWREQ (DevOps key) */
+  'devops-request': { key: string };
+  /** SH-NEWQ (title prefilled for "Ask a follow-up") */
+  'new-question': { pid: string; title?: string };
+  /** SH-NEWBUG */
+  'report-bug': { pid?: string };
+  /** SH-LEAVE (preset person, approvers) */
+  leave: { who?: string };
+  /** SH-USER (edit when id) */
+  user: { id?: number };
+  /** SH-COMPANY (edit when id) */
+  company: { id?: string };
+  /** SH-CONTACT (edit when i = contact index) */
+  contact: { co: string; i?: number };
+  /** SH-CMEMBER (edit when email) */
+  'client-member': { email?: string };
 }
 
 export type SheetName = keyof SheetParams;
 
+/** The params as `useLocalSearchParams` returns them (strings). */
+export type SheetQuery<N extends SheetName> = { [K in keyof SheetParams[N]]?: string };
+
+export const SHEETS: readonly SheetName[] = [
+  'log-time',
+  'new-ticket',
+  'new-project',
+  'project-status',
+  'support-terms',
+  'support-request',
+  'devops-request',
+  'new-question',
+  'report-bug',
+  'leave',
+  'user',
+  'company',
+  'contact',
+  'client-member',
+];
+
 export function sheetHref<N extends SheetName>(name: N, params?: SheetParams[N]): Href {
-  const q = Object.entries(params ?? {})
-    .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .map(([k, v]) => `${k}=${enc(String(v))}`)
-    .join('&');
-  return `/sheet/${name}${q ? `?${q}` : ''}` as Href;
+  return `/sheet/${name}${q((params ?? {}) as Record<string, string | number | undefined>)}` as Href;
 }
 
-/** Open a bottom sheet route over the current screen. */
+/** Open a URL bottom sheet over the current screen. */
 export function openSheet<N extends SheetName>(name: N, params?: SheetParams[N]): void {
   router.push(sheetHref(name, params));
 }
 
-/** Close the current sheet (or any modal route). */
+/** Close the current sheet route. */
 export function closeSheet(): void {
   if (router.canGoBack()) router.back();
 }
@@ -77,78 +136,76 @@ export function push(to: Href): void {
   router.push(to);
 }
 
-/** Pop one screen (M-45). */
+/** Pop one screen. */
 export function back(): void {
   if (router.canGoBack()) router.back();
 }
 
-/**
- * Switch tab (M-05): resets the stack to that tab's root, like the prototype's tab(s).
- */
+/** Switch tab (V-05): resets the stack to that tab's root. */
 export function goTab(key: TabKey): void {
   if (router.canDismiss()) router.dismissTo(href.tab(key));
   else router.navigate(href.tab(key));
 }
 
-/**
- * Open the screen for a More tile / feature key: a tab if the role has it as a tab,
- * otherwise the pushed copy (e.g. DevOps board for pm, Projects for devops).
- */
-export function hrefForKey(key: MoreKey, role: Role): Href {
-  if (isTabOf(role, key)) return href.tab(key as TabKey);
-  switch (key) {
-    case 'projects':
-    case 'devops':
-    case 'tickets':
-      return href.stack(key);
-    case 'time':
-    case 'questions':
-    case 'bugs':
-      return href.tab(key);
-    default:
-      return `/${key}` as Href;
-  }
-}
-
-/** Keys of More tiles and Home links (prototype screen keys). */
-export type MoreKey =
-  | 'tickets'
-  | 'board'
-  | 'time'
-  | 'history'
-  | 'team'
+/** v5 page keys used by dashboard links, KPI tiles, More and search (`tab2`). */
+export type PageKey =
+  | 'dash'
   | 'projects'
-  | 'companies'
-  | 'users'
+  | 'mytickets'
+  | 'time'
   | 'devops'
-  | 'dvset'
+  | 'portal'
   | 'questions'
   | 'bugs'
-  | 'inbox'
+  | 'more'
+  | 'emp'
+  | 'users'
+  | 'clients'
+  | 'companies'
+  | 'search'
+  | 'dvset'
+  | 'profile'
   | 'leave';
 
-/** Where a notification leads (M-06). The DevOps target also expands that project. */
-export function notificationHref(target: NotificationTarget): Href {
-  switch (target.kind) {
-    case 'ticket':
-      return href.ticket(target.id);
-    case 'question':
-      return href.question(target.id);
-    case 'project':
-      return href.project(target.name);
-    case 'leave':
-      return href.leave();
-    case 'devops':
-      // The prototype pushes the board for every role, devops included.
-      return href.stack('devops');
-  }
+const TAB_OF: Partial<Record<PageKey, TabKey>> = {
+  dash: 'home',
+  projects: 'projects',
+  portal: 'projects',
+  mytickets: 'tickets',
+  time: 'time',
+  devops: 'devops',
+  questions: 'questions',
+  bugs: 'bugs',
+  more: 'more',
+};
+
+const PUSHED: Partial<Record<PageKey, () => Href>> = {
+  emp: href.emp,
+  users: href.users,
+  clients: href.clients,
+  companies: href.companies,
+  search: href.search,
+  dvset: href.dvset,
+  profile: href.me,
+  leave: href.leave,
+  devops: href.devopsStack,
+};
+
+/** Where a page key leads for a role: its tab, or the pushed screen. */
+export function pageHref(page: PageKey, role: Role | null | undefined): Href {
+  const tab = TAB_OF[page];
+  if (tab && isTabOf(role, tab)) return href.tab(tab);
+  const p = PUSHED[page];
+  if (p) return p();
+  return href.tab(tab ?? 'home');
 }
 
-/** Ticket detail, a shortcut used everywhere (M-11). */
-export function toTicket(id: number): void {
-  push(href.ticket(id));
-}
-
-export function toProject(name: string): void {
-  push(href.project(name));
+/**
+ * `tab2(p)` (SPEC §1.2): switch tab when the page is one of the role's tabs, push it
+ * otherwise. Used by dashboard links, More and search results.
+ */
+export function tab2(page: PageKey, role: Role | null | undefined): void {
+  const tab = TAB_OF[page];
+  if (tab && isTabOf(role, tab)) goTab(tab);
+  else push(pageHref(page, role));
 }

@@ -1,55 +1,60 @@
-import { useState } from 'react';
-import { Platform, TextInput, type TextInputProps, type StyleProp, type ViewStyle } from 'react-native';
+import { TextInput, type KeyboardTypeOptions } from 'react-native';
 
 import { colors } from '@/theme';
 
-import { inputStyles } from './Field';
+import { Field, inputStyles } from './Field';
+import type { FieldBase } from './types';
 
-export interface TextFieldProps extends Omit<TextInputProps, 'style'> {
-  /** accessible name (usually the field label) */
-  label: string;
-  /** blue border (focused look, e.g. the Log sheet's project select) */
-  highlight?: boolean;
-  multiline?: boolean;
-  /** min height for multiline (TextArea) */
-  minHeight?: number;
-  style?: StyleProp<ViewStyle>;
+export interface TextFieldProps extends FieldBase {
+  value: string;
+  onChange?: (text: string) => void;
+  placeholder?: string;
+  /** grey read-only field (Profile email) */
+  readOnly?: boolean;
+  type?: 'text' | 'email' | 'password' | 'number';
+  autoFocus?: boolean;
 }
 
-const webNoOutline = Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null;
+const KB: Record<NonNullable<TextFieldProps['type']>, KeyboardTypeOptions> = { text: 'default', email: 'email-address', password: 'default', number: 'decimal-pad' };
 
-/** Single-line input (50 high, radius 14). */
-export function TextField({ label, highlight, multiline, minHeight, style, onFocus, onBlur, ...rest }: TextFieldProps) {
-  const [focus, setFocus] = useState(false);
+/** Text input 48h r12 15px (SPEC §6.2). */
+export function TextField({ value, onChange, placeholder, readOnly, type = 'text', autoFocus, testID, ...field }: TextFieldProps) {
   return (
-    <TextInput
-      accessibilityLabel={label}
-      placeholderTextColor={colors.muted}
-      multiline={multiline}
-      textAlignVertical={multiline ? 'top' : 'center'}
-      maxFontSizeMultiplier={1.4}
-      {...rest}
-      onFocus={(e) => {
-        setFocus(true);
-        onFocus?.(e);
-      }}
-      onBlur={(e) => {
-        setFocus(false);
-        onBlur?.(e);
-      }}
-      style={[
-        inputStyles.box,
-        inputStyles.text,
-        (focus || highlight) && inputStyles.focus,
-        multiline ? { minHeight: minHeight ?? 96, paddingTop: 12 } : null,
-        webNoOutline,
-        style,
-      ]}
-    />
+    <Field {...field}>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        editable={!readOnly}
+        placeholder={placeholder}
+        placeholderTextColor={colors.ink3}
+        accessibilityLabel={field.label || placeholder}
+        secureTextEntry={type === 'password'}
+        keyboardType={KB[type]}
+        autoCapitalize={type === 'text' ? 'sentences' : 'none'}
+        autoCorrect={type === 'text'}
+        autoFocus={autoFocus}
+        style={[inputStyles.box, field.error ? inputStyles.invalid : null, readOnly ? inputStyles.readOnly : null]}
+        testID={testID}
+      />
+    </Field>
   );
 }
 
-/** Multi-line input (description, note, reason). */
-export function TextArea(props: Omit<TextFieldProps, 'multiline'>) {
-  return <TextField {...props} multiline />;
+/** Textarea, 4 rows (SPEC §6.2). */
+export function TextArea({ value, onChange, placeholder, testID, ...field }: Omit<TextFieldProps, 'type' | 'readOnly'>) {
+  return (
+    <Field {...field}>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        placeholder={placeholder}
+        placeholderTextColor={colors.ink3}
+        accessibilityLabel={field.label || placeholder}
+        multiline
+        numberOfLines={4}
+        style={[inputStyles.box, inputStyles.area, field.error ? inputStyles.invalid : null]}
+        testID={testID}
+      />
+    </Field>
+  );
 }

@@ -1,4 +1,6 @@
 import { SignInScreen } from '@/features/auth/SignInScreen';
 
-/** S-LOGIN. Built by P0 (foundation-critical). */
-export default SignInScreen;
+/** S5-LOGIN Sign in (W3 owns; F0 ships a working version). */
+export default function SignInRoute() {
+  return <SignInScreen />;
+}

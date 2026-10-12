@@ -1,201 +1,223 @@
-import { EMPTY_MAINTENANCE } from '../seed/maintenance';
-import type { MaintData, Ticket } from '../types';
+import type { DevopsProject, Ticket } from '../types';
 import type { Action } from './actions';
 import { createInitialState, type AppState } from './state';
 
-const mapTicket = (s: AppState, id: number, f: (t: Ticket) => Ticket): AppState => ({
+const mapTicket = (s: AppState, key: string, f: (t: Ticket) => Ticket): AppState => ({
   ...s,
-  tickets: s.tickets.map((t) => (t.id === id ? f(t) : t)),
+  tickets: s.tickets.map((t) => (t.key === key ? f(t) : t)),
 });
 
-const mapMaint = (s: AppState, project: string, f: (m: MaintData) => MaintData): AppState => ({
+const mapDevops = (s: AppState, key: string, f: (d: DevopsProject) => DevopsProject): AppState => ({
   ...s,
-  maintenance: { ...s.maintenance, [project]: f(s.maintenance[project] ?? EMPTY_MAINTENANCE) },
+  devops: s.devops.map((d) => (d.key === key ? f(d) : d)),
 });
 
-const withSettingsLog = (s: AppState, line: AppState['devopsSettings']['log'][number]) => [
-  line,
-  ...s.devopsSettings.log,
-];
+const bumpId = (s: AppState, id: number) => Math.max(s.nextId, id + 1);
 
 /** Pure reducer: (state, action) → next state. */
 export function reducer(s: AppState, a: Action): AppState {
   switch (a.type) {
-    // ── Session ──
+    // ── Session and profile ──
     case 'session/signIn':
-      return { ...s, session: { ...s.session, user: a.user } };
-    case 'session/switchAccount':
-      return { ...s, session: { ...s.session, user: null } };
+      return { ...s, session: { personId: a.personId } };
     case 'session/signOut':
-      return { ...s, session: { user: null, email: '' } };
-    case 'session/setEmailDraft':
-      return { ...s, session: { ...s.session, email: a.email } };
-
-    // ── Notifications and profile ──
-    case 'notifications/markRead':
-      return { ...s, read: { ...s.read, [a.id]: true } };
-    case 'notifications/markAllRead': {
-      const read = { ...s.read };
-      a.ids.forEach((id) => (read[id] = true));
-      return { ...s, read };
-    }
-    case 'profile/setPush':
-      return { ...s, push: a.on };
-
-    // ── Tickets ──
-    case 'tickets/setStatus':
-      return mapTicket(s, a.id, (t) => ({ ...t, st: a.st }));
-    case 'tickets/addComment':
-      return mapTicket(s, a.id, (t) => ({ ...t, comments: [...t.comments, a.comment] }));
-    case 'tickets/setDesc':
-      return mapTicket(s, a.id, (t) => ({ ...t, desc: a.desc }));
-    case 'tickets/create':
-      return { ...s, tickets: [...s.tickets, a.ticket] };
+      return { ...s, session: { personId: null } };
+    case 'profile/save':
+    case 'users/update':
+      return {
+        ...s,
+        people: s.people.map((p) => (p.id === (a.type === 'profile/save' ? a.personId : a.id) ? { ...p, ...a.patch } : p)),
+      };
 
     // ── Time ──
-    case 'time/addEntry': {
-      const next = typeof a.entry.id === 'number' ? Math.max(s.nextId, a.entry.id + 1) : s.nextId;
-      const tk = a.entry.tk;
-      const withHours = tk == null ? s : mapTicket(s, tk, (t) => ({ ...t, hrs: t.hrs + a.entry.h }));
-      return { ...withHours, entries: [...s.entries, a.entry], nextId: next };
+    case 'time/save': {
+      const exists = s.entries.some((e) => e.id === a.entry.id);
+      return {
+        ...s,
+        entries: exists ? s.entries.map((e) => (e.id === a.entry.id ? a.entry : e)) : [a.entry, ...s.entries],
+        nextId: bumpId(s, a.entry.id),
+      };
     }
+    case 'time/delete':
+      return { ...s, entries: s.entries.filter((e) => e.id !== a.id) };
 
-    // ── Questions ──
-    case 'questions/addMessage':
+    // ── Tickets ──
+    case 'tickets/create':
+      return { ...s, tickets: [...s.tickets, a.ticket] };
+    case 'tickets/patch':
+      return mapTicket(s, a.key, (t) => ({ ...t, ...a.patch }));
+    case 'tickets/markRead':
+      return mapTicket(s, a.key, (t) => (t.unread ? { ...t, unread: 0 } : t));
+    case 'tickets/addComment':
+      return mapTicket(s, a.key, (t) => ({ ...t, comments: [...t.comments, a.comment] }));
+    case 'tickets/attach':
+      return mapTicket(s, a.key, (t) => ({ ...t, att: [...t.att, a.file] }));
+
+    // ── Subtasks ──
+    case 'subtasks/add':
+      return mapTicket(s, a.key, (t) => ({ ...t, subs: [...t.subs, a.sub], subSeq: t.subSeq + 1 }));
+    case 'subtasks/patch':
+      return mapTicket(s, a.key, (t) => ({ ...t, subs: t.subs.map((x) => (x.id === a.subId ? { ...x, ...a.patch } : x)) }));
+    case 'subtasks/comment':
+      return mapTicket(s, a.key, (t) => ({
+        ...t,
+        subs: t.subs.map((x) => (x.id === a.subId ? { ...x, comments: [...x.comments, a.comment] } : x)),
+      }));
+    case 'subtasks/delete':
+      return mapTicket(s, a.key, (t) => ({ ...t, subs: t.subs.filter((x) => x.id !== a.subId) }));
+
+    // ── Projects ──
+    case 'projects/create':
+      return { ...s, projects: [...s.projects, a.project] };
+    case 'projects/patch':
+      return { ...s, projects: s.projects.map((p) => (p.id === a.id ? { ...p, ...a.patch } : p)) };
+    case 'projects/addFile':
+      return { ...s, files: { ...s.files, [a.id]: [a.file, ...(s.files[a.id] ?? [])] } };
+
+    // ── Epics and sprints ──
+    case 'epics/create':
+      return { ...s, epics: [...s.epics, a.epic] };
+    case 'sprints/create':
+      return { ...s, sprints: [...s.sprints, a.sprint] };
+    case 'sprints/start':
+      return { ...s, sprints: s.sprints.map((x) => (x.id === a.id ? { ...x, state: 'active' } : x)) };
+    case 'sprints/complete':
       return {
         ...s,
-        questions: s.questions.map((q) => (q.id === a.id ? { ...q, msgs: [...q.msgs, a.msg] } : q)),
+        sprints: s.sprints.map((x) => (x.id === a.id ? { ...x, state: 'done' } : x)),
+        tickets: s.tickets.map((t) => (t.sprintId === a.id && t.st !== 'done' ? { ...t, sprintId: null } : t)),
       };
 
-    // ── Leave ──
+    // ── Client portal ──
+    case 'questions/create':
+      return { ...s, questions: [...s.questions, a.question] };
+    case 'questions/answer':
+      return { ...s, questions: s.questions.map((q) => (q.id === a.id ? { ...q, answer: a.answer, answeredBy: a.by } : q)) };
+    case 'bugs/create':
+      return { ...s, bugs: [a.bug, ...s.bugs] };
+    case 'bugs/reply':
+      return { ...s, bugChat: { ...s.bugChat, [a.id]: [...(s.bugChat[a.id] ?? []), a.comment] } };
+    case 'bugs/setStatus':
+      return { ...s, bugs: s.bugs.map((b) => (b.id === a.id ? { ...b, st: a.st } : b)) };
+    case 'clientTeam/add':
+      return { ...s, clientTeam: [...s.clientTeam, a.member] };
+    case 'clientTeam/update':
+      return { ...s, clientTeam: s.clientTeam.map((m) => (m.id === a.id ? { ...m, ...a.patch } : m)) };
+    case 'clientTeam/remove':
+      return { ...s, clientTeam: s.clientTeam.filter((m) => m.id !== a.id) };
+
+    // ── Users, leave, permissions ──
+    case 'users/add':
+      return { ...s, people: [...s.people, a.person], nextId: bumpId(s, a.person.id) };
+    case 'users/setActive':
+      return { ...s, people: s.people.map((p) => (p.id === a.id ? { ...p, active: a.active } : p)) };
+    case 'users/remove':
+      return { ...s, people: s.people.filter((p) => p.id !== a.id) };
     case 'leave/add':
-      return {
-        ...s,
-        leaves: [...s.leaves, { ...a.leave, st: 'Pending' }],
-        nextId: Math.max(s.nextId, a.leave.id + 1),
-      };
+      return { ...s, leaves: [a.leave, ...s.leaves], nextId: bumpId(s, a.leave.id) };
     case 'leave/decide':
       return {
         ...s,
-        leaves: s.leaves.map((l) =>
-          l.id === a.id ? { ...l, st: a.st, decidedBy: a.by, decidedWhen: a.when } : l,
-        ),
+        leaves: s.leaves.map((l) => (l.id === a.id ? { ...l, st: a.st, decidedBy: a.by, decidedWhen: a.when } : l)),
       };
-
-    // ── Projects and maintenance ──
-    case 'projects/setStatus':
-      return {
-        ...s,
-        projects: s.projects.map((p) => (p.name === a.project ? { ...p, status: a.status } : p)),
-      };
-    case 'projects/savePlan':
-      return {
-        ...s,
-        projects: s.projects.map((p) =>
-          p.name === a.project ? { ...p, plan: a.plan, status: 'maint' } : p,
-        ),
-        maintenance: s.maintenance[a.project]
-          ? s.maintenance
-          : { ...s.maintenance, [a.project]: { ...EMPTY_MAINTENANCE } },
-        ui: { ...s.ui, projectView: { ...s.ui.projectView, [a.project]: 'sup' } },
-      };
-    case 'maintenance/toggleBilling':
-      return mapMaint(s, a.project, (m) => ({
-        ...m,
-        req: m.req.map((r) => (r.id === a.requestId ? { ...r, outside: !r.outside } : r)),
-      }));
-    case 'maintenance/assign':
-      return mapMaint(s, a.project, (m) => ({
-        ...m,
-        req: m.req.map((r) => (r.id === a.requestId ? { ...r, as: a.who } : r)),
-      }));
-    case 'maintenance/toggleTask':
-      return mapMaint(s, a.project, (m) => ({
-        ...m,
-        tasks: m.tasks.map((t) => (t.id === a.taskId ? { ...t, done: !t.done } : t)),
-      }));
-
-    // ── DevOps ──
-    case 'devops/advancePhase':
-      return {
-        ...s,
-        devops: s.devops.map((d) =>
-          d.p === a.project ? { ...d, phase: a.next, log: [a.line, ...d.log] } : d,
-        ),
-        ui: { ...s.ui, devopsOpen: { ...s.ui.devopsOpen, [a.project]: true } },
-      };
-    case 'devops/adjustReminder': {
-      const seq = s.devopsSettings.seq.map((r, i) =>
-        i === a.index ? { ...r, d: Math.max(1, r.d + a.delta) } : r,
-      );
-      return { ...s, devopsSettings: { ...s.devopsSettings, seq, log: withSettingsLog(s, a.line) } };
-    }
-    case 'devops/addReminder': {
-      const seq = s.devopsSettings.seq;
-      const last = seq[seq.length - 1];
-      const added = { n: `Reminder ${seq.length + 1}`, d: (last?.d ?? 0) + 7 };
-      return {
-        ...s,
-        devopsSettings: { ...s.devopsSettings, seq: [...seq, added], log: withSettingsLog(s, a.line) },
-      };
-    }
-    case 'devops/toggleRule':
-      return {
-        ...s,
-        devopsSettings: {
-          ...s.devopsSettings,
-          rules: { ...s.devopsSettings.rules, [a.rule]: !s.devopsSettings.rules[a.rule] },
-          log: withSettingsLog(s, a.line),
-        },
-      };
-    case 'devops/movePhaseUp': {
-      if (a.index <= 0) return s;
-      const phases = [...s.devopsSettings.phases];
-      [phases[a.index - 1], phases[a.index]] = [phases[a.index], phases[a.index - 1]];
-      return { ...s, devopsSettings: { ...s.devopsSettings, phases, log: withSettingsLog(s, a.line) } };
-    }
-    case 'devops/addPhase': {
-      const ph = s.devopsSettings.phases;
-      const phases = [...ph.slice(0, -1), a.name, ...ph.slice(-1)];
-      return { ...s, devopsSettings: { ...s.devopsSettings, phases, log: withSettingsLog(s, a.line) } };
+    case 'perms/toggle': {
+      const row = s.perms[a.role] ?? {};
+      return { ...s, perms: { ...s.perms, [a.role]: { ...row, [a.key]: !row[a.key] } } };
     }
 
-    // ── Companies and users ──
-    case 'companies/setPortalPerm':
+    // ── Companies ──
+    case 'companies/create':
+      return { ...s, companies: [...s.companies, a.company] };
+    case 'companies/update':
+      return { ...s, companies: s.companies.map((c) => (c.id === a.id ? { ...c, ...a.patch } : c)) };
+    case 'companies/setArchived':
+      return { ...s, companies: s.companies.map((c) => (c.id === a.id ? { ...c, archived: a.archived } : c)) };
+    case 'contacts/save':
       return {
         ...s,
         companies: s.companies.map((c) =>
-          c.name !== a.company
+          c.id !== a.companyId
             ? c
             : {
                 ...c,
-                contacts: c.contacts.map((k) =>
-                  k.name === a.contact ? { ...k, portal: { ...k.portal, [a.perm]: a.on } } : k,
-                ),
+                contacts:
+                  a.index == null ? [...c.contacts, a.contact] : c.contacts.map((x, i) => (i === a.index ? a.contact : x)),
               },
         ),
       };
-    case 'companies/toggleArchived':
+    case 'contacts/remove':
       return {
         ...s,
-        companies: s.companies.map((c) => (c.name === a.company ? { ...c, archived: !c.archived } : c)),
+        companies: s.companies.map((c) => (c.id === a.companyId ? { ...c, contacts: c.contacts.filter((_, i) => i !== a.index) } : c)),
       };
-    case 'users/setRole':
-      return { ...s, people: s.people.map((p) => (p.name === a.name ? { ...p, staffRole: a.role } : p)) };
-    case 'users/toggleActive':
-      return { ...s, people: s.people.map((p) => (p.name === a.name ? { ...p, active: !p.active } : p)) };
 
-    // ── UI ──
-    case 'ui/set':
-      return { ...s, ui: { ...s.ui, ...a.patch } };
+    // ── DevOps ──
+    case 'devops/create':
+      return { ...s, devops: [...s.devops, a.record] };
+    case 'devops/patch':
+      return mapDevops(s, a.key, (d) => ({
+        ...d,
+        ...a.patch,
+        updatedBy: a.by,
+        logs: a.log ? [a.log, ...d.logs] : d.logs,
+      }));
+    case 'devops/addNote':
+      return mapDevops(s, a.key, (d) => ({ ...d, notes: [a.note, ...d.notes], updatedBy: a.note.by }));
+    case 'requests/create': {
+      const withLog = mapDevops(s, a.request.key, (d) => ({ ...d, logs: [a.log, ...d.logs] }));
+      return { ...withLog, devopsRequests: [a.request, ...s.devopsRequests], nextId: bumpId(s, a.request.id) };
+    }
+    case 'requests/setStatus': {
+      const req = s.devopsRequests.find((r) => r.id === a.id);
+      const withLog = req ? mapDevops(s, req.key, (d) => ({ ...d, logs: [a.log, ...d.logs], updatedBy: a.log.by })) : s;
+      return { ...withLog, devopsRequests: s.devopsRequests.map((r) => (r.id === a.id ? { ...r, status: a.status } : r)) };
+    }
+    case 'requests/comment':
+      return {
+        ...s,
+        devopsRequests: s.devopsRequests.map((r) => (r.id === a.id ? { ...r, comments: [...r.comments, a.comment] } : r)),
+      };
+    case 'devopsSettings/saveItem': {
+      const set = s.devopsSettings;
+      if (a.list === 'phases') {
+        const item = { n: a.name, d: a.days ?? 0 };
+        const phases = a.index == null ? [...set.phases, item] : set.phases.map((p, i) => (i === a.index ? item : p));
+        return { ...s, devopsSettings: { ...set, phases } };
+      }
+      const old = a.index == null ? null : set.statuses[a.index];
+      const statuses = a.index == null ? [...set.statuses, a.name] : set.statuses.map((x, i) => (i === a.index ? a.name : x));
+      const devops =
+        old && old !== a.name
+          ? s.devops.map((d) =>
+              d.infra === old
+                ? { ...d, infra: a.name, updatedBy: a.by, logs: [{ by: a.by, when: 'Just now', text: `Status renamed to ${a.name}` }, ...d.logs] }
+                : d,
+            )
+          : s.devops;
+      return { ...s, devops, devopsSettings: { ...set, statuses } };
+    }
+    case 'devopsSettings/removeItem': {
+      const set = s.devopsSettings;
+      if (set[a.list].length <= 1) return s;
+      if (a.list === 'phases') return { ...s, devopsSettings: { ...set, phases: set.phases.filter((_, i) => i !== a.index) } };
+      const old = set.statuses[a.index];
+      const statuses = set.statuses.filter((_, i) => i !== a.index);
+      const first = statuses[0];
+      const devops = s.devops.map((d) =>
+        d.infra === old
+          ? { ...d, infra: first, updatedBy: a.by, logs: [{ by: a.by, when: 'Just now', text: `Status ${old} was removed` }, ...d.logs] }
+          : d,
+      );
+      return { ...s, devops, devopsSettings: { ...set, statuses } };
+    }
+    case 'devopsSettings/toggleRule':
+      return {
+        ...s,
+        devopsSettings: { ...s.devopsSettings, rules: { ...s.devopsSettings.rules, [a.rule]: !s.devopsSettings.rules[a.rule] } },
+      };
 
     // ── Demo ──
     case 'demo/reset':
       return { ...createInitialState(), session: s.session };
-
-    default: {
-      const never: never = a;
-      return never;
-    }
   }
 }

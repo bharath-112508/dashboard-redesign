@@ -2,10 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Action } from './actions';
 import { reducer } from './reducer';
-import { createInitialState, DEFAULT_UI, STATE_VERSION, type AppState } from './state';
+import { createInitialState, STATE_VERSION, type AppState } from './state';
 
-/** AsyncStorage key (same as the prototype's localStorage key). */
-export const STORAGE_KEY = 'vt.mobile.v4';
+/** AsyncStorage key (DECISIONS 9). */
+export const STORAGE_KEY = 'vt.mobile.v5';
+/** Keys of older builds; removed on start, never migrated. */
+export const LEGACY_KEYS = ['vt.mobile.v4'] as const;
 
 type Listener = () => void;
 
@@ -29,13 +31,12 @@ function queueSave() {
   });
 }
 
-/** Merge a saved snapshot onto a fresh state so new fields get their defaults. */
+/** A saved snapshot of this version, merged onto a fresh state so new fields get defaults. */
 function revive(saved: unknown): AppState | null {
   if (!saved || typeof saved !== 'object') return null;
   const s = saved as Partial<AppState>;
   if (s.version !== STATE_VERSION) return null;
-  const base = createInitialState();
-  return { ...base, ...s, ui: { ...DEFAULT_UI, ...(s.ui ?? {}) }, session: { ...base.session, ...(s.session ?? {}) } };
+  return { ...createInitialState(), ...s } as AppState;
 }
 
 export const store = {
@@ -62,9 +63,14 @@ export const store = {
     return hydrated;
   },
 
-  /** Load the persisted state once at startup (M-47). Safe to call more than once. */
+  /** Load the persisted state once at startup and drop the v4 key. Safe to call twice. */
   async hydrate(): Promise<void> {
     if (hydrated) return;
+    try {
+      await AsyncStorage.multiRemove([...LEGACY_KEYS]);
+    } catch {
+      // ignore
+    }
     try {
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       const revived = raw ? revive(JSON.parse(raw)) : null;

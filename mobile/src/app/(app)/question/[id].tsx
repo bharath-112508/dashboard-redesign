@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { QuestionScreen } from '@/features/client/QuestionScreen';
+import { PlaceholderScreen } from '@/components/Placeholder';
 
-/** S-QUESTION Question detail (no tab bar; composer). */
+/** S5-QUESTION Question — placeholder; W4 replaces this body. */
 export default function QuestionRoute() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  return <QuestionScreen id={Number(id)} />;
+  const params = useLocalSearchParams<{ id?: string }>();
+  return <PlaceholderScreen spec="S5-QUESTION Question" owner="W4" title="Question" id="question" params={params} />;
 }

@@ -1,6 +1,6 @@
-import { LeaveScreen } from '@/features/leave/LeaveScreen';
+import { PlaceholderScreen } from '@/components/Placeholder';
 
-/** S-LEAVE Leave & comp-off. */
-export default function LeaveRoute() {
-  return <LeaveScreen />;
+/** My leave (A-2) — placeholder; W3 replaces this body. */
+export default function MyLeaveRoute() {
+  return <PlaceholderScreen spec="My leave (A-2)" owner="W3" title="My leave" id="leave" sub="Leave & comp-off" />;
 }

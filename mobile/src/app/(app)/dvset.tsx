@@ -1,6 +1,6 @@
-import { DevopsSettingsScreen } from '@/features/devops/DevopsSettingsScreen';
+import { PlaceholderScreen } from '@/components/Placeholder';
 
-/** S-DVSET DevOps settings. */
-export default function DvsetRoute() {
-  return <DevopsSettingsScreen />;
+/** S5-DVSET DevOps settings — placeholder; W4 replaces this body. */
+export default function DevopsSettingsRoute() {
+  return <PlaceholderScreen spec="S5-DVSET DevOps settings" owner="W4" title="Settings" id="dvset" sub="DevOps board" />;
 }

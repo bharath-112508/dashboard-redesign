@@ -3,171 +3,100 @@ import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { colors, radii, space } from '@/theme';
 
-import { Icon, type IconName } from './Icon';
-import { IconTile } from './IconTile';
 import { Press } from './Press';
 import { Txt } from './Txt';
 
 export interface CardProps {
   children: ReactNode;
-  /** ring colour (critical cards use colors.dangerRing) */
-  ring?: string;
-  pad?: number;
-  radius?: number;
-  bg?: string;
   style?: StyleProp<ViewStyle>;
-  /** makes the card pressable */
-  onPress?: () => void;
-  /** required with onPress */
-  label?: string;
+  /** padding preset: none (rows), sm (6/14 lists), md (13/14), lg (14) */
+  pad?: 'none' | 'sm' | 'md' | 'lg';
+  /** background override (rows pass white) */
+  bg?: string;
   testID?: string;
 }
 
-/** White card, radius 20, 1px ring. Pressable cards scale to .98. */
-export function Card({ children, ring = colors.line, pad = space.card.pad, radius = radii.card, bg = colors.surface, style, onPress, label, testID }: CardProps) {
-  const s = [styles.card, { borderColor: ring, padding: pad, borderRadius: radius, backgroundColor: bg }, style];
-  if (onPress) {
-    return (
-      <Press label={label ?? 'Open'} onPress={onPress} style={s} testID={testID}>
-        {children}
-      </Press>
-    );
-  }
+/** White card, radius 16, 1px ring #E4EAF0 (SPEC §6.2). Clips its rows. */
+export function Card({ children, style, pad = 'none', bg = colors.surface, testID }: CardProps) {
   return (
-    <View style={s} testID={testID}>
+    <View style={[styles.card, { backgroundColor: bg }, PAD[pad], style]} testID={testID}>
       {children}
     </View>
   );
 }
 
-/** Card that holds ListRows with dividers (no padding; rows pad themselves). */
-export function ListCard({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
-  return <View style={[styles.card, styles.listCard, style]}>{children}</View>;
-}
+const PAD: Record<NonNullable<CardProps['pad']>, ViewStyle> = {
+  none: {},
+  sm: { paddingVertical: 6, paddingHorizontal: 14 },
+  md: { paddingVertical: 13, paddingHorizontal: 14 },
+  lg: { padding: 14 },
+};
 
-export interface ListRowProps {
+export interface SectionHeadProps {
   title: string;
   sub?: string;
-  icon?: IconName;
-  iconBg?: string;
-  iconFg?: string;
-  /** custom leading element (avatar, logo) instead of the icon tile */
-  leading?: ReactNode;
-  /** custom trailing element; default is a chevron when pressable */
-  trailing?: ReactNode;
-  /** title colour (rust for Sign out) */
-  titleColor?: string;
-  onPress?: () => void;
-  /** first row has no top divider */
-  first?: boolean;
-  /** highlighted background (unread) */
-  bg?: string;
-  chevron?: boolean;
-  testID?: string;
+  /** soft action chip on the right ("Projects ›", "+ Add") */
+  action?: string;
+  onAction?: () => void;
+  actionTestID?: string;
 }
 
-/** Row inside a ListCard: icon tile, title, sub, and a chevron or trailing element. */
-export function ListRow({ title, sub, icon, iconBg, iconFg, leading, trailing, titleColor = colors.ink, onPress, first, bg, chevron, testID }: ListRowProps) {
-  const body = (
-    <>
-      {leading ?? (icon ? <IconTile icon={icon} bg={iconBg} fg={iconFg} size={34} radius={10} iconSize={18} /> : null)}
-      <View style={styles.rowText}>
-        <Txt v="rowTitle" color={titleColor} numberOfLines={2}>
+/** Section head: 15/800 title, 12.5 sub, soft action chip 30h (SPEC §4, §6.2). */
+export function SectionHead({ title, sub, action, onAction, actionTestID }: SectionHeadProps) {
+  return (
+    <View style={styles.head}>
+      <View style={styles.headText}>
+        <Txt v="section" accessibilityRole="header">
           {title}
         </Txt>
         {sub ? (
-          <Txt v="caption" color={colors.ink3} numberOfLines={2}>
+          <Txt v="sub" color={colors.ink3} style={styles.headSub}>
             {sub}
           </Txt>
         ) : null}
       </View>
-      {trailing ?? ((chevron ?? !!onPress) ? <Icon name="chevron-right" size={18} color={colors.muted} /> : null)}
-    </>
-  );
-  const s = [styles.row, !first && styles.rowDivider, bg ? { backgroundColor: bg } : null];
-  if (onPress) {
-    return (
-      <Press label={title} onPress={onPress} style={s} scale={1} testID={testID}>
-        {body}
-      </Press>
-    );
-  }
-  return (
-    <View style={s} testID={testID}>
-      {body}
+      {action && onAction ? (
+        <Press label={action.replace(/[›+]/g, '').trim() || action} onPress={onAction} style={styles.action} testID={actionTestID}>
+          <Txt v="sub" w={700} color={colors.primaryInk}>
+            {action}
+          </Txt>
+        </Press>
+      ) : null}
     </View>
   );
 }
 
-/** Uppercase eyebrow label (12/700, .08em). */
-export function Eyebrow({ children, color = colors.ink3, style }: { children: string; color?: string; style?: StyleProp<ViewStyle> }) {
-  return (
-    <View style={style}>
-      <Txt v="eyebrow" color={color}>
-        {children}
-      </Txt>
-    </View>
-  );
-}
-
-export interface SectionProps {
-  title: string;
-  count?: number | string;
-  link?: string;
-  onLink?: () => void;
-  /** 'section' (17/800, Home) or 'eyebrow' (uppercase) */
-  variant?: 'section' | 'eyebrow';
-  children?: ReactNode;
+export interface BlockProps extends Partial<SectionHeadProps> {
+  children: ReactNode;
   style?: StyleProp<ViewStyle>;
+  testID?: string;
 }
 
-/** Section title with an optional count and a link on the right, then its content. */
-export function Section({ title, count, link, onLink, variant = 'section', children, style }: SectionProps) {
+/**
+ * A block with an optional section head above it (every v5 block may carry one). Use it
+ * to wrap any block: `<Block title="Subtasks" sub="1 of 3 done"><Rows …/></Block>`.
+ */
+export function Block({ title, sub, action, onAction, actionTestID, children, style, testID }: BlockProps) {
   return (
-    <View style={[styles.section, style]}>
-      <View style={styles.sectionHead}>
-        <View style={styles.sectionTitle}>
-          {variant === 'section' ? (
-            <Txt v="section" accessibilityRole="header">
-              {title}
-            </Txt>
-          ) : (
-            <Txt v="eyebrow" color={colors.ink3} accessibilityRole="header">
-              {title}
-            </Txt>
-          )}
-          {count !== undefined ? (
-            <Txt v="meta" w={700} color={colors.ink3}>
-              {String(count)}
-            </Txt>
-          ) : null}
-        </View>
-        {link && onLink ? (
-          <Press label={link} onPress={onLink} a11yRole="link">
-            <Txt v="bodySm" w={700} color={colors.primaryInk}>
-              {link}
-            </Txt>
-          </Press>
-        ) : null}
-      </View>
+    <View style={[styles.block, style]} testID={testID}>
+      {title ? <SectionHead title={title} sub={sub} action={action} onAction={onAction} actionTestID={actionTestID} /> : null}
       {children}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: radii.card },
-  listCard: { overflow: 'hidden', padding: 0 },
-  row: {
-    flexDirection: 'row',
+  card: { borderRadius: radii.card, borderWidth: 1, borderColor: colors.ringCard, overflow: 'hidden' },
+  block: { gap: space.head, minWidth: 0 },
+  head: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 4 },
+  headText: { flex: 1, minWidth: 0 },
+  headSub: { marginTop: 1 },
+  action: {
+    height: 30,
+    paddingHorizontal: 10,
+    borderRadius: radii.chip,
+    backgroundColor: colors.primarySoft,
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: space.card.rowV,
-    paddingHorizontal: space.card.rowH,
+    justifyContent: 'center',
   },
-  rowDivider: { borderTopWidth: 1, borderTopColor: colors.divider },
-  rowText: { flex: 1, gap: 2 },
-  section: { gap: 10 },
-  sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 },
-  sectionTitle: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
 });

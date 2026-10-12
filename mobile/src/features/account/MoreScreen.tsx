@@ -1,94 +1,57 @@
-import { router } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
-import Animated from 'react-native-reanimated';
-
-import { Avatar } from '@/components/Avatar';
-import { Card, Eyebrow, ListCard, ListRow } from '@/components/Card';
-import { CountBadge } from '@/components/Chips';
-import { Icon } from '@/components/Icon';
-import { IconTile } from '@/components/IconTile';
+import { Avatar, IconTile } from '@/components/Avatar';
+import { Block } from '@/components/Card';
+import { Row, Rows } from '@/components/Row';
 import { Screen } from '@/components/Screen';
-import { Txt } from '@/components/Txt';
-import { me } from '@/data/selectors';
+import { me, orgName, roleLabel } from '@/data/selectors';
 import { useActions, useAppState } from '@/data/store';
-import { moreTiles } from '@/nav/moreTiles';
-import { href, hrefForKey, push } from '@/nav/routes';
-import { colors, motion } from '@/theme';
+import { morePages } from '@/nav/morePages';
+import { href, push, tab2 } from '@/nav/routes';
+import { useRootActions } from '@/nav/useRootActions';
+import { colors } from '@/theme';
 
 /**
- * S-MORE More (tab root): profile card (M-08), the role's tiles (SPEC §2.2) and the
- * Account card with Switch account (M-03) and Sign out (M-04).
+ * S5-MORE (SPEC §2.5): profile row, the role's Pages, Account (Profile settings, Sign
+ * out). W3 owns this screen; F0 ships a working version.
  */
 export function MoreScreen() {
-  const person = useAppState(me);
-  const tiles = useAppState(moreTiles);
-  const { signOut, switchAccount } = useActions();
-  if (!person?.role) return null;
-  const role = person.role;
+  const u = useAppState(me);
+  const org = useAppState((s) => (u ? orgName(s, u) : ''));
+  const { signOut } = useActions();
+  const actions = useRootActions();
+  if (!u) return null;
+  const pages = morePages(u.role);
   return (
-    <Screen title="More" header="large" gap={18} testID="screen-more">
-      <Card onPress={() => push(href.me())} label="View profile" radius={24} style={styles.profile} testID="more-profile">
-        <Avatar name={person.name} size={52} radius={16} bg={person.client ? colors.ink : undefined} />
-        <View style={styles.flex}>
-          <Txt v="section">{person.name}</Txt>
-          <Txt v="caption" color={colors.ink3} numberOfLines={1}>{`${person.title} · View profile`}</Txt>
-        </View>
-        <Icon name="chevron-right" size={18} color={colors.muted} />
-      </Card>
-
-      <View style={styles.block}>
-        <Eyebrow>Everything else</Eyebrow>
-        <View style={styles.grid}>
-          {tiles.map((t, i) => (
-            <Animated.View key={t.key} style={[styles.tileWrap, motion.fadeUp(i, 0.08, 0.05)]}>
-              <Card
-                onPress={() => router.push(hrefForKey(t.key, role))}
-                label={`${t.label}, ${t.sub}`}
-                style={styles.tile}
-                testID={`more-tile-${t.key}`}
-              >
-                <View style={styles.tileTop}>
-                  <IconTile icon={t.icon} bg={t.bg} fg={t.fg} size={42} radius={14} iconSize={20} />
-                  <CountBadge n={t.badge} size={19} />
-                </View>
-                <Txt v="rowTitle" numberOfLines={1}>
-                  {t.label}
-                </Txt>
-                <Txt v="caption" color={colors.ink3} numberOfLines={1}>
-                  {t.sub}
-                </Txt>
-              </Card>
-            </Animated.View>
+    <Screen title="More" actions={actions} testID="screen-more">
+      <Rows>
+        <Row lead={<Avatar name={u.name} />} title={u.name} sub={`${roleLabel(u)} · ${org}`} onPress={() => push(href.me())} testID="more-profile" />
+      </Rows>
+      <Block title="Pages">
+        <Rows empty="Everything you can open is in the tab bar." testID="more-pages">
+          {pages.map((p) => (
+            <Row
+              key={p.key}
+              lead={<IconTile icon={p.icon} bg={colors.track} fg={colors.primaryInk} />}
+              title={p.label}
+              sub={p.sub}
+              onPress={() => tab2(p.key, u.role)}
+              testID={`more-page-${p.key}`}
+            />
           ))}
-        </View>
-      </View>
-
-      <View style={styles.block}>
-        <Eyebrow>Account</Eyebrow>
-        <ListCard>
-          <ListRow first title="Switch account" icon="repeat-2" iconBg={colors.track} iconFg={colors.ink2} onPress={switchAccount} testID="more-switch-account" />
-          <ListRow
+        </Rows>
+      </Block>
+      <Block title="Account">
+        <Rows>
+          <Row lead={<IconTile icon="user-round-cog" />} title="Profile settings" sub="Details, notifications, password" onPress={() => push(href.me())} testID="more-profile-settings" />
+          <Row
+            lead={<IconTile icon="log-out" bg={colors.destructiveBg} fg={colors.destructiveInk} />}
             title="Sign out"
-            icon="log-out"
-            iconBg={colors.destructiveBg}
-            iconFg={colors.destructiveInk}
             titleColor={colors.destructiveInk}
-            onPress={signOut}
             chevron={false}
+            onPress={signOut}
             testID="more-sign-out"
           />
-        </ListCard>
-      </View>
+        </Rows>
+      </Block>
     </Screen>
   );
 }
-
-const styles = StyleSheet.create({
-  flex: { flex: 1, gap: 2 },
-  profile: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  block: { gap: 10 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  tileWrap: { flexBasis: '47%', flexGrow: 1, maxWidth: '48.7%' },
-  tile: { gap: 4, minHeight: 118 },
-  tileTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
-});

@@ -1,135 +1,94 @@
-import { DEVOPS_SEED, DEVOPS_SETTINGS_SEED } from '../seed/devops';
-import { MAINTENANCE_SEED } from '../seed/maintenance';
-import { PEOPLE_SEED } from '../seed/people';
-import { COMPANIES_SEED, PROJECTS_SEED } from '../seed/projects';
-import { TICKETS_SEED } from '../seed/tickets';
-import { ENTRIES_SEED, LEAVES_SEED, QUESTIONS_SEED } from '../seed/work';
+import { DEFAULT_DEVOPS_SETTINGS, PDEF } from '../constants';
+import {
+  BUG_CHAT,
+  BUGS,
+  CLIENT_TEAM,
+  COMPANIES,
+  DEVOPS,
+  DEVOPS_REQUESTS,
+  ENTRIES,
+  EPICS,
+  LEAVE,
+  PEOPLE,
+  PROJECTS,
+  QUESTIONS,
+  SPRINTS,
+  TICKETS,
+} from '../seed';
 import type {
+  ClientBug,
+  ClientTeamMember,
+  Comment,
   Company,
   DevopsProject,
+  DevopsRequest,
   DevopsSettings,
+  Epic,
+  FileRef,
   Leave,
-  MaintData,
+  PermMatrix,
   Person,
   Project,
   Question,
+  Session,
+  Sprint,
   Ticket,
   TimeEntry,
 } from '../types';
 
-export type TicketFilter = 'open' | 'done' | 'all';
-export type ProjectFilter = 'active' | 'maint' | 'done';
-/** Building: list board tree tl files. Maintenance: sup rep list board files. */
-export type ProjectView = 'list' | 'board' | 'tree' | 'tl' | 'files' | 'sup' | 'rep';
+/** Bump when the persisted shape changes; other versions are dropped (DECISIONS 9). */
+export const STATE_VERSION = 2;
 
-/**
- * Persisted UI preferences (prototype keys in brackets). Screens read and write these
- * with `setUi` so a choice survives navigation and reloads.
- */
-export interface UiPrefs {
-  /** [tFilter] Tickets tab filter */
-  ticketFilter: TicketFilter;
-  /** [weekOff] Timesheet week offset (0 = this week, −1 = last week) */
-  weekOffset: number;
-  /** [dayOpen] expanded Timesheet day (ISO) */
-  dayOpen: string | null;
-  /** [pf] Projects tab filter */
-  projectFilter: ProjectFilter;
-  /** [projView] view per project (DECISIONS.md 5: remembered per project) */
-  projectView: Record<string, ProjectView>;
-  /** [repM] report month per project */
-  reportMonth: Record<string, string>;
-  /** [epOpen] "project|epic" → open */
-  epicOpen: Record<string, boolean>;
-  /** [spOpen] "project|epic|sprint" → open */
-  sprintOpen: Record<string, boolean>;
-  /** [dvOpen] DevOps card expanded per project */
-  devopsOpen: Record<string, boolean>;
-  /** [bp, be, bv] Ticket board */
-  boardProject: string | null;
-  boardEpic: string;
-  boardView: 'board' | 'list';
-  /** [hf, hp] Time history filters */
-  historyFilter: 'all' | 'bill' | 'non';
-  historyProject: string;
-  /** [teamOff] Team hours week offset */
-  teamOffset: number;
-  /** [showArch] Companies tab */
-  showArchived: boolean;
-}
-
-export const DEFAULT_UI: UiPrefs = {
-  ticketFilter: 'open',
-  weekOffset: 0,
-  dayOpen: null,
-  projectFilter: 'active',
-  projectView: {},
-  reportMonth: {},
-  epicOpen: {},
-  sprintOpen: {},
-  devopsOpen: {},
-  boardProject: null,
-  boardEpic: 'all',
-  boardView: 'board',
-  historyFilter: 'all',
-  historyProject: 'all',
-  teamOffset: 0,
-  showArchived: false,
-};
-
-export interface Session {
-  /** signed-in person's name, null when signed out */
-  user: string | null;
-  /** email draft on the Sign in screen (kept on Switch account, cleared on Sign out) */
-  email: string;
-}
-
+/** The whole app state (DELTA D-DATA-25). Static seeds (DEPLOYS, demo numbers) are not in it. */
 export interface AppState {
-  /** bump when the persisted shape changes; older saves are discarded */
-  version: number;
+  version: typeof STATE_VERSION;
   session: Session;
   people: Person[];
-  tickets: Ticket[];
-  questions: Question[];
-  leaves: Leave[];
-  entries: TimeEntry[];
   companies: Company[];
   projects: Project[];
-  /** project name → maintenance data (requests, tasks, environments, releases) */
-  maintenance: Record<string, MaintData>;
+  epics: Epic[];
+  sprints: Sprint[];
+  tickets: Ticket[];
+  /** project files by project id */
+  files: Record<string, FileRef[]>;
+  entries: TimeEntry[];
+  leaves: Leave[];
+  perms: PermMatrix;
+  questions: Question[];
+  bugs: ClientBug[];
+  bugChat: Record<string, Comment[]>;
+  clientTeam: ClientTeamMember[];
   devops: DevopsProject[];
+  devopsRequests: DevopsRequest[];
   devopsSettings: DevopsSettings;
-  /** notification id → read */
-  read: Record<string, true>;
-  /** Profile push toggle (no other effect, DECISIONS.md 6) */
-  push: boolean;
-  ui: UiPrefs;
-  /** id counter for entries and leave (prototype nextId) */
+  /** next numeric id (entries, leave, people, requests) */
   nextId: number;
 }
 
-export const STATE_VERSION = 1;
-
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
-/** A fresh state built from the seeds. */
+/** A fresh state from the v5 seed. */
 export function createInitialState(): AppState {
-  return {
+  return clone({
     version: STATE_VERSION,
-    session: { user: null, email: '' },
-    people: clone(PEOPLE_SEED),
-    tickets: clone(TICKETS_SEED),
-    questions: clone(QUESTIONS_SEED),
-    leaves: clone(LEAVES_SEED),
-    entries: clone(ENTRIES_SEED),
-    companies: clone(COMPANIES_SEED),
-    projects: clone(PROJECTS_SEED),
-    maintenance: clone(MAINTENANCE_SEED),
-    devops: clone(DEVOPS_SEED),
-    devopsSettings: clone(DEVOPS_SETTINGS_SEED),
-    read: {},
-    push: true,
-    ui: clone(DEFAULT_UI),
-    nextId: 100,
-  };
+    session: { personId: null },
+    people: PEOPLE,
+    companies: COMPANIES,
+    projects: PROJECTS,
+    epics: EPICS,
+    sprints: SPRINTS,
+    tickets: TICKETS,
+    files: {},
+    entries: ENTRIES,
+    leaves: LEAVE,
+    perms: PDEF,
+    questions: QUESTIONS,
+    bugs: BUGS,
+    bugChat: BUG_CHAT,
+    clientTeam: CLIENT_TEAM,
+    devops: DEVOPS,
+    devopsRequests: DEVOPS_REQUESTS,
+    devopsSettings: DEFAULT_DEVOPS_SETTINGS,
+    nextId: 10000,
+  } satisfies AppState);
 }

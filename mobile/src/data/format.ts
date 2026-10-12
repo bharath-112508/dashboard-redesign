@@ -1,60 +1,61 @@
-/** Formatters ported from the prototype (DATA.md §2 "Formatters"). All dates are ISO days. */
+/** Formatting and date helpers (SPEC §3 "Formats"). Dates are ISO "YYYY-MM-DD". */
 
-export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-export const MONTHS_LONG = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-export const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+export const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+export const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
-const noon = (iso: string) => new Date(`${iso}T12:00:00Z`);
+const ISO_DAY = /^\d{4}-\d\d-\d\d/;
+const at = (iso: string) => new Date(`${iso.slice(0, 10)}T12:00:00Z`);
 
-/** Days from b to a (a − b). */
+/** Whole days from b to a (a − b). */
 export function diff(a: string, b: string): number {
-  return Math.round((noon(a).getTime() - noon(b).getTime()) / 864e5);
+  return Math.round((at(a).getTime() - at(b).getTime()) / 864e5);
 }
 
-/** Add n days to an ISO day. */
+/** ISO day plus n days. */
 export function addD(iso: string, n: number): string {
-  const d = noon(iso);
+  const d = at(iso);
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
 
-/** "2026-10-10" → "10 Oct" ('' for ''). */
-export function sh(iso: string): string {
-  if (!iso) return '';
-  const [, m, d] = iso.split('-');
-  return `${Number(d)} ${MONTHS[Number(m) - 1]}`;
+/** "10 Oct" (non-ISO input is returned as is). */
+export function fmt(iso?: string | null): string {
+  if (!iso || !ISO_DAY.test(iso)) return iso ?? '';
+  const [, m, d] = iso.slice(0, 10).split('-');
+  return `${+d} ${MON[+m - 1]}`;
 }
 
-/** "2026-03-31" → "31 Mar 2027"-style date with year. */
-export function shY(iso: string): string {
-  if (!iso) return '';
-  return `${sh(iso)} ${iso.slice(0, 4)}`;
+/** "10 Oct 2026". */
+export function fmtY(iso?: string | null): string {
+  if (!iso || !ISO_DAY.test(iso)) return iso ?? '';
+  return `${fmt(iso)} ${iso.slice(0, 4)}`;
 }
 
-/** Weekday short name, e.g. "Sat". */
+/** "Sat" */
 export function dow(iso: string): string {
-  return DOW[noon(iso).getUTCDay()];
+  return DOW[at(iso).getUTCDay()];
 }
 
-/** 0 = Sunday … 6 = Saturday. */
-export function weekday(iso: string): number {
-  return noon(iso).getUTCDay();
+/** "Sat 10 Oct" */
+export function fmtL(iso?: string | null): string {
+  return iso && ISO_DAY.test(iso) ? `${dow(iso)} ${fmt(iso)}` : '';
 }
 
-/** Hours as "Xh Ym": 1.5 → "1h 30m", 0 → "0h". */
-export function hm(n: number): string {
-  const total = Math.round(n * 60);
-  const H = Math.floor(total / 60);
-  const M = total % 60;
-  const out = (H ? `${H}h` : '') + (M ? `${H ? ' ' : ''}${M}m` : '');
-  return out || '0h';
+/** "5 Oct – 18 Oct" */
+export function fmtRange(a: string, b: string): string {
+  return `${fmt(a)} – ${fmt(b)}`;
 }
 
-/** Initials of up to two words: "Bhavana P" → "BP". */
-export function ini(name: string | undefined | null): string {
+/** Minutes → "1h 30m", "45m", "0h". */
+export function hm(min?: number | null): string {
+  const m = Math.round(min || 0);
+  const H = Math.floor(m / 60);
+  const M = m % 60;
+  return (H ? `${H}h` : '') + (H && M ? ' ' : '') + (M ? `${M}m` : '') || '0h';
+}
+
+/** Initials, max 2 letters. */
+export function ini(name?: string | null): string {
   return (name || '?')
     .trim()
     .split(/\s+/)
@@ -64,18 +65,60 @@ export function ini(name: string | undefined | null): string {
     .toUpperCase();
 }
 
-/** "24 Oct" or "24 Oct – 25 Oct" for a from/to pair. */
-export function dateRange(from: string, to: string): string {
-  return sh(from) + (to !== from ? ` – ${sh(to)}` : '');
+/** Monday of the week of iso. */
+export function monday(iso: string): string {
+  const d = at(iso).getUTCDay();
+  return addD(iso, -((d + 6) % 7));
 }
 
-/** "1 day" / "3 days" inclusive between two ISO days. */
-export function dayCount(from: string, to: string): string {
-  const n = diff(to, from) + 1;
-  return `${n} day${n === 1 ? '' : 's'}`;
+/**
+ * DevOps date for display (A-14: stored ISO). "2026-10-12T07:00" → "12 Oct 2026, 07:00";
+ * "2026-10-12" → "12 Oct 2026".
+ */
+export function dvDate(iso?: string | null): string {
+  if (!iso || !ISO_DAY.test(iso)) return iso ?? '';
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  const time = iso.length > 10 ? iso.slice(11, 16) : '';
+  return `${d} ${MON[+m - 1]} ${y}${time ? `, ${time}` : ''}`;
 }
 
-/** Simple plural: plural(2, 'ticket') → "2 tickets". */
-export function plural(n: number, word: string, many = `${word}s`): string {
-  return `${n} ${n === 1 ? word : many}`;
+/** Short DevOps date "12 Oct, 07:00" (board meta). */
+export function dvShort(iso?: string | null): string {
+  if (!iso || !ISO_DAY.test(iso)) return iso ?? '';
+  const time = iso.length > 10 ? iso.slice(11, 16) : '';
+  return `${fmt(iso)}${time ? `, ${time}` : ''}`;
+}
+
+/** "1 ticket" / "3 tickets". */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** CSV text from rows (quotes cells with , " or newlines). */
+export function csv(rows: (string | number | boolean | null | undefined)[][]): string {
+  return rows
+    .map((r) =>
+      r
+        .map((x) => {
+          const s = String(x ?? '');
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        })
+        .join(','),
+    )
+    .join('\n');
+}
+
+/** Stable small hash (company tile colour, demo password hash). */
+export function hash(text: string): number {
+  let h = 0;
+  for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h;
+}
+
+/**
+ * Demo password hash stored as `pwHash` (V-04). Not cryptographic: the app has no
+ * server and keeps everything on the device.
+ */
+export function hashPw(pw: string): string {
+  return `h${hash(`vt:${pw}`).toString(16)}${hash(`${pw}:vt`).toString(16)}`;
 }

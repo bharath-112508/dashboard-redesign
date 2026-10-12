@@ -1,11 +1,11 @@
 import {
-  SchibstedGrotesk_400Regular,
-  SchibstedGrotesk_500Medium,
-  SchibstedGrotesk_600SemiBold,
-  SchibstedGrotesk_700Bold,
-  SchibstedGrotesk_800ExtraBold,
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
   useFonts,
-} from '@expo-google-fonts/schibsted-grotesk';
+} from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -22,20 +22,14 @@ import { colors } from '@/theme';
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 /**
- * Root: fonts, persisted store hydration, safe area, gesture handler, toast host.
- * Auth: (app) is only reachable when signed in; sign-in only when signed out. When the
- * session changes, expo-router moves to the first screen that is allowed.
+ * Root: Inter, persisted store hydration (drops the v4 key), safe area, gesture handler,
+ * toast host. Auth: (app) is reachable only when signed in, sign-in only when signed
+ * out; when the session changes expo-router moves to the first allowed screen.
  */
 export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({
-    SchibstedGrotesk_400Regular,
-    SchibstedGrotesk_500Medium,
-    SchibstedGrotesk_600SemiBold,
-    SchibstedGrotesk_700Bold,
-    SchibstedGrotesk_800ExtraBold,
-  });
+  const [fontsLoaded, fontError] = useFonts({ Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_800ExtraBold });
   const hydrated = useHydrated();
-  const signedIn = useAppState((s) => !!me(s)?.role);
+  const signedIn = useAppState((s) => !!me(s));
   const ready = (fontsLoaded || !!fontError) && hydrated;
 
   useEffect(() => {

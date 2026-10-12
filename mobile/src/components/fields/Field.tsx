@@ -1,62 +1,63 @@
 import type { ReactNode } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
-import { colors, radii } from '@/theme';
+import { colors, fontFamily, radii } from '@/theme';
 
 import { Txt } from '../Txt';
+import type { FieldBase } from './types';
 
-export interface FieldProps {
-  label: string;
-  /** adds " *" */
-  required?: boolean;
-  hint?: string;
-  children: ReactNode;
-  style?: StyleProp<ViewStyle>;
-}
-
-/** Form field wrapper: 12.5/700 label, the control, an optional hint. */
-export function Field({ label, required, hint, children, style }: FieldProps) {
+/**
+ * Form field frame (SPEC §6.2 "Form"): label 12.5/700 with a red "*" or "(optional)",
+ * the control, a hint (12) and an error (12.5/600 #C0392B).
+ */
+export function Field({ label, required, optional, hint, error, children, hideLabel }: Omit<FieldBase, 'testID'> & { children: ReactNode; hideLabel?: boolean }) {
   return (
-    <View style={[styles.field, style]}>
-      <Txt v="caption" w={700} color={colors.ink2}>
-        {label}
-        {required ? ' *' : ''}
-      </Txt>
+    <View style={styles.field}>
+      {label && !hideLabel ? (
+        <Txt v="sub" w={700} color={colors.ink2}>
+          {label}
+          {required ? <Txt v="sub" w={700} color={colors.danger}>{' *'}</Txt> : null}
+          {optional ? <Txt v="sub" w={500} color={colors.ink3}>{' (optional)'}</Txt> : null}
+        </Txt>
+      ) : null}
       {children}
       {hint ? (
-        <Txt v="small" w={400} color={colors.ink3}>
+        <Txt v="meta" w={400} color={colors.ink3}>
           {hint}
+        </Txt>
+      ) : null}
+      {error ? (
+        <Txt v="sub" w={600} color={colors.danger} testID="field-error">
+          {error}
         </Txt>
       ) : null}
     </View>
   );
 }
 
-/** Inline validation error (red 13.5/600). Announced to screen readers. */
-export function FieldError({ text }: { text: string }) {
-  if (!text) return null;
-  return (
-    <Txt v="bodySm" color={colors.danger} accessibilityRole="alert" accessibilityLiveRegion="polite" testID="form-error">
-      {text}
-    </Txt>
-  );
+/** A form: fields 12 apart. */
+export function Form({ children }: { children: ReactNode }) {
+  return <View style={styles.form}>{children}</View>;
 }
 
-/** Shared input look: 50 high, radius 14, 1px border. */
 export const inputStyles = StyleSheet.create({
   box: {
-    minHeight: 50,
-    borderRadius: radii.input,
+    height: 48,
     borderWidth: 1,
     borderColor: colors.lineInput,
-    backgroundColor: colors.surface,
+    borderRadius: radii.input,
     paddingHorizontal: 14,
-    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    fontFamily: fontFamily[400],
+    fontSize: 15,
+    color: colors.ink,
   },
-  focus: { borderColor: colors.primary },
-  text: { fontFamily: 'SchibstedGrotesk_400Regular', fontSize: 14.5, color: colors.ink, paddingVertical: 12 },
+  invalid: { borderColor: colors.red },
+  readOnly: { backgroundColor: colors.track },
+  area: { height: undefined, minHeight: 104, paddingTop: 12, paddingBottom: 12, lineHeight: 22, textAlignVertical: 'top' },
 });
 
 const styles = StyleSheet.create({
   field: { gap: 6 },
+  form: { gap: 12 },
 });

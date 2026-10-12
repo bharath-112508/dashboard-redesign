@@ -10,16 +10,9 @@ export interface IconProps {
 }
 
 /** A lucide icon by its kebab-case name. Decorative: hidden from screen readers. */
-export function Icon({ name, size = 20, color = colors.ink, strokeWidth = 2 }: IconProps) {
+export function Icon({ name, size = 18, color = colors.ink, strokeWidth = 2 }: IconProps) {
   const C = ICONS[name];
-  return (
-    <C
-      size={size}
-      color={color}
-      strokeWidth={strokeWidth}
-      aria-hidden
-    />
-  );
+  return <C size={size} color={color} strokeWidth={strokeWidth} aria-hidden />;
 }
 
 export type { IconName };

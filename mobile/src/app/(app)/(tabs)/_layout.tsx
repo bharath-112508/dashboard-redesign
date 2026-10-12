@@ -18,7 +18,7 @@ export default function TabsLayout() {
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: colors.bg }, animation: 'none' }}
     >
       {ALL_TABS.map((key) => (
-        <Tabs.Screen key={key} name={key} options={{ href: role && isTabOf(role, key) ? undefined : null }} />
+        <Tabs.Screen key={key} name={key} options={{ href: isTabOf(role, key) ? undefined : null }} />
       ))}
     </Tabs>
   );

@@ -13,8 +13,8 @@ export function useStoreState(): AppState {
 }
 
 /**
- * Read derived data: `const tickets = useAppState(myTickets)`.
- * The selector runs on every state change; keep selectors cheap and pure.
+ * Read derived data: `const tickets = useAppState(myTickets)`. The selector runs on every
+ * state change; keep selectors cheap and pure (memoise heavy derivations in the screen).
  */
 export function useAppState<T>(selector: (s: AppState) => T): T {
   const state = useStoreState();
@@ -28,7 +28,7 @@ export function useActions(): Commands {
   return useMemo(() => commands, []);
 }
 
-/** Commands outside React (tests, deep-link handlers). */
+/** Commands outside React (tests, deep-link handlers, route helpers). */
 export const actions = commands;
 
 /** True once the persisted state has been loaded. */

@@ -5,6 +5,6 @@ import { useAppState } from '@/data/store';
 
 /** "/" → Home when signed in, otherwise Sign in. */
 export default function Index() {
-  const signedIn = useAppState((s) => !!me(s)?.role);
+  const signedIn = useAppState((s) => !!me(s));
   return <Redirect href={signedIn ? '/home' : '/sign-in'} />;
 }

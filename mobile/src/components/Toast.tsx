@@ -1,14 +1,14 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
-import { colors, motion, shadows } from '@/theme';
+import { colors, motion } from '@/theme';
 
 import { Icon } from './Icon';
 import { Txt } from './Txt';
 
-/** How long a toast stays (SPEC §1.5). */
-export const TOAST_MS = 2200;
+/** How long a toast stays (SPEC §1.6). */
+export const TOAST_MS = 2400;
 
 let current: { id: number; text: string } | null = null;
 let seq = 0;
@@ -16,8 +16,8 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
-/** Show a toast from anywhere (after a mutation). Replaces the one on screen. */
-export function showToast(text: string): void {
+/** Show a toast from anywhere (after a command). A newer toast replaces the current one. */
+export function showToast(text: string | null | undefined): void {
   if (!text) return;
   current = { id: ++seq, text };
   emit();
@@ -28,9 +28,10 @@ export function showToast(text: string): void {
   }, TOAST_MS);
 }
 
-/** `const toast = useToast(); toast('Request approved')` */
-export function useToast(): (text: string) => void {
-  return showToast;
+/** Show a command result: the toast on success, the error otherwise. Returns ok. */
+export function toastResult(r: { ok: true; toast: string } | { ok: false; error: string }): boolean {
+  showToast(r.ok ? r.toast : r.error);
+  return r.ok;
 }
 
 /** Mounted once in the root layout; renders the current toast above everything. */
@@ -43,24 +44,13 @@ export function ToastHost() {
     () => current,
     () => current,
   );
-  // Keep the last text while it fades out of the accessibility tree.
-  const [shown, setShown] = useState(t);
-  useEffect(() => setShown(t), [t]);
-  if (!shown) return null;
+  if (!t) return null;
   return (
     <View pointerEvents="none" style={styles.layer}>
-      <Animated.View
-        key={shown.id}
-        style={[styles.toast, motion.fadeIn()]}
-        accessibilityRole="alert"
-        accessibilityLiveRegion="polite"
-        testID="toast"
-      >
-        <Animated.View style={motion.pop()}>
-          <Icon name="circle-check" size={18} color={colors.mint} strokeWidth={2.4} />
-        </Animated.View>
-        <Txt v="body" w={600} color={colors.white} style={styles.text}>
-          {shown.text}
+      <Animated.View key={t.id} style={[styles.toast, motion.fadeIn(150)]} accessibilityRole="alert" accessibilityLiveRegion="polite" testID="toast">
+        <Icon name="circle-check" size={18} color={colors.toastIcon} />
+        <Txt v="item" color={colors.white} style={styles.text}>
+          {t.text}
         </Txt>
       </Animated.View>
     </View>
@@ -73,13 +63,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    maxWidth: 360,
-    marginHorizontal: 20,
-    paddingVertical: 12,
+    maxWidth: '86%',
+    paddingVertical: 11,
     paddingHorizontal: 16,
-    borderRadius: 999,
+    borderRadius: 12,
     backgroundColor: colors.ink,
-    ...shadows.toast,
   },
   text: { flexShrink: 1 },
 });

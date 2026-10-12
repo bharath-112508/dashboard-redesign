@@ -1,84 +1,80 @@
-import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
+import { Children, isValidElement, type ReactNode } from 'react';
+import { StyleSheet, View } from 'react-native';
 
-import { colors, control, pressScale, radii } from '@/theme';
+import { colors, radii } from '@/theme';
 
 import { Icon, type IconName } from './Icon';
 import { Press } from './Press';
 import { Txt } from './Txt';
 
+/** Button kinds (SPEC §6.2): p primary blue, s secondary white, d destructive, g green, ink. */
+export type ButtonKind = 'p' | 's' | 'd' | 'g' | 'ink';
+
+const K: Record<ButtonKind, { bg: string; fg: string; border: string }> = {
+  p: { bg: colors.primary, fg: colors.white, border: colors.primary },
+  s: { bg: colors.surface, fg: colors.ink, border: colors.lineInput },
+  d: { bg: colors.destructiveBg, fg: colors.destructiveInk, border: colors.dangerRing },
+  g: { bg: colors.green, fg: colors.white, border: colors.green },
+  ink: { bg: colors.ink, fg: colors.white, border: colors.ink },
+};
+
 export interface ButtonProps {
-  label: string;
-  onPress: () => void;
+  title: string;
+  onPress?: () => void;
+  kind?: ButtonKind;
   icon?: IconName;
   disabled?: boolean;
-  /** accessible label when it differs from the visible text */
-  a11yLabel?: string;
-  style?: StyleProp<ViewStyle>;
+  /** a11y label (defaults to the title) */
+  label?: string;
   testID?: string;
 }
 
-interface Look {
-  bg: string;
-  fg: string;
-  border?: string;
-  height: number;
-  radius: number;
-  v: 'titleSm' | 'rowTitle' | 'bodySm' | 'body';
-  /** side padding (default 16) */
-  padX?: number;
-  /** icon–label gap (default 8) */
-  gap?: number;
-  /** icon size (default 18) */
-  iconSize?: number;
+/** Button: 48h, radius 14, 14.5/700, optional 17px icon (SPEC §6.2). */
+export function Button({ title, onPress, kind = 'p', icon, disabled, label, testID }: ButtonProps) {
+  const k = K[kind];
+  return (
+    <Press
+      label={label ?? title}
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.btn, { backgroundColor: k.bg, borderColor: k.border }, disabled && styles.disabled]}
+      testID={testID}
+    >
+      {icon ? <Icon name={icon} size={17} color={k.fg} /> : null}
+      <Txt v="rowTitle" w={700} color={k.fg} numberOfLines={1}>
+        {title}
+      </Txt>
+    </Press>
+  );
 }
 
-function make(look: Look) {
-  return function Button({ label, onPress, icon, disabled, a11yLabel, style, testID }: ButtonProps) {
-    return (
-      <Press
-        label={a11yLabel ?? label}
-        onPress={onPress}
-        disabled={disabled}
-        scale={pressScale.tile}
-        testID={testID}
-        style={[
-          styles.base,
-          {
-            backgroundColor: look.bg,
-            height: look.height,
-            borderRadius: look.radius,
-            paddingHorizontal: look.padX ?? 16,
-            gap: look.gap ?? 8,
-            opacity: disabled ? 0.5 : 1,
-          },
-          look.border ? { borderWidth: 1, borderColor: look.border } : null,
-          style,
-        ]}
-      >
-        {icon ? <Icon name={icon} size={look.iconSize ?? 18} color={look.fg} strokeWidth={2.4} /> : null}
-        <Txt v={look.v} w={700} color={look.fg} numberOfLines={1}>
-          {label}
-        </Txt>
-      </Press>
-    );
-  };
+/** A row of buttons, 8 apart, each growing to fill (SPEC §6.2 "Buttons"). */
+export function ButtonRow({ children }: { children: ReactNode }) {
+  return (
+    <View style={styles.row}>
+      {Children.toArray(children)
+        .filter(isValidElement)
+        .map((c, i) => (
+          <View key={c.key ?? i} style={styles.cell}>
+            {c}
+          </View>
+        ))}
+    </View>
+  );
 }
-
-/** Blue 52px pill (Sign in, sheet save). */
-export const PrimaryButton = make({ bg: colors.primary, fg: colors.white, height: control.cta, radius: radii.pill, v: 'titleSm' });
-/** Dark ink 50px button (plan save, "Report a problem", "Download CSV"). */
-export const DarkButton = make({ bg: colors.ink, fg: colors.white, height: control.input, radius: radii.input, v: 'rowTitle' });
-/** White outline 46px button ("Request a change", "Edit plan"). */
-export const SecondaryButton = make({ bg: colors.surface, fg: colors.ink, border: colors.line, height: control.secondary, radius: radii.input, v: 'rowTitle' });
-/** Rust 50px pill (Sign out, Reject). */
-export const DestructiveButton = make({ bg: colors.destructiveBg, fg: colors.destructiveInk, border: colors.dangerRing, height: control.input, radius: radii.pill, v: 'rowTitle' });
-/** Green 42px button (Approve). */
-export const ApproveButton = make({ bg: colors.green, fg: colors.white, height: control.composer, radius: 12, v: 'rowTitle' });
-/** Soft blue 36px button, radius 10 (small-header actions: "Mark all read", "+ New"). */
-export const SoftPillButton = make({ bg: colors.primarySoft, fg: colors.primaryInk, height: 36, radius: 10, v: 'bodySm', padX: 12, gap: 6, iconSize: 16 });
-/** Blue 40px pill with a plus (large-header actions: "Log", "Report"): 14px side padding, 14/700 label, 16px icon. */
-export const HeaderActionButton = make({ bg: colors.primary, fg: colors.white, height: 40, radius: radii.pill, v: 'body', padX: 14, gap: 6, iconSize: 16 });
 
 const styles = StyleSheet.create({
-  base: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  cell: { flexGrow: 1, flexBasis: 0, minWidth: 120 },
+  btn: {
+    height: 48,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderRadius: radii.button,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  disabled: { opacity: 0.45 },
 });

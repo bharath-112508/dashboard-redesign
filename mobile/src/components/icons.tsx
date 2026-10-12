@@ -1,161 +1,151 @@
 /**
- * Icon registry: lucide names from SPEC.md §5.7 → lucide-react-native components.
+ * Icon registry: the v5 lucide set (SPEC §6.1 "Icons") → lucide-react-native components.
  * Icons are imported one by one so the bundle does not carry the whole library.
  * To add an icon: import it from 'lucide-react-native/icons/<file>' and add a key.
  */
 import type { LucideIcon } from 'lucide-react-native';
-import Activity from 'lucide-react-native/icons/activity';
-import AlarmClock from 'lucide-react-native/icons/alarm-clock';
-import Archive from 'lucide-react-native/icons/archive';
-import ArrowRightLeft from 'lucide-react-native/icons/arrow-right-left';
-import ArrowUp from 'lucide-react-native/icons/arrow-up';
-import Bell from 'lucide-react-native/icons/bell';
-import BellRing from 'lucide-react-native/icons/bell-ring';
-import Bookmark from 'lucide-react-native/icons/bookmark';
-import Bug from 'lucide-react-native/icons/bug';
-import BugOff from 'lucide-react-native/icons/bug-off';
-import Building2 from 'lucide-react-native/icons/building-complex';
-import CalendarCheck from 'lucide-react-native/icons/calendar-check';
-import CalendarClock from 'lucide-react-native/icons/calendar-clock';
-import CalendarDays from 'lucide-react-native/icons/calendar-days';
-import CalendarPlus from 'lucide-react-native/icons/calendar-plus';
-import ChartGantt from 'lucide-react-native/icons/chart-gantt';
-import ChartPie from 'lucide-react-native/icons/chart-pie';
-import Check from 'lucide-react-native/icons/check';
-import ChevronDown from 'lucide-react-native/icons/chevron-down';
-import ChevronLeft from 'lucide-react-native/icons/chevron-left';
-import ChevronRight from 'lucide-react-native/icons/chevron-right';
-import ChevronUp from 'lucide-react-native/icons/chevron-up';
-import ChevronsUp from 'lucide-react-native/icons/chevrons-up';
-import Circle from 'lucide-react-native/icons/circle';
-import CircleArrowRight from 'lucide-react-native/icons/circle-arrow-right';
-import CircleCheck from 'lucide-react-native/icons/circle-check';
-import CircleDot from 'lucide-react-native/icons/circle-dot';
-import Clock3 from 'lucide-react-native/icons/clock-3';
-import CornerDownRight from 'lucide-react-native/icons/corner-down-right';
-import Download from 'lucide-react-native/icons/download';
-import Equal from 'lucide-react-native/icons/equal';
-import FileChartColumn from 'lucide-react-native/icons/file-chart-column';
-import FileDown from 'lucide-react-native/icons/file-down';
-import FilePenLine from 'lucide-react-native/icons/file-pen-line';
-import FileText from 'lucide-react-native/icons/file-text';
-import Flag from 'lucide-react-native/icons/flag';
-import FolderCheck from 'lucide-react-native/icons/folder-check';
-import FolderKanban from 'lucide-react-native/icons/folder-kanban';
-import GitBranch from 'lucide-react-native/icons/git-branch';
-import GitFork from 'lucide-react-native/icons/git-fork';
-import Hammer from 'lucide-react-native/icons/hammer';
-import House from 'lucide-react-native/icons/house';
-import Image from 'lucide-react-native/icons/image';
-import Inbox from 'lucide-react-native/icons/inbox';
-import LayoutGrid from 'lucide-react-native/icons/layout-grid';
-import LifeBuoy from 'lucide-react-native/icons/life-buoy';
-import List from 'lucide-react-native/icons/list';
-import Lock from 'lucide-react-native/icons/lock';
-import LogOut from 'lucide-react-native/icons/log-out';
-import MessageCircleQuestion from 'lucide-react-native/icons/message-circle-question-mark';
-import MessageSquareText from 'lucide-react-native/icons/message-square-text';
-import Minus from 'lucide-react-native/icons/minus';
-import Paperclip from 'lucide-react-native/icons/paperclip';
-import Pencil from 'lucide-react-native/icons/pencil';
-import PencilLine from 'lucide-react-native/icons/pencil-line';
-import Plus from 'lucide-react-native/icons/plus';
-import Repeat2 from 'lucide-react-native/icons/repeat-2';
-import Rocket from 'lucide-react-native/icons/rocket';
-import History from 'lucide-react-native/icons/rotate-ccw-clock';
-import Send from 'lucide-react-native/icons/send';
-import Server from 'lucide-react-native/icons/server';
-import ServerCog from 'lucide-react-native/icons/server-cog';
-import Settings2 from 'lucide-react-native/icons/settings-2';
-import ShieldCheck from 'lucide-react-native/icons/shield-check';
-import Siren from 'lucide-react-native/icons/siren';
-import SquareCheckBig from 'lucide-react-native/icons/square-check-big';
-import SquareKanban from 'lucide-react-native/icons/square-kanban';
-import Ticket from 'lucide-react-native/icons/ticket';
-import Timer from 'lucide-react-native/icons/timer';
-import TriangleAlert from 'lucide-react-native/icons/triangle-alert';
-import UserPlus from 'lucide-react-native/icons/user-plus';
-import UserRound from 'lucide-react-native/icons/user-round';
-import UsersRound from 'lucide-react-native/icons/users-round';
-import Wrench from 'lucide-react-native/icons/wrench';
-import X from 'lucide-react-native/icons/x';
+import ActivityIcon from 'lucide-react-native/icons/activity';
+import AlarmClockIcon from 'lucide-react-native/icons/alarm-clock';
+import ArchiveIcon from 'lucide-react-native/icons/archive';
+import ArchiveRestoreIcon from 'lucide-react-native/icons/archive-restore';
+import BadgeDollarSignIcon from 'lucide-react-native/icons/badge-dollar-sign';
+import BellIcon from 'lucide-react-native/icons/bell';
+import BugIcon from 'lucide-react-native/icons/bug';
+import Building2Icon from 'lucide-react-native/icons/building-complex';
+import CalendarIcon from 'lucide-react-native/icons/calendar';
+import CalendarPlusIcon from 'lucide-react-native/icons/calendar-plus';
+import CheckIcon from 'lucide-react-native/icons/check';
+import ChevronDownIcon from 'lucide-react-native/icons/chevron-down';
+import ChevronLeftIcon from 'lucide-react-native/icons/chevron-left';
+import ChevronRightIcon from 'lucide-react-native/icons/chevron-right';
+import CircleCheckIcon from 'lucide-react-native/icons/circle-check';
+import CircleDotIcon from 'lucide-react-native/icons/circle-dot';
+import CircleMinusIcon from 'lucide-react-native/icons/circle-minus';
+import Clock3Icon from 'lucide-react-native/icons/clock-3';
+import DownloadIcon from 'lucide-react-native/icons/download';
+import FileTextIcon from 'lucide-react-native/icons/file-text';
+import FlagIcon from 'lucide-react-native/icons/flag';
+import FolderIcon from 'lucide-react-native/icons/folder';
+import FolderKanbanIcon from 'lucide-react-native/icons/folder-kanban';
+import GitBranchIcon from 'lucide-react-native/icons/git-branch';
+import GitPullRequestIcon from 'lucide-react-native/icons/git-pull-request';
+import GitPullRequestArrowIcon from 'lucide-react-native/icons/git-pull-request-arrow';
+import HardDriveIcon from 'lucide-react-native/icons/hard-drive';
+import HouseIcon from 'lucide-react-native/icons/house';
+import ImageIcon from 'lucide-react-native/icons/image';
+import InfoIcon from 'lucide-react-native/icons/info';
+import LayersIcon from 'lucide-react-native/icons/layers';
+import LayoutGridIcon from 'lucide-react-native/icons/layout-grid';
+import ListChecksIcon from 'lucide-react-native/icons/list-checks';
+import LockIcon from 'lucide-react-native/icons/lock';
+import LogInIcon from 'lucide-react-native/icons/log-in';
+import LogOutIcon from 'lucide-react-native/icons/log-out';
+import MessageCircleQuestionIcon from 'lucide-react-native/icons/message-circle-question-mark';
+import MessageSquareIcon from 'lucide-react-native/icons/message-square';
+import MilestoneIcon from 'lucide-react-native/icons/milestone';
+import MinusIcon from 'lucide-react-native/icons/minus';
+import PaperclipIcon from 'lucide-react-native/icons/paperclip';
+import PenLineIcon from 'lucide-react-native/icons/pen-line';
+import PencilIcon from 'lucide-react-native/icons/pencil';
+import PlayIcon from 'lucide-react-native/icons/play';
+import PlusIcon from 'lucide-react-native/icons/plus';
+import RefreshCwIcon from 'lucide-react-native/icons/refresh-cw';
+import ReplyIcon from 'lucide-react-native/icons/reply';
+import RocketIcon from 'lucide-react-native/icons/rocket';
+import RotateCcwIcon from 'lucide-react-native/icons/rotate-ccw';
+import SearchIcon from 'lucide-react-native/icons/search';
+import SendHorizontalIcon from 'lucide-react-native/icons/send-horizontal';
+import ServerIcon from 'lucide-react-native/icons/server';
+import SettingsIcon from 'lucide-react-native/icons/settings';
+import SheetIcon from 'lucide-react-native/icons/sheet';
+import ShieldCheckIcon from 'lucide-react-native/icons/shield-check';
+import SignalHighIcon from 'lucide-react-native/icons/signal-high';
+import TicketIcon from 'lucide-react-native/icons/ticket';
+import TimerIcon from 'lucide-react-native/icons/timer';
+import Trash2Icon from 'lucide-react-native/icons/trash';
+import TriangleAlertIcon from 'lucide-react-native/icons/triangle-alert';
+import UploadIcon from 'lucide-react-native/icons/upload';
+import UserCheckIcon from 'lucide-react-native/icons/user-check';
+import UserCogIcon from 'lucide-react-native/icons/user-cog';
+import UserPlusIcon from 'lucide-react-native/icons/user-plus';
+import UserRoundIcon from 'lucide-react-native/icons/user-round';
+import UserRoundCogIcon from 'lucide-react-native/icons/user-round-cog';
+import UserXIcon from 'lucide-react-native/icons/user-x';
+import UsersIcon from 'lucide-react-native/icons/users';
+import UsersRoundIcon from 'lucide-react-native/icons/users-round';
+import XIcon from 'lucide-react-native/icons/x';
 
 export const ICONS = {
-  activity: Activity,
-  'alarm-clock': AlarmClock,
-  archive: Archive,
-  'arrow-right-circle': CircleArrowRight,
-  'arrow-right-left': ArrowRightLeft,
-  'arrow-up': ArrowUp,
-  bell: Bell,
-  'bell-ring': BellRing,
-  bookmark: Bookmark,
-  bug: Bug,
-  'bug-off': BugOff,
-  'building-2': Building2,
-  'calendar-check': CalendarCheck,
-  'calendar-clock': CalendarClock,
-  'calendar-days': CalendarDays,
-  'calendar-plus': CalendarPlus,
-  'chart-gantt': ChartGantt,
-  'chart-pie': ChartPie,
-  check: Check,
-  'chevron-down': ChevronDown,
-  'chevron-left': ChevronLeft,
-  'chevron-right': ChevronRight,
-  'chevron-up': ChevronUp,
-  'chevrons-up': ChevronsUp,
-  circle: Circle,
-  'circle-check': CircleCheck,
-  'circle-dot': CircleDot,
-  'clock-3': Clock3,
-  'corner-down-right': CornerDownRight,
-  download: Download,
-  equal: Equal,
-  'file-chart-column': FileChartColumn,
-  'file-down': FileDown,
-  'file-pen-line': FilePenLine,
-  'file-text': FileText,
-  flag: Flag,
-  'folder-check': FolderCheck,
-  'folder-kanban': FolderKanban,
-  'git-branch': GitBranch,
-  'git-fork': GitFork,
-  hammer: Hammer,
-  history: History,
-  house: House,
-  image: Image,
-  inbox: Inbox,
-  'layout-grid': LayoutGrid,
-  'life-buoy': LifeBuoy,
-  list: List,
-  lock: Lock,
-  'log-out': LogOut,
-  'message-circle-question': MessageCircleQuestion,
-  'message-square-text': MessageSquareText,
-  minus: Minus,
-  paperclip: Paperclip,
-  pencil: Pencil,
-  'pencil-line': PencilLine,
-  plus: Plus,
-  'repeat-2': Repeat2,
-  rocket: Rocket,
-  send: Send,
-  server: Server,
-  'server-cog': ServerCog,
-  'settings-2': Settings2,
-  'shield-check': ShieldCheck,
-  siren: Siren,
-  'square-check-big': SquareCheckBig,
-  'square-kanban': SquareKanban,
-  ticket: Ticket,
-  timer: Timer,
-  'triangle-alert': TriangleAlert,
-  'user-plus': UserPlus,
-  'user-round': UserRound,
-  'users-round': UsersRound,
-  wrench: Wrench,
-  x: X,
+  'activity': ActivityIcon,
+  'alarm-clock': AlarmClockIcon,
+  'archive': ArchiveIcon,
+  'archive-restore': ArchiveRestoreIcon,
+  'badge-dollar-sign': BadgeDollarSignIcon,
+  'bell': BellIcon,
+  'bug': BugIcon,
+  'building-2': Building2Icon,
+  'calendar': CalendarIcon,
+  'calendar-plus': CalendarPlusIcon,
+  'check': CheckIcon,
+  'chevron-down': ChevronDownIcon,
+  'chevron-left': ChevronLeftIcon,
+  'chevron-right': ChevronRightIcon,
+  'circle-check': CircleCheckIcon,
+  'circle-dot': CircleDotIcon,
+  'circle-minus': CircleMinusIcon,
+  'clock-3': Clock3Icon,
+  'download': DownloadIcon,
+  'file-text': FileTextIcon,
+  'flag': FlagIcon,
+  'folder': FolderIcon,
+  'folder-kanban': FolderKanbanIcon,
+  'git-branch': GitBranchIcon,
+  'git-pull-request': GitPullRequestIcon,
+  'git-pull-request-arrow': GitPullRequestArrowIcon,
+  'hard-drive': HardDriveIcon,
+  'house': HouseIcon,
+  'image': ImageIcon,
+  'info': InfoIcon,
+  'layers': LayersIcon,
+  'layout-grid': LayoutGridIcon,
+  'list-checks': ListChecksIcon,
+  'lock': LockIcon,
+  'log-in': LogInIcon,
+  'log-out': LogOutIcon,
+  'message-circle-question': MessageCircleQuestionIcon,
+  'message-square': MessageSquareIcon,
+  'milestone': MilestoneIcon,
+  'minus': MinusIcon,
+  'paperclip': PaperclipIcon,
+  'pen-line': PenLineIcon,
+  'pencil': PencilIcon,
+  'play': PlayIcon,
+  'plus': PlusIcon,
+  'refresh-cw': RefreshCwIcon,
+  'reply': ReplyIcon,
+  'rocket': RocketIcon,
+  'rotate-ccw': RotateCcwIcon,
+  'search': SearchIcon,
+  'send-horizontal': SendHorizontalIcon,
+  'server': ServerIcon,
+  'settings': SettingsIcon,
+  'sheet': SheetIcon,
+  'shield-check': ShieldCheckIcon,
+  'signal-high': SignalHighIcon,
+  'ticket': TicketIcon,
+  'timer': TimerIcon,
+  'trash-2': Trash2Icon,
+  'triangle-alert': TriangleAlertIcon,
+  'upload': UploadIcon,
+  'user-check': UserCheckIcon,
+  'user-cog': UserCogIcon,
+  'user-plus': UserPlusIcon,
+  'user-round': UserRoundIcon,
+  'user-round-cog': UserRoundCogIcon,
+  'user-x': UserXIcon,
+  'users': UsersIcon,
+  'users-round': UsersRoundIcon,
+  'x': XIcon,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

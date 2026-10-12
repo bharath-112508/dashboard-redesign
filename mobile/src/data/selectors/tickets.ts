@@ -1,122 +1,123 @@
 import { TODAY } from '../clock';
-import { PRIORITY, TICKET_STATUS, TICKET_TYPE } from '../constants';
-import { diff, sh } from '../format';
+import { diff, fmt, fmtL } from '../format';
 import type { AppState } from '../store/state';
-import type { Ticket, TicketPrio } from '../types';
+import type { Subtask, Ticket, TicketPrio, TicketStatus } from '../types';
+import { entriesAll } from './time';
 import { me } from './session';
 
-/** Tickets in the signed-in person's scope (SPEC §2.1 "My tickets"). */
-export function myTickets(s: AppState): Ticket[] {
-  const person = me(s);
-  if (!person?.role) return [];
-  const r = person.role;
-  if (r === 'client') return s.tickets.filter((t) => t.client);
-  if (r === 'dev' || r === 'free' || r === 'devops') return s.tickets.filter((t) => t.as.includes(person.name));
-  return s.tickets.filter((t) => t.proj !== '');
+export function ticket(s: AppState, key: string | null | undefined): Ticket | null {
+  return (key && s.tickets.find((t) => t.key === key)) || null;
 }
 
-export const isOpen = (t: Ticket) => t.st !== 'done';
-
-export function ticketById(s: AppState, id: number): Ticket | undefined {
-  return s.tickets.find((t) => t.id === id);
+/** A subtask with its parent, position and displayed key (A-11). */
+export interface SubView extends Subtask {
+  parent: Ticket;
+  /** 0-based position */
+  index: number;
+  /** positional display key "PMT-11.2" */
+  key: string;
+  /** effective priority (falls back to the ticket's) */
+  prio: TicketPrio;
+  done: boolean;
 }
 
-export function ticketByKey(s: AppState, key: string): Ticket | undefined {
-  return s.tickets.find((t) => t.key === key);
+function subView(t: Ticket, i: number): SubView {
+  const x = t.subs[i];
+  return { ...x, parent: t, index: i, key: `${t.key}.${i + 1}`, prio: x.prio ?? t.prio, done: x.st === 'done' };
+}
+
+/** Displayed key of a subtask ("PMT-11.2"). */
+export function subKey(t: Ticket, subId: string): string {
+  const i = t.subs.findIndex((x) => x.id === subId);
+  return i < 0 ? subId : `${t.key}.${i + 1}`;
+}
+
+/**
+ * A subtask by its stable id ("PMT-11.s2") or by its positional key ("PMT-11.2").
+ * Links and time entries use the id (A-11).
+ */
+export function subOf(s: AppState, ref: string | null | undefined): SubView | null {
+  if (!ref) return null;
+  const byId = /^(.+)\.s\d+$/.exec(ref);
+  if (byId) {
+    const t = ticket(s, byId[1]);
+    const i = t ? t.subs.findIndex((x) => x.id === ref) : -1;
+    return t && i >= 0 ? subView(t, i) : null;
+  }
+  const pos = /^(.+)\.(\d+)$/.exec(ref);
+  if (pos) {
+    const t = ticket(s, pos[1]);
+    const i = +pos[2] - 1;
+    return t && t.subs[i] ? subView(t, i) : null;
+  }
+  return null;
+}
+
+/** A ticket or a subtask by key/id (`tkOrSub`): what a time entry's `key` points at. */
+export function tkOrSub(
+  s: AppState,
+  ref: string | null | undefined,
+): { key: string; title: string; sub: boolean; ticket: Ticket; subtask?: SubView } | null {
+  const sub = subOf(s, ref);
+  if (sub) return { key: sub.key, title: sub.title, sub: true, ticket: sub.parent, subtask: sub };
+  const t = ticket(s, ref);
+  return t ? { key: t.key, title: t.title, sub: false, ticket: t } : null;
+}
+
+/**
+ * Minutes logged against a ticket key or subtask id (`loggedMin`). For a ticket key it
+ * includes the time logged on its subtasks.
+ */
+export function loggedMin(s: AppState, ref: string): number {
+  const t = ticket(s, ref);
+  const keys = new Set([ref, ...(t ? t.subs.map((x) => x.id) : [])]);
+  return entriesAll(s)
+    .filter((e) => e.key && keys.has(e.key))
+    .reduce((a, e) => a + e.min, 0);
 }
 
 export interface DueInfo {
-  /** "3d late", "Today", "Tomorrow", "13 Oct", "No date" (done: the date) */
-  label: string;
+  text: string;
+  /** colour token value */
   color: string;
-  weight: 600 | 800;
   late: boolean;
-  /** days from TODAY, null without a due date */
-  days: number | null;
 }
 
-/** Due label and colour (prototype dueInfo). Done tickets are never late. */
-export function dueInfo(t: Pick<Ticket, 'due' | 'st'>): DueInfo {
-  const d = t.due ? diff(t.due, TODAY) : null;
-  const done = t.st === 'done';
-  const label = !t.due ? 'No date' : done ? sh(t.due) : d! < 0 ? `${-d!}d late` : d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : sh(t.due);
-  const late = !done && d !== null && d < 0;
-  const color = late ? '#C0392B' : !done && d === 0 ? '#7A5C0E' : '#1B2D45';
-  const weight = !done && d !== null && d <= 0 ? 800 : 600;
-  return { label, color, weight, late, days: d };
+/**
+ * Due text (`dueInfo`): "No date", the date when done, "Nd late" (red, bold), "Today"
+ * (amber ink), "Tomorrow", otherwise "Sat 10 Oct".
+ */
+export function dueInfo(t: { due?: string; st: TicketStatus }): DueInfo {
+  if (!t.due) return { text: 'No date', color: '#3B4A5E', late: false };
+  if (t.st === 'done') return { text: fmt(t.due), color: '#3B4A5E', late: false };
+  const d = diff(t.due, TODAY);
+  if (d < 0) return { text: `${-d}d late`, color: '#C0392B', late: true };
+  if (d === 0) return { text: 'Today', color: '#7A5C0E', late: false };
+  if (d === 1) return { text: 'Tomorrow', color: '#1B2D45', late: false };
+  return { text: fmtL(t.due), color: '#1B2D45', late: false };
 }
 
-/** Sort by due date, tickets without a date last (prototype order). */
-export function byDue(a: Ticket, b: Ticket): number {
-  return (a.due || '9') < (b.due || '9') ? -1 : 1;
+/** Overdue: not done and due before TODAY. */
+export const isLate = (t: { due?: string; st: TicketStatus }): boolean => !!t.due && t.st !== 'done' && t.due < TODAY;
+
+/** Tickets assigned to the signed-in person. */
+export function myTickets(s: AppState): Ticket[] {
+  const name = me(s)?.name;
+  return name ? s.tickets.filter((t) => t.as.includes(name)) : [];
 }
 
-export interface TicketCardVM {
-  id: number;
-  key: string;
-  title: string;
-  proj: string;
-  epic: string;
-  sprint: string;
-  type: Ticket['type'];
-  typeTone: { soft: string; ink: string; icon: (typeof TICKET_TYPE)[keyof typeof TICKET_TYPE]['icon'] };
-  /** show the red Critical badge (staff only) */
-  critical: boolean;
-  /** priority shown when not critical; clients see Critical as High */
-  prio: Exclude<TicketPrio, 'Critical'>;
-  prioColor: string;
-  prioIcon: (typeof PRIORITY)[keyof typeof PRIORITY]['icon'];
-  /** status label for the viewer (client labels for clients) */
-  statusLabel: string;
-  statusDot: string;
-  due: DueInfo;
-  assignees: string[];
-  subsLabel: string;
-  subsPct: number;
-  hasSubs: boolean;
-  /** ring colour: danger ring for critical cards */
-  ring: string;
+/** Tickets tab badge: unread over my tickets (staff only). */
+export function unreadTotal(s: AppState): number {
+  return myTickets(s).reduce((a, t) => a + (t.unread || 0), 0);
 }
 
-/** TicketCard view model (prototype card()). */
-export function ticketCardVM(t: Ticket, viewerIsClient: boolean): TicketCardVM {
-  const crit = t.prio === 'Critical';
-  const prio = (crit ? 'High' : t.prio) as Exclude<TicketPrio, 'Critical'>;
-  const pr = PRIORITY[prio] ?? PRIORITY.Medium;
-  const st = TICKET_STATUS[t.st];
-  return {
-    id: t.id,
-    key: t.key,
-    title: t.title,
-    proj: t.proj,
-    epic: t.epic,
-    sprint: t.sprint,
-    type: t.type,
-    typeTone: TICKET_TYPE[t.type],
-    critical: crit && !viewerIsClient,
-    prio,
-    prioColor: pr.color,
-    prioIcon: pr.icon,
-    statusLabel: viewerIsClient ? st.client : st.label,
-    statusDot: st.dot,
-    due: dueInfo(t),
-    assignees: t.as,
-    hasSubs: !!t.subs,
-    subsLabel: t.subs ? `${t.subs[0]} of ${t.subs[1]} subtasks` : 'No subtasks',
-    subsPct: t.subs && t.subs[1] ? (t.subs[0] / t.subs[1]) * 100 : 0,
-    ring: crit && !viewerIsClient ? '#F0C9B8' : '#D6DEE8',
-  };
+/** Subtasks done / total. */
+export function subProgress(t: Ticket): { done: number; total: number } {
+  return { done: t.subs.filter((x) => x.st === 'done').length, total: t.subs.length };
 }
 
-/** Open / late / critical counts in the signed-in scope (Home KPIs, More tiles). */
-export function myTicketCounts(s: AppState) {
-  const mine = myTickets(s);
-  const open = mine.filter(isOpen);
-  return {
-    all: mine.length,
-    open: open.length,
-    done: mine.length - open.length,
-    late: open.filter((t) => dueInfo(t).late).length,
-    critical: open.filter((t) => t.prio === 'Critical').length,
-  };
+/** Next ticket key for a project prefix (A-13): PREFIX-(max+1). */
+export function nextTicketKey(s: AppState, prefix: string): string {
+  const n = Math.max(0, ...s.tickets.filter((t) => t.key.startsWith(`${prefix}-`)).map((t) => Number(t.key.slice(prefix.length + 1)) || 0));
+  return `${prefix}-${n + 1}`;
 }

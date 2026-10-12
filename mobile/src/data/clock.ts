@@ -1,20 +1,15 @@
 /**
- * The app's fixed clock. The seed data is anchored on the prototype's date, so every
- * due date, week and "today" label is computed from TODAY (never from `new Date()`).
- * The greeting is the only thing that uses the real time of day (DECISIONS.md 7).
+ * The demo clock. Every "today" in the app comes from here (SPEC: TODAY = '2026-10-10',
+ * a Saturday). Change it in this one place.
  */
 export const TODAY = '2026-10-10';
 
-/** Monday of the current week (TODAY is a Saturday). */
+/** Monday of TODAY's week. */
 export const WEEK_MONDAY = '2026-10-05';
 
-/** Weekly hour target for staff (freelancers have none). */
-export const WEEK_TARGET_HOURS = 40;
+/** Required minutes per weekday and per week (staff; freelancers have no target). */
+export const DAY_MIN = 480;
+export const WEEK_MIN = 2400;
 
-/** "Good morning" / "Good afternoon" / "Good evening" from the device clock. */
-export function greetingFor(date: Date = new Date()): string {
-  const h = date.getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
-}
+/** The demo password (DECISIONS 7). A person with a `pwHash` signs in with their own. */
+export const DEMO_PASSWORD = 'demo';

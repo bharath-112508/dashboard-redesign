@@ -3,7 +3,7 @@ import { Text, type TextProps, type TextStyle } from 'react-native';
 import { colors, typeStyle, type FontWeight, type TypeVariant } from '@/theme';
 
 export interface TxtProps extends TextProps {
-  /** type scale entry (SPEC §5.2), default 'body' */
+  /** type scale entry (SPEC §6.1), default 'body' */
   v?: TypeVariant;
   /** text colour, default ink */
   color?: string;
@@ -12,7 +12,7 @@ export interface TxtProps extends TextProps {
   align?: TextStyle['textAlign'];
 }
 
-/** Text in the app font. Scales with the system font size (cap 1.4×). */
+/** Text in Inter. Scales with the system font size (cap 1.4×). */
 export function Txt({ v = 'body', color = colors.ink, w, align, style, maxFontSizeMultiplier = 1.4, ...rest }: TxtProps) {
   return (
     <Text

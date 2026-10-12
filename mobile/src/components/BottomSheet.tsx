@@ -1,134 +1,115 @@
 import type { ReactNode } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View, type DimensionValue } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { closeSheet } from '@/nav/routes';
-import { colors, motion, radii, useLoop } from '@/theme';
+import { useRouteAllowed } from '@/nav/useRouteAllowed';
+import { colors, motion, radii, shadows, space } from '@/theme';
 
-import { Icon, type IconName } from './Icon';
-import { IconTile } from './IconTile';
+import { Button, ButtonRow } from './Buttons';
+import { Icon } from './Icon';
 import { Press } from './Press';
+import { TextBlock } from './TextBlock';
 import { Txt } from './Txt';
 
 export interface BottomSheetProps {
   title: string;
-  /** header icon tile (drifts gently, e.g. timer / bug / calendar-plus / wrench) */
-  icon?: IconName;
-  iconBg?: string;
-  iconFg?: string;
-  /** line under the title ("Today, Sat 10 Oct · logged as Chary", project name) */
-  subtitle?: string;
-  /** default: pop the sheet route (M-46) */
+  sub?: string;
+  /** default: pop the sheet route */
   onClose?: () => void;
-  /** close button in the header (the support-plan sheet has none) */
-  showClose?: boolean;
-  /** panel max height, default 88% */
-  maxHeight?: DimensionValue;
-  /** sticky footer (error + save button) */
-  footer?: ReactNode;
-  /**
-   * form (default): 40px icon tile (radius 14), 20/800 title, subtitle under the header row,
-   * no dividers. plan (support plan): 36px circular icon, 18/800 title with the subtitle
-   * under it, dividers under the header and above the footer.
-   */
-  variant?: 'form' | 'plan';
-  /** title size: md 20 (default for form), sm 18 (plan, project status) */
-  titleSize?: 'md' | 'sm';
   children: ReactNode;
+  /**
+   * Inline mode (component state, no route): pass `visible`. The sheet renders in a
+   * transparent Modal. Without `visible` the sheet is a URL sheet route body.
+   */
+  visible?: boolean;
+  /** test id of the panel (default "sheet") */
   testID?: string;
 }
 
 /**
- * Bottom sheet chrome (SPEC §1.5): dim backdrop (tap to close), white panel with a
- * 28 radius and grab handle, sliding up. Render it as the whole body of a
- * src/app/(app)/sheet/* route (presentation transparentModal).
+ * Bottom sheet (SPEC §1.5, D-CMP-1): backdrop rgba(14,22,34,.42) (tap closes), panel
+ * #F6F9FC, radius 28, max 90%, handle 40x5, title 19/800 + sub 13, close 36 r11 #E7ECF2,
+ * body padding 2/18/34 with blocks 16 apart, sheetUp .26s.
+ *
+ * URL sheet: render it as the whole body of `src/app/(app)/sheet/<name>.tsx`.
+ * Inline sheet: `<BottomSheet visible={open} onClose={() => setOpen(false)} …>`.
  */
-export function BottomSheet({
-  title,
-  icon,
-  iconBg = colors.primarySoft,
-  iconFg = colors.primaryInk,
-  subtitle,
-  onClose = closeSheet,
-  showClose = true,
-  maxHeight = '88%',
-  footer,
-  variant = 'form',
-  titleSize,
-  children,
-  testID = 'sheet',
-}: BottomSheetProps) {
-  const plan = variant === 'plan';
-  const titleV = (titleSize ?? (plan ? 'sm' : 'md')) === 'sm' ? 'sheetTitle' : 'titleMd';
-  const sub = subtitle ? (
-    <Txt v={plan ? 'meta' : 'bodySm'} w={400} color={colors.ink3} numberOfLines={2} style={plan ? null : styles.subBelow}>
-      {subtitle}
-    </Txt>
-  ) : null;
+export function BottomSheet({ title, sub, onClose, children, visible, testID = 'sheet' }: BottomSheetProps) {
+  const inline = visible !== undefined;
+  const close = onClose ?? closeSheet;
   const insets = useSafeAreaInsets();
-  const reducedUp = useLoop(motion.sheetUp());
-  const drift = useLoop(motion.drift());
-  return (
+  const allowed = useRouteAllowed();
+  if (!inline && !allowed) return null;
+  const body = (
     <View style={styles.root}>
-      <Animated.View style={[StyleSheet.absoluteFill, motion.fadeIn()]}>
-        <Pressable
-          style={styles.backdrop}
-          onPress={onClose}
-          accessibilityRole="button"
-          accessibilityLabel="Close sheet"
-          testID="sheet-backdrop"
-        />
+      <Animated.View style={[StyleSheet.absoluteFill, motion.fadeIn(180)]}>
+        <Pressable style={styles.backdrop} onPress={close} accessibilityRole="button" accessibilityLabel="Close sheet" testID={`${testID}-backdrop`} />
       </Animated.View>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.kav}
-        pointerEvents="box-none"
-      >
-        <Animated.View
-          style={[styles.panel, { maxHeight }, reducedUp]}
-          accessibilityViewIsModal
-          testID={testID}
-        >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.kav} pointerEvents="box-none">
+        <Animated.View style={[styles.panel, motion.sheetUp()]} accessibilityViewIsModal testID={testID}>
           <View style={styles.handle} />
-          <View style={[styles.headWrap, plan && styles.headPlan]}>
-            <View style={[styles.head, plan && { gap: 10 }]}>
-              {icon ? (
-                <Animated.View style={plan ? null : drift}>
-                  {plan ? (
-                    <IconTile icon={icon} bg={iconBg} fg={iconFg} size={36} radius={18} iconSize={18} />
-                  ) : (
-                    <IconTile icon={icon} bg={iconBg} fg={iconFg} size={40} radius={14} iconSize={19} />
-                  )}
-                </Animated.View>
-              ) : null}
-              <View style={styles.headText}>
-                <Txt v={titleV} accessibilityRole="header" numberOfLines={2}>
-                  {title}
+          <View style={styles.head}>
+            <View style={styles.headText}>
+              <Txt v="title" accessibilityRole="header" numberOfLines={2}>
+                {title}
+              </Txt>
+              {sub ? (
+                <Txt v="label" w={400} color={colors.ink3} numberOfLines={2} style={styles.sub}>
+                  {sub}
                 </Txt>
-                {plan ? sub : null}
-              </View>
-              {showClose ? (
-                <Press label="Close" onPress={onClose} style={styles.close} scale={0.94} testID="sheet-close">
-                  <Icon name="x" size={16} color={colors.destructiveInk} strokeWidth={2.6} />
-                </Press>
               ) : null}
             </View>
-            {plan ? null : sub}
+            <Press label="Close" onPress={close} style={styles.close} testID={`${testID}-close`}>
+              <Icon name="x" size={17} color={colors.ink} />
+            </Press>
           </View>
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={[styles.body, plan && styles.bodyPlan, !footer && { paddingBottom: insets.bottom + 34 }]}
-            keyboardShouldPersistTaps="handled"
-          >
+          <ScrollView style={styles.scroll} contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 34 }]} keyboardShouldPersistTaps="handled">
             {children}
           </ScrollView>
-          {footer ? (
-            <View style={[styles.footer, plan && styles.footerPlan, { paddingBottom: insets.bottom + (plan ? 30 : 34) }]}>{footer}</View>
-          ) : null}
         </Animated.View>
       </KeyboardAvoidingView>
     </View>
+  );
+  if (!inline) return body;
+  return (
+    <Modal visible={visible} transparent animationType="none" onRequestClose={close} statusBarTranslucent>
+      {body}
+    </Modal>
+  );
+}
+
+export interface ConfirmSheetProps {
+  visible: boolean;
+  title: string;
+  /** note text (amber note block) */
+  text: string;
+  /** destructive button title ("Delete", "Remove", "Archive") */
+  confirm: string;
+  onConfirm: () => void;
+  onClose: () => void;
+  testID?: string;
+}
+
+/** SH-CONFIRM: title, a note, Cancel (secondary) and a destructive OK. Inline. */
+export function ConfirmSheet({ visible, title, text, confirm, onConfirm, onClose, testID = 'confirm' }: ConfirmSheetProps) {
+  return (
+    <BottomSheet visible={visible} title={title} onClose={onClose} testID={testID}>
+      <TextBlock text={text} tone="note" />
+      <ButtonRow>
+        <Button title="Cancel" kind="s" onPress={onClose} testID={`${testID}-cancel`} />
+        <Button
+          title={confirm}
+          kind="d"
+          onPress={() => {
+            onClose();
+            onConfirm();
+          }}
+          testID={`${testID}-ok`}
+        />
+      </ButtonRow>
+    </BottomSheet>
   );
 }
 
@@ -137,30 +118,18 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: colors.overlay },
   kav: { flex: 1, justifyContent: 'flex-end' },
   panel: {
-    backgroundColor: colors.surface,
+    maxHeight: '90%',
+    backgroundColor: colors.bg,
     borderTopLeftRadius: radii.sheet,
     borderTopRightRadius: radii.sheet,
     overflow: 'hidden',
+    ...shadows.sheet,
   },
-  handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: colors.lineInput, marginTop: 10 },
-  headWrap: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12 },
-  headPlan: { paddingTop: 6, borderBottomWidth: 1, borderBottomColor: colors.divider2 },
-  head: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  headText: { flex: 1, gap: 1 },
-  subBelow: { marginTop: 6 },
-  close: {
-    width: 34,
-    height: 34,
-    borderRadius: 9,
-    backgroundColor: colors.destructiveBg,
-    borderWidth: 1,
-    borderColor: colors.dangerRing,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  handle: { alignSelf: 'center', width: 40, height: 5, borderRadius: 3, backgroundColor: colors.handle, marginTop: 8 },
+  head: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 12, paddingHorizontal: 18 },
+  headText: { flex: 1, minWidth: 0 },
+  sub: { marginTop: 2 },
+  close: { width: 36, height: 36, borderRadius: radii.sheetClose, backgroundColor: colors.segTrack, alignItems: 'center', justifyContent: 'center' },
   scroll: { flexGrow: 0 },
-  body: { paddingHorizontal: 20, paddingTop: 4, gap: 14 },
-  bodyPlan: { paddingTop: 14, paddingBottom: 14 },
-  footer: { paddingHorizontal: 20, paddingTop: 16, gap: 12 },
-  footerPlan: { paddingTop: 12, gap: 8, borderTopWidth: 1, borderTopColor: colors.divider2 },
+  body: { paddingTop: 2, paddingHorizontal: 18, gap: space.sheetBlock },
 });

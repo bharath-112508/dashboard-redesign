@@ -1,79 +1,141 @@
-import { CLIENT_COMPANY, SPRINTS } from '../seed/projects';
-import { EMPTY_MAINTENANCE } from '../seed/maintenance';
 import type { AppState } from '../store/state';
-import type { Company, MaintData, Project, Sprint } from '../types';
-import { me } from './session';
-import { myTickets } from './tickets';
+import type { Company, Epic, Project, Sprint, Ticket } from '../types';
+import { isClientRole, me } from './session';
 
-export function projectByName(s: AppState, name: string): Project | undefined {
-  return s.projects.find((p) => p.name === name);
+/** A project with its company resolved (v5 `projAll` adds `co`, `coId`). */
+export interface ProjectView extends Project {
+  /** company name, or "Viljetech" for internal projects */
+  co: string;
+  /** company id, or 'vt' */
+  coId: string;
 }
 
-/** Company name of a project ('' when unknown). */
-export function companyOf(s: AppState, project: string): string {
-  return projectByName(s, project)?.company ?? '';
+function view(s: AppState, p: Project): ProjectView {
+  if (p.kind === 'internal') return { ...p, co: 'Viljetech', coId: 'vt' };
+  const c = s.companies.find((x) => x.id === p.companyId);
+  return { ...p, co: c?.name ?? '', coId: c?.id ?? p.companyId ?? '' };
 }
 
-export function companyByName(s: AppState, name: string): Company | undefined {
-  return s.companies.find((c) => c.name === name);
+/** Every project of a non-archived company, then internal projects (`projAll`). */
+export function projAll(s: AppState): ProjectView[] {
+  const live = new Set(s.companies.filter((c) => !c.archived).map((c) => c.id));
+  const client = s.projects.filter((p) => p.kind === 'client' && live.has(p.companyId ?? ''));
+  const internal = s.projects.filter((p) => p.kind === 'internal');
+  return [...client, ...internal].map((p) => view(s, p));
 }
 
-export function projectsOfCompany(s: AppState, company: string): Project[] {
-  return s.projects.filter((p) => p.company === company);
+/** One project by id (also archived companies' projects), or null. */
+export function project(s: AppState, id: string | null | undefined): ProjectView | null {
+  const p = id ? s.projects.find((x) => x.id === id) : undefined;
+  return p ? view(s, p) : null;
 }
 
-/** Maintenance data of a project (empty data for a project moved to maintenance in-app). */
-export function maintenanceOf(s: AppState, project: string): MaintData {
-  return s.maintenance[project] ?? EMPTY_MAINTENANCE;
+export function company(s: AppState, id: string | null | undefined): Company | null {
+  return (id && s.companies.find((c) => c.id === id)) || null;
+}
+
+/** "Daco · Daco platform" for client projects, the name for internal ones. */
+export function projectTitle(p: Pick<ProjectView, 'kind' | 'co' | 'name'>): string {
+  return p.kind === 'client' ? `${p.co} · ${p.name}` : p.name;
 }
 
 /**
- * Projects the signed-in person can see (SPEC §2.1 "Projects list"):
- * client → their company; dev/free → projects with my tickets plus maintenance projects
- * where I own a request or upkeep task; everyone else → all.
+ * Projects the signed-in person can see (`projVis`, SPEC §2.4): super/admin/pm all; dev
+ * their `projects` list plus teams they are on; cadmin their company; cuser their
+ * company's projects in their list; devops none.
  */
-export function visibleProjects(s: AppState): Project[] {
-  const person = me(s);
-  const role = person?.role;
-  if (!person || !role) return [];
-  if (role === 'client') return s.projects.filter((p) => p.company === CLIENT_COMPANY);
-  if (role === 'dev' || role === 'free') {
-    const mine = myTickets(s);
-    return s.projects.filter((p) => {
-      if (mine.some((t) => t.proj === p.name)) return true;
-      const m = s.maintenance[p.name];
-      return !!m && (m.req.some((r) => r.as === person.name) || m.tasks.some((t) => t.who === person.name));
-    });
+export function projVis(s: AppState): ProjectView[] {
+  const u = me(s);
+  if (!u) return [];
+  const all = projAll(s);
+  switch (u.role) {
+    case 'super':
+    case 'admin':
+    case 'pm':
+      return all;
+    case 'dev':
+      return u.projects === 'all' ? all : all.filter((p) => u.projects.includes(p.id) || p.team.includes(u.name));
+    case 'cadmin':
+      return all.filter((p) => p.coId === u.org);
+    case 'cuser':
+      return all.filter((p) => p.coId === u.org && (u.projects === 'all' || u.projects.includes(p.id)));
+    default:
+      return [];
   }
-  return s.projects;
 }
 
-/** "Active" in the Projects filter means active or planned. */
-export const isActiveOrPlanned = (p: Project) => p.status === 'active' || p.status === 'planned';
+/** True when the signed-in person can see the project. */
+export const canSeeProject = (s: AppState, id: string): boolean => projVis(s).some((p) => p.id === id);
 
-/** Visible projects grouped by company, in company order. */
-export function groupByCompany(s: AppState, projects: Project[]): { company: string; projects: Project[] }[] {
-  return s.companies
-    .map((c) => ({ company: c.name, projects: projects.filter((p) => p.company === c.name) }))
-    .filter((g) => g.projects.length);
+/** A company's projects (client projects only). */
+export function projectsOfCompany(s: AppState, companyId: string): ProjectView[] {
+  return s.projects.filter((p) => p.kind === 'client' && p.companyId === companyId).map((p) => view(s, p));
 }
 
-/** Active project count and the companies they span (Home KPI, More tile). */
-export function activeProjectStats(s: AppState): { count: number; companies: number } {
-  const act = visibleProjects(s).filter(isActiveOrPlanned);
-  return { count: act.length, companies: new Set(act.map((p) => p.company)).size };
+/**
+ * Epics of a project (`epics(pid)`). A project without epics gets one pseudo-epic with
+ * the project's id and name; new epics replace it (SH-NEWEPIC).
+ */
+export function epicsOf(s: AppState, projectId: string): Epic[] {
+  const L = s.epics.filter((e) => e.projectId === projectId);
+  if (L.length) return L;
+  const p = s.projects.find((x) => x.id === projectId);
+  if (!p) return [];
+  return [{ id: p.id, projectId: p.id, name: p.name, state: p.state, pct: p.pct, sprints: s.sprints.filter((x) => x.epicId === p.id).length }];
 }
 
-export function sprintsOf(project: string): Sprint[] {
-  return SPRINTS.filter((x) => x.p === project);
+/** Epic name by id (pseudo-epics resolve to the project name). */
+export function epicName(s: AppState, id: string | null | undefined): string {
+  if (!id) return '';
+  return s.epics.find((e) => e.id === id)?.name ?? s.projects.find((p) => p.id === id)?.name ?? '';
 }
 
-/** Distinct epic names of a project, in sprint order. */
-export function epicsOf(project: string): string[] {
-  return [...new Set(sprintsOf(project).map((x) => x.e))];
+/** The project an epic (or pseudo-epic) belongs to. */
+export function projectOfEpic(s: AppState, epicId: string): string | null {
+  return s.epics.find((e) => e.id === epicId)?.projectId ?? (s.projects.some((p) => p.id === epicId) ? epicId : null);
 }
 
-/** The active (non-Ops) sprint of a project, if any. */
-export function activeSprint(project: string): Sprint | undefined {
-  return SPRINTS.find((x) => x.p === project && x.st === 'active' && x.n !== 'Ops');
+export function sprint(s: AppState, id: string | null | undefined): Sprint | null {
+  return (id && s.sprints.find((x) => x.id === id)) || null;
 }
+
+/** Sprints of an epic, in start order. */
+export function sprintsOf(s: AppState, epicId: string): Sprint[] {
+  return s.sprints.filter((x) => x.epicId === epicId).sort((a, b) => a.start.localeCompare(b.start));
+}
+
+/** The active sprint of an epic (A-12: at most one). */
+export function activeSprintOf(s: AppState, epicId: string): Sprint | null {
+  return s.sprints.find((x) => x.epicId === epicId && x.state === 'active') ?? null;
+}
+
+/** Tickets of a project. */
+export function ticketsOf(s: AppState, projectId: string): Ticket[] {
+  return s.tickets.filter((t) => t.projectId === projectId);
+}
+
+/**
+ * Log-time project options (`projOpts`): non-done client projects as "Company · Project",
+ * then non-done internal projects, then "Admin & meetings". Values: c:/i:/x:admin.
+ */
+export function projOpts(s: AppState): { value: string; label: string }[] {
+  const all = projAll(s).filter((p) => p.state !== 'done');
+  return [
+    ...all.filter((p) => p.kind === 'client').map((p) => ({ value: `c:${p.id}`, label: `${p.co} · ${p.name}` })),
+    ...all.filter((p) => p.kind === 'internal').map((p) => ({ value: `i:${p.id}`, label: p.name })),
+    { value: 'x:admin', label: 'Admin & meetings' },
+  ];
+}
+
+/** Label of a time-entry project value (`projLabel`). */
+export function projLabel(s: AppState, v: string): string {
+  if (v === 'x:admin') return 'Admin & meetings';
+  const p = project(s, v.slice(2));
+  return p ? projectTitle(p) : v;
+}
+
+/** The time-entry project value of a project ("c:dacop" / "i:i1"). */
+export const projValue = (p: Pick<Project, 'id' | 'kind'>): string => `${p.kind === 'client' ? 'c' : 'i'}:${p.id}`;
+
+/** Whether a client role is looking (portal variants of project screens). */
+export const viewerIsClient = (s: AppState): boolean => isClientRole(me(s)?.role);

@@ -1,26 +1,29 @@
 import type { ReactNode } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute } from 'expo-router';
 import { useNavigationState } from 'expo-router/react-navigation';
 
-import { colors, motion, space, TAB_BAR_SPACE, useLoop } from '@/theme';
+import { useRouteAllowed } from '@/nav/useRouteAllowed';
+import { colors, space } from '@/theme';
 
-import { LargeHeader, SmallHeader, type HeaderAction } from './Headers';
+import { AccessDenied } from './AccessDenied';
+import { Header, type HeaderAction } from './Header';
 
 export interface ScreenProps {
   title: string;
-  /** large on tab roots, small on pushed screens */
-  header?: 'large' | 'small';
-  action?: HeaderAction;
-  /** fixed bar at the bottom (Composer on ticket / question) */
-  footer?: ReactNode;
-  /** true when the tab bar is hidden on this screen (ticket, question) */
-  noTabBar?: boolean;
-  /** false to render children without the ScrollView (own FlatList) */
+  sub?: string;
+  /** up to 3 header buttons; tab roots usually pass `useRootActions()` */
+  actions?: HeaderAction[];
+  /** force root (26px title, no Back) or pushed; default: root when the screen is a tab */
+  root?: boolean;
+  /** Sign in: no header and no tab bar padding */
+  noHeader?: boolean;
+  /** false: no tab bar below (bottom padding 40 instead of 110) */
+  tabBar?: boolean;
+  /** false to render children without the ScrollView (own list) */
   scroll?: boolean;
-  /** gap between direct children (default 14) */
+  /** gap between blocks (default 18) */
   gap?: number;
   contentStyle?: StyleProp<ViewStyle>;
   /** test id of the screen root, e.g. "screen-home" */
@@ -29,24 +32,18 @@ export interface ScreenProps {
 }
 
 /**
- * Screen scaffold: safe area, header, scrolling content (padding 4/16/28 plus room for
- * the floating tab bar) with the tc-fade-up enter animation, and an optional footer.
+ * Screen scaffold (SPEC §1.1): safe area, v5 header, a vertical scroll with padding 4/16
+ * and 18 between blocks, bottom padding 110 (tab bar) or 40. Renders an access-denied
+ * state when the route is not allowed for the role (the RouteGuard then sends the
+ * person Home with a toast).
  */
-export function Screen({
-  title,
-  header = 'small',
-  action,
-  footer,
-  noTabBar,
-  scroll = true,
-  gap = space.gap.detail,
-  contentStyle,
-  testID,
-  children,
-}: ScreenProps) {
-  const enter = useLoop(motion.screenIn());
+export function Screen({ title, sub, actions, root, noHeader, tabBar = true, scroll = true, gap = space.block, contentStyle, testID, children }: ScreenProps) {
   const hidden = useHiddenTab();
-  const bottom = (noTabBar || footer ? 0 : TAB_BAR_SPACE) + space.contentBottom;
+  const isTab = useNavigationState((s) => !!s && s.type === 'tab');
+  const allowed = useRouteAllowed();
+  const isRoot = root ?? isTab;
+  const bottom = tabBar && !noHeader ? space.bottomTabs : space.bottomPlain;
+  const content = allowed ? children : <AccessDenied />;
   const body = scroll ? (
     <ScrollView
       style={styles.flex}
@@ -54,22 +51,16 @@ export function Screen({
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      {children}
+      {content}
     </ScrollView>
   ) : (
-    <View style={[styles.flex, contentStyle]}>{children}</View>
+    <View style={[styles.flex, contentStyle]}>{content}</View>
   );
   return (
-    <SafeAreaView
-      edges={['top', 'left', 'right']}
-      style={[styles.root, hidden && styles.hidden]}
-      testID={testID}
-      aria-hidden={hidden || undefined}
-    >
-      {header === 'large' ? <LargeHeader title={title} action={action} /> : <SmallHeader title={title} action={action} />}
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, hidden && styles.hidden]} testID={testID} aria-hidden={hidden || undefined}>
+      {noHeader ? null : <Header title={title} sub={sub} actions={allowed ? actions : []} root={isRoot} />}
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Animated.View style={[styles.flex, enter]}>{body}</Animated.View>
-        {footer}
+        {body}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -78,7 +69,7 @@ export function Screen({
 /**
  * Tab roots stay mounted when another tab is selected (web keeps them in the DOM behind
  * the selected one). Hide them so taps, tests and screen readers only reach the
- * selected tab. Stack screens under a sheet stay visible.
+ * selected tab.
  */
 function useHiddenTab(): boolean {
   const route = useRoute();

@@ -8,6 +8,8 @@ export const FACES: Record<FaceKey, ImageSourcePropType> = {
   m1: require('../../../assets/faces/m1.jpg'),
   m2: require('../../../assets/faces/m2.jpg'),
   m4: require('../../../assets/faces/m4.jpg'),
+  m5: require('../../../assets/faces/m5.jpg'),
   m6: require('../../../assets/faces/m6.jpg'),
   w0: require('../../../assets/faces/w0.jpg'),
+  w1: require('../../../assets/faces/w1.jpg'),
 };
