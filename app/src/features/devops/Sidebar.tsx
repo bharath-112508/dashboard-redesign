@@ -1,6 +1,8 @@
 import { useState, type CSSProperties } from 'react'
 import { Link } from 'react-router'
 import { useSend } from '../../api/queries'
+import { canAccess } from '../../api/session/access'
+import { useSession } from '../../api/session/store'
 import type { DvDeployments, DvProject } from '../../api/devops/types'
 import { useDv } from './ctx'
 import {
@@ -212,11 +214,14 @@ function Deployments({ d }: { d: DvDeployments }) {
 
 /**
  * The project this DevOps item is (v5): its name, its company (client project) or area (internal),
- * and a link to it on the Projects page.
+ * and a link to it on the Projects page for roles that can open Projects (plain text for the others,
+ * such as DevOps engineers, who would only get "access denied").
  */
 function LinkedProjectCard({ p }: { p: DvProject }) {
   const { projectOf } = useDv()
+  const session = useSession()
   const lp = projectOf(p)
+  const canOpen = !!session && canAccess(session.role, 'Projects')
   return (
     <div data-testid="linked-project" className={`${card} flex items-center gap-2.5 px-3.5 py-3`}>
       <div className="flex size-8 flex-none items-center justify-center rounded-md text-[12px] font-bold text-white" style={{ background: lp ? tileOf(lp.name) : '#A9B6C5' }}>
@@ -224,13 +229,17 @@ function LinkedProjectCard({ p }: { p: DvProject }) {
       </div>
       {lp ? (
         <div className="min-w-0 flex-1">
-          <Link
-            to={`/projects?q=${encodeURIComponent(lp.name)}`}
-            title="Open in Projects"
-            className="block truncate whitespace-nowrap text-[13.5px] font-semibold text-ink no-underline hover:text-blue-ink hover:underline"
-          >
-            {lp.name}
-          </Link>
+          {canOpen ? (
+            <Link
+              to={`/projects?q=${encodeURIComponent(lp.name)}`}
+              title="Open in Projects"
+              className="block truncate whitespace-nowrap text-[13.5px] font-semibold text-ink no-underline hover:text-blue-ink hover:underline"
+            >
+              {lp.name}
+            </Link>
+          ) : (
+            <div className="truncate whitespace-nowrap text-[13.5px] font-semibold text-ink">{lp.name}</div>
+          )}
           <div className="mt-px truncate whitespace-nowrap text-[11.5px] text-muted">
             {lp.kind === 'client' ? `Client project · ${lp.companyName}` : `Internal project${lp.area ? ' · ' + lp.area : ''}`}
           </div>

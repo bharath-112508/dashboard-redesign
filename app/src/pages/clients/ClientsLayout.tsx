@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router'
 import { useEntries, useQuestions, useRequests, useTasks, useWorkspace } from '../../api/queries'
 import { Avatar, Icon, PATHS } from '../../components/ui'
@@ -7,8 +7,8 @@ import { EpicBar } from './EpicBar'
 import { Toolbar } from './Toolbar'
 import { Overlays } from '../../features/Overlays'
 import { ScopeContext } from '../../state/access'
-import { useUi } from '../../state/ui'
-import { ImModeContext, useProjectScope } from './useClientScope'
+import { clientsPath, useProjectParam, useUi } from '../../state/ui'
+import { ImModeContext, useOpenProject, useProjectScope } from './useClientScope'
 import { IM_BASE, IM_NAME } from '../../features/invoice-match/data'
 
 export const VIEWS = [
@@ -42,6 +42,26 @@ export function ClientsLayout() {
     if (scope && scope.epicIds.length && !scope.epicIds.includes(ui.epic)) ui.setEpics(scope.epicIds)
   }, [scope, ui.epic])
 
+  // The open project (?project=) survives a reload: its epics are picked when it opens. Picking
+  // epics outside it afterwards (the epic picker) leaves the project, so the parameter is dropped.
+  const projectParam = useProjectParam()
+  const open = useOpenProject()
+  const wsEpics = useWorkspace().data?.epics
+  const applied = useRef<string | null>(null)
+  useEffect(() => {
+    if (!open || !wsEpics) {
+      applied.current = null
+      return
+    }
+    const ids = open.project.epics.map(e => e.id).filter(id => wsEpics.some(e => e.id === id))
+    if (!ids.length) return
+    const inside = ui.epSel.every(id => ids.includes(id))
+    if (applied.current !== open.project.id) {
+      applied.current = open.project.id
+      if (!inside) ui.setEpics(ids)
+    } else if (!inside) projectParam.set(null)
+  }, [open, wsEpics, ui.epSel])
+
   return (
     <ScopeContext.Provider value={scope}>
       <ImModeContext.Provider value={im}>
@@ -49,7 +69,7 @@ export function ClientsLayout() {
           <div className="flex items-center gap-2.5">
             <button
               type="button"
-              onClick={() => from && navigate('/clients/' + from, { state: { stack: stack.slice(0, -1) } })}
+              onClick={() => from && navigate(clientsPath(from, projectParam.id), { state: { stack: stack.slice(0, -1) } })}
               title={fromLabel ? 'Back to ' + fromLabel : 'Back'}
               className="inline-flex h-[30px] items-center gap-1.5 rounded-lg border-[1.5px] border-line bg-white pl-1.5 pr-2.5 text-[12.5px] font-semibold text-ink hover:border-blue hover:text-blue-ink"
               style={{ cursor: from ? 'pointer' : 'default', opacity: from ? 1 : 0.45 }}
@@ -95,7 +115,7 @@ export function ClientsLayout() {
             {VIEWS.map(v => (
               <NavLink
                 key={v.id}
-                to={'/clients/' + v.id}
+                to={clientsPath(v.id, projectParam.id)}
                 state={v.id === view ? loc.state : { stack: [...stack, view] }}
                 replace={v.id === view}
                 className={({ isActive }) =>

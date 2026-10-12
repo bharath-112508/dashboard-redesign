@@ -75,9 +75,11 @@ const migrate = (v: unknown): unknown => {
  */
 const migrate3 = (v: Record<string, unknown>): unknown => devopsProjects(migrate3base(v))
 
-const migrate3base = (v: Record<string, unknown>): Record<string, unknown> => ({
-  // v5: the InvoiceMatch project and its live app's invoices, for stores saved before them.
-  ...withInvoiceMatch(v),
+// v5: the InvoiceMatch project (workspace, tasks and Daco's company) and its live app's invoices, for stores saved before them.
+const migrate3base = (input: Record<string, unknown>): Record<string, unknown> => fields3(withInvoiceMatch(input))
+
+const fields3 = (v: Record<string, unknown>): Record<string, unknown> => ({
+  ...v,
   ...devopsNames(v),
   version: DB_VERSION,
   leave: Array.isArray(v.leave) ? v.leave : [],

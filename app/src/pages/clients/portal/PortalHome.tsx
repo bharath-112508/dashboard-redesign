@@ -4,11 +4,11 @@ import type { ClientProject, Company, ProjectState, Workspace } from '../../../a
 import { Icon, PATHS } from '../../../components/ui'
 import { fmt } from '../../../lib/dates'
 import { useIsClient } from '../../../state/access'
-import { useUi } from '../../../state/ui'
+import { clientsPath, useUi } from '../../../state/ui'
 import { useSession } from '../../../api/session/store'
 import { TeamPanel } from './TeamPanel'
 import { LiveProjectCard } from '../../../features/invoice-match/LiveProjectCard'
-import { hasInvoiceMatch, IM_EPIC_IDS } from '../../../features/invoice-match/data'
+import { IM_PROJECT_ID } from '../../../features/invoice-match/data'
 
 const PROJECT_STATE: Record<ProjectState, [string, string, string]> = {
   active: ['Active', '#1F3FAF', '#DCE5FA'],
@@ -56,15 +56,13 @@ export function PortalHome() {
     : companies.find(c => c.id === params.get('client')) ?? companies.find(c => c.projects.length) ?? companies[0]
   const members = company ? teamQ.data.filter(m => m.companyId === company.id) : []
   const projects = company?.projects ?? []
-  // v5: Daco's delivered InvoiceMatch project is listed with its live app.
-  const live = hasInvoiceMatch(company)
-  const count = projects.length + (live ? 1 : 0)
+  const count = projects.length
 
-  /** Shows the project's board, filtered to its epics. */
+  /** Shows the project's board, filtered to its epics. The project is kept in the URL (?project=), so a reload keeps it. */
   const openProject = (p: ClientProject) => {
     const ids = p.epics.map(e => e.id).filter(id => wsQ.data.epics.some(x => x.id === id))
     if (ids.length) ui.setEpics(ids)
-    navigate('/clients/board')
+    navigate(clientsPath('board', p.id))
   }
 
   return (
@@ -122,6 +120,8 @@ export function PortalHome() {
               </div>
             )}
             {projects.map(p => {
+              // v5: Daco's delivered InvoiceMatch project has its own card, with its live app.
+              if (p.id === IM_PROJECT_ID) return <LiveProjectCard key={p.id} project={p} onOpen={() => openProject(p)} />
               const [label, ink, soft] = PROJECT_STATE[p.state]
               const ms = nextMilestone(p, wsQ.data)
               return (
@@ -162,14 +162,6 @@ export function PortalHome() {
                 </article>
               )
             })}
-            {live && (
-              <LiveProjectCard
-                onOpen={() => {
-                  ui.setEpics(IM_EPIC_IDS)
-                  navigate('/clients/board')
-                }}
-              />
-            )}
           </section>
 
           <TeamPanel company={company} members={members} canManage={isClient && session?.role === 'cadmin'} />

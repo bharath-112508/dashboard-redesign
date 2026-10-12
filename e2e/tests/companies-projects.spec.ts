@@ -284,7 +284,8 @@ test.describe('Companies', () => {
     await dialog.getByLabel('Role & access').selectOption('Viewer')
     await dialog.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(dialog).toBeHidden()
-    await expect(panel(page, 'Responsible from Viljetech').getByText('Viewer · 1 project')).toBeVisible()
+    // v5: Chary is on the Daco platform and InvoiceMatch teams.
+    await expect(panel(page, 'Responsible from Viljetech').getByText('Viewer · 2 projects')).toBeVisible()
   })
 
   test('CO-14 removes a responsibility', async ({ page }) => {
@@ -365,8 +366,8 @@ test.describe('Companies', () => {
 test.describe('Projects', () => {
   test('PR-01 switches between Cards and List views', async ({ page }) => {
     await openProjects(page)
-    // v5: 10 client projects of the DevOps board's clients join the seed.
-    await expect(page.getByText('16 projects · 10 active')).toBeVisible()
+    // v5: 10 client projects of the DevOps board's clients join the seed, and Daco's InvoiceMatch (Maintenance).
+    await expect(page.getByText('17 projects · 10 active')).toBeVisible()
     await expect(page.getByRole('link', { name: 'Open Daco platform' })).toBeVisible()
 
     await page.getByRole('button', { name: 'List', exact: true }).click()
@@ -382,7 +383,8 @@ test.describe('Projects', () => {
     await openProjects(page)
     const kpi = (label: string) => page.locator('dl').first().locator('div').filter({ hasText: label })
     await expect(kpi('Active projects').locator('dd')).toHaveText('10')
-    await expect(kpi('Client projects').locator('dd')).toHaveText('13')
+    // v5: includes Daco's InvoiceMatch.
+    await expect(kpi('Client projects').locator('dd')).toHaveText('14')
     await expect(kpi('Internal projects').locator('dd')).toHaveText('3')
     await expect(kpi('Overdue').locator('dd')).toHaveText('1')
   })

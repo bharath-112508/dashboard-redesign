@@ -93,3 +93,33 @@ export const useOverlay = () => {
   )
   return { get, open, close }
 }
+
+/**
+ * The project open on the Clients page (`?project=<id>`, a client project id
+ * from the Companies data), so a reload or a shared link keeps it, like the
+ * windows above. `href` builds a Clients link that keeps the open project.
+ */
+export const useProjectParam = () => {
+  const [params, setParams] = useSearchParams()
+  const { state } = useLocation()
+  const id = params.get('project')
+  /** Changes or clears (null) the open project in place, keeping the other parameters. */
+  const set = useCallback(
+    (next: string | null) =>
+      setParams(
+        p => {
+          const n = new URLSearchParams(p)
+          if (next) n.set('project', next)
+          else n.delete('project')
+          return n
+        },
+        { replace: true, state },
+      ),
+    [setParams, state],
+  )
+  return { id, set }
+}
+
+/** A Clients page path with the open project, e.g. `/clients/board?project=imp`. */
+export const clientsPath = (view: string, project?: string | null) =>
+  '/clients/' + view + (project ? '?project=' + encodeURIComponent(project) : '')

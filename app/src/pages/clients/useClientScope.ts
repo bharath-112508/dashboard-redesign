@@ -4,8 +4,9 @@ import { isClientRole } from '../../api/session/access'
 import { useSession } from '../../api/session/store'
 import { buildScope, type ClientScope } from '../../domain/scope'
 import { useScopedWorkspace } from '../../state/access'
-import { useUi } from '../../state/ui'
-import { hasInvoiceMatch, IM_COMPANY, IM_EPIC_IDS, isImSelection } from '../../features/invoice-match/data'
+import { useProjectParam, useUi } from '../../state/ui'
+import type { ClientProject, Company } from '../../api/types'
+import { hasInvoiceMatch, IM_EPIC_IDS, IM_PROJECT_ID, isImSelection } from '../../features/invoice-match/data'
 
 /** The scope for the signed-in client, or null for team roles. */
 export function useClientScope(): ClientScope | null {
@@ -18,22 +19,44 @@ export function useClientScope(): ClientScope | null {
   }, [session, companies, ws])
 }
 
-/** The board scope while the InvoiceMatch project is open: its epics only, no DevOps link, no questions. */
-const IM_SCOPE: ClientScope = { companyId: IM_COMPANY, epicIds: IM_EPIC_IDS, devopsKeys: [] }
+/**
+ * The project open on the Clients page (`?project=<id>`), looked up in the
+ * Companies data: a client finds only their own company's projects, a team
+ * role any company's. Null when there is no parameter or it matches nothing.
+ */
+export function useOpenProject(): { company: Company; project: ClientProject } | null {
+  const session = useSession()
+  const companies = useCompanies().data
+  const { id } = useProjectParam()
+  return useMemo(() => {
+    if (!id || !companies) return null
+    const client = !!session && isClientRole(session.role)
+    for (const company of companies) {
+      if (client && company.id !== session.orgId) continue
+      const project = company.projects.find(p => p.id === id)
+      if (project) return { company, project }
+    }
+    return null
+  }, [id, companies, session])
+}
 
 /**
- * Whether the Clients page shows the delivered InvoiceMatch project (every
- * picked epic is one of its epics, and the viewer may see it), and the scope
- * the page then uses. Team roles may open it; clients only from its company.
+ * Whether the Clients page shows the delivered InvoiceMatch project, and the
+ * scope the page then uses (its epics only, no DevOps link, no questions).
+ * The open project (`?project=`) decides; without one, a selection of only its
+ * epics does. Team roles may open it; clients only from its company.
  */
 export function useProjectScope(): { im: boolean; scope: ClientScope | null } {
   const base = useClientScope()
   const session = useSession()
   const companies = useCompanies().data
+  const open = useOpenProject()
+  const { id } = useProjectParam()
   const epSel = useUi().epSel
   const allowed = !session || !isClientRole(session.role) || hasInvoiceMatch(companies?.find(c => c.id === session.orgId))
-  const im = allowed && isImSelection(epSel)
-  return useMemo(() => ({ im, scope: im ? IM_SCOPE : base }), [im, base])
+  const im = open ? open.project.id === IM_PROJECT_ID : !id && allowed && isImSelection(epSel)
+  const companyId = open?.company.id ?? companies?.find(c => hasInvoiceMatch(c))?.id ?? null
+  return useMemo(() => ({ im, scope: im ? { companyId, epicIds: IM_EPIC_IDS, devopsKeys: [] } : base }), [im, base, companyId])
 }
 
 /** Set by ClientsLayout: true while the InvoiceMatch project is open. */

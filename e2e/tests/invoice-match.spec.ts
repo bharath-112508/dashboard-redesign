@@ -5,16 +5,20 @@ import { menu, openTickets } from './helpers/tickets'
 /**
  * InvoiceMatch (v5): Daco's delivered project on the Clients portal, its
  * embedded live app (inbox, match review, reports) and "Send feedback", whose
- * reports become client bug tickets. Flow IDs IM-01 to IM-12.
+ * reports become client bug tickets. Flow IDs IM-01 to IM-15.
  */
 
 const BASE = '/clients/live/invoicematch'
 
 type Stored = {
   tasks: { id: number; title: string; epic: string; prio: string; desc: string; clientBug?: unknown; acts: { who: string; what?: string }[]; atts: { name: string; url?: string }[] }[]
-  invoiceMatch: { invoices: { no: string; decision?: { st: string; note: string; by: string } }[] }
+  invoiceMatch: { invoices: { no: string; decision?: { st: string; note: string; by: string } }[]; projectAdded?: boolean }
   workspace: { epics: { id: string }[] }
+  companies: { id: string; projects: { id: string; state: string; epics: { id: string }[] }[] }[]
 }
+
+/** The ids of Daco's projects in the stored companies. */
+const dacoProjects = (db: Stored) => db.companies.find(c => c.id === 'daco')?.projects.map(p => p.id) ?? []
 
 const stored = (page: Page) =>
   page.evaluate(() => {
@@ -343,11 +347,83 @@ test.describe('InvoiceMatch feedback', () => {
       d.workspace.sprints = d.workspace.sprints.filter((s: { epic: string }) => !['im1', 'im2'].includes(s.epic))
       d.tasks = d.tasks.filter((t: { epic: string }) => !['im1', 'im2'].includes(t.epic))
       delete d.invoiceMatch
+      const daco = d.companies.find((c: { id: string }) => c.id === 'daco')
+      daco.projects = daco.projects.filter((p: { id: string }) => p.id !== 'imp')
       localStorage.setItem('vt.clients.db', JSON.stringify(d))
     })
     await openImProject(page)
     await expect(page.getByText('Go-live and handover')).toBeVisible()
     await page.getByRole('button', { name: 'Live app ↗' }).click()
     await expect(app(page).getByRole('table', { name: 'Invoices' }).getByRole('row')).toHaveCount(11)
+    // The project is back in Daco's company data, once, and marked as added. Decide something so the store is saved.
+    await openLive(page, '/invoices/INV-20409')
+    await app(page).getByRole('button', { name: 'Approve for payment' }).click()
+    await waitStored(page, db => db.invoiceMatch?.projectAdded === true && dacoProjects(db).join() === 'dacop,imp', 'project added once')
+  })
+
+  test('IM-14 the portal card comes from the company data; a project removed after the upgrade stays removed', async ({ page }) => {
+    await signIn(page, 'cadmin')
+    await openLive(page, '/invoices/INV-20409')
+    await app(page).getByRole('button', { name: 'Approve for payment' }).click()
+    await waitStored(page, db => db.invoiceMatch.projectAdded === true && dacoProjects(db).join() === 'dacop,imp', 'seeded with the project')
+    const project = (await stored(page))!.companies.find(c => c.id === 'daco')!.projects.find(p => p.id === 'imp')!
+    expect(project.state).toBe('maint')
+    expect(project.epics.map(e => e.id)).toEqual(['im1', 'im2'])
+
+    // Support hours come from the project's support agreement (6h of 10h left in the seed).
+    await page.goto('/clients')
+    await expect(page.getByRole('article', { name: 'InvoiceMatch' }).getByText('6h', { exact: true })).toBeVisible()
+    await page.evaluate(() => {
+      const d = JSON.parse(localStorage.getItem('vt.clients.db')!)
+      const daco = d.companies.find((c: { id: string }) => c.id === 'daco')
+      daco.projects.find((p: { id: string }) => p.id === 'imp').sup.used = 7
+      localStorage.setItem('vt.clients.db', JSON.stringify(d))
+    })
+    await page.reload()
+    await expect(page.getByRole('article', { name: 'InvoiceMatch' }).getByText('3h', { exact: true })).toBeVisible()
+
+    // Without the project in the company, the portal has no InvoiceMatch card, and the upgrade does not add it back.
+    await page.evaluate(() => {
+      const d = JSON.parse(localStorage.getItem('vt.clients.db')!)
+      const daco = d.companies.find((c: { id: string }) => c.id === 'daco')
+      daco.projects = daco.projects.filter((p: { id: string }) => p.id !== 'imp')
+      localStorage.setItem('vt.clients.db', JSON.stringify(d))
+    })
+    await page.reload()
+    await expect(page.getByText('Daco · 1 project')).toBeVisible()
+    await expect(page.getByRole('article', { name: 'InvoiceMatch' })).toHaveCount(0)
+    await expect(page.getByRole('article', { name: 'Daco platform' })).toBeVisible()
+  })
+
+  test('IM-15 the open project is in the URL (?project=) and survives a reload and tab changes', async ({ page }) => {
+    await signIn(page, 'cadmin')
+    await openImProject(page)
+    await expect(page).toHaveURL(/\/clients\/board\?project=imp$/)
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'InvoiceMatch' })).toBeVisible()
+    await expect(page.getByText('Go-live and handover')).toBeVisible()
+
+    await page.getByRole('link', { name: 'Timeline' }).click()
+    await expect(page).toHaveURL(/\/clients\/timeline\?project=imp$/)
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'InvoiceMatch' })).toBeVisible()
+
+    // Back from the live app returns to the project, still in the URL.
+    await page.getByRole('button', { name: 'Live app ↗' }).click()
+    await page.getByRole('button', { name: 'Back to InvoiceMatch project' }).click()
+    await expect(page).toHaveURL(/\/clients\/board\?project=imp$/)
+
+    // Daco platform: the other project, also kept over a reload.
+    await page.goto('/clients')
+    await page.getByRole('article', { name: 'Daco platform' }).getByRole('button', { name: 'Open project ›' }).click()
+    await expect(page).toHaveURL(/\/clients\/board\?project=dacop$/)
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Project Management tool' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'InvoiceMatch' })).toHaveCount(0)
+
+    // A link straight to the project opens it.
+    await page.goto('/clients/board?project=imp')
+    await expect(page.getByRole('heading', { name: 'InvoiceMatch' })).toBeVisible()
+    await expect(page.getByText('Go-live and handover')).toBeVisible()
   })
 })

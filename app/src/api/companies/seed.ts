@@ -1,5 +1,6 @@
 import type { ClientProject, Company } from '../types'
 import { DRIVER_APP_SUPPORT } from '../projects/seed'
+import { IM_PROJECT } from '../../features/invoice-match/data'
 
 /**
  * Client companies, from the prototype's Companies seed (CO0). The Projects
@@ -22,6 +23,8 @@ export const COMPANIES_SEED: Company[] = [
           { id: 'web', name: 'Web app', state: 'active', pct: 35, sprints: 2 },
         ],
       },
+      // v5: the delivered InvoiceMatch app (features/invoice-match), live and in Maintenance.
+      structuredClone(IM_PROJECT),
     ],
     ourRoles: { 1: 'Super admin', 2: 'Admin', 3: 'Developer', 4: 'Developer' },
     archived: false, archivedAt: null,

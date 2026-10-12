@@ -1,6 +1,6 @@
 import type { Db } from '../../api/types'
 import type { Resource } from '../../api/commands'
-import { IM_EPICS, IM_EPIC_IDS, IM_SPRINTS, imTasks, INVOICES_SEED, type InvoiceDecision, type InvoiceMatchDb } from './data'
+import { IM_COMPANY, IM_EPICS, IM_EPIC_IDS, IM_PROJECT, IM_PROJECT_ID, IM_SPRINTS, imTasks, INVOICES_SEED, type InvoiceDecision, type InvoiceMatchDb } from './data'
 
 /** The live app's data is a collection of the shared db. Declared here so api/types.ts stays unchanged. */
 declare module '../../api/types' {
@@ -40,10 +40,12 @@ export const reduceInvoiceMatch = (db: Db, input: { type: string }): Db => {
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /**
- * Adds the InvoiceMatch project (its epics, sprints and delivered tickets) and
- * the live app's invoices to a db: the seed, or a store saved before they
- * existed (run from migrate3 on every load, so it only adds what is missing).
- * The tickets are numbered after the highest ticket id already there.
+ * Adds the InvoiceMatch project (its epics, sprints and delivered tickets, and the
+ * project itself in Daco's company) and the live app's invoices to a db: the seed,
+ * or a store saved before they existed (run from migrate3 on every load, so it only
+ * adds what is missing). The tickets are numbered after the highest ticket id already there.
+ * The company project is added once (`invoiceMatch.projectAdded`): if someone removes it
+ * later, it stays removed.
  */
 export const withInvoiceMatch = <T extends object>(input: T): T & { invoiceMatch: InvoiceMatchDb } => {
   const v = input as Record<string, unknown>
@@ -61,8 +63,15 @@ export const withInvoiceMatch = <T extends object>(input: T): T & { invoiceMatch
       }
     }
   }
-  if (!isObj(v.invoiceMatch) || !Array.isArray(v.invoiceMatch.invoices)) {
-    out = { ...out, invoiceMatch: { invoices: structuredClone(INVOICES_SEED) } }
+  const im = isObj(v.invoiceMatch) && Array.isArray(v.invoiceMatch.invoices) ? (v.invoiceMatch as unknown as InvoiceMatchDb) : null
+  if (!im) out = { ...out, invoiceMatch: { invoices: structuredClone(INVOICES_SEED) } }
+  if (!im?.projectAdded && Array.isArray(v.companies)) {
+    const companies = v.companies.map(c =>
+      isObj(c) && c.id === IM_COMPANY && Array.isArray(c.projects) && !c.projects.some(p => isObj(p) && p.id === IM_PROJECT_ID)
+        ? { ...c, projects: [...c.projects, structuredClone(IM_PROJECT)] }
+        : c,
+    )
+    out = { ...out, companies, invoiceMatch: { ...(out.invoiceMatch as InvoiceMatchDb), projectAdded: true } }
   }
   return out as T & { invoiceMatch: InvoiceMatchDb }
 }

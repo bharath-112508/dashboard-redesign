@@ -1,4 +1,4 @@
-import type { Activity, Epic, Sprint, Task } from '../../api/types'
+import type { Activity, ClientProject, Company, Epic, Sprint, Task } from '../../api/types'
 import { addDays, MON } from '../../lib/dates'
 
 /**
@@ -21,14 +21,35 @@ export const IM_HOST = 'invoicematch.daco.no'
 /** Where the live app opens inside the Clients portal. */
 export const IM_BASE = '/clients/live/invoicematch'
 
-/** Shown on the portal card and in the live app's header. */
+/** The project's id in its company (Companies data); `?project=imp` opens it on the Clients page. */
+export const IM_PROJECT_ID = 'imp'
+
+/** Facts about the live app shown on the portal card and in the live app's header (not part of the company data). */
 export const IM_LIVE = {
-  completed: '2026-09-28',
   uptime: '99.98%',
   version: '1.4.2',
-  supportLeft: '6h',
   lastDeployed: '9 Oct',
+}
+
+/**
+ * The project as Daco's client project in the Companies data: delivered on 28 Sep
+ * (its due date), in Maintenance with a support agreement (6h of 10h left this month).
+ * Team: 1 Rahul, 3 Chary, 2 Vivek.
+ */
+export const IM_PROJECT: ClientProject = {
+  id: IM_PROJECT_ID,
+  name: IM_NAME,
   desc: 'Matches supplier invoices against purchase orders and goods receipts, and routes exceptions for approval.',
+  state: 'maint',
+  pct: 100,
+  start: '2026-08-03',
+  due: '2026-09-28',
+  team: [1, 3, 2],
+  epics: [
+    { id: 'im1', name: 'Matching engine', state: 'done', pct: 100, sprints: 2 },
+    { id: 'im2', name: 'Review & reports', state: 'done', pct: 100, sprints: 2 },
+  ],
+  sup: { until: '2027-09-28', used: 4, quota: 10 },
 }
 
 export const IM_EPICS: Epic[] = [
@@ -85,9 +106,9 @@ export const imTasks = (firstId: number): Task[] =>
 /** The board shows the InvoiceMatch project when every picked epic is one of its epics. */
 export const isImSelection = (epSel: string[]) => epSel.length > 0 && epSel.every(id => IM_EPIC_IDS.includes(id))
 
-/** Whether a client company has the InvoiceMatch project (the prototype matches the name "Daco…"). */
-export const hasInvoiceMatch = (company: { id: string; name: string } | undefined) =>
-  !!company && (company.id === IM_COMPANY || /^daco/i.test(company.name))
+/** Whether a client company has the InvoiceMatch project (read from its projects in the Companies data). */
+export const hasInvoiceMatch = (company: Pick<Company, 'projects'> | undefined) =>
+  !!company && company.projects.some(p => p.id === IM_PROJECT_ID)
 
 // ---------- the live app's data
 
@@ -118,6 +139,8 @@ export interface Invoice {
 /** The live app's own data, stored in the shared db. */
 export interface InvoiceMatchDb {
   invoices: Invoice[]
+  /** Set once the project has been added to its company (migrate3), so a project removed later stays removed. */
+  projectAdded?: boolean
 }
 
 export const INVOICES_SEED: Invoice[] = [

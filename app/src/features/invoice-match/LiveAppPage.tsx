@@ -3,8 +3,8 @@ import { useCompanies } from '../../api/queries'
 import { useSession } from '../../api/session/store'
 import { Icon, PATHS } from '../../components/ui'
 import { useIsClient } from '../../state/access'
-import { useUi } from '../../state/ui'
-import { hasInvoiceMatch, IM_BASE, IM_COMPANY, IM_EPIC_IDS, IM_LIVE, IM_NAME } from './data'
+import { clientsPath, useUi } from '../../state/ui'
+import { hasInvoiceMatch, IM_BASE, IM_EPIC_IDS, IM_LIVE, IM_NAME, IM_PROJECT_ID } from './data'
 import { InvoiceMatchApp, type ImPage } from './InvoiceMatchApp'
 
 /**
@@ -29,7 +29,7 @@ export function LiveAppPage() {
         </div>
       </main>
     )
-  const company = isClient ? companies.find(c => c.id === session?.orgId) : companies.find(c => c.id === IM_COMPANY)
+  const company = isClient ? companies.find(c => c.id === session?.orgId) : companies.find(c => hasInvoiceMatch(c))
   if (!hasInvoiceMatch(company)) return <Navigate to="/clients" replace />
 
   const page: ImPage = seg === 'reports' ? 'reports' : seg === 'invoices' || seg === 'review' ? 'review' : 'inbox'
@@ -38,7 +38,7 @@ export function LiveAppPage() {
     navigate(IM_BASE + '/' + (p === 'review' ? (no ? 'invoices/' + encodeURIComponent(no) : 'review') : p))
   const backToProject = () => {
     ui.setEpics(IM_EPIC_IDS)
-    navigate('/clients/board')
+    navigate(clientsPath('board', IM_PROJECT_ID))
   }
 
   return (

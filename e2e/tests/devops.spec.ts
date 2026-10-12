@@ -417,16 +417,19 @@ test.describe('DevOps board', () => {
     await expect(panelOf(page).getByText('Deployments', { exact: true })).toHaveCount(0)
   })
 
-  test('DO-28 Each DevOps item is a project: the panel shows the linked project and links to Projects (v5)', async ({ page }) => {
+  test('DO-28 Each DevOps item is a project: the panel shows the linked project, as text for DevOps who cannot open Projects (v5)', async ({ page }) => {
     await page.goto('/devops/list')
-    await expect(page.getByText('Customer portal', { exact: true })).toBeVisible()
+    // Scoped to the list: the status hover card (under the pointer left by sign-in) can also show the name.
+    await expect(page.getByRole('main').getByText('Customer portal', { exact: true })).toBeVisible()
     await expect(page.getByText('Alnarp', { exact: true })).toHaveCount(0)
 
     await openProject(page, 'OPS-104')
     const linked = panelOf(page).getByTestId('linked-project')
     await expect(linked).toContainText('Customer portal')
     await expect(linked).toContainText('Client project · Alnarp')
-    await expect(linked.getByRole('link', { name: 'Customer portal' })).toHaveAttribute('href', '/projects?q=Customer%20portal')
+    // The DevOps role cannot open /projects, so the name is not a link (it would only lead to "access denied").
+    await expect(linked.getByText('Customer portal', { exact: true })).toBeVisible()
+    await expect(linked.getByRole('link')).toHaveCount(0)
   })
 
   test('DO-29 New project: the project picker searches, blocks projects already on the board and can pick an internal project (v5)', async ({ page }) => {
@@ -506,5 +509,19 @@ test.describe('DevOps board', () => {
     await openProject(page, 'OPS-121')
     await expect(panelOf(page).getByRole('heading', { name: 'Mystery app' })).toBeVisible()
     await expect(panelOf(page).getByTestId('linked-project')).toContainText('Not linked to a project')
+  })
+})
+
+test.describe('DevOps board as an admin', () => {
+  test('DO-32 The Project card links to Projects for roles that can open it, and the link searches for the project (v5)', async ({ page }) => {
+    await signIn(page, 'admin')
+    await openProject(page, 'OPS-104')
+    const link = panelOf(page).getByTestId('linked-project').getByRole('link', { name: 'Customer portal' })
+    await expect(link).toHaveAttribute('href', '/projects?q=Customer%20portal')
+    await link.click()
+    await expect(page).toHaveURL(/\/projects\?q=Customer(%20|\+)portal/)
+    await expect(page.getByText(/does not have access/)).toHaveCount(0)
+    await expect(page.getByRole('searchbox', { name: 'Search projects' })).toHaveValue('Customer portal')
+    await expect(page.getByRole('link', { name: 'Open Customer portal' })).toBeVisible()
   })
 })

@@ -1,5 +1,6 @@
+import type { ClientProject } from '../../api/types'
 import { short } from '../../lib/dates'
-import { IM_HOST, IM_LIVE, IM_NAME } from './data'
+import { IM_HOST, IM_LIVE } from './data'
 
 /** The live chip used on the card and in the project header. */
 export function LiveDot({ label = 'Live', className = '' }: { label?: string; className?: string }) {
@@ -12,22 +13,24 @@ export function LiveDot({ label = 'Live', className = '' }: { label?: string; cl
 }
 
 /**
- * The portal card of the delivered, live InvoiceMatch project: completed,
- * uptime, version and support hours left, and "Open project" in green.
+ * The portal card of the delivered, live InvoiceMatch project: completed (its
+ * due date), uptime, version and support hours left (its support agreement),
+ * and "Open project" in green. The project comes from the Companies data.
  */
-export function LiveProjectCard({ onOpen }: { onOpen: () => void }) {
+export function LiveProjectCard({ project, onOpen }: { project: ClientProject; onOpen: () => void }) {
+  const left = project.sup ? Math.max(0, project.sup.quota - project.sup.used) + 'h' : '–'
   const facts = [
     { l: 'Uptime', v: IM_LIVE.uptime, c: '#195040' },
     { l: 'Version', v: IM_LIVE.version, c: '#1B2D45' },
-    { l: 'Support left', v: IM_LIVE.supportLeft, c: '#1B2D45' },
+    { l: 'Support left', v: left, c: '#1B2D45' },
   ]
   return (
-    <article aria-label={IM_NAME} className="flex flex-col gap-3 rounded-2xl bg-white p-5 shadow-[0_0_0_1.5px_#D6DEE8]">
+    <article aria-label={project.name} className="flex flex-col gap-3 rounded-2xl bg-white p-5 shadow-[0_0_0_1.5px_#D6DEE8]">
       <div className="flex items-start gap-2.5">
         <div className="min-w-0 flex-1">
-          <h2 className="text-[17px] font-bold leading-snug text-ink">{IM_NAME}</h2>
+          <h2 className="text-[17px] font-bold leading-snug text-ink">{project.name}</h2>
           <div className="mt-0.5 truncate text-[13px] text-ink-2">
-            Completed {short(IM_LIVE.completed)} · live at {IM_HOST}
+            Completed {short(project.due)} · live at {IM_HOST}
           </div>
         </div>
         <span className="inline-flex h-[22px] flex-none items-center gap-1.5 rounded-md bg-[#D6E9E2] px-2 text-[12px] font-bold text-[#195040]">
