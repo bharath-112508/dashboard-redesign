@@ -1,0 +1,12 @@
+{
+  "name": "viljetech-mobile-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test --output=test-results",
+    "test:headed": "playwright test --headed --output=test-results"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}
