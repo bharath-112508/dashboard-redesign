@@ -1,7 +1,7 @@
 import { useQuestions, useRequests } from '../../api/queries'
 import type { DvProject } from '../../api/devops/types'
 import { useDv } from './ctx'
-import { PRIO_ICON, tileOf, tileText, tone } from './model'
+import { PRIO_ICON, tileName, tileOf, tileText, tone } from './model'
 import { FollowUpsTab } from './FollowUpsTab'
 import { PhasesTab } from './PhasesTab'
 import { ActivityTab, ClientChatTab, TicketsTab } from './OtherTabs'
@@ -52,14 +52,15 @@ export function ProjectPanel({ p }: { p: DvProject }) {
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <div
                   className="flex size-8 flex-none items-center justify-center rounded-md text-[12px] font-bold text-white"
-                  style={{ background: tileOf(p.name) }}
+                  style={{ background: tileOf(tileName(p)) }}
                 >
-                  {tileText(p.name)}
+                  {tileText(tileName(p))}
                 </div>
                 <div className="min-w-0 flex-1">
                   <h2 title={p.name} className="m-0 truncate whitespace-nowrap text-[22px] font-bold leading-[1.2] tracking-[-0.02em]">
                     {p.name}
                   </h2>
+                  {p.client && <div className="mt-0.5 text-[13px] text-muted">{p.client}</div>}
                 </div>
               </div>
               <div className="flex flex-none items-center gap-2.5">

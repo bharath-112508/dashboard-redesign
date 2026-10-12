@@ -16,7 +16,7 @@ import {
   storedLadderHours,
 } from './helpers/devops'
 
-/** Board tests run as Arjun (DevOps). Seed: OPS-102 Inoff (client, step 1), OPS-108 OSBY (dev team), OPS-101 DACO (not started). */
+/** Board tests run as Arjun (DevOps). Seed: OPS-102 Intranet · Inoff (client, step 1), OPS-108 Webshop · OSBY (dev team), OPS-101 Daco platform · Daco (not started). */
 test.describe('DevOps board', () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page, 'devops')
@@ -27,7 +27,7 @@ test.describe('DevOps board', () => {
     await page.getByTitle('List', { exact: true }).click()
     await expect(page).toHaveURL(/\/devops\/list/)
     await expect(page.getByRole('button', { name: /^Project/ })).toBeVisible()
-    await expect(page.getByText('Inoff', { exact: true })).toBeVisible()
+    await expect(page.getByText('Intranet', { exact: true })).toBeVisible()
     await page.getByTitle('Board', { exact: true }).click()
     await expect(page).toHaveURL(/\/devops\/board/)
     await expect(cardsOn(page)).toHaveCount(11)
@@ -55,7 +55,7 @@ test.describe('DevOps board', () => {
   test('DO-03 Search: header search matches project name and key', async ({ page }) => {
     await page.goto('/devops/board')
     const search = page.getByPlaceholder('Search projects, owners, notes…')
-    await search.fill('Inoff')
+    await search.fill('Intranet')
     await expect(cardsOn(page)).toHaveCount(1)
     await expect(page.locator('[data-card="OPS-102"]')).toBeVisible()
     await search.fill('OPS-109')
@@ -172,7 +172,7 @@ test.describe('DevOps board', () => {
     await panel.getByRole('button', { name: 'Add note', exact: true }).last().click()
     await expect(panel.getByText('Customer prefers Swedish invoices', { exact: true })).toBeVisible()
     await openPanelTab(page, 'Activity')
-    await expect(panel.getByText('Added note to Inoff', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Added note to Intranet', { exact: true })).toBeVisible()
 
     await openPanelTab(page, 'Follow-ups')
     await panel.getByRole('button', { name: 'Edit', exact: true }).last().click()
@@ -180,7 +180,7 @@ test.describe('DevOps board', () => {
     await panel.getByRole('button', { name: 'Save', exact: true }).last().click()
     await expect(panel.getByText('Customer prefers English invoices', { exact: true })).toBeVisible()
     await openPanelTab(page, 'Activity')
-    await expect(panel.getByText('Edited note on Inoff', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Edited note on Intranet', { exact: true })).toBeVisible()
 
     await openPanelTab(page, 'Follow-ups')
     await panel.getByRole('button', { name: 'Delete', exact: true }).click()
@@ -380,5 +380,20 @@ test.describe('DevOps board', () => {
     await expect(panelOf(page)).toBeVisible()
     await pressEscape(page)
     await expect(panelOf(page)).toHaveCount(0)
+  })
+
+  test('DO-27 Client and Deployments: cards show the client under the project name, and the panel lists releases', async ({ page }) => {
+    await page.goto('/devops/board')
+    const card = page.locator('[data-card="OPS-106"]')
+    await expect(card.getByText('Fast', { exact: true })).toBeVisible()
+    await expect(card.getByText('ARC', { exact: true })).toBeVisible()
+    await openProject(page, 'OPS-106')
+    const panel = panelOf(page)
+    await expect(panel.getByRole('heading', { name: 'Fast' })).toBeVisible()
+    await expect(panel.getByText('Deployments', { exact: true })).toBeVisible()
+    await expect(panel.locator('[data-release]')).toHaveCount(5)
+    await expect(panel.locator('[data-release="2.5.3"]')).toContainText('rolled back')
+    await openProject(page, 'OPS-102')
+    await expect(panelOf(page).getByText('Deployments', { exact: true })).toHaveCount(0)
   })
 })

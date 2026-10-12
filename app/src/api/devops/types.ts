@@ -41,6 +41,8 @@ export interface DvNote {
 export interface DvProject {
   key: string
   name: string
+  /** The client company the project is for; shown under the name and used for the tile. */
+  client?: string
   /** All projects are client projects for now; the Sequence switch filters on this. */
   kind: 'client' | 'internal'
   /** The project's status (a name from settings.statuses). */
@@ -97,6 +99,8 @@ export interface DvProject {
   nextStart?: string | null
   history?: { text: string; when: string; due?: string | null }[]
   pnotes?: DvNote[]
+  /** Release history, shown under Deployments in the panel sidebar. */
+  deploys?: DvDeployments | null
   /** ISO date the project was added. */
   added: string
   /** Newest first. */
@@ -131,6 +135,23 @@ export interface DvSettings {
   options: Record<string, string[]>
   /** DevOps team members (owners and request assignees). */
   people: string[]
+}
+
+/** One release of a project, newest first in DvDeployments.rel. */
+export interface DvRelease {
+  v: string
+  name: string
+  st: 'Live' | 'Rolled back'
+  /** ISO datetime of the release, e.g. "2026-10-09T13:12". */
+  when: string
+  note?: string
+}
+
+/** A project's release history (sample data; no command writes it yet). */
+export interface DvDeployments {
+  /** ISO date of the first go-live. */
+  first: string
+  rel: DvRelease[]
 }
 
 export interface DevopsDb {

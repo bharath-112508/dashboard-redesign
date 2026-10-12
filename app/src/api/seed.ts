@@ -291,7 +291,7 @@ export const createSeed = (): Db => {
     devops: createDevopsSeed(),
     requests: [
       {
-        id: 1, key: 'OPS-101', pname: 'DACO', rkey: 'REQ-1', type: 'Environment', prio: 'High', to: 'Chary',
+        id: 1, key: 'OPS-101', pname: 'Daco platform', rkey: 'REQ-1', type: 'Environment', prio: 'High', to: 'Chary',
         text: 'Need a staging environment for the Sprint 2 build', by: 'Rahul', when: 'yesterday', raised: '2026-10-09', status: 'In progress',
         comments: [
           { by: 'Rahul', text: 'We need it before Friday for client testing.', when: 'yesterday', side: 'tickets' },
@@ -299,7 +299,7 @@ export const createSeed = (): Db => {
         ],
       },
       {
-        id: 2, key: 'OPS-101', pname: 'DACO', rkey: 'REQ-2', type: 'Access', prio: 'Medium', to: '',
+        id: 2, key: 'OPS-101', pname: 'Daco platform', rkey: 'REQ-2', type: 'Access', prio: 'Medium', to: '',
         text: 'Give Vivek read access to the production logs', by: 'Rahul', when: '2d ago', raised: '2026-10-08', status: 'Open', comments: [],
       },
     ],

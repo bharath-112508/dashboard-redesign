@@ -3,6 +3,7 @@ import { createSeed, DB_VERSION, personIdByName } from './seed'
 import { PEOPLE_SEED } from './people/seed'
 import { COMPANIES_SEED } from './companies/seed'
 import { INTERNAL_PROJECTS_SEED } from './projects/seed'
+import { upgradeDevopsNames } from './devops/seed'
 import type { Db } from './types'
 import { setSaveProblem } from '../components/SaveNotice'
 
@@ -73,6 +74,7 @@ const migrate = (v: unknown): unknown => {
  */
 const migrate3 = (v: Record<string, unknown>): unknown => ({
   ...v,
+  ...devopsNames(v),
   version: DB_VERSION,
   leave: Array.isArray(v.leave) ? v.leave : [],
   notifications: Array.isArray(v.notifications) ? v.notifications : [],
@@ -80,6 +82,12 @@ const migrate3 = (v: Record<string, unknown>): unknown => ({
   internalProjects: Array.isArray(v.internalProjects) && v.internalProjects.length ? v.internalProjects : clone(INTERNAL_PROJECTS_SEED),
   weekSubmissions: Array.isArray(v.weekSubmissions) ? v.weekSubmissions : [],
 })
+
+/** DevOps sample projects saved under their pre-v4 names get the client / project split. */
+const devopsNames = (v: Record<string, unknown>) =>
+  isObj(v.devops) && Array.isArray(v.devops.projects) && Array.isArray(v.requests)
+    ? upgradeDevopsNames(v.devops as unknown as Db['devops'], v.requests as Db['requests'])
+    : {}
 
 /** Version 2 gains people, companies, internal projects and per-entry person ids. */
 const upgrade2 = (v: Record<string, unknown>): Record<string, unknown> => {

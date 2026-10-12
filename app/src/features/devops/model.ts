@@ -62,6 +62,12 @@ export const tileText = (n: string) =>
     .slice(0, 2)
     .toUpperCase() || n[0]
 
+/** The tile shows the client's initials, or the project's when it has no client. */
+export const tileName = (p: { client?: string; name: string }) => p.client || p.name
+
+/** Day label of a release: "Today", or "9 Oct". */
+export const releaseDay = (iso: string) => (iso.slice(0, 10) === TODAY ? 'Today' : shortD(iso))
+
 /** Owner avatar colours on the board. */
 const AV: Record<string, string> = { Chary: '#B98A2F', Vivek: '#30b0c7', Raj: '#5e5ce6', Ganesh: '#3F9079', Rahul: '#4870E8' }
 export const ownerColor = (n: string | null | undefined) => (n && AV[n]) || '#A9B6C5'

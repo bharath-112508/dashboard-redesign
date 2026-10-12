@@ -100,6 +100,7 @@ Front-end build of `project/DevOps Board v6.dc.html`, at `/devops/board` and `/d
 - **Filters:** All, Due now, Client, Dev team, Escalated and Rescheduled tabs with counts, plus the All / Client / Internal "Sequence" switch.
 - **Board:** one column per status, each with its default description. Dragging a card to another column opens the status change window.
 - **List:** one line per project, with a sort arrow on every column. Status and priority sort in workflow order, dates by date, and empty values always go last. Hovering a status shows its description, which you can edit and log. Hovering a project name shows its current phase.
+- **Client under the name:** each project has a client company (`client`). The list row, the board card and the panel header show it under the project name, and the initials tile uses the client's initials. A new project takes the client from the company that has a project of that name (Companies), or none.
 - **Critical projects** pulse light red, with a red edge, in both views. The pulse stops when reduced motion is on.
 - **Project panel** (`?project=OPS-101&tab=…`):
   - **Follow-ups:**
@@ -115,7 +116,7 @@ Front-end build of `project/DevOps Board v6.dc.html`, at `/devops/board` and `/d
   - **Activity:** every change, logged with the old value, and free-form posts.
   - **Tickets:** DevOps requests raised from Tickets for this project. Clicking one opens the request window (`?request=`). There you can change the status, priority, type and assignee, edit the description in the markdown editor, reply (`side: 'devops'`), set the start, due date and estimate (the due date and estimate lock once set), and log time. Its activity tab shows the request's history.
   - **Client chat:** raise a question to the client (`question.create` with `fromDevops` and the project key). It shows on `/clients` under "Questions to client" with a DevOps tag. The question window (`?question=`) has the chat and "Mark as solved".
-  - **Sidebar:** Details pill dropdowns. Each has "+ New …", and a new status asks for a description that goes into Settings. The CI/CD switch sits under Deployment type. Below are the Dates: the estimated deployment card and editable dates, with the initial due date and dev phase due date locked when the rules say so.
+  - **Sidebar:** Details pill dropdowns. Each has "+ New …", and a new status asks for a description that goes into Settings. The CI/CD switch sits under Deployment type. Projects with a release history (`deploys`, sample data on OPS-106) then show **Deployments**: each release with its version, name, "rolled back" in red when it was, and its day. Below are the Dates: the estimated deployment card and editable dates, with the initial due date and dev phase due date locked when the rules say so.
 - **Status change window:** opens for every status change. It shows old → new, and a description pre-filled from Settings with a "Use default" link. Moving to Client onboarding also requires the initial due date and the first reminder, and starts the client sequence.
 - **Settings** (`?settings=infra|seq|dates|dev`):
   - Statuses, with their default descriptions.
@@ -151,7 +152,9 @@ Front-end build of `project/DevOps Board v6.dc.html`, at `/devops/board` and `/d
 - **Request estimate** locks as soon as it's set (on blur), using the stored estimate. The prototype kept a separate `estLock` flag that the shared request type doesn't have.
 - **New project** doesn't reset the page's filter and search after creating, but it opens the new project straight away.
 - **"Export a backup"** in the footer downloads the board's data as JSON; in the prototype it was a dead link.
-- **Escape** closes the status window, then an open menu, then the top window. The prototype did the same, but for the project panel only.
+- **Escape** closes the status window, then an open menu, then the top window.
+- **v4 design (client and project name):** the sample projects are renamed (DACO → Daco platform for Daco, and so on). A store saved before keeps its data; sample projects still under their old name get the new name, client and sample releases on load, and requests on them the new project name (`upgradeDevopsNames`, run from `migrate3`). The release the prototype dates "Today" is stored on the app's today (10 Oct).
+- **Left out of the v4 Deployments design:** the second Deployments block in the New project window ("Live on Production", feed, "Notify me when live on" switches, `vt.deployNotify`) reads values the prototype never computes (`dep.prod`, `dep.feed`, `dep.envs`, `dep.auto`) and has no project to show in a new-project form, so it isn't built. The unused release strip and picker (`dep.strip`, `dep.pick`) and the disabled "2.6.2 Just now" release are dead code too. Search still matches the project name, not the client, as in the prototype. The prototype did the same, but for the project panel only.
 
 # App shell, sign-in and roles
 

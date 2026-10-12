@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties } from 'react'
 import type { DvProject } from '../../api/devops/types'
 import { useDv } from '../../features/devops/ctx'
-import { ownerColor, tileOf, tileText } from '../../features/devops/model'
+import { ownerColor, tileName, tileOf, tileText } from '../../features/devops/model'
 import { PrioIcon } from '../../features/devops/ui'
 import { projectView } from '../../features/devops/view'
 
@@ -80,12 +80,13 @@ export function BoardView({ projects, onOpen }: { projects: DvProject[]; onOpen:
                     <div className="flex items-center gap-2.5">
                       <div
                         className="flex size-6 flex-none items-center justify-center rounded text-[10px] font-bold text-white"
-                        style={{ background: tileOf(c.name) }}
+                        style={{ background: tileOf(tileName(c)) }}
                       >
-                        {tileText(c.name)}
+                        {tileText(tileName(c))}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate whitespace-nowrap text-[14px] font-semibold">{c.name}</div>
+                        {c.client && <div className="truncate whitespace-nowrap text-[11.5px] font-medium text-muted">{c.client}</div>}
                       </div>
                       <div className="tnum flex-none whitespace-nowrap rounded-[5px] bg-sky-2 px-1.5 py-[3px] font-sans text-[11px] font-medium leading-none text-blue-ink">
                         {c.key}
