@@ -86,7 +86,6 @@ export function BoardView({ projects, onOpen }: { projects: DvProject[]; onOpen:
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="truncate whitespace-nowrap text-[14px] font-semibold">{c.name}</div>
-                        {c.client && <div className="truncate whitespace-nowrap text-[11.5px] font-medium text-muted">{c.client}</div>}
                       </div>
                       <div className="tnum flex-none whitespace-nowrap rounded-[5px] bg-sky-2 px-1.5 py-[3px] font-sans text-[11px] font-medium leading-none text-blue-ink">
                         {c.key}

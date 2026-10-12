@@ -5,6 +5,8 @@
  * reminder times. The page formats them ("12 Oct 2026, 07:00").
  */
 
+import type { ProjectRef } from '../types'
+
 /** One line in a project's Activity tab. */
 export interface DvLog {
   /** 'Field change' | 'Phase change' | 'Follow-up' | 'Action' | 'Note' | 'Action update' */
@@ -40,10 +42,17 @@ export interface DvNote {
 
 export interface DvProject {
   key: string
+  /**
+   * The project's name: a copy of the linked project's name, taken when the item is created
+   * (projects cannot be renamed). Requests keep it as `pname`.
+   */
   name: string
-  /** The client company the project is for; shown under the name and used for the tile. */
-  client?: string
-  /** All projects are client projects for now; the Sequence switch filters on this. */
+  /**
+   * The project this DevOps item is (v5: DevOps is project specific): a client project inside its
+   * company, or an internal project. Null only for an item saved before v5 whose project could not be found.
+   */
+  project: ProjectRef | null
+  /** Follows the linked project's kind; the Sequence switch filters on this. */
   kind: 'client' | 'internal'
   /** The project's status (a name from settings.statuses). */
   infra: string

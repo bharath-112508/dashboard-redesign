@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
-import { useDevops, useWorkspace } from '../../api/queries'
+import { useCompanies, useDevops, useInternalProjects, useWorkspace } from '../../api/queries'
+import { linkedProject } from '../../domain/projects'
 import { useUi } from '../../state/ui'
 import { deploys, latestRelease, needsToast, useDeployState } from './deploys'
 import { useMe } from './useMe'
@@ -21,6 +22,8 @@ export function DeployToast({ showEpicBar }: { showEpicBar: () => void }) {
   const ui = useUi()
   const ws = useWorkspace().data
   const dv = useDevops().data
+  const companies = useCompanies().data
+  const internal = useInternalProjects().data
   const st = useDeployState()
 
   const links = ws?.devopsLinks ?? {}
@@ -39,6 +42,7 @@ export function DeployToast({ showEpicBar }: { showEpicBar: () => void }) {
 
   const p = st.toast ? dv?.projects.find(x => x.key === st.toast) : undefined
   const r = latestRelease(p)
+  const client = linkedProject(p?.project, companies, internal)?.companyName
   if (!p || !r) return null
 
   const view = () => {
@@ -61,7 +65,7 @@ export function DeployToast({ showEpicBar }: { showEpicBar: () => void }) {
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-[14px] font-bold text-ink">
-          {p.client ? p.client + ' · ' : ''}
+          {client ? client + ' · ' : ''}
           {p.name} {r.v} is live
         </div>
         <div className="mt-0.5 text-[12.5px] text-muted">

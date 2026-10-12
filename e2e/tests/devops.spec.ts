@@ -18,7 +18,10 @@ import {
   storedLadderHours,
 } from './helpers/devops'
 
-/** Board tests run as Arjun (DevOps). Seed: OPS-102 Intranet · Inoff (client, step 1), OPS-108 Webshop · OSBY (dev team), OPS-101 Daco platform · Daco (not started). */
+/**
+ * Board tests run as Arjun (DevOps). Seed: OPS-102 Intranet · Inoff (client, step 1), OPS-108 Webshop · OSBY (dev team), OPS-101 Daco platform · Daco (not started).
+ * v5: every DevOps item is a project (Intranet is the Inoff company's project `inoffp`, and so on).
+ */
 test.describe('DevOps board', () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page, 'devops')
@@ -287,17 +290,21 @@ test.describe('DevOps board', () => {
     await expect(page.getByText('Marked as solved', { exact: true }).first()).toBeVisible()
   })
 
-  test('DO-20 New project: a new project gets the next OPS key and its panel opens', async ({ page }) => {
+  test('DO-20 New project: picking a project gives the next OPS key and opens its panel (v5)', async ({ page }) => {
     await page.goto('/devops/board')
     await page.getByRole('button', { name: 'New project', exact: true }).click()
     await expect(page).toHaveURL(/new=1/)
-    await page.getByPlaceholder('New project name').fill('Probe Client Portal')
+    await page.getByRole('combobox', { name: 'Project' }).click()
+    await page.getByRole('combobox', { name: 'Project' }).fill('business')
+    await page.getByRole('option', { name: /Business portal/ }).click()
     await page.getByText('Initial due date', { exact: true }).click()
-    await page.getByRole('textbox', { name: 'Initial due date' }).or(page.locator('input[type="date"][aria-label="Initial due date"]')).fill('2026-12-15')
+    await page.locator('input[type="date"][aria-label="Initial due date"]').fill('2026-12-15')
     await page.getByRole('button', { name: 'Create project', exact: true }).click()
     await expect(page).toHaveURL(/project=OPS-112/)
-    await expect(panelOf(page).getByText('Probe Client Portal', { exact: true })).toBeVisible()
+    await expect(panelOf(page).getByRole('heading', { name: 'Business portal' })).toBeVisible()
     await expect(panelOf(page).getByText('OPS-112', { exact: true })).toBeVisible()
+    await expect(panelOf(page).getByTestId('linked-project')).toContainText('Client project · Nordlys Energi')
+    await expect.poll(() => storedProject(page, 'OPS-112', 'project')).toEqual({ kind: 'client', companyId: 'nord', id: 'nordp' })
   })
 
   test('DO-21 Settings: statuses - renaming a status moves its projects to the new name', async ({ page }) => {
@@ -393,11 +400,13 @@ test.describe('DevOps board', () => {
     await expect(panelOf(page)).toHaveCount(0)
   })
 
-  test('DO-27 Client and Deployments: cards show the client under the project name, and the panel lists releases', async ({ page }) => {
+  test('DO-27 Project and Deployments: cards show the project (no client line), and the panel lists releases', async ({ page }) => {
     await page.goto('/devops/board')
     const card = page.locator('[data-card="OPS-106"]')
     await expect(card.getByText('Fast', { exact: true })).toBeVisible()
-    await expect(card.getByText('ARC', { exact: true })).toBeVisible()
+    // v5: the client line under the name is gone, and the tile uses the project's initials.
+    await expect(card.getByText('ARC', { exact: true })).toHaveCount(0)
+    await expect(card.getByText('F', { exact: true })).toBeVisible()
     await openProject(page, 'OPS-106')
     const panel = panelOf(page)
     await expect(panel.getByRole('heading', { name: 'Fast' })).toBeVisible()
@@ -406,5 +415,96 @@ test.describe('DevOps board', () => {
     await expect(panel.locator('[data-release="2.5.3"]')).toContainText('rolled back')
     await openProject(page, 'OPS-102')
     await expect(panelOf(page).getByText('Deployments', { exact: true })).toHaveCount(0)
+  })
+
+  test('DO-28 Each DevOps item is a project: the panel shows the linked project and links to Projects (v5)', async ({ page }) => {
+    await page.goto('/devops/list')
+    await expect(page.getByText('Customer portal', { exact: true })).toBeVisible()
+    await expect(page.getByText('Alnarp', { exact: true })).toHaveCount(0)
+
+    await openProject(page, 'OPS-104')
+    const linked = panelOf(page).getByTestId('linked-project')
+    await expect(linked).toContainText('Customer portal')
+    await expect(linked).toContainText('Client project · Alnarp')
+    await expect(linked.getByRole('link', { name: 'Customer portal' })).toHaveAttribute('href', '/projects?q=Customer%20portal')
+  })
+
+  test('DO-29 New project: the project picker searches, blocks projects already on the board and can pick an internal project (v5)', async ({ page }) => {
+    await page.goto('/devops/board?new=1')
+    await page.getByRole('button', { name: 'Create project', exact: true }).click()
+    await expect(page.getByText('Pick a project', { exact: true }).last()).toBeVisible()
+
+    const picker = page.getByRole('combobox', { name: 'Project' })
+    await picker.click()
+    await picker.fill('daco')
+    const taken = page.getByRole('option', { name: /Daco platform/ })
+    await expect(taken).toHaveAttribute('aria-disabled', 'true')
+    await expect(taken).toContainText('On the board · OPS-101')
+    await taken.click({ force: true })
+    await expect(page.getByRole('listbox', { name: 'Projects' })).toBeVisible()
+
+    await picker.fill('website')
+    await expect(page.getByRole('group', { name: 'Internal projects' }).getByRole('option', { name: /Viljetech website/ })).toBeVisible()
+    await picker.press('Enter') // the first free match: Fa tech's Website is on the board (OPS-107)
+    await expect(page.getByRole('listbox', { name: 'Projects' })).toHaveCount(0)
+    await expect(page.getByTestId('new-project')).toContainText('Internal project · Website & marketing')
+
+    await page.getByText('Initial due date', { exact: true }).click()
+    await page.locator('input[type="date"][aria-label="Initial due date"]').fill('2026-12-15')
+    await page.getByRole('button', { name: 'Create project', exact: true }).click()
+    await expect(page).toHaveURL(/project=OPS-112/)
+    await expect(panelOf(page).getByRole('heading', { name: 'Viljetech website' })).toBeVisible()
+    await expect.poll(() => storedProject(page, 'OPS-112', 'project')).toEqual({ kind: 'internal', id: 'i2' })
+    expect(await storedProject(page, 'OPS-112', 'kind')).toBe('internal')
+
+    await page.reload()
+    await expect(panelOf(page).getByTestId('linked-project')).toContainText('Internal project · Website & marketing')
+  })
+
+  test('DO-30 Search matches the project name and the DevOps key (v5)', async ({ page }) => {
+    await page.goto('/devops/board')
+    const search = page.getByPlaceholder('Search projects, owners, notes…')
+    await search.fill('booking platform')
+    await expect(cardsOn(page)).toHaveCount(1)
+    await expect(page.locator('[data-card="OPS-109"]')).toBeVisible()
+    await search.fill('ops-104')
+    await expect(cardsOn(page)).toHaveCount(1)
+    await expect(page.locator('[data-card="OPS-104"]')).toBeVisible()
+  })
+
+  test('DO-31 A store saved before v5 links its DevOps items to projects and keeps their data', async ({ page }) => {
+    // Save the store once (a status description edit), then turn it back into a pre-v5 store.
+    await openProject(page, 'OPS-102')
+    await panelOf(page).getByRole('button', { name: 'Edit status description' }).click()
+    await statusModal(page).getByRole('textbox', { name: 'Description' }).fill('Kept through the upgrade')
+    await statusModal(page).getByRole('button', { name: 'Save & log' }).click()
+    await expect.poll(() => storedProject(page, 'OPS-102', 'infraNote')).toBe('Kept through the upgrade')
+    await page.evaluate(() => {
+      const db = JSON.parse(localStorage.getItem('vt.clients.db') as string)
+      const strip = (p: Record<string, unknown>, client: string) => {
+        delete p.project
+        p.client = client
+        p.kind = 'client'
+      }
+      const p102 = db.devops.projects.find((p: { key: string }) => p.key === 'OPS-102')
+      strip(p102, 'Inoff')
+      db.companies = db.companies.filter((c: { id: string }) => c.id !== 'inoff')
+      const base = db.devops.projects.find((p: { key: string }) => p.key === 'OPS-110')
+      const mk = (key: string, name: string, client: string) => {
+        const p = { ...structuredClone(base), key, name }
+        strip(p, client)
+        return p
+      }
+      db.devops.projects.push(mk('OPS-120', 'Business portal', 'Nordlys Energi'), mk('OPS-121', 'Mystery app', 'Acme'))
+      localStorage.setItem('vt.clients.db', JSON.stringify(db))
+    })
+    await page.goto('/devops/board?project=OPS-102')
+    await expect(panelOf(page).getByText('Kept through the upgrade', { exact: true })).toBeVisible()
+    await expect(panelOf(page).getByTestId('linked-project')).toContainText('Client project · Inoff')
+    await openProject(page, 'OPS-120')
+    await expect(panelOf(page).getByTestId('linked-project')).toContainText('Client project · Nordlys Energi')
+    await openProject(page, 'OPS-121')
+    await expect(panelOf(page).getByRole('heading', { name: 'Mystery app' })).toBeVisible()
+    await expect(panelOf(page).getByTestId('linked-project')).toContainText('Not linked to a project')
   })
 })

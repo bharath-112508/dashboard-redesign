@@ -1,4 +1,4 @@
-import type { Company } from '../types'
+import type { ClientProject, Company } from '../types'
 import { DRIVER_APP_SUPPORT } from '../projects/seed'
 
 /**
@@ -62,4 +62,35 @@ export const COMPANIES_SEED: Company[] = [
     contacts: [{ personId: 10, name: 'Ola Nilsen', role: 'CEO', email: 'ola@havbruk.no', projects: [] }],
     projects: [], ourRoles: {}, archived: false, archivedAt: null,
   },
+  ...DEVOPS_CLIENTS(),
 ]
+
+/** A client of the DevOps board with one project per DevOps item (kept small: no contacts, no team yet). */
+function client(id: string, name: string, industry: string, country: string, p: number, projects: ClientProject[]): Company {
+  return { id, name, industry, country, web: '', p, notes: '', contacts: [], projects, ourRoles: {}, archived: false, archivedAt: null }
+}
+
+function proj(id: string, name: string, desc: string, state: ClientProject['state'], pct: number, due: string): ClientProject {
+  return { id, name, desc, state, pct, due, team: [], epics: [] }
+}
+
+/**
+ * The DevOps board's clients (v5: every DevOps item is a project). Each DevOps
+ * sample item links to one of these projects; see DEVOPS_PROJECT_LINKS in api/devops/seed.ts.
+ */
+export function DEVOPS_CLIENTS(): Company[] {
+  return [
+    client('inoff', 'Inoff', 'Professional services', 'Sweden', 4, [proj('inoffp', 'Intranet', 'Intranet on Microsoft 365 for Inoff staff.', 'active', 10, '2026-11-30')]),
+    client('weland', 'Weland', 'Manufacturing', 'Sweden', 5, [proj('welp', 'Order portal', 'Ordering and order tracking for Weland dealers.', 'active', 30, '2026-10-31')]),
+    client('alnarp', 'Alnarp', 'Agriculture', 'Sweden', 6, [
+      proj('alnp1', 'Customer portal', 'Self-service portal for Alnarp customers.', 'done', 100, '2026-09-15'),
+      proj('alnp2', 'Lead automation', 'Lead capture and follow-up automation.', 'active', 45, '2026-12-15'),
+    ]),
+    client('arc', 'ARC', 'Retail', 'Norway', 7, [proj('arcp', 'Fast', 'Fast checkout platform, released in versions.', 'active', 80, '2026-10-30')]),
+    client('fatech', 'Fa tech', 'Technology', 'Sweden', 8, [proj('fatp', 'Website', 'Company website and blog.', 'active', 60, '2026-11-15')]),
+    client('osby', 'OSBY', 'Retail', 'Sweden', 9, [proj('osbyp', 'Webshop', 'Online shop for OSBY products.', 'active', 55, '2026-11-20')]),
+    client('redare', 'Redare', 'Travel', 'Norway', 10, [proj('redp', 'Booking platform', 'Bookings and payments for Redare trips.', 'active', 15, '2026-12-15')]),
+    client('sst', 'SST', 'Membership organisation', 'Sweden', 11, [proj('sstp', 'Member portal', 'Member sign-up and member pages.', 'planned', 0, '')]),
+    client('tryggratt', 'Tryggrätt', 'Legal services', 'Sweden', 12, [proj('trygp', 'Case app', 'Case handling app for Tryggrätt lawyers.', 'done', 100, '2026-09-01')]),
+  ]
+}

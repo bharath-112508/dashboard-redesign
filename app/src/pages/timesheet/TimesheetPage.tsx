@@ -3,10 +3,10 @@ import { useSearchParams } from 'react-router'
 import { useCompanies, useEntries, useInternalProjects, useTasks, useWeekSubmissions } from '../../api/queries'
 import { findPerson, usePeople } from '../../api/people/directory'
 import { useSession } from '../../api/session/store'
-import { projectOptions } from '../../api/timesheet/projects'
+import { clientValue, findProject, internalValue, projectOptions } from '../../api/timesheet/projects'
 import { weekStart } from '../../api/timesheet/week'
 import { TODAY } from '../../lib/dates'
-import { HistoryView } from './HistoryView'
+import { HistoryView, type HistoryScope } from './HistoryView'
 import { WeekView } from './WeekView'
 import type { TimeCtx } from './model'
 
@@ -15,12 +15,14 @@ type Tab = 'week' | 'history'
 /**
  * My timesheet (/timesheet). Shows the signed-in person's time from the shared
  * time store: the week view with the log form and week submit, and the history.
- * `?company=<id>` narrows the projects to one company (the Companies link).
+ * A Companies or Projects "Timesheet" link (`?company=<id>` or `?project=<id>`, with an optional
+ * `name`) opens the history as the page itself, limited to that company's projects or that one project.
  */
 export function TimesheetPage() {
   const session = useSession()
   const [params, setParams] = useSearchParams()
   const companyId = params.get('company')
+  const projectId = companyId ? null : params.get('project')
   const [tab, setTab] = useState<Tab>('week')
   const [week, setWeek] = useState(() => weekStart(TODAY))
 
@@ -57,12 +59,31 @@ export function TimesheetPage() {
     submissions,
     companyId,
   }
-  const company = companyId ? companies.find(c => c.id === companyId) : undefined
   const projects = projectOptions(companies, internal, companyId)
 
-  const showAll = () => {
-    params.delete('company')
-    setParams(params, { replace: true })
+  const scope = scopeOf(params, companyId, projectId, ctx)
+  if (scope) {
+    const leave = () => {
+      for (const k of ['company', 'project', 'projects', 'name']) params.delete(k)
+      setTab('week')
+      setParams(params, { replace: true })
+    }
+    return (
+      <main className="flex flex-col gap-4 px-7 pb-10 pt-5">
+        <header className="min-w-0">
+          <h1 className="font-serif text-[30px] leading-tight text-ink">Timesheets · {scope.name}</h1>
+          <p className="mt-1 text-[13.5px] text-ink-2">
+            {me.name} · {session.org}
+          </p>
+        </header>
+        {!scope.values.length && (
+          <div className="rounded-[12px] border-[1.5px] border-line-2 bg-white px-4 py-2.5 text-[13px] text-ink-2">
+            No {projectId ? 'project' : 'company'} matches this link, so no time is shown.
+          </div>
+        )}
+        <HistoryView key={params.toString()} ctx={ctx} scope={scope} onLeaveScope={leave} />
+      </main>
+    )
   }
 
   const tabBtn = (id: Tab, label: string) => (
@@ -94,21 +115,6 @@ export function TimesheetPage() {
         </div>
       </header>
 
-      {companyId && (
-        <div className="flex flex-wrap items-center gap-3 rounded-[12px] border-[1.5px] border-line-2 bg-white px-4 py-2.5 text-[13px] text-ink-2">
-          {company ? (
-            <span>
-              Showing projects for <b className="text-ink">{company.name}</b>.
-            </span>
-          ) : (
-            <span>No company matches this link, so no projects are shown.</span>
-          )}
-          <button type="button" onClick={showAll} className="cursor-pointer border-0 bg-transparent font-semibold text-blue-ink underline">
-            Show all projects
-          </button>
-        </div>
-      )}
-
       {tab === 'week' ? (
         <WeekView ctx={ctx} projects={projects} week={week} setWeek={setWeek} />
       ) : (
@@ -116,4 +122,23 @@ export function TimesheetPage() {
       )}
     </main>
   )
+}
+
+/** The scope of a Companies (`?company=`) or Projects (`?project=`) link, or null for the plain page. */
+function scopeOf(params: URLSearchParams, companyId: string | null, projectId: string | null, ctx: TimeCtx): HistoryScope | null {
+  const name = params.get('name')
+  if (companyId) {
+    const co = ctx.companies.find(c => c.id === companyId)
+    const fromUrl = (params.get('projects') || '').split(',').filter(Boolean)
+    const ids = fromUrl.length ? fromUrl : co ? co.projects.map(p => p.id) : []
+    return { name: name || co?.name || companyId, values: ids.map(clientValue), single: false }
+  }
+  if (projectId) {
+    const client = findProject(clientValue(projectId), ctx.companies, ctx.internal)
+    const own = client ?? findProject(internalValue(projectId), ctx.companies, ctx.internal)
+    // "Daco · Daco platform" for a client project, the bare name for an internal one.
+    const label = own ? (client ? own.label : own.label.replace(/^Internal · /, '')) : projectId
+    return { name: name || label, values: own ? [own.value] : [], single: true }
+  }
+  return null
 }

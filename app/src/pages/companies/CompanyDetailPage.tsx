@@ -14,6 +14,7 @@ import { ResponsibleDialog } from './ResponsibleDialog'
 import { ArchiveDialog } from './ArchiveDialog'
 import { LogoField } from './LogoField'
 import { NewProjectDialog } from '../projects/NewProjectDialog'
+import { TimesheetLink } from '../projects/TimesheetLink'
 
 type Modal =
   | { kind: 'edit'; focus?: 'web' }
@@ -181,8 +182,8 @@ export function CompanyDetailPage() {
               {visibleProjects.map(p => {
                 const due = dueLabel(p.due, p.state, p.sup)
                 return (
-                  <li key={p.id}>
-                    <Link to="/tickets/board" className="flex items-center gap-4 py-3 text-ink no-underline hover:text-blue-ink">
+                  <li key={p.id} className="flex items-center gap-3">
+                    <Link to="/tickets/board" className="flex min-w-0 flex-1 items-center gap-4 py-3 text-ink no-underline hover:text-blue-ink">
                       <ProgressRing pct={p.pct} size={40} color={STATE_TONE[p.state].dot} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[14.5px] font-bold">{p.name}</span>
@@ -193,6 +194,7 @@ export function CompanyDetailPage() {
                         <span className={`text-[11.5px] font-semibold ${DUE_TONE[due.tone]}`}>{due.text}</span>
                       </span>
                     </Link>
+                    <TimesheetLink projectId={p.id} name={p.name} />
                   </li>
                 )
               })}

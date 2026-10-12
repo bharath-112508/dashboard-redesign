@@ -1,5 +1,5 @@
 import { useMemo, useState, type DragEvent } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 import { useCompanies, useInternalProjects, useSend } from '../../api/queries'
 import { usePeople } from '../../api/people/directory'
 import { useSession } from '../../api/session/store'
@@ -9,6 +9,7 @@ import { PersonDot, ProgressRing, SearchGlyph, StatePill } from '../../component
 import { STATE_COLUMNS, STATE_LABEL, STATE_TONE, dueLabel, isOverdue, projectItems, refKey, sortProjects, supportUntil, type ProjectItem } from '../../domain/projects'
 import { plural } from '../../lib/dates'
 import { NewProjectDialog } from './NewProjectDialog'
+import { TimesheetLink } from './TimesheetLink'
 
 type Kind = 'all' | 'client' | 'internal'
 type StateFilter = 'any' | ProjectState
@@ -40,7 +41,9 @@ export function ProjectsPage() {
   const move = useSend()
   const [kind, setKind] = useState<Kind>('all')
   const [st, setSt] = useState<StateFilter>('any')
-  const [q, setQ] = useState('')
+  // `?q=` pre-fills the search (the DevOps board links a project this way).
+  const [params] = useSearchParams()
+  const [q, setQ] = useState(() => params.get('q') ?? '')
   const [view, setView] = useState<View>('board')
   const [creating, setCreating] = useState<{ state?: ProjectState } | null>(null)
   const [dragOver, setDragOver] = useState<ProjectState | null>(null)
@@ -252,6 +255,10 @@ function ProjectCard({ item: p, people, onMove }: { item: ProjectItem; people: {
         <ProgressRing pct={p.pct} size={36} color={STATE_TONE[p.state].dot} />
         <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted">{p.kind === 'client' ? (p.epics ? plural(p.epics, 'epic') : 'No epics') : ''}</span>
         <span className={`whitespace-nowrap text-right text-[11.5px] font-semibold ${DUE_TONE[due.tone]}`}>{due.text}</span>
+      </div>
+      {/* v5: the design puts "Timesheet" next to the due chip; the board's narrow cards give it its own row. */}
+      <div className="mt-2.5 flex">
+        <TimesheetLink projectId={p.ref.id} name={p.name} />
       </div>
       <div className="mt-3 flex items-center gap-2 border-t border-line-3 pt-2.5">
         <div className="flex -space-x-1.5">

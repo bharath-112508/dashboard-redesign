@@ -1,4 +1,5 @@
 import { useState, type CSSProperties } from 'react'
+import { Link } from 'react-router'
 import { useSend } from '../../api/queries'
 import type { DvDeployments, DvProject } from '../../api/devops/types'
 import { useDv } from './ctx'
@@ -12,6 +13,8 @@ import {
   ownerColor,
   relD,
   releaseDay,
+  tileOf,
+  tileText,
   tone,
   type FieldKey,
 } from './model'
@@ -207,7 +210,39 @@ function Deployments({ d }: { d: DvDeployments }) {
   )
 }
 
-/** The right-hand column of the project panel: Details, Deployments (when there are any) and Dates. */
+/**
+ * The project this DevOps item is (v5): its name, its company (client project) or area (internal),
+ * and a link to it on the Projects page.
+ */
+function LinkedProjectCard({ p }: { p: DvProject }) {
+  const { projectOf } = useDv()
+  const lp = projectOf(p)
+  return (
+    <div data-testid="linked-project" className={`${card} flex items-center gap-2.5 px-3.5 py-3`}>
+      <div className="flex size-8 flex-none items-center justify-center rounded-md text-[12px] font-bold text-white" style={{ background: lp ? tileOf(lp.name) : '#A9B6C5' }}>
+        {lp ? tileText(lp.name) : '?'}
+      </div>
+      {lp ? (
+        <div className="min-w-0 flex-1">
+          <Link
+            to={`/projects?q=${encodeURIComponent(lp.name)}`}
+            title="Open in Projects"
+            className="block truncate whitespace-nowrap text-[13.5px] font-semibold text-ink no-underline hover:text-blue-ink hover:underline"
+          >
+            {lp.name}
+          </Link>
+          <div className="mt-px truncate whitespace-nowrap text-[11.5px] text-muted">
+            {lp.kind === 'client' ? `Client project · ${lp.companyName}` : `Internal project${lp.area ? ' · ' + lp.area : ''}`}
+          </div>
+        </div>
+      ) : (
+        <div className="min-w-0 flex-1 text-[12.5px] text-muted">Not linked to a project. The project it was saved with no longer exists.</div>
+      )}
+    </div>
+  )
+}
+
+/** The right-hand column of the project panel: Project, Details, Deployments (when there are any) and Dates. */
 export function Sidebar({ p }: { p: DvProject }) {
   const { db, update } = useDv()
   /** A date is fixed only once it has a value (the rules decide whether it is locked). */
@@ -239,7 +274,9 @@ export function Sidebar({ p }: { p: DvProject }) {
 
   return (
     <div className="flex-[0_0_308px] overflow-y-auto border-l-[0.5px] border-black/[0.06] bg-canvas px-[18px] pb-7 pt-16">
-      <div className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Details</div>
+      <div className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Project</div>
+      <LinkedProjectCard p={p} />
+      <div className="px-1 pb-2 pt-7 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Details</div>
       <div className={card}>
         {DETAIL_KEYS.map((k, i) => (
           <div key={k} style={{ borderTop: i ? '0.5px solid rgba(0,0,0,0.07)' : 'none' }}>
