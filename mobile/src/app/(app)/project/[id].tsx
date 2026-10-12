@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { ProjectScreen } from '@/features/projects/ProjectScreen';
 
-/** S5-PROJECT Project — placeholder; W2 replaces this body. */
+/** S5-PROJECT (`?tab=`). */
 export default function ProjectRoute() {
-  const params = useLocalSearchParams<{ id?: string; tab?: string }>();
-  return <PlaceholderScreen spec="S5-PROJECT Project" owner="W2" title="Project" id="project" params={params} />;
+  const { id, tab } = useLocalSearchParams<{ id?: string; tab?: string }>();
+  return <ProjectScreen key={id} id={id ?? ''} tab={tab} />;
 }

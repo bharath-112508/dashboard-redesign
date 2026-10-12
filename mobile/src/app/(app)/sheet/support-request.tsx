@@ -1,10 +1,10 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderSheet } from '@/components/Placeholder';
+import { SupportRequestSheet } from '@/features/projects/sheets/SupportRequestSheet';
 import type { SheetQuery } from '@/nav/routes';
 
-/** SH-SUPREQ Report a problem / Request a change (URL sheet `support-request`) — placeholder; W2 replaces this body. */
+/** SH-SUPREQ Report a problem / Request a change (URL sheet `support-request`, `{pid, kind}`). */
 export default function SupportRequestSheetRoute() {
-  const params = useLocalSearchParams<SheetQuery<'support-request'>>();
-  return <PlaceholderSheet spec="SH-SUPREQ Report a problem / Request a change" owner="W2" title="Support request" id="support-request" params={params} />;
+  const { pid, kind } = useLocalSearchParams<SheetQuery<'support-request'>>();
+  return <SupportRequestSheet pid={pid ?? ''} kind={kind === 'change' ? 'change' : 'problem'} />;
 }
