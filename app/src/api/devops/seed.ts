@@ -24,12 +24,12 @@ const DEV = { from: 'Development team', prio: 'Not set', act: 'Not required', st
 
 const P: SeedProject[] = [
   {
-    key: 'OPS-101', name: 'DACO', infra: 'Not started', from: 'Not set', prio: 'Medium', act: 'Not required', step: null,
+    key: 'OPS-101', client: 'Daco', name: 'Daco platform', infra: 'Not started', from: 'Not set', prio: 'Medium', act: 'Not required', step: null,
     phase: 'Kickoff email drafted. Onboarding starts once the client confirms the contact person.',
     deploy: 'Waiting', dev: 'Not set', owner: 'Chary', added: '2026-10-04',
   },
   {
-    key: 'OPS-102', name: 'Inoff', infra: 'Client onboarding', from: 'Client', prio: 'High', act: 'Reminder 1', step: 1,
+    key: 'OPS-102', client: 'Inoff', name: 'Intranet', infra: 'Client onboarding', from: 'Client', prio: 'High', act: 'Reminder 1', step: 1,
     seqStart: '2026-10-03T07:00',
     phase: 'Following up with the client for Azure environment onboarding.',
     logs: [{ type: 'Action update', by: 'Rahul', when: '2 d ago', text: 'First reminder sent asking for the Azure and Microsoft 365 tenant details.' }],
@@ -38,7 +38,7 @@ const P: SeedProject[] = [
     deploy: 'Waiting', dev: 'Not set', owner: 'Vivek', next: NEXT_365, added: '2026-10-01',
   },
   {
-    key: 'OPS-103', name: 'Weland', infra: 'Client onboarding', from: 'Client', prio: 'Critical', act: 'Inform Marcus', step: 4,
+    key: 'OPS-103', client: 'Weland', name: 'Order portal', infra: 'Client onboarding', from: 'Client', prio: 'Critical', act: 'Inform Marcus', step: 4,
     seqStart: '2026-09-30T07:00',
     phase: 'Internal deployment is complete. Follow up with the client regarding the previously sent email and await their response.',
     logs: [{ type: 'Action update', by: 'Rahul', when: '3 d ago', text: 'No reply after the call. Marcus informed.' }],
@@ -47,13 +47,13 @@ const P: SeedProject[] = [
     moved: '+20 d', reason: 'No response from client', deploy: 'Waiting', dev: 'Not set', owner: 'Chary', added: '2026-09-28',
   },
   {
-    ...DEV, key: 'OPS-104', cicd: true, name: 'Alnarp Customer portal', infra: 'Deployment Completed', from: 'DevOps',
+    ...DEV, key: 'OPS-104', client: 'Alnarp', cicd: true, name: 'Customer portal', infra: 'Deployment Completed', from: 'DevOps',
     deploy: 'Completed', initDue: '2026-09-15',
     next: "Infrastructure changes will be implemented based on the development team's updates, and the environment will be prepared for deployment.",
     dev: 'Production', owner: 'Raj', added: '2026-09-25',
   },
   {
-    ...DEV, key: 'OPS-105', cicd: true, name: 'Alnarp Lead Automation', infra: 'Adding new services', prio: 'Medium',
+    ...DEV, key: 'OPS-105', client: 'Alnarp', cicd: true, name: 'Lead automation', infra: 'Adding new services', prio: 'Medium',
     deploy: 'Completed', initDue: '2026-12-15',
     ifu: [
       { date: '2026-10-02', name: 'Waiting for dev team', done: true, note: 'Asked dev team for the new service list.' },
@@ -64,21 +64,32 @@ const P: SeedProject[] = [
     dev: 'Development', owner: 'Raj', added: '2026-09-22',
   },
   {
-    ...DEV, key: 'OPS-106', cicd: true, name: 'ARC Fast', infra: 'Prod product deployment', prio: 'High',
+    ...DEV, key: 'OPS-106', client: 'ARC', cicd: true, name: 'Fast', infra: 'Prod product deployment', prio: 'High',
     deploy: 'Waiting', initDue: '2026-10-30',
     ifu: [{ date: '2026-10-08', name: 'Waiting for dev team' }],
     reminder: '2026-10-08T07:00', overdue: true,
     next: "Waiting for the Developers Update. Any necessary changes will be implemented based on the feedback received.",
     dev: 'Client validation', owner: 'Ganesh', added: '2026-09-19',
+    deploys: {
+      first: '2026-09-28',
+      rel: [
+        // The prototype shows this one as "Today"; it is kept on the app's today (10 Oct).
+        { v: '2.6.1', name: 'Ticket import and BankID login', st: 'Live', when: '2026-10-10T10:20' },
+        { v: '2.6.0', name: 'Push notifications', st: 'Live', when: '2026-10-09T13:12' },
+        { v: '2.5.3', name: 'Profile settings', st: 'Rolled back', when: '2026-10-08T16:40', note: 'Rolled back to 2.5.2' },
+        { v: '2.5.2', name: 'Performance fixes', st: 'Live', when: '2026-10-06T10:05' },
+        { v: '1.0.0', name: 'First go-live', st: 'Live', when: '2026-09-28T09:00' },
+      ],
+    },
   },
   {
-    ...DEV, key: 'OPS-107', name: 'Fa tech', infra: 'Dev project deployment', from: 'DevOps', prio: 'Low',
+    ...DEV, key: 'OPS-107', client: 'Fa tech', name: 'Website', infra: 'Dev project deployment', from: 'DevOps', prio: 'Low',
     deploy: 'Waiting', initDue: '2026-11-15',
     next: 'The VM is ready as per the requirement and will be changed according to the next phase of development.',
     dev: 'Development', owner: 'Ganesh', added: '2026-09-16',
   },
   {
-    ...DEV, key: 'OPS-108', name: 'OSBY', infra: 'Internally deployment', prio: 'Medium', deploy: 'Waiting', initDue: '2026-11-20',
+    ...DEV, key: 'OPS-108', client: 'OSBY', name: 'Webshop', infra: 'Internally deployment', prio: 'Medium', deploy: 'Waiting', initDue: '2026-11-20',
     ifu: [
       { date: '2026-09-25', name: 'Waiting for dev team', done: true, note: 'Dev team still finishing the API.' },
       { date: '2026-10-02', name: 'Follow-up 1', done: true, note: 'Two more days needed for testing.' },
@@ -89,7 +100,7 @@ const P: SeedProject[] = [
     dev: 'Testing', owner: 'Ganesh', added: '2026-09-13',
   },
   {
-    key: 'OPS-109', name: 'Redare', infra: 'Client onboarding', from: 'Client', prio: 'Medium', act: 'Waiting for client', step: 0,
+    key: 'OPS-109', client: 'Redare', name: 'Booking platform', infra: 'Client onboarding', from: 'Client', prio: 'Medium', act: 'Waiting for client', step: 0,
     seqStart: '2026-10-09T07:00',
     phase: 'Onboarding email sent with the infrastructure checklist.',
     logs: [{ type: 'Action update', by: 'Rahul', when: 'Today', text: 'Onboarding started and checklist sent to the client.' }],
@@ -97,9 +108,9 @@ const P: SeedProject[] = [
     actDate: '2026-10-09T07:00', reminder: '2026-10-12T07:00', overdue: false, initDue: '2026-12-15',
     deploy: 'Waiting', dev: 'Not set', owner: 'Vivek', added: '2026-09-10',
   },
-  { ...DEV, key: 'OPS-110', name: 'SST', infra: 'Not started', from: 'Not set', deploy: 'Waiting', dev: 'Not set', owner: null, added: '2026-09-07' },
+  { ...DEV, key: 'OPS-110', client: 'SST', name: 'Member portal', infra: 'Not started', from: 'Not set', deploy: 'Waiting', dev: 'Not set', owner: null, added: '2026-09-07' },
   {
-    ...DEV, key: 'OPS-111', cicd: true, name: 'Tryggrätt', infra: 'Deployment Completed', from: 'DevOps', deploy: 'Completed',
+    ...DEV, key: 'OPS-111', client: 'Tryggrätt', cicd: true, name: 'Case app', infra: 'Deployment Completed', from: 'DevOps', deploy: 'Completed',
     initDue: '2026-09-01',
     next: "Infrastructure changes will follow the client's requirements as future development phases progress.",
     dev: 'Production', owner: null, added: '2026-09-04',
@@ -161,3 +172,31 @@ export const createDevopsSeed = (): DevopsDb => ({
     people: ['Chary', 'Vivek', 'Raj', 'Ganesh', 'Rahul'],
   },
 })
+
+/** Project names before the v4 design split them into client and project name. */
+const OLD_NAMES: Record<string, string> = {
+  'OPS-101': 'DACO', 'OPS-102': 'Inoff', 'OPS-103': 'Weland', 'OPS-104': 'Alnarp Customer portal',
+  'OPS-105': 'Alnarp Lead Automation', 'OPS-106': 'ARC Fast', 'OPS-107': 'Fa tech', 'OPS-108': 'OSBY',
+  'OPS-109': 'Redare', 'OPS-110': 'SST', 'OPS-111': 'Tryggrätt',
+}
+
+/**
+ * Brings DevOps data saved before the v4 design up to date: sample projects still
+ * under their old name get the new name, their client and the sample release
+ * history, and requests on them take the new project name. Anything else is kept.
+ */
+export const upgradeDevopsNames = <R extends { key: string; pname: string }>(dv: DevopsDb, requests: R[]) => {
+  const seed = new Map(P.map(p => [p.key, p]))
+  const renamed = new Map<string, string>()
+  const projects = dv.projects.map(p => {
+    const s = seed.get(p.key)
+    if (p.client !== undefined || !s || OLD_NAMES[p.key] !== p.name) return p
+    renamed.set(p.key, s.name)
+    return { ...p, name: s.name, client: s.client, ...(s.deploys && !p.deploys ? { deploys: s.deploys } : {}) }
+  })
+  if (!renamed.size) return { devops: dv, requests }
+  return {
+    devops: { ...dv, projects },
+    requests: requests.map(r => (renamed.has(r.key) && r.pname === OLD_NAMES[r.key] ? { ...r, pname: renamed.get(r.key) as string } : r)),
+  }
+}

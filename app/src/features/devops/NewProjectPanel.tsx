@@ -2,7 +2,7 @@ import { useState, type CSSProperties } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useSend } from '../../api/queries'
+import { useCompanies, useSend } from '../../api/queries'
 import type { DvProject, DvSettings } from '../../api/devops/types'
 import { useDv } from './ctx'
 import {
@@ -70,6 +70,7 @@ const card = 'rounded-[14px] bg-white shadow-[0_0_0_0.5px_rgba(0,0,0,0.06),0_1px
 export function NewProjectPanel() {
   const { db, open, dd, setDd, me } = useDv()
   const send = useSend()
+  const companies = useCompanies().data
   const s = db.settings
   const [dateOpen, setDateOpen] = useState<DateKey | null>(null)
   const schema = makeSchema(
@@ -112,6 +113,8 @@ export function NewProjectPanel() {
     const project: DvProject = {
       key,
       name: n.name.trim(),
+      // The client is the company that has a project of this name (none for a free-typed name).
+      client: companies?.find(c => c.projects.some(x => x.name === n.name.trim()))?.name || '',
       kind: 'client',
       infra: n.infra,
       prio: n.prio,

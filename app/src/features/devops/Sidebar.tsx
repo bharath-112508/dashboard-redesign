@@ -1,6 +1,6 @@
 import { useState, type CSSProperties } from 'react'
 import { useSend } from '../../api/queries'
-import type { DvProject } from '../../api/devops/types'
+import type { DvDeployments, DvProject } from '../../api/devops/types'
 import { useDv } from './ctx'
 import {
   dayOf,
@@ -11,6 +11,7 @@ import {
   fmtDay,
   ownerColor,
   relD,
+  releaseDay,
   tone,
   type FieldKey,
 } from './model'
@@ -177,7 +178,36 @@ const DATE_FIELDS: [DateKey, string][] = [
   ['devDue', 'Dev phase due date'],
 ]
 
-/** The right-hand column of the project panel: Details and Dates. */
+/** Release history: a dot per release on a line, newest first. Rolled-back releases are red. */
+function Deployments({ d }: { d: DvDeployments }) {
+  return (
+    <>
+      <div className="mb-2 px-1 pt-7 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Deployments</div>
+      <div className="relative pl-[18px]">
+        <span className="absolute bottom-2 left-1 top-2 w-0.5 bg-line-2" />
+        {d.rel.map(r => {
+          const live = r.st === 'Live'
+          return (
+            <div key={r.v} data-release={r.v} className="relative flex items-baseline gap-2 py-[5px]">
+              <span
+                className="absolute -left-[18px] top-2.5 size-2.5 rounded-full shadow-[0_0_0_2px_#fff]"
+                style={{ background: live ? '#3F9079' : '#C0392B' }}
+              />
+              <span className="tnum text-[13px] font-bold text-ink">{r.v}</span>
+              <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[13px] text-ink-2">
+                {r.name}
+                {!live && <span className="text-[#8E2A1F]"> · rolled back</span>}
+              </span>
+              <span className="flex-none text-[12px] text-muted">{releaseDay(r.when)}</span>
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
+/** The right-hand column of the project panel: Details, Deployments (when there are any) and Dates. */
 export function Sidebar({ p }: { p: DvProject }) {
   const { db, update } = useDv()
   /** A date is fixed only once it has a value (the rules decide whether it is locked). */
@@ -236,6 +266,8 @@ export function Sidebar({ p }: { p: DvProject }) {
           </div>
         ))}
       </div>
+
+      {!!p.deploys?.rel.length && <Deployments d={p.deploys} />}
 
       <div className="px-1 pb-2 pt-7 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Dates</div>
       <div className={`${card} px-3.5 pb-3.5 pt-4`}>
