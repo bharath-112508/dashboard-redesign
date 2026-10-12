@@ -1,8 +1,6 @@
-import { PlaceholderScreen } from '@/components/Placeholder';
-import { useRootActions } from '@/nav/useRootActions';
+import { TimeScreen } from '@/features/time/TimeScreen';
 
-/** S5-TIME Timesheet — placeholder; W3 replaces this body. */
+/** S5-TIME Timesheet (W3). */
 export default function TimeTab() {
-  const actions = useRootActions();
-  return <PlaceholderScreen spec="S5-TIME Timesheet" owner="W3" title="My timesheet" id="time" actions={actions} />;
+  return <TimeScreen />;
 }

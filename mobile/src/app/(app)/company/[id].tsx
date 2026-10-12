@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { CompanyScreen } from '@/features/admin/CompanyScreen';
 
-/** S5-COMPANY Company — placeholder; W3 replaces this body. */
+/** S5-COMPANY Company (W3). */
 export default function CompanyRoute() {
-  const params = useLocalSearchParams<{ id?: string }>();
-  return <PlaceholderScreen spec="S5-COMPANY Company" owner="W3" title="Company" id="company" params={params} />;
+  const { id } = useLocalSearchParams<{ id: string }>();
+  return <CompanyScreen id={id ?? ''} />;
 }

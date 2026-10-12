@@ -1,6 +1,6 @@
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { ProfileScreen } from '@/features/account/ProfileScreen';
 
-/** S5-PROFILE Profile settings — placeholder; W3 replaces this body. */
+/** S5-PROFILE Profile settings (W3). */
 export default function ProfileRoute() {
-  return <PlaceholderScreen spec="S5-PROFILE Profile settings" owner="W3" title="Profile settings" id="me" />;
+  return <ProfileScreen />;
 }

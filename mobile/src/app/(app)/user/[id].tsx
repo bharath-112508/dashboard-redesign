@@ -1,9 +1,9 @@
 import { useLocalSearchParams } from 'expo-router';
 
-import { PlaceholderScreen } from '@/components/Placeholder';
+import { UserScreen } from '@/features/admin/UserScreen';
 
-/** S5-USER User — placeholder; W3 replaces this body. */
+/** S5-USER User (W3). */
 export default function UserRoute() {
-  const params = useLocalSearchParams<{ id?: string }>();
-  return <PlaceholderScreen spec="S5-USER User" owner="W3" title="User" id="user" params={params} />;
+  const { id } = useLocalSearchParams<{ id: string }>();
+  return <UserScreen id={Number(id)} />;
 }
