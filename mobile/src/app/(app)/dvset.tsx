@@ -1,6 +1,6 @@
-import { Placeholder } from '@/components/Placeholder';
+import { DevopsSettingsScreen } from '@/features/devops/DevopsSettingsScreen';
 
-/** S-DVSET DevOps settings. Placeholder: P4 replaces this file (src/app/(app)/dvset.tsx). */
-export default function DvsetScreen() {
-  return <Placeholder screen="S-DVSET" title="DevOps settings" owner="P4" file="src/app/(app)/dvset.tsx" testID="screen-dvset" />;
+/** S-DVSET DevOps settings. */
+export default function DvsetRoute() {
+  return <DevopsSettingsScreen />;
 }
