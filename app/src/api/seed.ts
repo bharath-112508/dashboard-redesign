@@ -6,6 +6,7 @@ import { COMPANIES_SEED } from './companies/seed'
 import { INTERNAL_PROJECTS_SEED } from './projects/seed'
 import { USERS_SEED } from './users/seed'
 import { CLIENT_TEAM_SEED } from './clients/seed'
+import { withInvoiceMatch } from '../features/invoice-match/commands'
 
 const hist = (who: string, what: string, when: string): Activity => ({ kind: 'history', who, what, when })
 
@@ -247,7 +248,8 @@ export const DB_VERSION = 4
 
 export const createSeed = (): Db => {
   const sprints = buildSprints()
-  return {
+  // The InvoiceMatch project and its live app's invoices (features/invoice-match).
+  return withInvoiceMatch({
     version: DB_VERSION,
     workspace: {
       statuses: [
@@ -303,5 +305,5 @@ export const createSeed = (): Db => {
         text: 'Give Vivek read access to the production logs', by: 'Rahul', when: '2d ago', raised: '2026-10-08', status: 'Open', comments: [],
       },
     ],
-  }
+  })
 }

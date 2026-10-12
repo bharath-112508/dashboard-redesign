@@ -55,6 +55,29 @@ To start over with fresh mock data, run `localStorage.removeItem('vt.clients.db'
 - **The DevOps board is built separately.** Data the Clients page shares with the Tickets page and the DevOps board (client bugs, questions, DevOps requests) lives in the mock backend.
 - **Today is fixed at 10 Oct 2026**, as in the design, so overdue and "days left" labels match the mock data.
 
+## InvoiceMatch (v5)
+
+Daco's accounts-payable app, a project Viljetech delivered, built from `Invoice Match.dc.html` and the v5 `Clients.dc.html`. Code in `src/features/invoice-match/`.
+
+- **Portal card:** Daco's "Your projects" lists InvoiceMatch after its own projects: Completed, live at invoicematch.daco.no, uptime, version, support hours left, "Live · last deployed 9 Oct" with a Live chip, and a green "Open project ›".
+- **Project board:** opening it picks its two epics (Matching engine, Review & reports), so the board, Epics & sprints and Timeline show its four done sprints and eleven delivered tickets. The header shows the IM tile, **Completed** and **Live app ↗**; the DevOps label reads **Live**; there are no DevOps requests or questions. Other projects no longer list the InvoiceMatch epics.
+- **Live app** (`/clients/live/invoicematch/inbox | review | invoices/<no> | reports`): "Back to InvoiceMatch project", "Daco · Completed project · Live", the uptime chip, and the app in a browser frame whose address bar follows the page.
+  - **Inbox:** KPIs, filters (All, Needs attention, Awaiting approval, Matched, On hold) with counts, search, "Review next exception".
+  - **Review:** invoice, purchase order and goods receipt cards, line-by-line comparison (±2% on price, exact on quantity), Approve for payment / Put on hold / Reject with a note, Undo decision, Previous / Next.
+  - **Reports:** KPIs, auto-match rate by month (October follows the approvals), exceptions by supplier, Export CSV.
+- **Send feedback** (Feedback button, or ⌘⇧5 / Ctrl+Shift+5 for a snippet): title (required), description, how bad it is, and an optional **Snippet** (drag over part of the app), **Screenshot** (the whole app), **Record** (screen recording, up to two minutes) or **Upload**. Sending creates a client bug (`task.create` with `clientBug`) in Review & reports, so it shows in the Bugs column, in the bug window and in Tickets. The capture is its attachment and goes to IndexedDB like every other attachment.
+- **Data:** the project's epics, sprints and tickets are in the shared workspace and tasks; the invoices are the `invoiceMatch` collection, and decisions are the `invoiceMatch.decide` command. `migrate3` adds both to stores saved before v5 (`withInvoiceMatch`).
+
+### Differences from the prototype
+
+- **Captures without html2canvas.** The prototype loads html2canvas from a CDN. Here the app's DOM is copied with its computed styles into an SVG `foreignObject` and drawn on a canvas (`capture.ts`); web fonts fall back to system fonts in the image. Browsers that refuse to draw it (Safari) show the prototype's "could not be captured, try upload" message.
+- **Real ticket keys.** The thank-you card shows the bug's ticket key (PMT-…) rather than the prototype's FB-001 counter, and the project's delivered tickets are numbered after the existing tickets instead of 9000+, so new tickets keep short keys.
+- **Feedback is stored like any bug.** The prototype kept reports in `vt.imBugs` and the decisions in `im.state`; here both are in the shared db, so they survive a reload and reach the team side.
+- **Only the bug kind.** The prototype's code has Idea and Question kinds, but its form never shows the picker, so every report is a bug.
+- **The open project is page state.** As with other projects, a reload of the board goes back to the default epic; open InvoiceMatch from the portal again.
+- **Left out:** the "Live projects" section of the portal is switched off in the prototype (`hasLive: false`) and is not built.
+- **Who can open it:** Daco's people and the Viljetech team. Other clients are sent back to the portal.
+
 # Tickets page
 
 The team's page, at `/tickets`, built from `project/Tickets.dc.html`. It works on the same tasks, epics, sprints, time entries, questions and DevOps requests as the Clients page, so anything the client does shows up here and the other way round.

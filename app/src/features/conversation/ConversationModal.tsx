@@ -191,7 +191,7 @@ function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
   }))
   const update = (patch: Partial<Task>, log: string) => send({ type: 'task.update', id: bug.id, patch, log })
   // The client who reported it (the first history line), so the window names them.
-  const reporter = bug.acts.find(a => a.what === 'reported this bug')?.who || 'Client'
+  const reporter = bug.acts.find(a => a.what?.startsWith('reported this bug'))?.who || 'Client'
 
   const m: Model = {
     kind: 'Bug report',

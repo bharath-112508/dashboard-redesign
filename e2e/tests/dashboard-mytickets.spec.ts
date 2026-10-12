@@ -297,8 +297,9 @@ test.describe('My tickets', () => {
     await expect(page.locator('[data-row="PMT-9"]')).toBeVisible()
     await expect(page.locator('[data-row="PMT-11"]')).toHaveCount(0)
     await expect(page.getByRole('tab', { name: /^Open/ })).toContainText('3')
-    await expect(page.getByRole('tab', { name: /^Done/ })).toContainText('1')
-    await expect(page.getByRole('tab', { name: /^All/ })).toContainText('4')
+    // PMT-9 plus Rahul's four delivered InvoiceMatch tickets (v5).
+    await expect(page.getByRole('tab', { name: /^Done/ })).toContainText('5')
+    await expect(page.getByRole('tab', { name: /^All/ })).toContainText('8')
   })
 
   test('MT-03 the project chip limits the list to that project', async ({ page }) => {

@@ -4,7 +4,7 @@ import { CheckSquare, Icon, PATHS, Scrim } from '../../components/ui'
 import { range } from '../../lib/dates'
 import { devopsTone, pal } from '../../lib/theme'
 import { useOverlay, useUi } from '../../state/ui'
-import { useScopedWorkspace } from '../../state/access'
+import { useImMode, useProjectWorkspace } from './useClientScope'
 import { sprintsOf } from '../../domain/tasks'
 
 export const SPRINT_DOT = { done: '#3F9079', active: '#4870E8', planned: '#A9B6C5' }
@@ -60,7 +60,9 @@ const chevron = <Icon d={PATHS.chevron} size={11} sw={2.8} className="text-ink-2
 /** Epic and sprint pickers, "Report a bug" and the DevOps status. */
 export function EpicBar({ showSprints }: { showSprints: boolean }) {
   const ui = useUi()
-  const ws = useScopedWorkspace()
+  // The open project's epics only (InvoiceMatch, or every other epic).
+  const ws = useProjectWorkspace()
+  const im = useImMode()
   // The DevOps board owns the projects; the epic bar only shows the linked one's status.
   const devops = useDevops().data
   const overlay = useOverlay()
@@ -108,8 +110,10 @@ export function EpicBar({ showSprints }: { showSprints: boolean }) {
         ? range(eSp[0].start, eSp[eSp.length - 1].end) + ' · ' + eSp.length + ' sprints'
         : ''
 
-  const project = devops.projects.find(x => x.key === ws.devopsLinks[ui.epic])
-  const [dvC, dvBg, dvDot] = devopsTone(project?.infra ?? '')
+  const linked = devops.projects.find(x => x.key === ws.devopsLinks[ui.epic])
+  // v5: the delivered InvoiceMatch project has no DevOps project; it shows as Live.
+  const project = im ? { infra: 'Live' } : linked
+  const [dvC, dvBg, dvDot] = im ? ['#195040', '#DFF1EA', '#3F9079'] : devopsTone(project?.infra ?? '')
 
   return (
     <div className="mt-3.5 flex flex-wrap items-center gap-2.5">

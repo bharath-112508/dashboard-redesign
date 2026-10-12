@@ -6,6 +6,7 @@ import { pal, SPRINT_STATE } from '../../lib/theme'
 import { usePerson } from '../../state/page'
 import { useOverlay, useUi } from '../../state/ui'
 import { useIsClient, useScopedTasks, useScopedWorkspace } from '../../state/access'
+import { useProjectWorkspace } from './useClientScope'
 import { assigneesOf, cardAvatars, sprintsOf, statusOf, taskKey } from '../../domain/tasks'
 import { useCreateTicket, useOpenTask } from '../../features/useOpenTask'
 import { onActivate } from '../../features/plan/keyboard'
@@ -63,8 +64,9 @@ function PlanTaskCard({ t, onOpen }: { t: Task; onOpen: () => void }) {
 /** Epic → Sprints → Tasks tree. */
 export function PlanView() {
   const person = usePerson()
-  const ws = useScopedWorkspace()!
-  const tasks = (useScopedTasks() ?? []).filter(t => !t.parent)
+  // The open project's epics only (InvoiceMatch, or every other epic).
+  const ws = useProjectWorkspace()!
+  const tasks = (useScopedTasks() ?? []).filter(t => !t.parent && ws.epics.some(e => e.id === t.epic))
   // Client users read the plan; creating epics, sprints and tickets is the team's job.
   const isClient = useIsClient()
   const ui = useUi()

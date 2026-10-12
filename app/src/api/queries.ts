@@ -20,9 +20,10 @@ export const qk = {
   leave: ['leave'] as const,
   notifications: ['notifications'] as const,
   clientTeam: ['clientTeam'] as const,
+  invoiceMatch: ['invoiceMatch'] as const,
 }
 
-const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'weekSubmissions', 'questions', 'requests', 'devops', 'people', 'companies', 'internalProjects', 'access', 'leave', 'notifications', 'clientTeam']
+const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'weekSubmissions', 'questions', 'requests', 'devops', 'people', 'companies', 'internalProjects', 'access', 'leave', 'notifications', 'clientTeam', 'invoiceMatch']
 
 export const useWorkspace = () => useQuery({ queryKey: qk.workspace, queryFn: () => server.get('workspace') })
 export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => server.get('tasks') })
