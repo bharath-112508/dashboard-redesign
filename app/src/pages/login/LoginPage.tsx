@@ -2,9 +2,11 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Link, useNavigate } from 'react-router'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { qk, useCompanies } from '../../api/queries'
-import { findPersonByEmail, usePeople } from '../../api/people/directory'
+import { findPersonByEmail } from '../../api/people/directory'
+import { apiSignIn } from '../../api/http/auth'
+import { apiMode } from '../../api/http/config'
 import { server } from '../../api/server'
 import { ROLE_LABEL } from '../../api/session/access'
 import { DEMO_PASSWORD, signIn } from '../../api/session/signIn'
@@ -47,7 +49,8 @@ const input = 'w-full rounded-[10px] border-[1.5px] bg-white px-[13px] text-[14p
 export function LoginPage() {
   const session = useSession()
   const navigate = useNavigate()
-  const people = usePeople().data ?? []
+  // The sample users panel always lists the sample data, in API mode too, so the page looks the same.
+  const people = useQuery({ queryKey: ['loginSamples'], queryFn: () => server.get('people') }).data ?? []
   const companies = useCompanies().data ?? []
   const form = useForm<Form>({ resolver: zodResolver(schema), defaultValues: { email: '', password: '' } })
   const { errors, isSubmitting } = form.formState
@@ -56,18 +59,24 @@ export function LoginPage() {
 
   const qc = useQueryClient()
 
-  const onSubmit = form.handleSubmit(async v => {
+  const mockSignIn = async (v: Form) => {
     // The directory may still be loading when the form is submitted, so read it here.
     const [dir, orgs] = await Promise.all([
       qc.fetchQuery({ queryKey: qk.people, queryFn: () => server.get('people') }),
       qc.fetchQuery({ queryKey: qk.companies, queryFn: () => server.get('companies') }),
     ])
-    const result = await signIn(v.email, v.password, dir, orgs)
+    return signIn(v.email, v.password, dir, orgs)
+  }
+
+  const onSubmit = form.handleSubmit(async v => {
+    const result = apiMode ? await apiSignIn(v.email, v.password) : await mockSignIn(v)
     if (!result.ok) {
       form.setError(result.field, { type: 'manual', message: result.message })
       return
     }
     startSession(result.session)
+    // The directory depends on who is signed in (API mode), so load it again.
+    await qc.invalidateQueries({ queryKey: qk.people })
     navigate('/dashboard', { replace: true })
   })
 

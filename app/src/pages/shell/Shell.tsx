@@ -5,6 +5,8 @@ import { findPerson, usePeople } from '../../api/people/directory'
 import { canAccess, isClientRole, ROLE_LABEL } from '../../api/session/access'
 import { PAGE_PATH, pageOfPath, type PageName } from '../../api/session/pages'
 import { clearSession, useSession } from '../../api/session/store'
+import { apiSignOut } from '../../api/http/auth'
+import { apiMode } from '../../api/http/config'
 import type { Session } from '../../api/types'
 import { HEADER_SLOT_ID } from '../../components/HeaderSlot'
 import { logoFor } from '../../lib/media'
@@ -118,6 +120,7 @@ function Frame({ session, page, children }: { session: Session; page: PageName; 
   }
 
   const signOut = () => {
+    if (apiMode) void apiSignOut()
     clearSession()
     navigate(PAGE_PATH.Login, { replace: true })
   }
