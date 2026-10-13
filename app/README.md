@@ -32,7 +32,20 @@ What comes from the backend so far:
 
 - **Phase 1b-2 (part 2):** the ticket drawer's comments, history and attachments (`src/api/http/ticketDetails.ts`), read for the open ticket only.
 
-Timesheets, DevOps and questions still show the mock data.
+- **Phase 1c:** timesheets — My timesheet, the dashboard quick log, the Tickets timesheet, Employee timesheets, profile week cards, hours on tickets and the support plan's hours used (`src/api/http/timesheet.ts`, mappings in `timesheetMappers.ts`).
+
+DevOps and questions still show the mock data.
+
+Timesheets in API mode:
+
+- A developer reads their own time; a project manager or admin also reads their team's (the backend decides who that is). Time is read from the first day of the previous month. Clients read none.
+- **Submit week** locks the week on the backend (new `timesheet_weeks` collection): logging, editing or deleting time in it is refused until it is reopened. A manager or admin can reopen anyone's week. The backend's 7-day self-edit window still applies too.
+- The work type (General, Meeting, Review, DevOps) is stored with each entry (new optional backend field `work_type`). A text entry's task is stored as its category. The backend needs a description: an empty note sends the task, ticket title or work type instead, and reads back as an empty note.
+- You can only log your own time: picking someone else in the Tickets timesheet is refused.
+- A ticket's **Log time** adds a billable entry on that ticket for you.
+- A support plan's hours used this month are the project's billable hours from the timesheets.
+- DevOps request time logs are still the mock (DevOps phase).
+- My timesheet's "today" is the design's fixed date (10 Oct 2026), while the dashboard uses the real date; both are as in mock mode.
 
 Epics, sprints and tickets in API mode:
 
