@@ -137,6 +137,17 @@ export const buildUserRateLimiter = (opts: { windowMs: number; limit: number; me
     });
 
 /**
+ * New client contact limiter — each create can email an invitation to an
+ * address the caller chooses, so a runaway loop or a misused account must
+ * not turn it into a mail cannon. 30 / hour / user is far above onboarding.
+ */
+export const contactInviteRateLimiter = buildUserRateLimiter({
+    windowMs: 60 * 60 * 1000,
+    limit: 30,
+    messageKey: 'Too many new contacts. Please try again later.',
+});
+
+/**
  * Report-read limiter — applied on the synchronous report GETs.
  * 60 reads / minute / user is roughly "one report every second" which
  * a human-driven dashboard never approaches; well above legitimate

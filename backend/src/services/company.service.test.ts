@@ -1248,3 +1248,30 @@ describe('setResponsible / removeResponsible', () => {
         expect(companyUpdateOneMock).not.toHaveBeenCalled();
     });
 });
+
+describe('setResponsible — edge cases', () => {
+    const staffId = new Types.ObjectId();
+    const userChain = (u: unknown) => ({ select: () => ({ lean: () => Promise.resolve(u) }) });
+
+    it('refuses an archived company', async () => {
+        companyFindByIdMock.mockResolvedValue(makeCompany({ status: 'archived' }));
+        await expect(svc.setResponsible(companyId, { user_id: staffId.toString(), role: 'viewer' }, adminCaller())).rejects.toMatchObject({
+            statusCode: 422,
+        });
+        expect(companyUpdateOneMock).not.toHaveBeenCalled();
+    });
+
+    it('adds the person again if they were removed between the two updates', async () => {
+        companyFindByIdMock.mockResolvedValue(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(userChain({ _id: staffId, role: ROLES.EMPLOYEE, status: 'active' }));
+        companyUpdateOneMock
+            .mockResolvedValueOnce({ modifiedCount: 0 }) // already there → push skipped
+            .mockResolvedValueOnce({ matchedCount: 0, modifiedCount: 0 }) // removed meanwhile → role set found nobody
+            .mockResolvedValueOnce({ modifiedCount: 1 }); // pushed again
+
+        await svc.setResponsible(companyId, { user_id: staffId.toString(), role: 'viewer' }, adminCaller());
+
+        expect(companyUpdateOneMock).toHaveBeenCalledTimes(3);
+        expect(companyUpdateOneMock.mock.calls[2][1]).toEqual({ $push: { responsibles: { user_id: staffId, role: 'viewer' } } });
+    });
+});

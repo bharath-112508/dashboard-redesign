@@ -699,15 +699,19 @@ export const setResponsible = async (
 ): Promise<Record<string, unknown>> => {
     const doc = await loadCompanyOrThrow(id);
     assertCallerCanWriteCompany(doc, caller);
+    if (doc.status === 'archived') {
+        throw AppError.unprocessable('Cannot change people on an archived company', ERROR_CODES.VALIDATION_ERROR);
+    }
     const userId = new Types.ObjectId(body.user_id);
     await assertActiveStaff(userId);
 
-    const added = await Company.updateOne(
-        { _id: id, 'responsibles.user_id': { $ne: userId } },
-        { $push: { responsibles: { user_id: userId, role: body.role } } }
-    );
+    const push = () =>
+        Company.updateOne({ _id: id, 'responsibles.user_id': { $ne: userId } }, { $push: { responsibles: { user_id: userId, role: body.role } } });
+    const added = await push();
     if (added.modifiedCount === 0) {
-        await Company.updateOne({ _id: id, 'responsibles.user_id': userId }, { $set: { 'responsibles.$.role': body.role } });
+        const updated = await Company.updateOne({ _id: id, 'responsibles.user_id': userId }, { $set: { 'responsibles.$.role': body.role } });
+        // Removed by someone else between the two updates: add them again.
+        if (updated.matchedCount === 0) await push();
     }
     if (caller.audit) {
         await recordAudit(caller.audit, {

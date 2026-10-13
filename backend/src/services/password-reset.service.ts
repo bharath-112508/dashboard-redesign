@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { Types } from 'mongoose';
+import logger from '../utils/logger.js';
 
 import { User } from '../models/user.model.js';
 import { PasswordResetToken } from '../models/password-reset-token.model.js';
@@ -54,7 +55,7 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
 
     // Invalidate any older unused tokens so only the latest link is active.
     // (Phished-but-unused tokens are implicitly revoked here.)
-    await PasswordResetToken.updateMany({ user_id: user._id, used_at: null }, { $set: { used_at: new Date() } });
+    await revokePendingPasswordLinks(user._id);
 
     const rawToken = base64Url(randomBytes(RESET_TOKEN_BYTES));
     // Step 33: TTL is read from `system_settings.security.password_reset_ttl_minutes`,
@@ -68,11 +69,13 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
         expires_at: new Date(Date.now() + ttlMs),
     });
 
-    await sendPasswordResetEmail({
-        to: user.email,
-        full_name: user.full_name,
-        token: rawToken,
-    });
+    // Not awaited: waiting for the email provider only on real accounts would let the response
+    // time reveal which emails have an account (the unknown-email branch returns at once).
+    void Promise.resolve()
+        .then(() => sendPasswordResetEmail({ to: user.email, full_name: user.full_name, token: rawToken }))
+        .catch((err: unknown) =>
+        logger.warn({ err, code: 'PASSWORD_RESET_EMAIL_FAILED' }, 'Could not send the password reset email')
+    );
 };
 
 // ─── Reset ─────────────────────────────────────────────────────────────────
@@ -245,7 +248,7 @@ export const adminInitiatePasswordReset = async (targetUserId: Types.ObjectId, a
  * SETUP_TOKEN_TTL_MS. Older unused links for the user stop working.
  */
 export const issuePasswordSetupLink = async (user: { _id: Types.ObjectId; email: string; full_name: string }): Promise<void> => {
-    await PasswordResetToken.updateMany({ user_id: user._id, used_at: null }, { $set: { used_at: new Date() } });
+    await revokePendingPasswordLinks(user._id);
     const rawToken = base64Url(randomBytes(RESET_TOKEN_BYTES));
     await PasswordResetToken.create({
         user_id: user._id,
@@ -253,4 +256,9 @@ export const issuePasswordSetupLink = async (user: { _id: Types.ObjectId; email:
         expires_at: new Date(Date.now() + SETUP_TOKEN_TTL_MS),
     });
     await sendPasswordSetupEmail({ to: user.email, full_name: user.full_name, token: rawToken });
+};
+
+/** Makes every unused reset or setup link of the user stop working (e.g. after their email changes). */
+export const revokePendingPasswordLinks = async (userId: Types.ObjectId): Promise<void> => {
+    await PasswordResetToken.updateMany({ user_id: userId, used_at: null }, { $set: { used_at: new Date() } });
 };

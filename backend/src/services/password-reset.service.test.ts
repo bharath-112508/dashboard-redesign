@@ -455,3 +455,21 @@ describe('issuePasswordSetupLink', () => {
         expect(sendPasswordResetEmailMock).not.toHaveBeenCalled();
     });
 });
+
+describe('requestPasswordReset — timing', () => {
+    it('does not wait for the email provider, so a real account answers as fast as an unknown one', async () => {
+        userFindOneMock.mockResolvedValueOnce(sampleUser());
+        sendPasswordResetEmailMock.mockReturnValueOnce(new Promise(() => undefined));
+
+        await expect(svc.requestPasswordReset('jane@example.com')).resolves.toBeUndefined();
+        expect(sendPasswordResetEmailMock).toHaveBeenCalled();
+    });
+});
+
+describe('revokePendingPasswordLinks', () => {
+    it('marks every unused link of the user as used', async () => {
+        const user = sampleUser();
+        await svc.revokePendingPasswordLinks(user._id);
+        expect(tokenUpdateManyMock).toHaveBeenCalledWith({ user_id: user._id, used_at: null }, { $set: { used_at: expect.any(Date) } });
+    });
+});

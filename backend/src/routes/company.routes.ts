@@ -4,6 +4,7 @@ import * as ctrl from '../controllers/company.controller.js';
 import { asyncHandler } from '../utils/async-handler.js';
 import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
+import { contactInviteRateLimiter } from '../middlewares/rate-limit.middleware.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import {
     companyIdParamSchema,
@@ -131,6 +132,7 @@ router.get(
 router.post(
     '/:id/representatives',
     requirePermission(PERMISSIONS.REPRESENTATIVE_WRITE),
+    contactInviteRateLimiter,
     validate({ params: companyIdParamSchema, body: createRepresentativeBodySchema }),
     asyncHandler(ctrl.postRepresentative)
 );

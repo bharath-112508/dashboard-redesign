@@ -12,6 +12,8 @@ import { AppError } from '../utils/app-error.js';
 import { hashPassword } from '../utils/password.js';
 import { assertPasswordPolicy } from '../utils/password-policy.js';
 import { isAdminLike } from '../utils/role-check.js';
+import logger from '../utils/logger.js';
+import { issuePasswordSetupLink, revokePendingPasswordLinks } from './password-reset.service.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { PERMISSIONS } from '../constants/permissions.js';
 import { CLIENT_SIDE_ROLES, ROLES, type RoleType } from '../constants/roles.js';
@@ -494,11 +496,17 @@ export const updateUser = async (input: {
     if (patch.timezone !== undefined) target.timezone = patch.timezone;
     if (patch.slack_user_id !== undefined) target.slack_user_id = patch.slack_user_id;
     // Only an admin's patch still carries `email` here (self and employment edits are whitelisted above).
+    let emailChanged = false;
     if (patch.email !== undefined && patch.email !== target.email) {
+        // One admin must not be able to point another admin's account at their own inbox and reset it.
+        if (target.role === ROLES.ADMIN && !isSelf) {
+            throw AppError.forbidden("An admin's email can only be changed by that admin.", ERROR_CODES.FORBIDDEN);
+        }
         if (await User.exists({ email: patch.email, _id: { $ne: target._id } })) {
             throw AppError.conflict('Email already exists', ERROR_CODES.EMAIL_ALREADY_EXISTS);
         }
         target.email = patch.email;
+        emailChanged = true;
     }
     if (patch.email_notifications_enabled !== undefined) {
         target.email_notifications_enabled = patch.email_notifications_enabled;
@@ -507,7 +515,28 @@ export const updateUser = async (input: {
         target.slack_notifications_enabled = patch.slack_notifications_enabled;
     }
 
-    await target.save();
+    try {
+        await target.save();
+    } catch (err) {
+        // Two changes to the same address at once: the unique index catches the second.
+        if ((err as { code?: number; keyPattern?: Record<string, unknown> }).code === 11000 && (err as { keyPattern?: Record<string, unknown> }).keyPattern?.email) {
+            throw AppError.conflict('Email already exists', ERROR_CODES.EMAIL_ALREADY_EXISTS);
+        }
+        throw err;
+    }
+
+    if (emailChanged) {
+        // Links already sent went to the old address: they must stop working. A client contact
+        // (who may never have chosen a password) gets a fresh invite at the new address.
+        await revokePendingPasswordLinks(target._id);
+        if ((CLIENT_SIDE_ROLES as string[]).includes(target.role)) {
+            try {
+                await issuePasswordSetupLink(target);
+            } catch (err) {
+                logger.warn({ err, code: 'PASSWORD_SETUP_EMAIL_FAILED', user_id: target._id.toString() }, 'Could not send the set-your-password email');
+            }
+        }
+    }
 
     // Reporting line moved → move the pending leave reviews with it. The
     // approvals queue already follows the change on its own (it's computed

@@ -15,7 +15,8 @@ import type { EmailTransport } from './types.js';
  * bodies into structured logs.
  */
 export const stubTransport: EmailTransport = async (msg) => {
-    if (NODE_ENV === 'production') {
+    // Bodies can hold live password links: only a developer's own machine (development) logs them.
+    if (NODE_ENV !== 'development') {
         logger.warn(
             { to_masked: maskEmail(msg.to), subject: msg.subject, context: msg.context ?? null },
             'Email transport=stub in production — no outbound delivery (likely misconfiguration)'

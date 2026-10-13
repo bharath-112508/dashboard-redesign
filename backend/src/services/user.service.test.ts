@@ -110,6 +110,15 @@ vi.mock('./role.service.js', () => ({
     getSystemRoleByKey: getSystemRoleByKeyMock,
 }));
 
+const { issuePasswordSetupLinkMock, revokePendingPasswordLinksMock } = vi.hoisted(() => ({
+    issuePasswordSetupLinkMock: vi.fn(),
+    revokePendingPasswordLinksMock: vi.fn(),
+}));
+vi.mock('./password-reset.service.js', () => ({
+    issuePasswordSetupLink: issuePasswordSetupLinkMock,
+    revokePendingPasswordLinks: revokePendingPasswordLinksMock,
+}));
+
 vi.mock('./share-link.service.js', () => ({
     revokeLinksForDeactivatedClient: revokeLinksMock,
 }));
@@ -970,5 +979,55 @@ describe('updateUser — email', () => {
         });
 
         expect(t.email).toBe('me@x.io');
+    });
+});
+
+describe('updateUser — email change safety', () => {
+    const asAdmin = (target: ReturnType<typeof sampleUser>, patch: unknown) => ({
+        target_id: target._id as Types.ObjectId,
+        caller_id: new Types.ObjectId(),
+        caller_role: ROLES.ADMIN,
+        caller_role_keys: [ROLES.ADMIN],
+        caller_permissions: [],
+        patch: patch as never,
+    });
+
+    it('revokes pending password links and sends a fresh invite to the new address of a client contact', async () => {
+        const t = sampleUser({ role: ROLES.REPRESENTATIVE, email: 'typo@clinet.com' });
+        userFindByIdMock.mockResolvedValueOnce(t);
+        userExistsMock.mockResolvedValueOnce(null);
+
+        await svc.updateUser(asAdmin(t, { email: 'jon@client.com' }));
+
+        expect(revokePendingPasswordLinksMock).toHaveBeenCalledWith(t._id);
+        expect(issuePasswordSetupLinkMock).toHaveBeenCalledWith(expect.objectContaining({ email: 'jon@client.com' }));
+    });
+
+    it('only revokes the links for internal staff (no invite)', async () => {
+        const t = sampleUser({ role: ROLES.EMPLOYEE, email: 'old@x.io' });
+        userFindByIdMock.mockResolvedValueOnce(t);
+        userExistsMock.mockResolvedValueOnce(null);
+
+        await svc.updateUser(asAdmin(t, { email: 'new@x.io' }));
+
+        expect(revokePendingPasswordLinksMock).toHaveBeenCalledWith(t._id);
+        expect(issuePasswordSetupLinkMock).not.toHaveBeenCalled();
+    });
+
+    it("refuses to change another admin's email (it would let one admin take over another's account)", async () => {
+        const t = sampleUser({ role: ROLES.ADMIN, email: 'b@x.io' });
+        userFindByIdMock.mockResolvedValueOnce(t);
+
+        await expect(svc.updateUser(asAdmin(t, { email: 'a@x.io' }))).rejects.toMatchObject({ statusCode: 403 });
+        expect(t.email).toBe('b@x.io');
+    });
+
+    it('turns a duplicate-key race on save into 409 EMAIL_ALREADY_EXISTS', async () => {
+        const t = sampleUser({ role: ROLES.EMPLOYEE, email: 'old@x.io' });
+        (t as unknown as { save: () => Promise<unknown> }).save = vi.fn().mockRejectedValueOnce({ code: 11000, keyPattern: { email: 1 } });
+        userFindByIdMock.mockResolvedValueOnce(t);
+        userExistsMock.mockResolvedValueOnce(null);
+
+        await expect(svc.updateUser(asAdmin(t, { email: 'race@x.io' }))).rejects.toMatchObject({ code: 'EMAIL_ALREADY_EXISTS' });
     });
 });
