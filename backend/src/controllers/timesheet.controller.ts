@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 
 import * as service from '../services/timesheet.service.js';
 import * as importService from '../services/timesheet-import.service.js';
+import * as weekService from '../services/timesheet-week.service.js';
 import { buildAuditContext } from '../utils/audit-context.js';
 import { TIMESHEET_EXPORT_MAX_ROWS } from '../constants/timesheet.js';
 import { generateXlsx } from '../services/report-exporters/xlsx.js';
@@ -13,6 +14,7 @@ import type {
     CreateTimesheetBody,
     TimesheetImportBody,
     DayDatePath,
+    ListWeeksQuery,
     ListTimesheetsQuery,
     PatchTimesheetBody,
     SummaryQuery,
@@ -148,3 +150,20 @@ export const postImport = async (req: Request, res: Response): Promise<Response>
     const result = await importService.commitImport(body.rows, projectCallerFrom(req), buildAuditContext(req));
     return created(res, result);
 };
+
+// ─── Redesign: submitted weeks ───────────────────────────────────────────
+
+export const getWeeks = async (req: Request, res: Response): Promise<Response> =>
+    ok(res, await weekService.listWeeks(req.query as ListWeeksQuery, projectCallerFrom(req)));
+
+export const putWeek = async (req: Request, res: Response): Promise<Response> =>
+    ok(res, await weekService.submitWeek(req.params.week as string, { ...projectCallerFrom(req), audit: buildAuditContext(req) }));
+
+export const deleteWeek = async (req: Request, res: Response): Promise<Response> =>
+    ok(
+        res,
+        await weekService.reopenWeek(req.params.week as string, req.query.user_id as string | undefined, {
+            ...projectCallerFrom(req),
+            audit: buildAuditContext(req),
+        })
+    );

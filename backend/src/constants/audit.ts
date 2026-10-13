@@ -246,6 +246,8 @@ export const AUDIT_ACTIONS = {
     TIMESHEET_UPDATE: 'timesheet.update',
     TIMESHEET_EDIT_OUT_OF_WINDOW: 'timesheet.edit_out_of_window',
     TIMESHEET_DELETE: 'timesheet.delete',
+    TIMESHEET_WEEK_SUBMIT: 'timesheet.week_submit',
+    TIMESHEET_WEEK_REOPEN: 'timesheet.week_reopen',
     /** ONE row per bulk import, carrying the count and date range — not one
      *  row per entry. The entries are already individually traceable. */
     TIMESHEET_IMPORT: 'timesheet.import',
@@ -412,6 +414,7 @@ export const AUDIT_TARGET_KINDS = {
     COMMENT: 'task_comment',
     ATTACHMENT: 'task_attachment',
     TIMESHEET_ENTRY: 'timesheet_entry',
+    TIMESHEET_WEEK: 'timesheet_week',
     BILLING_RATE: 'billing_rate',
     COST_RATE: 'cost_rate',
     ENGAGEMENT: 'engagement',

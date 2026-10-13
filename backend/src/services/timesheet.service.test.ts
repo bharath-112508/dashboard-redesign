@@ -84,6 +84,9 @@ vi.mock('./audit.service.js', () => ({
     recordSystemAudit: vi.fn(),
 }));
 
+const assertWeekOpenMock = vi.hoisted(() => vi.fn());
+vi.mock('./timesheet-week.service.js', () => ({ assertWeekOpen: assertWeekOpenMock }));
+
 vi.mock('./settings.service.js', () => ({
     getOrInitSettings: getOrInitSettingsMock,
 }));
@@ -675,6 +678,60 @@ describe('patchEntry', () => {
 });
 
 // ─── deleteEntry ─────────────────────────────────────────────────────────
+
+// ─── Redesign: a submitted week is locked ────────────────────────────────
+
+describe('submitted weeks', () => {
+    const weekClosed = () => AppError.conflict('This week is submitted. Reopen it to change its time.', ERROR_CODES.TIMESHEET_WEEK_SUBMITTED);
+
+    it('refuses logging time in a submitted week', async () => {
+        const me = employeeCaller();
+        assertWeekOpenMock.mockRejectedValueOnce(weekClosed());
+        await expect(
+            svc.createEntry(
+                {
+                    local_date: today(),
+                    entry_type: 'general',
+                    project_id: new Types.ObjectId().toString(),
+                    sprint_id: null,
+                    task_id: null,
+                    general_category: 'Meeting',
+                    billable_hours: 1,
+                    billable_minutes: 0,
+                    non_billable_hours: 0,
+                    non_billable_minutes: 0,
+                    idle_hours: 0,
+                    idle_minutes: 0,
+                    description: 'standup',
+                } as never,
+                me
+            )
+        ).rejects.toMatchObject({ code: ERROR_CODES.TIMESHEET_WEEK_SUBMITTED });
+        expect(assertWeekOpenMock).toHaveBeenCalledWith(me.id, today());
+        expect(entryCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('refuses deleting time in a submitted week', async () => {
+        const owner = new Types.ObjectId();
+        const entry = makeEntry({ user_id: owner, local_date: daysAgo(1) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+        assertWeekOpenMock.mockRejectedValueOnce(weekClosed());
+        await expect(svc.deleteEntry(entry._id, employeeCaller(owner))).rejects.toMatchObject({ code: ERROR_CODES.TIMESHEET_WEEK_SUBMITTED });
+        expect(entry.deleteOne).not.toHaveBeenCalled();
+    });
+
+    it('refuses moving time into a submitted week', async () => {
+        const owner = new Types.ObjectId();
+        const entry = makeEntry({ user_id: owner, local_date: daysAgo(1) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+        assertWeekOpenMock.mockResolvedValueOnce(undefined).mockRejectedValueOnce(weekClosed());
+        await expect(svc.patchEntry(entry._id, { local_date: daysAgo(2) }, employeeCaller(owner))).rejects.toMatchObject({
+            code: ERROR_CODES.TIMESHEET_WEEK_SUBMITTED,
+        });
+        expect(assertWeekOpenMock).toHaveBeenLastCalledWith(owner, daysAgo(2));
+        expect(entry.save).not.toHaveBeenCalled();
+    });
+});
 
 describe('deleteEntry', () => {
     it('rejects an owner deleting outside the self-edit window', async () => {

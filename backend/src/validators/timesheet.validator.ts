@@ -254,3 +254,12 @@ export const timesheetImportBodySchema = z.object({
 
 export type TimesheetImportRow = z.infer<typeof importRowSchema>;
 export type TimesheetImportBody = z.infer<typeof timesheetImportBodySchema>;
+
+// ─── Redesign: submitted weeks (/timesheets/weeks) ───────────────────────
+
+export const weekPathSchema = z.object({ week: isoDateSchema });
+export const listWeeksQuerySchema = z
+    .object({ from_date: isoDateSchema.optional(), to_date: isoDateSchema.optional(), user_id: objectIdSchema.optional() })
+    .strict();
+export const reopenWeekQuerySchema = z.object({ user_id: objectIdSchema.optional() }).strict();
+export type ListWeeksQuery = z.infer<typeof listWeeksQuerySchema>;

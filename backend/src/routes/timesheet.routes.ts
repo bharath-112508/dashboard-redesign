@@ -9,6 +9,9 @@ import {
     createTimesheetBodySchema,
     dayDatePathSchema,
     listTimesheetsQuerySchema,
+    listWeeksQuerySchema,
+    reopenWeekQuerySchema,
+    weekPathSchema,
     patchTimesheetBodySchema,
     summaryQuerySchema,
     timesheetIdPathSchema,
@@ -35,6 +38,27 @@ router.use(authenticate);
 // list their own entries (Employee, Team Lead, Manager, Admin all do).
 
 router.get('/me', validate({ query: listTimesheetsQuerySchema }), asyncHandler(ctrl.getMyList));
+
+// ─── /weeks — submitted weeks (redesign) ─────────────────────────────────
+//
+// Literal segment, so declared above `/:id`. Listing is open to everyone
+// (the service pins a non-reviewer to their own weeks); submitting needs the
+// write permission and is always the caller's own week; reopening someone
+// else's week is checked in the service (manager or admin).
+
+router.get('/weeks', validate({ query: listWeeksQuerySchema }), asyncHandler(ctrl.getWeeks));
+router.put(
+    '/weeks/:week',
+    requirePermission(PERMISSIONS.TIMESHEET_WRITE),
+    validate({ params: weekPathSchema }),
+    asyncHandler(ctrl.putWeek)
+);
+router.delete(
+    '/weeks/:week',
+    requirePermission(PERMISSIONS.TIMESHEET_WRITE),
+    validate({ params: weekPathSchema, query: reopenWeekQuerySchema }),
+    asyncHandler(ctrl.deleteWeek)
+);
 
 // ─── /import — bulk import of YOUR OWN entries ──────────────────────────
 //

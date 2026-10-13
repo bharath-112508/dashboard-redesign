@@ -48,6 +48,8 @@ export const COLLECTIONS = {
     // Timesheets
     TIMESHEETS: 'timesheets',
     TIMESHEET_ENTRIES: 'timesheet_entries',
+    /** Redesign: weeks a person has submitted (their time is locked). */
+    TIMESHEET_WEEKS: 'timesheet_weeks',
     BILLING_RATES: 'billing_rates',
 
     // Invoicing (client engagements + invoices)

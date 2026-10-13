@@ -27,6 +27,7 @@ import { recordAudit } from './audit.service.js';
 import { loadProjectForCaller } from './project.service.js';
 import type { ProjectCaller } from './project.service.js';
 import { getOrInitSettings } from './settings.service.js';
+import { assertWeekOpen } from './timesheet-week.service.js';
 import dayjs, { DATE_FORMAT, DEFAULT_TIMEZONE } from '../utils/date.js';
 import type { PaginationMeta } from '../utils/api-response.js';
 import type {
@@ -325,6 +326,7 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
     assertNotFuture(input.local_date);
     assertNonZero(input);
     assertEntryUnderDailyCap(input);
+    await assertWeekOpen(caller.id, input.local_date);
 
     // Both branches resolve one — a task's parent, or the project the general
     // entry names. Nullable only because the column still holds rows created
@@ -461,6 +463,10 @@ export const patchEntry = async (
             ERROR_CODES.TIMESHEET_EDIT_WINDOW_EXPIRED
         );
     }
+
+    // Its week, and the week it moves to, must both be open.
+    await assertWeekOpen(entry.user_id, entry.local_date);
+    if (patch.local_date !== undefined && patch.local_date !== entry.local_date) await assertWeekOpen(entry.user_id, patch.local_date);
 
     const before = toPublic(entry);
 
@@ -624,6 +630,8 @@ export const deleteEntry = async (id: Types.ObjectId, caller: Caller): Promise<{
             ERROR_CODES.TIMESHEET_EDIT_WINDOW_EXPIRED
         );
     }
+
+    await assertWeekOpen(entry.user_id, entry.local_date);
 
     const before = toPublic(entry);
     await entry.deleteOne();
