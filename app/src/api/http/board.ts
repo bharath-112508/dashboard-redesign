@@ -350,15 +350,16 @@ type UploadTicket = { upload_url: string; blob_container: string; blob_key: stri
 /** New attachments are uploaded: a signed URL from the backend, the file straight to storage, then finalize. */
 const saveAtts = async (id: string, atts: Attachment[]) => {
   for (const a of atts) {
+    // Taken out before uploading, so a later edit that still lists it cannot upload it again.
     const file = a.fileRef ? pickedFiles.get(a.fileRef) : undefined
     if (!file) continue
+    pickedFiles.delete(a.fileRef as string)
     const meta = { file_name: file.name, file_size: file.size, mime_type: file.type || 'application/octet-stream' }
     const t = await api.post<UploadTicket>(`/tasks/${id}/attachments/upload-url`, meta)
     // A network or storage (CORS) failure reads the same as a refused upload.
     const res = await fetch(t.upload_url, { method: 'PUT', headers: t.required_headers, body: file }).catch(() => null)
     if (!res?.ok) throw refuse('The file could not be uploaded. Try again.')
     await api.post(`/tasks/${id}/attachments/finalize`, { blob_container: t.blob_container, blob_key: t.blob_key, ...meta })
-    pickedFiles.delete(a.fileRef as string)
   }
 }
 
@@ -375,6 +376,8 @@ const updateTask = async (appId: TaskId, patch: Partial<Task>) => {
     drafts.delete(appId)
     const id = await createTask({ ...next, isNew: false }, !!top)
     if (id) aliases.set(appId, id)
+    // Files dropped on the draft go up now that the ticket exists.
+    if (id && next.atts.length) await saveAtts(id, next.atts)
     return
   }
   const id = await realTaskId(appId)

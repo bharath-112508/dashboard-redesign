@@ -425,4 +425,24 @@ describe('attachments', () => {
     expect(post).not.toHaveBeenCalled()
     expect(patch).not.toHaveBeenCalled()
   })
+
+  it('uploads files added to a draft once the draft is created', async () => {
+    post.mockImplementation(async (path: string) =>
+      path.endsWith('/upload-url') ? { upload_url: 'https://blob.example/u', blob_container: 'c', blob_key: 'k', required_headers: {} } : { id: 'n7' },
+    )
+    const ref = attachFile(file)
+    await sendBoardCommand({ type: 'task.create', task: newTask({ id: '7', title: '', isNew: true }) }, TODAY)
+    await sendBoardCommand({ type: 'task.update', id: '7', patch: { atts: [{ name: 'spec.pdf', size: '1 KB', date: 'x', fileRef: ref }] } }, TODAY)
+    expect(post).not.toHaveBeenCalled()
+    await sendBoardCommand({ type: 'task.update', id: '7', patch: { title: 'Named', isNew: false } }, TODAY)
+    expect(post.mock.calls.map(c => c[0])).toEqual(['/tasks', '/tasks/n7/attachments/upload-url', '/tasks/n7/attachments/finalize'])
+  })
+
+  it('uploads a file once even when a later edit still lists it', async () => {
+    post.mockResolvedValue({ upload_url: 'https://blob.example/u', blob_container: 'c', blob_key: 'k', required_headers: {} })
+    const att = { name: 'spec.pdf', size: '1 KB', date: 'x', fileRef: attachFile(file) }
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { atts: [att] } }, TODAY)
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { atts: [att] } }, TODAY)
+    expect(put).toHaveBeenCalledTimes(1)
+  })
 })

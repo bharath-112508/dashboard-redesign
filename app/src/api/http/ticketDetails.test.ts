@@ -70,4 +70,14 @@ describe('fetchTicketDetails', () => {
     expect(await fetchTicketDetails('3', NOW)).toEqual({ acts: [], atts: [] })
     expect(get).not.toHaveBeenCalled()
   })
+
+  it('reads every page of comments, so the newest comment is shown', async () => {
+    const page = (n: number, from: number) => Array.from({ length: n }, (_, i) => ({ id: `c${from + i}`, body: `#${from + i}`, author: null, created_at: '2026-10-12T10:00:00.000Z' }))
+    get.mockImplementation(async (path: string) => {
+      if (path.includes('/comments')) return path.includes('page=2') ? page(1, 100) : page(100, 0)
+      return []
+    })
+    const d = await fetchTicketDetails(ID, NOW)
+    expect(d.acts.filter(a => a.kind === 'comment')).toHaveLength(101)
+  })
 })

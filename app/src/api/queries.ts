@@ -5,7 +5,8 @@ import { RefusedError, server } from './server'
 import { apiMode } from './http/config'
 import { isCompanyApiCommand } from './http/companies'
 import { isBoardApiCommand } from './http/board'
-import { fetchTicketDetails } from './http/ticketDetails'
+import { fetchTicketDetails, isBackendId } from './http/ticketDetails'
+import { ApiError } from './http/client'
 import { refusal } from './session/permissions'
 import { readSession } from './session/store'
 import type { Db } from './types'
@@ -38,7 +39,10 @@ export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => serv
 export const ticketDetailsQuery = (id: string) => ({
   queryKey: ['ticketDetails', id],
   queryFn: () => fetchTicketDetails(id),
-  enabled: apiMode,
+  // A draft or a ticket still being created keeps its own fields until it has a backend id.
+  enabled: apiMode && isBackendId(id),
+  // A refusal will not change on retry; a server or network failure may.
+  retry: (n: number, err: unknown) => n < 3 && !(err instanceof ApiError && err.status < 500),
 })
 export const useTicketDetails = (id: string) => useQuery(ticketDetailsQuery(id))
 export const useEntries = () => useQuery({ queryKey: qk.entries, queryFn: () => server.get('entries') })

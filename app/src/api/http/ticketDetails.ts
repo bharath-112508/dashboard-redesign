@@ -1,4 +1,5 @@
 import { api } from './client'
+import { allPages } from './companies'
 import { boardIndex } from './board'
 import { prioFrom, statusIdFrom, typeFrom } from './boardMappers'
 import { fileSize } from '../../domain/tasks'
@@ -18,6 +19,12 @@ export const ago = (iso: string, now = new Date()) => {
   if (s < 86_400) return `${Math.floor(s / 3600)}h ago`
   if (s < 7 * 86_400) return `${Math.floor(s / 86_400)}d ago`
   return fmt(iso.slice(0, 10))
+}
+
+/** The calendar day of a timestamp where the person is, as YYYY-MM-DD. */
+const localDate = (iso: string) => {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -78,22 +85,23 @@ export const historyLine = (r: Pick<BackendActivity, 'activity_type' | 'from_val
   }
 }
 
-const isBackendId = (id: string) => /^[a-f0-9]{24}$/i.test(id)
+export const isBackendId = (id: string) => /^[a-f0-9]{24}$/i.test(id)
 const nameOf = (p: Person) => p?.full_name || 'Someone'
 
 /**
- * The open ticket's comments, history and attachments. Only the first page
- * (100) of each is read.
+ * The open ticket's comments, history and attachments. Comments and
+ * attachments come oldest first, so every page is read; history comes newest
+ * first and only its first page (100 rows) is read.
  */
-// ponytail: first page only; add paging when a ticket outgrows 100 comments or history rows.
+// ponytail: history is capped at its newest 100 rows; page it if older lines are ever needed.
 export const fetchTicketDetails = async (taskId: string, now = new Date()): Promise<{ acts: Activity[]; atts: Attachment[] }> => {
   // A draft or a ticket still being created has no backend id yet.
   if (!isBackendId(taskId)) return { acts: [], atts: [] }
   const at = `/tasks/${taskId}`
   const [comments, activity, files] = await Promise.all([
-    api.get<BackendComment[]>(`${at}/comments?limit=100`),
+    allPages<BackendComment>(`${at}/comments`),
     api.get<BackendActivity[]>(`${at}/activity?limit=100`),
-    api.get<BackendAttachment[]>(`${at}/attachments?limit=100`),
+    allPages<BackendAttachment>(`${at}/attachments`),
   ])
   const dated: { at: string; act: Activity }[] = [
     ...comments.map(c => ({ at: c.created_at, act: { kind: 'comment' as const, who: nameOf(c.author), text: c.body, when: ago(c.created_at, now) } })),
@@ -104,6 +112,6 @@ export const fetchTicketDetails = async (taskId: string, now = new Date()): Prom
   ]
   return {
     acts: dated.sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0)).map(d => d.act),
-    atts: files.map(f => ({ id: f.id, name: f.file_name, size: fileSize(f.file_size), date: fmt(f.created_at.slice(0, 10)) })),
+    atts: files.map(f => ({ id: f.id, name: f.file_name, size: fileSize(f.file_size), date: fmt(localDate(f.created_at)) })),
   }
 }
