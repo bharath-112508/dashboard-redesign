@@ -161,6 +161,14 @@ describe('api client', () => {
     expect(authOf(f.mock.calls[0][1])).toBe('Bearer a1')
   })
 
+  it('reports sign-out on a 401 when there are no tokens at all (a session left without them)', async () => {
+    store.delete('vt.tokens')
+    const signedOut = vi.fn()
+    const api = createClient('http://x/api/v1', vi.fn(async () => json(401, { error: { code: 'UNAUTHORIZED', message: '' } })), signedOut)
+    await expect(api.get('/users')).rejects.toMatchObject({ status: 401 })
+    expect(signedOut).toHaveBeenCalledOnce()
+  })
+
   it('returns undefined for 204 No Content', async () => {
     const api = createClient('http://x/api/v1', vi.fn(async () => new Response(null, { status: 204 })))
     expect(await api.post('/auth/logout', { refresh_token: 'r1' })).toBeUndefined()

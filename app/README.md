@@ -32,12 +32,14 @@ Every other screen (tickets, epics and sprints, timesheets, DevOps, questions, d
 
 Companies and projects in API mode:
 
-- Adding a client contact creates a client user on that company with a random starting password nobody sees; the person sets their own with "Forgot password". The contact's admin switch makes them a client admin. A contact needs an email.
+- Adding a client contact creates a client user on that company and emails them a **"Set your Viljetech password"** link (valid 7 days). They choose their own password on `/reset-password?token=…&welcome=1` and then sign in with it. Nobody else ever sees a password. The contact's admin switch makes them a client admin (admins only). A contact needs an email, and the company form asks for one when a main contact is filled in.
+- **Forgot password:** the login page links to `/forgot-password`, which emails a reset link to `/reset-password?token=…`. In safe mode (`npm run dev:redesign`) emails are not sent: the backend writes each one, with its link, to its log. In an environment with a real email transport they arrive in the inbox.
+- Viljetech staff on a company are added and removed one at a time on the backend, and only active staff qualify. Changing the main contact's email on the company form updates that contact.
 - Making a client admin a regular contact again is refused by the backend for now.
 - Company logos are stored in the company as an image of at most 200 KB.
 - The support plan's hours used this month show 0 until timesheets come from the backend.
 - Projects can now be **Planned** or **Maintenance** (new backend statuses). An older backend running against the same Demo DB would refuse to save a project in one of these states, so only the test project below uses them for now.
-- **Redesign Test AB** (archived), its project and its contact in the Demo DB were made by the API check on 13 Oct 2026; they are safe to ignore.
+- **Redesign Test AB** (archived), its project and its contacts (Kari and Nina Testsson) in the Demo DB were made by the API checks on 13 Oct 2026; they are safe to ignore.
 
 Also:
 

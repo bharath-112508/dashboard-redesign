@@ -117,6 +117,19 @@ describe('fetchCompanies', () => {
   })
 })
 
+describe('allPages', () => {
+  beforeEach(() => {
+    get.mockReset()
+  })
+
+  it('adds the page parameters with & when the path already has a query', async () => {
+    const { allPages } = await import('./companies')
+    get.mockResolvedValueOnce([])
+    await allPages('/projects?company_id=c1')
+    expect(get).toHaveBeenCalledWith('/projects?company_id=c1&limit=100&page=1')
+  })
+})
+
 describe('fetchInternalProjects', () => {
   beforeEach(() => {
     get.mockReset()

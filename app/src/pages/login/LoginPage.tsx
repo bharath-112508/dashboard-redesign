@@ -60,7 +60,8 @@ export function LoginPage() {
   const session = useSession()
   const navigate = useNavigate()
   // The sample users panel always lists the sample data, in API mode too, so the page looks the same.
-  const people = useQuery({ queryKey: ['loginSamples'], queryFn: () => server.get('people') }).data ?? []
+  // Always fresh on arrival, so a rename made by an admin shows up straight away.
+  const people = useQuery({ queryKey: ['loginSamples'], queryFn: () => server.get('people'), staleTime: 0 }).data ?? []
   const companies = useCompanies().data ?? []
   const form = useForm<Form>({ resolver: zodResolver(schema), defaultValues: { email: '', password: '' } })
   const { errors, isSubmitting } = form.formState
@@ -187,7 +188,12 @@ export function LoginPage() {
           </form>
           <div className="mt-3 text-[12.5px] text-muted">
             {apiMode ? (
-              <>Signing in to the Demo DB. Pick an account on the right to fill in its email, then enter its password.</>
+              <>
+                Signing in to the Demo DB. Pick an account on the right to fill in its email, then enter its password.{' '}
+                <Link to="/forgot-password" className="font-bold text-blue-ink">
+                  Forgot password?
+                </Link>
+              </>
             ) : (
               <>
                 Demo password for the sample users: <b>demo</b>. Pick a sample user on the right to fill in both fields.

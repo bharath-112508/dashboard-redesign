@@ -6,6 +6,8 @@ import { z } from 'zod'
 import { useCompanies, useSendAsync } from '../../api/queries'
 import type { Company } from '../../api/types'
 import { newId, normalizeWebsite } from '../../domain/ids'
+import { mainContactProblem } from '../../domain/companies'
+import { apiMode } from '../../api/http/config'
 import { Dialog, btnPrimary, btnSecondary, errorCls, fieldCls, labelCls } from '../../components/Dialog'
 import { LogoField } from './LogoField'
 
@@ -67,6 +69,13 @@ export function CompanyFormModal({
 
   const onSubmit = form.handleSubmit(async v => {
     setSaveError(null)
+    // API mode: the main contact gets an account by email, so a name alone can't be saved.
+    const contactProblem = apiMode ? mainContactProblem(v.contactName, v.contactEmail) : null
+    if (contactProblem) {
+      form.setError('contactEmail', { type: 'manual', message: contactProblem })
+      form.setFocus('contactEmail')
+      return
+    }
     const fields = {
       name: v.name,
       industry: v.industry,
@@ -102,6 +111,7 @@ export function CompanyFormModal({
         id: company.id,
         patch: fields,
         main: { name: v.contactName, email: v.contactEmail },
+        mainPersonId: company.contacts[0]?.personId ?? null,
       })
       onClose()
     } catch {

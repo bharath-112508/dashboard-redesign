@@ -21,7 +21,14 @@ export interface CompanyFields {
 export type CompaniesCommand =
   | { type: 'company.create'; company: Company }
   /** `main` sets the first contact (the main contact): its name and email, or adds it when there is none. */
-  | { type: 'company.update'; id: string; patch: Partial<CompanyFields>; main?: { name: string; email: string } }
+  | {
+      type: 'company.update'
+      id: string
+      patch: Partial<CompanyFields>
+      main?: { name: string; email: string }
+      /** The current main contact's person id, so the backend updates that contact (API mode). */
+      mainPersonId?: PersonId | null
+    }
   | { type: 'company.archive'; id: string; archived: boolean; at: string | null }
   /** `index` null adds a contact; otherwise replaces the one at that index. */
   | { type: 'company.contact.save'; companyId: string; index: number | null; contact: CompanyContact }

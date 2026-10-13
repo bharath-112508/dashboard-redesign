@@ -63,3 +63,10 @@ export const matchesQuery = (c: Company, q: string): boolean => {
 
 /** Companies that a person can be added to. Archived companies are hidden from pickers. */
 export const selectableCompanies = (companies: readonly Company[]) => companies.filter(c => !c.archived)
+
+/**
+ * API mode: a main contact becomes a client account invited by email, so a
+ * name without an email cannot be saved. Null when the pair is fine.
+ */
+export const mainContactProblem = (name: string, email: string): string | null =>
+  name.trim() && !email.trim() ? "Add the main contact's email so they can be invited." : null

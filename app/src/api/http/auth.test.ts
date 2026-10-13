@@ -13,7 +13,7 @@ vi.mock('./client', async importOriginal => ({
 }))
 vi.mock('./tokens', () => ({ writeTokens, clearTokens, readTokens: () => ({ access: 'a', refresh: 'r' }) }))
 
-const { apiSignIn, apiSignOut } = await import('./auth')
+const { apiSignIn, apiSignOut, apiForgotPassword, apiResetPassword } = await import('./auth')
 
 const me = {
   id: 'u1',
@@ -80,6 +80,28 @@ describe('apiSignIn', () => {
     })
   })
 
+  it('drops the tokens when loading the profile fails right after signing in', async () => {
+    post.mockResolvedValue({ access_token: 'a1', refresh_token: 'r1', user: { id: 'u1' } })
+    get.mockRejectedValue(new ApiError(500, 'INTERNAL', 'boom'))
+    const r = await apiSignIn('a@viljetech.com', 'pw')
+    expect(r.ok).toBe(false)
+    expect(clearTokens).toHaveBeenCalled()
+  })
+
+  it('explains too many attempts (rate limited)', async () => {
+    post.mockRejectedValue(new ApiError(429, 'RATE_LIMITED', 'Too many requests'))
+    expect(await apiSignIn('a@viljetech.com', 'pw')).toEqual({
+      ok: false,
+      field: 'password',
+      message: 'Too many sign-in attempts. Wait a few minutes and try again.',
+    })
+  })
+
+  it('does not blame the connection for a server error', async () => {
+    post.mockRejectedValue(new ApiError(500, 'INTERNAL', 'boom'))
+    expect(await apiSignIn('a@viljetech.com', 'pw')).toEqual({ ok: false, field: 'password', message: 'Sign-in failed. Try again in a moment.' })
+  })
+
   it('says the server could not be reached when the network fails', async () => {
     post.mockRejectedValue(new TypeError('Failed to fetch'))
     expect(await apiSignIn('a@viljetech.com', 'pw')).toEqual({
@@ -104,5 +126,60 @@ describe('apiSignOut', () => {
     post.mockRejectedValue(new TypeError('Failed to fetch'))
     await expect(apiSignOut()).resolves.toBeUndefined()
     expect(clearTokens).toHaveBeenCalled()
+  })
+})
+
+describe('apiForgotPassword', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('asks for an email first', async () => {
+    expect(await apiForgotPassword('  ')).toEqual({ ok: false, message: 'Enter your email.' })
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('sends the request and gives the same answer whether or not the account exists', async () => {
+    post.mockResolvedValue({ message: 'If this email is registered, a reset link has been sent.' })
+    expect(await apiForgotPassword(' Kari@X.no ')).toEqual({
+      ok: true,
+      message: 'If an account uses this email, we have sent it a link to set a new password.',
+    })
+    expect(post).toHaveBeenCalledWith('/auth/forgot-password', { email: 'Kari@X.no' })
+  })
+
+  it('explains too many requests', async () => {
+    post.mockRejectedValue(new ApiError(429, 'RATE_LIMITED', 'Too many'))
+    expect(await apiForgotPassword('k@x.no')).toEqual({ ok: false, message: 'Too many attempts. Wait a few minutes and try again.' })
+  })
+})
+
+describe('apiResetPassword', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('checks the two passwords before calling the server', async () => {
+    expect(await apiResetPassword('t'.repeat(43), '', '')).toEqual({ ok: false, message: 'Enter a new password.' })
+    expect(await apiResetPassword('t'.repeat(43), 'Abc123!xyz', 'Abc123!xyZ')).toEqual({ ok: false, message: "The two passwords don't match." })
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('refuses a page opened without a link token', async () => {
+    expect(await apiResetPassword('', 'Abc123!xyz', 'Abc123!xyz')).toEqual({ ok: false, message: 'This link is incomplete. Ask for a new one.' })
+  })
+
+  it('sets the password with the token from the link', async () => {
+    post.mockResolvedValue({ message: 'Password reset successful.' })
+    expect(await apiResetPassword('tok'.repeat(15), 'Abc123!xyz', 'Abc123!xyz')).toEqual({ ok: true, message: 'Your password is set. You can sign in now.' })
+    expect(post).toHaveBeenCalledWith('/auth/reset-password', { token: 'tok'.repeat(15), new_password: 'Abc123!xyz' })
+  })
+
+  it("shows the backend's reason: an expired link, or the field rule that failed", async () => {
+    post.mockRejectedValueOnce(new ApiError(400, 'VALIDATION_ERROR', 'Reset link is invalid or expired'))
+    expect(await apiResetPassword('tok'.repeat(15), 'Abc123!xyz', 'Abc123!xyz')).toEqual({
+      ok: false,
+      message: 'This link is invalid or has expired. Ask for a new one.',
+    })
+    post.mockRejectedValueOnce(
+      new ApiError(400, 'VALIDATION_ERROR', 'Validation failed', { errors: [{ field: 'new_password', message: 'Password must contain a number.' }] }),
+    )
+    expect(await apiResetPassword('tok'.repeat(15), 'Abcdefghij!', 'Abcdefghij!')).toEqual({ ok: false, message: 'Password must contain a number.' })
   })
 })

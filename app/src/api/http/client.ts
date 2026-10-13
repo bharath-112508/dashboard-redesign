@@ -7,8 +7,16 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** The backend's error details, e.g. `{ errors: [{ field, message }] }` for a validation error. */
+    readonly details?: unknown,
   ) {
     super(message)
+  }
+
+  /** The first field-level message, when the backend sent one. */
+  get fieldMessage(): string | undefined {
+    const errors = (this.details as { errors?: { message?: string }[] } | undefined)?.errors
+    return errors?.[0]?.message
   }
 }
 
@@ -70,6 +78,8 @@ export const createClient = (base: string, fetchImpl: Fetch, signedOut: () => vo
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (t) headers.Authorization = `Bearer ${t.access}`
     const res = await fetchImpl(`${base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+    // A 401 with no tokens at all: the session outlived them, so sign out here too.
+    if (res.status === 401 && !t && !path.startsWith('/auth/')) signedOut()
     if (res.status === 401 && t && !retried && !path.startsWith('/auth/login')) {
       const now = readTokens()
       // Another tab refreshed while this call was in flight: retry with its tokens.
@@ -77,8 +87,8 @@ export const createClient = (base: string, fetchImpl: Fetch, signedOut: () => vo
       if (await refresh(t)) return call<T>(method, path, body, true)
     }
     if (res.status === 204) return undefined as T
-    const payload = (await res.json().catch(() => ({}))) as { data?: T; error?: { code?: string; message?: string } }
-    if (!res.ok) throw new ApiError(res.status, payload.error?.code ?? 'UNKNOWN', payload.error?.message ?? res.statusText)
+    const payload = (await res.json().catch(() => ({}))) as { data?: T; error?: { code?: string; message?: string; details?: unknown } }
+    if (!res.ok) throw new ApiError(res.status, payload.error?.code ?? 'UNKNOWN', payload.error?.message ?? res.statusText, payload.error?.details)
     return payload.data as T
   }
 

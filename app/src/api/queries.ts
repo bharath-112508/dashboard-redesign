@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { reduce, touches, type Command, type Resource } from './commands'
-import { server } from './server'
+import { RefusedError, server } from './server'
+import { apiMode } from './http/config'
 import { refusal } from './session/permissions'
 import { readSession } from './session/store'
 import type { Db } from './types'
@@ -56,10 +57,25 @@ const cachedDb = (qc: QueryClient, needed: Resource[]): Db | null => {
  * Sends a command to the server. The cache is updated straight away with the
  * same reducer the server uses, then refetched once the server confirms.
  */
+/**
+ * API mode: refuses a command the signed-in role may not run before it reaches
+ * the backend, with the same reason the mock gives (session/permissions.ts).
+ * The backend enforces the rules too; this keeps the message and timing the same as mock mode.
+ */
+export const refuseBeforeSending = (qc: QueryClient, cmd: Command) => {
+  if (!apiMode) return
+  const db = cachedDb(qc, touches(cmd))
+  const why = db && refusal(db, cmd, readSession())
+  if (why) throw new RefusedError(why)
+}
+
 const useCommandMutation = () => {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (cmd: Command) => server.send(cmd),
+    mutationFn: async (cmd: Command) => {
+      refuseBeforeSending(qc, cmd)
+      return server.send(cmd)
+    },
     onMutate: async cmd => {
       const keys = touches(cmd)
       await Promise.all(keys.map(k => qc.cancelQueries({ queryKey: [k] })))

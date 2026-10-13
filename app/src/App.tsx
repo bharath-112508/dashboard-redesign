@@ -16,6 +16,7 @@ import { CompanyDetailPage } from './pages/companies/CompanyDetailPage'
 import { ProjectsPage } from './pages/projects/ProjectsPage'
 import { Shell } from './pages/shell/Shell'
 import { LoginPage } from './pages/login/LoginPage'
+import { ForgotPasswordPage, ResetPasswordPage } from './pages/login/PasswordPages'
 import { UsersPage } from './pages/users/UsersPage'
 import { ProfilePage } from './pages/users/ProfilePage'
 import { EmployeeTimesheetsPage } from './pages/employee-timesheets/EmployeeTimesheetsPage'
@@ -41,6 +42,8 @@ export function App() {
       <HashRedirect>
         <Routes>
           <Route path="login" element={<LoginPage />} />
+          <Route path="forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="reset-password" element={<ResetPasswordPage />} />
           <Route element={<Shell />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<DashboardPage />} />

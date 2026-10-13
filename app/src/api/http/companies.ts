@@ -26,7 +26,7 @@ const PAGE = 100
 export const allPages = async <T>(path: string): Promise<T[]> => {
   const items: T[] = []
   for (let page = 1; ; page++) {
-    const batch = await api.get<T[]>(`${path}?limit=${PAGE}&page=${page}`)
+    const batch = await api.get<T[]>(`${path}${path.includes('?') ? '&' : '?'}limit=${PAGE}&page=${page}`)
     items.push(...batch)
     if (batch.length < PAGE) return items
   }
@@ -108,12 +108,21 @@ const ALL = LOWER + UPPER + DIGIT + SYMBOL
  * sets their own with "Forgot password". It has one of each character class,
  * so it passes the backend's character rules whatever they require.
  */
+/** A uniform random index below `n`: values from the uneven top of the 32-bit range are drawn again. */
+export const randomIndex = (n: number): number => {
+  const limit = 2 ** 32 - (2 ** 32 % n)
+  for (;;) {
+    const v = crypto.getRandomValues(new Uint32Array(1))[0]
+    if (v < limit) return v % n
+  }
+}
+
 export const randomPassword = (length: number): string => {
-  const pick = (set: string) => set[crypto.getRandomValues(new Uint32Array(1))[0] % set.length]
+  const pick = (set: string) => set[randomIndex(set.length)]
   const chars = [pick(LOWER), pick(UPPER), pick(DIGIT), pick(SYMBOL), ...Array.from({ length: Math.max(0, length - 4) }, () => pick(ALL))]
   // Shuffle so the classes are not always in the first four places.
   for (let i = chars.length - 1; i > 0; i--) {
-    const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1)
+    const j = randomIndex(i + 1)
     ;[chars[i], chars[j]] = [chars[j], chars[i]]
   }
   return chars.join('')
@@ -143,6 +152,8 @@ const createContact = async (companyId: string, c: CompanyContact): Promise<Pers
     full_name: c.name,
     ...(c.role ? { title: c.role } : {}),
     initial_password: randomPassword(await passwordLength()),
+    // They choose their own password from an emailed link; nobody sees the random one.
+    send_invite: true,
   })
   if (c.admin) await api.post(`/users/${id}/change-role`, { new_role: 'client' })
   for (const p of c.projects) await roster(p, 'representatives', 'add', id)
@@ -163,12 +174,14 @@ const updateContact = async (companyId: string, c: CompanyContact & { personId: 
   for (const p of wants) if (!had.has(p)) await roster(p, 'representatives', 'add', c.personId)
 }
 
-/** Sets (or, with `role` null, removes) a staff member on a company, and their membership of its projects. */
+/**
+ * Sets (or, with `role` null, removes) one staff member on a company, and their membership of its projects.
+ * The backend changes that one entry atomically, so two people editing at once can't erase each other.
+ */
 const setResponsible = async (companyId: string, person: PersonId, role: string | null, projects: string[]) => {
-  const company = await api.get<BackendCompany>(`/companies/${companyId}`)
-  const others = (company.responsibles ?? []).filter(r => r.user_id !== person)
-  await api.patch(`/companies/${companyId}`, { responsibles: role ? [...others, { user_id: person, role }] : others })
-  const own = (await allPages<BackendProject>('/projects')).filter(p => p.company_id === companyId)
+  if (role) await api.post(`/companies/${companyId}/responsibles`, { user_id: person, role })
+  else await api.delete(`/companies/${companyId}/responsibles/${person}`)
+  const own = await allPages<BackendProject>(`/projects?company_id=${companyId}`)
   for (const p of own) {
     const has = p.member_ids.includes(person)
     const wants = projects.includes(p.id)
@@ -202,9 +215,8 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
       const body = companyBody(cmd.patch)
       if (Object.keys(body).length) await api.patch(`/companies/${cmd.id}`, body)
       if (cmd.main?.email) {
-        const people = await allPages<BackendRepresentative>(`/companies/${cmd.id}/representatives`)
-        const main = people.find(p => p.email.toLowerCase() === cmd.main!.email.toLowerCase())
-        if (main) await api.patch(`/users/${main.id}`, { full_name: cmd.main.name })
+        // The existing main contact is updated by id (name and email); without one, it is added.
+        if (cmd.mainPersonId) await api.patch(`/users/${cmd.mainPersonId}`, { full_name: cmd.main.name, email: cmd.main.email })
         else await createContact(cmd.id, { personId: null, name: cmd.main.name, role: 'Main contact', email: cmd.main.email, projects: [] })
       }
       return {}
