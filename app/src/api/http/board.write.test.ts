@@ -7,7 +7,7 @@ vi.mock('./client', async importOriginal => ({
   api: { get, post, patch, delete: del },
 }))
 
-const { loadBoard, sendBoardCommand, isBoardApiCommand, fetchTasks, ticketAlias } = await import('./board')
+const { loadBoard, sendBoardCommand, isBoardApiCommand, fetchTasks, ticketAlias, attachFile } = await import('./board')
 const { ApiError } = await import('./client')
 const cuser: Session = { personId: 'k1', name: 'Kari', email: 'k@x', role: 'cuser', org: 'Aurora', orgId: 'c1' }
 
@@ -203,12 +203,9 @@ describe('tickets', () => {
     expect(del).toHaveBeenCalledWith('/tasks/t3')
   })
 
-  it('refuses comments for now, before calling anything', async () => {
-    await expect(sendBoardCommand({ type: 'task.comment', id: 't1', text: 'hi' }, TODAY)).rejects.toMatchObject({
-      status: 403,
-      message: 'Comments come with the next update.',
-    })
-    expect(post).not.toHaveBeenCalled()
+  it('posts a comment', async () => {
+    await sendBoardCommand({ type: 'task.comment', id: 't1', text: 'Looks good' }, TODAY)
+    expect(post).toHaveBeenCalledWith('/tasks/t1/comments', { body: 'Looks good' })
   })
 
   it('passes a backend refusal on', async () => {
@@ -372,5 +369,60 @@ describe('review fixes', () => {
     await sendBoardCommand({ type: 'task.create', task: newTask({ id: '8', title: '', isNew: true }) }, TODAY)
     expect((await fetchTasks(cuser)).some(t => t.id === '8')).toBe(false)
     expect(await fetchTasks(null)).toEqual([])
+  })
+})
+
+describe('attachments', () => {
+  const file = new File(['hello world'], 'spec.pdf', { type: 'application/pdf' })
+  const put = vi.fn()
+  beforeEach(() => {
+    put.mockReset()
+    put.mockResolvedValue(new Response(null, { status: 201 }))
+    vi.stubGlobal('fetch', put)
+  })
+
+  it('uploads a new file: signed URL, the upload itself, then finalize', async () => {
+    post.mockImplementation(async (path: string) =>
+      path.endsWith('/upload-url')
+        ? { upload_url: 'https://blob.example/c/key?sig', blob_container: 'c', blob_key: 'tasks/t1/key', required_headers: { 'x-ms-blob-type': 'BlockBlob', 'Content-Type': 'application/pdf' } }
+        : { id: 'f9' },
+    )
+    const ref = attachFile(file)
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { atts: [{ id: 'f1', name: 'old.png', size: '1 KB', date: 'x' }, { name: 'spec.pdf', size: '1 KB', date: 'x', fileRef: ref }] } }, TODAY)
+    expect(post).toHaveBeenNthCalledWith(1, '/tasks/t1/attachments/upload-url', { file_name: 'spec.pdf', file_size: 11, mime_type: 'application/pdf' })
+    expect(put).toHaveBeenCalledWith('https://blob.example/c/key?sig', {
+      method: 'PUT',
+      headers: { 'x-ms-blob-type': 'BlockBlob', 'Content-Type': 'application/pdf' },
+      body: file,
+    })
+    expect(post).toHaveBeenNthCalledWith(2, '/tasks/t1/attachments/finalize', {
+      blob_container: 'c',
+      blob_key: 'tasks/t1/key',
+      file_name: 'spec.pdf',
+      file_size: 11,
+      mime_type: 'application/pdf',
+    })
+    expect(patch).not.toHaveBeenCalled()
+  })
+
+  it('stops before uploading when the backend refuses', async () => {
+    post.mockRejectedValueOnce(new ApiError(403, 'TASK_WRITE_FORBIDDEN', 'no'))
+    const ref = attachFile(file)
+    await expect(sendBoardCommand({ type: 'task.update', id: 't1', patch: { atts: [{ name: 'spec.pdf', size: '1 KB', date: 'x', fileRef: ref }] } }, TODAY)).rejects.toMatchObject({ status: 403 })
+    expect(put).not.toHaveBeenCalled()
+  })
+
+  it('reports a failed upload and does not finalize it', async () => {
+    post.mockResolvedValueOnce({ upload_url: 'https://blob.example/u', blob_container: 'c', blob_key: 'k', required_headers: {} })
+    put.mockResolvedValueOnce(new Response(null, { status: 403 }))
+    const ref = attachFile(file)
+    await expect(sendBoardCommand({ type: 'task.update', id: 't1', patch: { atts: [{ name: 'spec.pdf', size: '1 KB', date: 'x', fileRef: ref }] } }, TODAY)).rejects.toMatchObject({ status: 403, message: 'The file could not be uploaded. Try again.' })
+    expect(post).toHaveBeenCalledTimes(1)
+  })
+
+  it('does nothing for attachments that are already saved', async () => {
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { atts: [{ id: 'f1', name: 'old.png', size: '1 KB', date: 'x' }] } }, TODAY)
+    expect(post).not.toHaveBeenCalled()
+    expect(patch).not.toHaveBeenCalled()
   })
 })

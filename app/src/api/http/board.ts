@@ -14,7 +14,7 @@ import {
   type BackendTask,
 } from './boardMappers'
 import type { Command } from '../commands'
-import type { Epic, Session, Sprint, Status, Subtask, Task, TaskId, Workspace } from '../types'
+import type { Attachment, Epic, Session, Sprint, Status, Subtask, Task, TaskId, Workspace } from '../types'
 
 /** Where each board item lives on the backend, kept for writes. */
 export interface BoardIndex {
@@ -335,6 +335,33 @@ const saveSubs = async (parentId: string, before: Subtask[], after: Subtask[]): 
   return saved
 }
 
+/** Files picked in the drawer, waiting for the write that uploads them. */
+const pickedFiles = new Map<string, File>()
+let fileCount = 0
+/** Keeps a picked file for upload and returns the reference the attachment carries. */
+export const attachFile = (file: File) => {
+  const ref = `file-${++fileCount}`
+  pickedFiles.set(ref, file)
+  return ref
+}
+
+type UploadTicket = { upload_url: string; blob_container: string; blob_key: string; required_headers: Record<string, string> }
+
+/** New attachments are uploaded: a signed URL from the backend, the file straight to storage, then finalize. */
+const saveAtts = async (id: string, atts: Attachment[]) => {
+  for (const a of atts) {
+    const file = a.fileRef ? pickedFiles.get(a.fileRef) : undefined
+    if (!file) continue
+    const meta = { file_name: file.name, file_size: file.size, mime_type: file.type || 'application/octet-stream' }
+    const t = await api.post<UploadTicket>(`/tasks/${id}/attachments/upload-url`, meta)
+    // A network or storage (CORS) failure reads the same as a refused upload.
+    const res = await fetch(t.upload_url, { method: 'PUT', headers: t.required_headers, body: file }).catch(() => null)
+    if (!res?.ok) throw refuse('The file could not be uploaded. Try again.')
+    await api.post(`/tasks/${id}/attachments/finalize`, { blob_container: t.blob_container, blob_key: t.blob_key, ...meta })
+    pickedFiles.delete(a.fileRef as string)
+  }
+}
+
 const saveDeps = async (id: string, before: TaskId[], after: TaskId[]) => {
   for (const d of after) if (!before.includes(d)) await api.post(`/tasks/${id}/dependencies`, { depends_on_task_id: await realTaskId(d) })
   for (const d of before) if (!after.includes(d)) await api.delete(`/tasks/${id}/dependencies/${d}`)
@@ -358,6 +385,7 @@ const updateTask = async (appId: TaskId, patch: Partial<Task>) => {
   if (patch.deps) await saveDeps(id, was?.deps ?? [], patch.deps)
   if (Object.keys(body).length) await api.patch(`/tasks/${id}`, body)
   const subs = patch.subs ? await saveSubs(id, was?.subs ?? [], patch.subs) : undefined
+  if (patch.atts) await saveAtts(id, patch.atts)
   // What is saved now is the "before" of the next write, until the board reloads.
   if (was) boardIndex.tasks.set(id, { ...was, ...patch, ...(subs ? { subs } : {}) })
 }
@@ -433,7 +461,8 @@ const sendOne = async (cmd: BoardCommand, today: string): Promise<{ id?: string 
       await api.delete(`/tasks/${await realTaskId(cmd.id)}`)
       return {}
     case 'task.comment':
-      throw refuse('Comments come with the next update.')
+      await api.post(`/tasks/${await realTaskId(cmd.id)}/comments`, { body: cmd.text })
+      return {}
     case 'sprint.create': {
       const { sprint } = cmd
       const project = projectOfEpic(sprint.epic)

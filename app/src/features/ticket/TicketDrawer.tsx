@@ -26,7 +26,11 @@ import {
 } from '../../domain/tasks'
 import { DescriptionEditor } from './DescriptionEditor'
 import { Caret, PillDropdown, type PillOption } from './PillDropdown'
-import { ticketAlias } from '../../api/http/board'
+import { attachFile, ticketAlias } from '../../api/http/board'
+import { apiMode } from '../../api/http/config'
+
+/** API mode: the picked file goes with the attachment so the write can upload it. */
+const uploadRef = (f: File) => (apiMode ? { fileRef: attachFile(f) } : {})
 
 type Tab = 'details' | 'subs' | 'act' | 'chat'
 
@@ -307,7 +311,7 @@ function TicketBody({
   // ---------- attachments
   const addFiles = (fs: File[]) => {
     if (!fs.length) return
-    const add: Attachment[] = fs.map(f => ({ name: f.name, size: fileSize(f.size), date: fmt(TODAY) }))
+    const add: Attachment[] = fs.map(f => ({ name: f.name, size: fileSize(f.size), date: fmt(TODAY), ...uploadRef(f) }))
     upd({ atts: [...raw.atts, ...add] }, 'added ' + (add.length > 1 ? add.length + ' attachments' : 'an attachment'))
   }
 
@@ -813,7 +817,7 @@ function TicketBody({
                           if (v !== raw.desc) upd({ desc: v }, 'updated the description')
                           setDescEdit(false)
                         }}
-                        onImage={f => upd({ atts: [...raw.atts, { name: f.name, size: Math.max(1, Math.round(f.size / 1e3)) + ' KB', date: fmt(TODAY) }] }, 'added an attachment')}
+                        onImage={f => upd({ atts: [...raw.atts, { name: f.name, size: Math.max(1, Math.round(f.size / 1e3)) + ' KB', date: fmt(TODAY), ...uploadRef(f) }] }, 'added an attachment')}
                       />
                     ) : (
                       <div className="flex items-start gap-4">
