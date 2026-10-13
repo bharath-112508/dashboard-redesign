@@ -13,7 +13,7 @@ import { readSession } from './session/store'
 import { apiMode } from './http/config'
 import { fetchCompanies, fetchInternalProjects, isCompanyApiCommand, sendCompanyCommand } from './http/companies'
 import { ApiError } from './http/client'
-import { fetchTasks, fetchWorkspace } from './http/board'
+import { fetchTasks, fetchWorkspace, isBoardApiCommand, sendBoardCommand } from './http/board'
 
 /**
  * A mock backend. Data lives in localStorage so it survives reloads and is
@@ -479,11 +479,15 @@ const localToday = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-/** API mode: sends the command to the backend. A 403 becomes the RefusedError the pages already show. */
-const sendToApi = async (cmd: Parameters<typeof sendCompanyCommand>[0]): Promise<SendResult> => {
+/**
+ * API mode: sends the command to the backend. A 403 becomes the RefusedError
+ * the pages already show. A new ticket's backend id is also its `id`, so the
+ * ticket window moves from the temporary id to the real one.
+ */
+const sendToApi = async (send: (today: string) => Promise<{ id?: string }>, ticket = false): Promise<SendResult> => {
   try {
-    const { id } = await sendCompanyCommand(cmd, localToday())
-    return id ? { apiId: id } : {}
+    const { id } = await send(localToday())
+    return id ? { apiId: id, ...(ticket ? { id } : {}) } : {}
   } catch (err) {
     if (err instanceof ApiError && err.status === 403) throw new RefusedError(err.message)
     throw err
@@ -503,7 +507,9 @@ export const server = {
 
   /** Applies a command and resolves with what it did (the id of a new task, for example). */
   async send(cmd: Command): Promise<SendResult> {
-    if (apiMode && isCompanyApiCommand(cmd)) return sendToApi(cmd)
+    if (apiMode && isCompanyApiCommand(cmd)) return sendToApi(today => sendCompanyCommand(cmd, today))
+    if (apiMode && isBoardApiCommand(cmd))
+      return sendToApi(today => sendBoardCommand(cmd, today), cmd.type === 'task.create' || cmd.type === 'tickets.task.createTop')
     await sleep(LATENCY_MS)
     return exclusive(() =>
       acrossTabs(async () => {

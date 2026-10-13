@@ -1,17 +1,20 @@
-import { api } from './client'
+import { ApiError, api } from './client'
 import { allPages, liveProjects } from './companies'
 import type { BackendProject } from './companyMappers'
 import {
   epicFrom,
   noEpicFor,
+  realSprintId,
   sprintsFrom,
+  taskBody,
   taskFrom,
   type BackendSprint,
   type BackendStatuses,
   type BackendStory,
   type BackendTask,
 } from './boardMappers'
-import type { Epic, Session, Sprint, Status, Task, TaskId, Workspace } from '../types'
+import type { Command } from '../commands'
+import type { Epic, Session, Sprint, Status, Subtask, Task, TaskId, Workspace } from '../types'
 
 /** Where each board item lives on the backend, kept for writes. */
 export interface BoardIndex {
@@ -21,6 +24,10 @@ export interface BoardIndex {
   storyOfEpic: Map<string, string | null>
   /** Person name → user id, for writes that name people. */
   idOfName: Map<string, string>
+  /** The tickets as loaded, to tell what a write changes (subtasks, blockers). */
+  tasks: Map<TaskId, Task>
+  /** Each real sprint's member ids, for adding members. */
+  sprintMemberIds: Map<string, string[]>
 }
 
 export interface Board {
@@ -36,7 +43,14 @@ const DEFAULT_STATUSES: Status[] = [
   { id: 'done', name: 'Done', p: 3 },
 ]
 
-const emptyIndex = (): BoardIndex => ({ projectOfEpic: new Map(), projectOfTask: new Map(), storyOfEpic: new Map(), idOfName: new Map() })
+const emptyIndex = (): BoardIndex => ({
+  projectOfEpic: new Map(),
+  projectOfTask: new Map(),
+  storyOfEpic: new Map(),
+  idOfName: new Map(),
+  tasks: new Map(),
+  sprintMemberIds: new Map(),
+})
 
 /** The last board loaded, for writes (which project a ticket is in, which story an epic is). */
 export let boardIndex: BoardIndex = emptyIndex()
@@ -107,6 +121,7 @@ export const loadBoard = async (session: Session | null): Promise<Board> => {
     }
     epics.push(...projectEpics)
     sprints.push(...projectSprintList)
+    for (const sp of projectSprints) index.sprintMemberIds.set(sp.id, sp.member_ids ?? [])
 
     const byNumber = (a: BackendTask, b: BackendTask) => (a.task_number ?? 0) - (b.task_number ?? 0)
     for (const t of list) {
@@ -122,6 +137,7 @@ export const loadBoard = async (session: Session | null): Promise<Board> => {
       )
     }
   }
+  for (const t of tasks) index.tasks.set(t.id, t)
   boardIndex = index
   return { workspace: { statuses, epics, sprints, devopsLinks: {} }, tasks, index }
 }
@@ -131,4 +147,256 @@ let inflight: Promise<Board> | null = null
 const shared = (session: Session | null) => (inflight ??= loadBoard(session).finally(() => (inflight = null)))
 
 export const fetchWorkspace = async (session: Session | null) => (await shared(session)).workspace
-export const fetchTasks = async (session: Session | null) => (await shared(session)).tasks
+export const fetchTasks = async (session: Session | null) => [...(await shared(session)).tasks, ...drafts.values()]
+
+// ─── Writes ──────────────────────────────────────────────────────────────
+
+const BOARD_COMMANDS = new Set([
+  'task.create',
+  'tickets.task.createTop',
+  'task.update',
+  'task.delete',
+  'task.comment',
+  'sprint.create',
+  'sprint.update',
+  'sprint.addMembers',
+  'epic.create',
+  'epic.update',
+])
+
+type BoardCommand = Extract<
+  Command,
+  {
+    type:
+      | 'task.create'
+      | 'tickets.task.createTop'
+      | 'task.update'
+      | 'task.delete'
+      | 'task.comment'
+      | 'sprint.create'
+      | 'sprint.update'
+      | 'sprint.addMembers'
+      | 'epic.create'
+      | 'epic.update'
+      | 'batch'
+  }
+>
+
+/** Ticket, epic and sprint commands, and batches made only of them, go to the backend. */
+export const isBoardApiCommand = (cmd: { type: string; cmds?: { type: string }[] }): cmd is BoardCommand =>
+  cmd.type === 'batch' ? !!cmd.cmds?.length && cmd.cmds.every(isBoardApiCommand) : BOARD_COMMANDS.has(cmd.type)
+
+const refuse = (message: string) => new ApiError(403, 'NOT_AVAILABLE', message)
+
+const idsOf = (names: string[]) => names.map(n => boardIndex.idOfName.get(n)).filter((x): x is string => !!x)
+const bodyCtx = {
+  ids: (name: string) => boardIndex.idOfName.get(name),
+  realSprintId: (id: string | null) => (id ? realSprintId(id) : null),
+  storyIdOf: (epic: string) => boardIndex.storyOfEpic.get(epic) ?? (epic.startsWith('none~') ? null : epic),
+}
+const projectOfEpic = (epic: string) => boardIndex.projectOfEpic.get(epic) ?? (epic.startsWith('none~') ? epic.slice(5) : undefined)
+const firstProject = () => boardIndex.projectOfEpic.values().next().value as string | undefined
+
+/**
+ * A ticket made in the app has a temporary id until the backend answers. An
+ * edit sent meanwhile waits for that answer and goes to the real ticket.
+ */
+const creating = new Map<TaskId, Promise<string>>()
+const realTaskId = async (id: TaskId) => (await creating.get(id)) ?? aliases.get(id) ?? id
+
+/**
+ * "+ Create ticket" opens an empty ticket that is removed if it is left without
+ * a title. The backend needs a title, so until it has one the ticket is a
+ * draft kept here (and shown with the board's tickets); the title creates it.
+ */
+const drafts = new Map<TaskId, Task & { top?: boolean }>()
+/** A draft's id → the backend id it was created under, so its open window can follow. */
+const aliases = new Map<TaskId, string>()
+export const ticketAlias = (id: TaskId) => aliases.get(id)
+
+const createTask = async (task: Task, top: boolean): Promise<string | undefined> => {
+  if (task.isNew && !task.title.trim()) {
+    drafts.set(task.id, { ...task, top })
+    return undefined
+  }
+  const project = (task.parent && boardIndex.projectOfTask.get(task.parent)) || projectOfEpic(task.epic) || firstProject()
+  if (!project) throw refuse('There is no project to add this ticket to.')
+  const pending = (async () => {
+    const { id } = await api.post<{ id: string }>('/tasks', {
+      project_id: project,
+      ...taskBody(task, bodyCtx),
+      ...(task.parent ? { parent_task_id: await realTaskId(task.parent) } : {}),
+    })
+    if (top) await api.post(`/tasks/${id}/rank`, {})
+    return id
+  })()
+  creating.set(task.id, pending)
+  try {
+    return await pending
+  } finally {
+    // Kept briefly so edits queued behind the create still find it.
+    setTimeout(() => creating.delete(task.id), 60_000)
+  }
+}
+
+const subBody = (s: Subtask): Record<string, unknown> => ({
+  ...(s.due ? { due_date: s.due } : {}),
+  ...(s.assignee ? { assignee_ids: idsOf([s.assignee]), primary_assignee_id: idsOf([s.assignee])[0] ?? null } : {}),
+  ...(s.note ? { description: s.note } : {}),
+})
+
+/** Subtask lines are the backend's linked tasks: new lines are created, changed ones patched, removed ones deleted. */
+const saveSubs = async (parentId: string, before: Subtask[], after: Subtask[]) => {
+  const old = new Map(before.filter(s => s.sid).map(s => [s.sid as string, s]))
+  const project = boardIndex.projectOfTask.get(parentId)
+  for (const s of after) {
+    const sid = s.sid ? await realTaskId(s.sid) : undefined
+    const was = sid ? old.get(sid) : undefined
+    if (sid && was) {
+      const b: Record<string, unknown> = {}
+      if (s.t !== was.t) b.title = s.t
+      if (s.done !== was.done) b.status = s.done ? 'done' : 'to_do'
+      if ((s.due ?? '') !== (was.due ?? '')) b.due_date = s.due || null
+      if ((s.assignee ?? '') !== (was.assignee ?? '')) {
+        b.assignee_ids = s.assignee ? idsOf([s.assignee]) : []
+        b.primary_assignee_id = (b.assignee_ids as string[])[0] ?? null
+      }
+      if ((s.note ?? '') !== (was.note ?? '')) b.description = s.note ?? ''
+      if (Object.keys(b).length) await api.patch(`/tasks/${sid}`, b)
+      old.delete(sid)
+    } else if (!sid) {
+      await api.post('/tasks', { project_id: project, parent_task_id: parentId, title: s.t, status: s.done ? 'done' : 'to_do', ...subBody(s) })
+    }
+    // A line with a sid the board does not know yet was just created (the drawer opened it): nothing to do.
+  }
+  for (const sid of old.keys()) await api.delete(`/tasks/${sid}`)
+}
+
+const saveDeps = async (id: string, before: TaskId[], after: TaskId[]) => {
+  for (const d of after) if (!before.includes(d)) await api.post(`/tasks/${id}/dependencies`, { depends_on_task_id: await realTaskId(d) })
+  for (const d of before) if (!after.includes(d)) await api.delete(`/tasks/${id}/dependencies/${d}`)
+}
+
+const updateTask = async (appId: TaskId, patch: Partial<Task>) => {
+  const draft = drafts.get(appId)
+  if (draft) {
+    const { top, ...next } = { ...draft, ...patch }
+    if (!next.title.trim()) return void drafts.set(appId, { ...next, top })
+    drafts.delete(appId)
+    const id = await createTask({ ...next, isNew: false }, !!top)
+    if (id) aliases.set(appId, id)
+    return
+  }
+  const id = await realTaskId(appId)
+  const was = boardIndex.tasks.get(id)
+  const body = taskBody(patch, bodyCtx)
+  if (Object.keys(body).length) await api.patch(`/tasks/${id}`, body)
+  if (patch.subs) await saveSubs(id, was?.subs ?? [], patch.subs)
+  if (patch.deps) await saveDeps(id, was?.deps ?? [], patch.deps)
+}
+
+const doneIndexes = (m: Record<number, boolean> = {}) =>
+  Object.entries(m)
+    .filter(([, v]) => v)
+    .map(([k]) => +k)
+
+const sprintBody = (p: Partial<Sprint>): Record<string, unknown> => {
+  const b: Record<string, unknown> = {}
+  if (p.name !== undefined) b.name = p.name
+  if (p.start !== undefined) b.start_date = p.start
+  if (p.end !== undefined) b.end_date = p.end
+  if (p.goal !== undefined) b.goal = p.goal
+  if (p.epic !== undefined) b.story_id = bodyCtx.storyIdOf(p.epic)
+  if (p.members !== undefined) b.member_ids = idsOf(p.members)
+  if (p.goals !== undefined) b.goals = p.goals
+  if (p.goalsDone !== undefined) b.goals_done = doneIndexes(p.goalsDone)
+  if (p.summary !== undefined) b.summary = p.summary
+  if (p.why !== undefined) b.why = p.why
+  return b
+}
+
+const updateSprint = async (appId: string, patch: Partial<Sprint>) => {
+  const id = realSprintId(appId)
+  const { state, ...rest } = patch
+  if (state === 'active') await api.post(`/sprints/${id}/start`, {})
+  if (state === 'done') await api.post(`/sprints/${id}/complete`, { move_unfinished_to: 'backlog' })
+  const body = { ...sprintBody(rest), ...(state === 'planned' ? { status: 'planned' } : {}) }
+  if (Object.keys(body).length) await api.patch(`/sprints/${id}`, body)
+}
+
+const epicBody = (p: Partial<Epic>): Record<string, unknown> => {
+  const b: Record<string, unknown> = {}
+  if (p.name !== undefined) b.title = p.name
+  if (p.desc !== undefined) b.description = p.desc
+  if (p.goal !== undefined) b.goal = p.goal
+  if (p.story !== undefined) b.user_story = p.story
+  if (p.criteria !== undefined) b.criteria = p.criteria
+  if (p.critDone !== undefined) b.criteria_done = doneIndexes(p.critDone)
+  if (p.target !== undefined) b.target_date = p.target || null
+  if (p.inScope !== undefined) b.in_scope = p.inScope
+  if (p.outScope !== undefined) b.out_scope = p.outScope
+  if (p.reqs !== undefined) b.requirements = p.reqs
+  if (p.risks !== undefined) b.risks = p.risks
+  if (p.questions !== undefined) b.open_questions = p.questions
+  return b
+}
+
+/** Sends one board command to the backend. Creates resolve with the backend id. */
+export const sendBoardCommand = async (cmd: BoardCommand, today: string): Promise<{ id?: string }> => {
+  switch (cmd.type) {
+    case 'task.create':
+      return { id: await createTask(cmd.task, !!cmd.top) }
+    case 'tickets.task.createTop':
+      return { id: await createTask(cmd.task, true) }
+    case 'task.update':
+      await updateTask(cmd.id, cmd.patch)
+      return {}
+    case 'task.delete':
+      if (drafts.delete(cmd.id)) return {}
+      await api.delete(`/tasks/${await realTaskId(cmd.id)}`)
+      return {}
+    case 'task.comment':
+      throw refuse('Comments come with the next update.')
+    case 'sprint.create': {
+      const { sprint } = cmd
+      const project = projectOfEpic(sprint.epic)
+      if (!project) throw refuse('There is no project for this sprint.')
+      const story = bodyCtx.storyIdOf(sprint.epic)
+      const { id } = await api.post<{ id: string }>(`/projects/${project}/sprints`, {
+        name: sprint.name,
+        start_date: sprint.start,
+        end_date: sprint.end,
+        goal: sprint.goal ?? '',
+        ...(story ? { story_id: story } : {}),
+        member_ids: idsOf(sprint.members),
+        ...(sprint.goals ? { goals: sprint.goals } : {}),
+      })
+      return { id }
+    }
+    case 'sprint.update':
+      await updateSprint(cmd.id, cmd.patch)
+      return {}
+    case 'sprint.addMembers': {
+      const id = realSprintId(cmd.id)
+      const member_ids = [...new Set([...(boardIndex.sprintMemberIds.get(id) ?? []), ...idsOf(cmd.names)])]
+      await api.patch(`/sprints/${id}`, { member_ids })
+      return {}
+    }
+    case 'epic.create': {
+      const project = cmd.projectId ?? firstProject()
+      if (!project) throw refuse('There is no project to add this epic to.')
+      const { id: _tmp, p: _p, ...doc } = cmd.epic
+      const { id } = await api.post<{ id: string }>(`/projects/${project}/stories`, epicBody(doc))
+      return { id }
+    }
+    case 'epic.update':
+      if (cmd.id.startsWith('none~')) throw refuse('"No epic" holds the tickets without an epic; it cannot be edited.')
+      await api.patch(`/stories/${cmd.id}`, epicBody(cmd.patch))
+      return {}
+    case 'batch': {
+      let last: { id?: string } = {}
+      for (const c of cmd.cmds) last = await sendBoardCommand(c as BoardCommand, today)
+      return last
+    }
+  }
+}

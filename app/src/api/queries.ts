@@ -4,6 +4,7 @@ import { reduce, touches, type Command, type Resource } from './commands'
 import { RefusedError, server } from './server'
 import { apiMode } from './http/config'
 import { isCompanyApiCommand } from './http/companies'
+import { isBoardApiCommand } from './http/board'
 import { refusal } from './session/permissions'
 import { readSession } from './session/store'
 import type { Db } from './types'
@@ -64,8 +65,8 @@ const cachedDb = (qc: QueryClient, needed: Resource[]): Db | null => {
  * The backend enforces the rules too; this keeps the message and timing the same as mock mode.
  */
 export const refuseBeforeSending = (qc: QueryClient, cmd: Command) => {
-  // Company and project commands are judged by the backend: the mock's client rules are stricter there.
-  if (!apiMode || isCompanyApiCommand(cmd)) return
+  // Company, project and board commands are judged by the backend: the mock's rules differ there.
+  if (!apiMode || isCompanyApiCommand(cmd) || isBoardApiCommand(cmd)) return
   const db = cachedDb(qc, touches(cmd))
   const why = db && refusal(db, cmd, readSession())
   if (why) throw new RefusedError(why)

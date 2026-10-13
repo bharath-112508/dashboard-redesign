@@ -2,7 +2,9 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSend, useWorkspace } from '../../api/queries'
-import { useOverlay } from '../../state/ui'
+import { useOverlay, useUi } from '../../state/ui'
+import { useOpenProject } from '../../pages/clients/useClientScope'
+import { boardIndex } from '../../api/http/board'
 import { useEscape } from '../useEscape'
 
 const schema = z.object({
@@ -19,6 +21,9 @@ export function EpicFormModal() {
   const ws = useWorkspace().data!
   const send = useSend()
   const overlay = useOverlay()
+  // API mode: the epic goes in the project open on the Clients page, else the selected epic's project.
+  const openProject = useOpenProject()
+  const { epic: selectedEpic } = useUi()
   const close = () => overlay.close('newEpic')
   useEscape(close)
   const { register, handleSubmit, watch } = useForm<Form>({ resolver: zodResolver(schema), defaultValues: { name: '', story: '' } })
@@ -29,6 +34,7 @@ export function EpicFormModal() {
     send({
       type: 'epic.create',
       epic: { id: 'e' + Date.now(), name: f.name.trim(), p: ws.epics.length, desc: story.split('\n')[0].slice(0, 90), goal: '', story, criteria: [] },
+      projectId: openProject?.project.id ?? boardIndex.projectOfEpic.get(selectedEpic),
     })
     close()
   }

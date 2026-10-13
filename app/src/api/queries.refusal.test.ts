@@ -14,8 +14,17 @@ describe('refuseBeforeSending (API mode)', () => {
   it("refuses a command the signed-in role may not run, with the same reason the mock gives, before it reaches the backend", () => {
     const qc = new QueryClient()
     qc.setQueryData(['tasks'], [])
-    refusal.mockReturnValueOnce('A client user cannot delete a ticket.')
-    expect(() => refuseBeforeSending(qc, { type: 'task.delete', id: '1' })).toThrow(RefusedError)
+    qc.setQueryData(['questions'], [])
+    refusal.mockReturnValueOnce('A client user cannot mark questions seen.')
+    expect(() => refuseBeforeSending(qc, { type: 'tickets.question.seen', id: 1, seen: 2 })).toThrow(RefusedError)
+  })
+
+  it('leaves ticket, epic and sprint commands to the backend', () => {
+    const qc = new QueryClient()
+    qc.setQueryData(['tasks'], [])
+    refusal.mockReturnValue('do that')
+    expect(() => refuseBeforeSending(qc, { type: 'task.delete', id: '1' })).not.toThrow()
+    refusal.mockReset()
   })
 
   it('leaves company and project commands to the backend, which knows what each client may do there', () => {

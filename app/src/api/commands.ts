@@ -36,7 +36,8 @@ export type Command =
   | { type: 'sprint.create'; sprint: Sprint }
   | { type: 'sprint.update'; id: string; patch: Partial<Sprint> }
   | { type: 'sprint.addMembers'; id: string; names: string[] }
-  | { type: 'epic.create'; epic: Epic }
+  /** `projectId`: the backend project the epic belongs to (API mode). */
+  | { type: 'epic.create'; epic: Epic; projectId?: string }
   | { type: 'epic.update'; id: string; patch: Partial<Epic> }
   /** Saves the signed-in user's own details in the directory. The session is written by the caller. */
   | { type: 'profile.update'; id: PersonId; patch: ProfilePatch }

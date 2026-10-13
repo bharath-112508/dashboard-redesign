@@ -26,6 +26,7 @@ import {
 } from '../../domain/tasks'
 import { DescriptionEditor } from './DescriptionEditor'
 import { Caret, PillDropdown, type PillOption } from './PillDropdown'
+import { ticketAlias } from '../../api/http/board'
 
 type Tab = 'details' | 'subs' | 'act' | 'chat'
 
@@ -55,7 +56,12 @@ export function TicketDrawer({ id }: { id: TaskId }) {
   const [navStack, setNavStack] = useState<TaskId[]>([])
   const [initialTab, setInitialTab] = useState<Tab>('details')
   const [railHide, setRailHide] = useState<boolean | null>(null)
-  const raw0 = tasks.find(t => t.id === id)
+  // API mode: a draft ticket that got its title now lives under its backend id.
+  const alias = ticketAlias(id)
+  const raw0 = tasks.find(t => t.id === id) ?? (alias ? tasks.find(t => t.id === alias) : undefined)
+  useEffect(() => {
+    if (alias && raw0?.id === alias) overlay.open('ticket', alias, { replace: true })
+  }, [alias, raw0?.id])
   // Client-reported bugs open in the bug window; a link to one of them lands there.
   const isBug = !!raw0?.clientBug
   useEffect(() => {

@@ -1,15 +1,22 @@
 import { describe, expect, it, vi } from 'vitest'
+import type { Task } from './types'
 
 const { fetchCompanies, fetchInternalProjects, sendCompanyCommand } = vi.hoisted(() => ({
   fetchCompanies: vi.fn(async () => [{ id: 'c1' }]),
   fetchInternalProjects: vi.fn(async () => [{ id: 'i1' }]),
   sendCompanyCommand: vi.fn(async (): Promise<{ id?: string }> => ({ id: 'c1' })),
 }))
-const { fetchWorkspace, fetchTasks } = vi.hoisted(() => ({
+const { fetchWorkspace, fetchTasks, sendBoardCommand } = vi.hoisted(() => ({
+  sendBoardCommand: vi.fn(async (): Promise<{ id?: string }> => ({ id: 'real1' })),
   fetchWorkspace: vi.fn(async () => ({ statuses: [], epics: [{ id: 'e1' }], sprints: [], devopsLinks: {} })),
   fetchTasks: vi.fn(async () => [{ id: 't1' }]),
 }))
-vi.mock('./http/board', () => ({ fetchWorkspace, fetchTasks }))
+vi.mock('./http/board', () => ({
+  fetchWorkspace,
+  fetchTasks,
+  sendBoardCommand,
+  isBoardApiCommand: (c: { type: string }) => c.type.startsWith('task.'),
+}))
 vi.mock('./http/config', () => ({ apiMode: true, API_URL: 'http://x/api/v1' }))
 vi.mock('./http/companies', () => ({
   fetchCompanies,
@@ -53,5 +60,18 @@ describe('server.send in API mode', () => {
   it('passes other backend errors through unchanged', async () => {
     sendCompanyCommand.mockRejectedValueOnce(new ApiError(409, 'DUPLICATE_RESOURCE', 'Taken'))
     await expect(server.send({ type: 'company.archive', id: 'c1', archived: true, at: null })).rejects.toMatchObject({ status: 409 })
+  })
+})
+
+describe('server.send for board commands in API mode', () => {
+  const task = { id: '1', title: 'T', type: 'Task', status: 'todo', prio: 'Medium', due: '', assignee: '', contribs: [], est: '', desc: '', atts: [], subs: [], deps: [], epic: 'e1', sprint: null, start: '', time: {}, acts: [] } satisfies Task
+
+  it("gives a new ticket's backend id back, so its window moves to the real ticket", async () => {
+    expect(await server.send({ type: 'task.create', task })).toEqual({ id: 'real1', apiId: 'real1' })
+  })
+
+  it('turns a backend refusal into the refusal the board shows (the card snaps back)', async () => {
+    sendBoardCommand.mockRejectedValueOnce(new ApiError(403, 'TASK_WRITE_FORBIDDEN', 'You may only update: status'))
+    await expect(server.send({ type: 'task.update', id: 't1', patch: { status: 'done' } })).rejects.toBeInstanceOf(RefusedError)
   })
 })
