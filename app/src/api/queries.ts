@@ -6,6 +6,7 @@ import { apiMode } from './http/config'
 import { isCompanyApiCommand } from './http/companies'
 import { isBoardApiCommand } from './http/board'
 import { isTimeApiCommand } from './http/timesheet'
+import { isUserApiCommand } from './http/users'
 import { fetchTicketDetails, isBackendId } from './http/ticketDetails'
 import { ApiError } from './http/client'
 import { refusal } from './session/permissions'
@@ -80,7 +81,7 @@ const cachedDb = (qc: QueryClient, needed: Resource[]): Db | null => {
  */
 export const refuseBeforeSending = (qc: QueryClient, cmd: Command) => {
   // Company, project and board commands are judged by the backend: the mock's rules differ there.
-  if (!apiMode || isCompanyApiCommand(cmd) || isBoardApiCommand(cmd) || isTimeApiCommand(cmd)) return
+  if (!apiMode || isCompanyApiCommand(cmd) || isBoardApiCommand(cmd) || isTimeApiCommand(cmd) || isUserApiCommand(cmd)) return
   const db = cachedDb(qc, touches(cmd))
   const why = db && refusal(db, cmd, readSession())
   if (why) throw new RefusedError(why)

@@ -1,3 +1,5 @@
+import { apiMode } from '../../api/http/config'
+import { RefusedError } from '../../api/server'
 import { useMemo, useState, type ChangeEvent } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -191,7 +193,7 @@ export function UserForm({ person, scope, session, people, companies, internal, 
             last: 'Invited',
           },
         })
-        show(`Invited ${shared.name}. No email is sent yet.`)
+        show(apiMode ? `Invited ${shared.name}. They get an email to set their password.` : `Invited ${shared.name}. No email is sent yet.`)
         onClose()
         return
       }
@@ -211,8 +213,8 @@ export function UserForm({ person, scope, session, people, companies, internal, 
       if (self) writeSession({ ...session, name: shared.name, email: shared.email })
       show(`Saved ${shared.name}.`)
       onClose()
-    } catch {
-      setFormError('The change could not be saved. Try again.')
+    } catch (err) {
+      setFormError(err instanceof RefusedError ? err.message : 'The change could not be saved. Try again.')
     }
   })
 
@@ -222,8 +224,8 @@ export function UserForm({ person, scope, session, people, companies, internal, 
       await send({ type: 'user.remove', id: person.id })
       show(`Removed ${person.name}. Their time entries and ticket history are kept.`)
       onClose()
-    } catch {
-      setFormError('The person could not be removed. Try again.')
+    } catch (err) {
+      setFormError(err instanceof RefusedError ? err.message : 'The person could not be removed. Try again.')
       setConfirmRemove(false)
     }
   }

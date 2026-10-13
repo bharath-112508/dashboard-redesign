@@ -1,3 +1,4 @@
+import { RefusedError } from '../../api/server'
 import { useEffect, useState } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -86,8 +87,9 @@ export function ProfileModal({ session, person, onClose }: Props) {
     const patch = { name: v.name, phone: v.phone, tz: v.tz, notif: v.notif, ...(pwHash ? { pwHash } : {}) }
     try {
       await send({ type: 'profile.update', id: session.personId, patch })
-    } catch {
-      setSaveError('Your changes could not be saved. Try again.')
+    } catch (err) {
+      // A refusal carries its own reason (e.g. the backend's, or how to set a new password).
+      setSaveError(err instanceof RefusedError ? err.message : 'Your changes could not be saved. Try again.')
       return
     }
     writeSession({ ...session, name: v.name, phone: v.phone, tz: v.tz, notif: v.notif })

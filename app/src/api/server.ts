@@ -15,7 +15,7 @@ import { fetchCompanies, fetchInternalProjects, isCompanyApiCommand, sendCompany
 import { ApiError } from './http/client'
 import { fetchTasks, fetchWorkspace, isBoardApiCommand, sendBoardCommand } from './http/board'
 import { fetchEntries, fetchWeekSubmissions, isTimeApiCommand, sendTimeCommand } from './http/timesheet'
-import { fetchAccessApi, fetchPeopleApi } from './http/users'
+import { fetchAccessApi, fetchPeopleApi, isUserApiCommand, sendUserCommand } from './http/users'
 
 /**
  * A mock backend. Data lives in localStorage so it survives reloads and is
@@ -531,6 +531,7 @@ export const server = {
     if (apiMode && isBoardApiCommand(cmd))
       return sendToApi(today => sendBoardCommand(cmd, today), cmd.type === 'task.create' || cmd.type === 'tickets.task.createTop')
     if (apiMode && isTimeApiCommand(cmd)) return sendToApi(() => sendTimeCommand(cmd, readSession()))
+    if (apiMode && isUserApiCommand(cmd)) return sendToApi(() => sendUserCommand(cmd))
     await sleep(LATENCY_MS)
     return exclusive(() =>
       acrossTabs(async () => {

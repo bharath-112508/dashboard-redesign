@@ -152,7 +152,7 @@ const roster = (projectId: string, list: 'members' | 'representatives', change: 
   api.post(`/projects/${projectId}/${list}`, { [change]: [person] })
 
 /** A password length inside the backend's policy (public settings), aiming for 16. */
-const passwordLength = async (): Promise<number> => {
+export const passwordLength = async (): Promise<number> => {
   const { password_policy: p } = await api.get<{ password_policy?: { min_length: number; max_length: number } }>('/settings/public')
   return p ? Math.min(Math.max(16, p.min_length), p.max_length) : 16
 }
@@ -164,7 +164,7 @@ const refuse = (message: string) => new ApiError(403, 'FORBIDDEN', message)
 const mayChangeRoles = () => readSession()?.role === 'super'
 
 /** Creates a client contact: the user, their admin role, and their projects. Returns their id. */
-const createContact = async (companyId: string, c: CompanyContact): Promise<PersonId> => {
+export const createContact = async (companyId: string, c: CompanyContact): Promise<PersonId> => {
   if (c.admin && !mayChangeRoles()) throw refuse('Only an admin can make a contact a client admin.')
   const { id } = await api.post<{ id: string }>(`/companies/${companyId}/representatives`, {
     email: c.email,
