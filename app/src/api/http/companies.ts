@@ -100,11 +100,11 @@ const ALL = LOWER + UPPER + DIGIT + SYMBOL
 /**
  * A starting password for a new client contact that nobody sees: the person
  * sets their own with "Forgot password". It has one of each character class,
- * so it passes the backend's password policy whatever it requires.
+ * so it passes the backend's character rules whatever they require.
  */
-export const randomPassword = (): string => {
+export const randomPassword = (length: number): string => {
   const pick = (set: string) => set[crypto.getRandomValues(new Uint32Array(1))[0] % set.length]
-  const chars = [pick(LOWER), pick(UPPER), pick(DIGIT), pick(SYMBOL), ...Array.from({ length: 20 }, () => pick(ALL))]
+  const chars = [pick(LOWER), pick(UPPER), pick(DIGIT), pick(SYMBOL), ...Array.from({ length: Math.max(0, length - 4) }, () => pick(ALL))]
   // Shuffle so the classes are not always in the first four places.
   for (let i = chars.length - 1; i > 0; i--) {
     const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1)
@@ -117,13 +117,19 @@ export const randomPassword = (): string => {
 const roster = (projectId: string, list: 'members' | 'representatives', change: 'add' | 'remove', person: PersonId) =>
   api.post(`/projects/${projectId}/${list}`, { [change]: [person] })
 
+/** A password length inside the backend's policy (public settings), aiming for 16. */
+const passwordLength = async (): Promise<number> => {
+  const { password_policy: p } = await api.get<{ password_policy?: { min_length: number; max_length: number } }>('/settings/public')
+  return p ? Math.min(Math.max(16, p.min_length), p.max_length) : 16
+}
+
 /** Creates a client contact: the user, their admin role, and their projects. Returns their id. */
 const createContact = async (companyId: string, c: CompanyContact): Promise<PersonId> => {
   const { id } = await api.post<{ id: string }>(`/companies/${companyId}/representatives`, {
     email: c.email,
     full_name: c.name,
     ...(c.role ? { title: c.role } : {}),
-    initial_password: randomPassword(),
+    initial_password: randomPassword(await passwordLength()),
   })
   if (c.admin) await api.post(`/users/${id}/change-role`, { new_role: 'client' })
   for (const p of c.projects) await roster(p, 'representatives', 'add', id)

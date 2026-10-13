@@ -41,8 +41,14 @@ const backendProject = (id: string, company_id: string, member_ids: string[] = [
   company_id,
 })
 
+const POLICY = { password_policy: { min_length: 10, max_length: 12, require_upper: true, require_lower: true, require_number: true, require_special: true } }
+
 beforeEach(() => {
   for (const m of [get, post, patch, del]) m.mockReset()
+  get.mockImplementation(async (path: string) => {
+    if (path === '/settings/public') return POLICY
+    throw new Error(`unexpected GET ${path}`)
+  })
 })
 
 describe('company.create', () => {
@@ -62,6 +68,14 @@ describe('company.create', () => {
       title: 'Main contact',
       initial_password: expect.any(String),
     })
+  })
+
+  it("makes the starting password fit the backend's password length policy", async () => {
+    post.mockResolvedValueOnce({ id: 'c1' }).mockResolvedValueOnce({ id: 'u9' })
+    await sendCompanyCommand({ type: 'company.create', company: company({ contacts: [contact()] }) }, TODAY)
+    const body = post.mock.calls[1][1] as { initial_password: string }
+    expect(body.initial_password.length).toBeGreaterThanOrEqual(10)
+    expect(body.initial_password.length).toBeLessThanOrEqual(12)
   })
 
   it('skips a main contact without an email, since a backend contact needs one', async () => {
@@ -214,13 +228,13 @@ describe('projects', () => {
 })
 
 describe('randomPassword', () => {
-  it('is 24 characters with an upper, a lower, a digit and a symbol, and differs each time', () => {
-    const a = randomPassword()
-    expect(a).toHaveLength(24)
+  it('has the asked length with an upper, a lower, a digit and a symbol, and differs each time', () => {
+    const a = randomPassword(12)
+    expect(a).toHaveLength(12)
     expect(a).toMatch(/[A-Z]/)
     expect(a).toMatch(/[a-z]/)
     expect(a).toMatch(/[0-9]/)
     expect(a).toMatch(/[^A-Za-z0-9]/)
-    expect(randomPassword()).not.toBe(a)
+    expect(randomPassword(12)).not.toBe(a)
   })
 })
