@@ -36,6 +36,7 @@ Companies and projects in API mode:
 - Making a client admin a regular contact again is refused by the backend for now.
 - Company logos are stored in the company as an image of at most 200 KB.
 - The support plan's hours used this month show 0 until timesheets come from the backend.
+- Projects can now be **Planned** or **Maintenance** (new backend statuses). An older backend running against the same Demo DB would refuse to save a project in one of these states, so only the test project below uses them for now.
 - **Redesign Test AB** (archived), its project and its contact in the Demo DB were made by the API check on 13 Oct 2026; they are safe to ignore.
 
 Also:
