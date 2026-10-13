@@ -1,0 +1,90 @@
+import { NEW_PERSON_COLOURS } from '../users/access'
+import type { Person, Role, Session } from '../types'
+
+/** The backend's system roles in the app's role names. */
+const ROLE_MAP: Record<string, Role> = {
+  admin: 'super',
+  manager: 'pm',
+  team_lead: 'pm',
+  employee: 'dev',
+  client: 'cadmin',
+  representative: 'cuser',
+}
+
+/** Roles a custom "devops" role does not override: admins stay admins, clients stay clients. */
+const KEEPS_ROLE = new Set(['admin', 'client', 'representative'])
+
+/** The app's role for a backend user. A custom "devops" role wins over the staff roles. */
+export const roleFromBackend = (role: string, roleKeys: readonly string[]): Role =>
+  roleKeys.includes('devops') && !KEEPS_ROLE.has(role) ? 'devops' : (ROLE_MAP[role] ?? 'dev')
+
+/** One user as `GET /users` returns it (the fields the app reads). */
+export interface BackendUser {
+  id: string
+  full_name: string
+  email: string
+  role: string
+  /** Only `/auth/me` sends role keys; the user list does not. */
+  role_keys?: string[]
+  status: string
+  timezone: string
+  phone?: string | null
+  internal_profile?: { employment_type?: 'staff' | 'freelancer' | null }
+  client_profile?: { company_id?: string }
+  last_login_at: string | null
+}
+
+/** A stable avatar colour from the person's id. */
+const colourOf = (id: string) =>
+  NEW_PERSON_COLOURS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % NEW_PERSON_COLOURS.length]
+
+const empOf = (t: 'staff' | 'freelancer' | null | undefined) =>
+  t === 'freelancer' ? ('freelancer' as const) : t === 'staff' ? ('employee' as const) : undefined
+
+export const personFromUser = (u: BackendUser): Person => {
+  const emp = empOf(u.internal_profile?.employment_type)
+  return {
+    id: u.id,
+    name: u.full_name,
+    email: u.email,
+    org: u.client_profile?.company_id ?? 'vt',
+    role: roleFromBackend(u.role, u.role_keys ?? []),
+    // ponytail: everyone gets every project here; the backend scopes the real data. Fill from project members in Phase 1b.
+    projects: 'all',
+    colour: colourOf(u.id),
+    active: u.status === 'active',
+    last: u.last_login_at ? new Date(u.last_login_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }) : 'Never',
+    tz: u.timezone,
+    ...(emp ? { emp } : {}),
+    ...(u.phone ? { phone: u.phone } : {}),
+  }
+}
+
+/** The body of `GET /auth/me` (the fields the app reads). */
+export interface BackendMe {
+  id: string
+  email: string
+  full_name: string
+  role: string
+  role_keys: string[]
+  timezone: string
+  employment_type: 'staff' | 'freelancer' | null
+  company_id: string | null
+  company_name: string | null
+  phone: string | null
+}
+
+export const sessionFromMe = (me: BackendMe): Session => {
+  const emp = empOf(me.employment_type)
+  return {
+    personId: me.id,
+    name: me.full_name,
+    email: me.email,
+    role: roleFromBackend(me.role, me.role_keys),
+    org: me.company_id ? (me.company_name ?? 'Client') : 'Viljetech',
+    ...(me.company_id ? { orgId: me.company_id } : {}),
+    ...(emp ? { emp } : {}),
+    ...(me.phone ? { phone: me.phone } : {}),
+    tz: me.timezone,
+  }
+}
