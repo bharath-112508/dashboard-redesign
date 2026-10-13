@@ -571,7 +571,8 @@ describe('updateTask', () => {
         taskFindByIdMock.mockResolvedValueOnce(task);
         loadProjectForCallerMock.mockResolvedValueOnce(project);
 
-        await expect(svc.updateTask(task._id, { title: 'rename' }, employeeCaller(employeeId))).rejects.toMatchObject({
+        // Redesign: title is a planning field members may change; story points stay manager-only.
+        await expect(svc.updateTask(task._id, { story_points: 5 } as never, employeeCaller(employeeId))).rejects.toMatchObject({
             code: ERROR_CODES.TASK_WRITE_FORBIDDEN,
         });
     });
@@ -1157,11 +1158,11 @@ describe('rankTask', () => {
 // ─── assignTaskStory — STORY_WRITE_FORBIDDEN ─────────────────────────────
 
 describe('assignTaskStory', () => {
-    it('rejects employees with STORY_WRITE_FORBIDDEN (per API_Contract §8.2a)', async () => {
+    it('lets employees past the role gate; project membership decides (redesign planning rights)', async () => {
+        taskFindByIdMock.mockResolvedValueOnce(null);
         await expect(
             svc.assignTaskStory(new Types.ObjectId(), { story_id: new Types.ObjectId().toString() }, employeeCaller())
-        ).rejects.toMatchObject({ code: ERROR_CODES.STORY_WRITE_FORBIDDEN });
-        expect(taskFindByIdMock).not.toHaveBeenCalled();
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_NOT_FOUND });
     });
 
     it('rejects clients with STORY_WRITE_FORBIDDEN', async () => {
@@ -1259,10 +1260,11 @@ describe('moving into a completed sprint', () => {
 });
 
 describe('moveTaskToSprint', () => {
-    it('rejects employees with TASK_WRITE_FORBIDDEN', async () => {
+    it('lets employees past the role gate; project membership decides (redesign planning rights)', async () => {
+        taskFindByIdMock.mockResolvedValueOnce(null);
         await expect(
             svc.moveTaskToSprint(new Types.ObjectId(), { sprint_id: null }, employeeCaller())
-        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_WRITE_FORBIDDEN });
+        ).rejects.toMatchObject({ code: ERROR_CODES.TASK_NOT_FOUND });
     });
 
     it('rejects sprint from another project', async () => {
@@ -1678,18 +1680,17 @@ describe('assertEmployeePatchScope', () => {
         ).not.toThrow();
     });
 
-    it('refuses priority and due date to a non-creator ASSIGNEE', () => {
-        // Re-ranking someone else's task, or moving its deadline, is a
-        // planning decision — not a note about your own work.
+    it('lets a non-creator ASSIGNEE set priority and due date (redesign planning fields)', () => {
+        // Redesign: project members plan their project's tickets.
         const me = new Types.ObjectId();
         const someoneElse = new Types.ObjectId();
         expect(() =>
             svc.assertEmployeePatchScope(
-                { priority: TASK_PRIORITIES.LOW } as never,
+                { priority: TASK_PRIORITIES.LOW, due_date: '2026-11-01' } as never,
                 taskOwnedBy(someoneElse, [me]),
                 employeeCaller(me)
             )
-        ).toThrow(/may only update/i);
+        ).not.toThrow();
     });
 
     it('still lets a non-creator assignee update their own work fields', () => {
@@ -1743,7 +1744,7 @@ describe('assertEmployeePatchScope', () => {
     it('still refuses fields no employee may touch, creator or not', () => {
         const me = new Types.ObjectId();
         expect(() =>
-            svc.assertEmployeePatchScope({ title: 'Renamed' } as never, taskOwnedBy(me), employeeCaller(me))
+            svc.assertEmployeePatchScope({ story_points: 3 } as never, taskOwnedBy(me), employeeCaller(me))
         ).toThrow(/may only update/i);
     });
 });
@@ -1808,5 +1809,28 @@ describe('updateTask — start date (redesign)', () => {
         loadProjectForCallerMock.mockResolvedValueOnce(project);
 
         await expect(svc.updateTask(task._id, { start_date: '2026-10-25' } as never, adminCaller())).rejects.toMatchObject({ statusCode: 422 });
+    });
+});
+
+// ─── Redesign: project members plan and edit their project's tickets ────
+
+describe('employees on their project (redesign planning rights)', () => {
+    it('lets an employee who neither created nor is assigned the ticket move it to a sprint and epic', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, created_by: new Types.ObjectId(), assignee_ids: [] });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        expect(() => svc.assertEmployeePatchScope({ title: 'Renamed', priority: 'urgent', start_date: '2026-10-14', sprint_id: null, story_id: null, labels: ['x'], issue_type: 'story' } as never, task as never, employeeCaller() as never)).not.toThrow();
+    });
+
+    it('still requires being the assignee to change the work itself (status)', () => {
+        const task = makeTask({ created_by: new Types.ObjectId(), assignee_ids: [] });
+        expect(() => svc.assertEmployeePatchScope({ status: 'done' } as never, task as never, employeeCaller() as never)).toThrow();
+    });
+
+    it('keeps clients to their own reports', () => {
+        const task = makeTask({ created_by: new Types.ObjectId() });
+        expect(() => svc.assertEmployeePatchScope({ sprint_id: null } as never, task as never, clientCaller() as never)).toThrow();
     });
 });

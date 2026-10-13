@@ -7,23 +7,25 @@ import { Sprint } from '../models/sprint.model.js';
 import { User } from '../models/user.model.js';
 import { Project, type ProjectDocument } from '../models/project.model.js';
 import { AppError } from '../utils/app-error.js';
-import { isAdminLike } from '../utils/role-check.js';
+import { isAdminLike, isProjectWorkAuthor } from '../utils/role-check.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import {
     DEFAULT_TASK_STATUSES,
     DEFAULT_TASK_STATUS_VALUES,
-    TASK_DEPENDENCIES_MAX,
-    TASK_MAX_ASSIGNEES,
     TASK_CLIENT_PATCH_FIELDS,
     TASK_CREATOR_PATCH_FIELDS,
+    TASK_DEPENDENCIES_MAX,
     TASK_EMPLOYEE_PATCH_FIELDS,
     TASK_ISSUE_TYPES,
-    TASK_REPORT_KINDS,
-    TASK_REPORT_IMPACT_LABEL,
+    TASK_MAX_ASSIGNEES,
     TASK_MAX_SUBTASK_DEPTH,
+    TASK_MEMBER_PATCH_FIELDS,
     TASK_PRIORITIES,
+    TASK_REPORT_IMPACT_LABEL,
+    TASK_REPORT_KINDS,
+    TASK_WORK_FIELDS,
 } from '../constants/task.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { DEFAULT_DONE_TASK_STATUS_KEY } from '../constants/story.js';
@@ -187,15 +189,12 @@ export const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocumen
     // Fields outside the employee whitelist are never allowed for any employee.
     // The creator gets a wider set — see `TASK_CREATOR_PATCH_FIELDS`.
     const isCreator = task.created_by.equals(caller.id);
-    const allowed = isCreator
-        ? [...TASK_EMPLOYEE_PATCH_FIELDS, ...TASK_CREATOR_PATCH_FIELDS]
-        : TASK_EMPLOYEE_PATCH_FIELDS;
+    // Employees only reach a task through a project they are a member of, so the planning fields apply to all of them.
+    const allowed = [...TASK_EMPLOYEE_PATCH_FIELDS, ...TASK_CREATOR_PATCH_FIELDS, ...TASK_MEMBER_PATCH_FIELDS];
     const offending = Object.keys(patch).filter((k) => !allowed.includes(k));
     if (offending.length > 0) {
         throw AppError.forbidden(
-            isCreator
-                ? `You may only update: ${allowed.join(', ')}`
-                : `On a task you did not create you may only update: ${TASK_EMPLOYEE_PATCH_FIELDS.join(', ')}`,
+            `You may only update: ${allowed.join(', ')}`,
             ERROR_CODES.TASK_WRITE_FORBIDDEN
         );
     }
@@ -207,7 +206,7 @@ export const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocumen
     //  - work-field edits (status/description/estimate) require being an assignee;
     //  - an assignee change may only put the caller on it (taking it over).
     const isAssignee = isCallerAssignee(task, caller);
-    const editsWorkFields = Object.keys(patch).some((k) => k !== 'assignee_ids');
+    const editsWorkFields = Object.keys(patch).some((k) => TASK_WORK_FIELDS.includes(k));
     if (editsWorkFields && !isAssignee) {
         throw AppError.forbidden(
             'Employees can only update tasks they created or are assigned to',
@@ -1354,7 +1353,7 @@ export const assignTaskStory = async (
     body: AssignStoryBody,
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
-    if (!isManagerOrAdmin(caller)) {
+    if (!isManagerOrAdmin(caller) && !isProjectWorkAuthor(caller)) {
         throw AppError.forbidden(
             'Only admins and managers can change a task’s story',
             ERROR_CODES.STORY_WRITE_FORBIDDEN
@@ -1406,7 +1405,8 @@ export const moveTaskToSprint = async (
     body: MoveSprintBody,
     caller: ProjectCaller
 ): Promise<Record<string, unknown>> => {
-    requireWriter(caller);
+    // Redesign: planning a project's sprints is open to its members (see TASK_MEMBER_PATCH_FIELDS).
+    if (!isProjectWorkAuthor(caller)) requireWriter(caller);
     const { task, project } = await loadTaskAndProject(taskId, caller);
 
     const before = { id: task._id.toString(), sprint_id: task.sprint_id ? task.sprint_id.toString() : null };

@@ -196,6 +196,26 @@ export const TASK_EMPLOYEE_PATCH_FIELDS: readonly string[] = [
 export const TASK_CREATOR_PATCH_FIELDS: readonly string[] = ['priority', 'due_date'];
 
 /**
+ * Redesign: planning fields any employee may change on a ticket of a project
+ * they can see (an employee only sees projects they are a member of). The
+ * redesign lets developers plan their own project's work: rename, re-rank,
+ * date, retype, label and move tickets between sprints and epics.
+ */
+export const TASK_MEMBER_PATCH_FIELDS: readonly string[] = [
+    'title',
+    'priority',
+    'due_date',
+    'start_date',
+    'issue_type',
+    'labels',
+    'sprint_id',
+    'story_id',
+];
+
+/** The work itself: only the creator or an assignee may change these. */
+export const TASK_WORK_FIELDS: readonly string[] = ['status', 'description', 'estimated_hours', 'is_flagged'];
+
+/**
  * What a client-side reporter may change on their OWN report
  * (`source: 'client'` && `created_by === caller`).
  *
