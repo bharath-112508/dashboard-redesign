@@ -117,6 +117,13 @@ const evaluateDerivedStatus = (
     };
 };
 
+/** Redesign: the epic document fields, stored and returned as given. */
+const EPIC_DOCUMENT_KEYS = ['goal', 'user_story', 'criteria', 'criteria_done', 'target_date', 'in_scope', 'out_scope', 'requirements', 'risks', 'open_questions'] as const;
+
+/** The epic document fields present in a body (undefined ones left out, so a patch changes only what it names). */
+const epicDocumentOf = (body: object): Partial<Pick<StoryDocument, (typeof EPIC_DOCUMENT_KEYS)[number]>> =>
+    Object.fromEntries(EPIC_DOCUMENT_KEYS.filter((k) => (body as Record<string, unknown>)[k] !== undefined).map((k) => [k, (body as Record<string, unknown>)[k]]));
+
 const buildPublicStory = (
     doc: StoryDocument,
     derived: ReturnType<typeof evaluateDerivedStatus>
@@ -131,6 +138,7 @@ const buildPublicStory = (
     done_task_count: derived.done_task_count,
     sprint_ids: derived.sprint_ids.map((s) => s.toString()),
     progress_percent: derived.task_count === 0 ? 0 : Math.round((100 * derived.done_task_count) / derived.task_count),
+    ...Object.fromEntries(EPIC_DOCUMENT_KEYS.map((k) => [k, doc[k] ?? (k === 'target_date' ? null : Array.isArray(doc[k]) ? [] : '')])),
     created_at: doc.created_at,
     updated_at: doc.updated_at,
     created_by: doc.created_by.toString(),
@@ -168,6 +176,7 @@ export const createStory = async (
         title: input.title,
         description: input.description,
         position,
+        ...epicDocumentOf(input),
         created_by: caller.id,
         updated_by: caller.id,
     });
@@ -305,6 +314,7 @@ export const updateStory = async (
 
     if (patch.title !== undefined) story.title = patch.title;
     if (patch.description !== undefined) story.description = patch.description;
+    Object.assign(story, epicDocumentOf(patch));
     story.updated_by = caller.id;
 
     // Position changes go through the shift helper so PATCH and

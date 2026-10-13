@@ -48,6 +48,9 @@ vi.mock('../models/sprint.model.js', () => ({
     },
 }));
 
+const { storyFindOneMock } = vi.hoisted(() => ({ storyFindOneMock: vi.fn() }));
+vi.mock('../models/story.model.js', () => ({ Story: { findOne: storyFindOneMock } }));
+
 vi.mock('../models/project.model.js', () => ({
     Project: { findById: vi.fn(), findOne: vi.fn(), find: vi.fn(), countDocuments: vi.fn(), create: vi.fn() },
 }));
@@ -596,5 +599,56 @@ describe('completeSprint', () => {
         await expect(
             svc.completeSprint(sprint._id, { move_unfinished_to: new Types.ObjectId().toString() }, adminCaller())
         ).rejects.toMatchObject({ code: ERROR_CODES.TASK_SPRINT_PROJECT_MISMATCH });
+    });
+});
+
+
+// ─── Redesign: a sprint belongs to an epic and has members and goals ─────
+
+describe('sprint epic link, members and goals', () => {
+    const body = { name: 'Sprint 3', goal: '', start_date: '2026-02-01', end_date: '2026-02-14' };
+
+    it('stores the epic (a story of the same project), members, goals, summary and why', async () => {
+        const proj = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        const storyId = new Types.ObjectId();
+        const member = new Types.ObjectId();
+        storyFindOneMock.mockReturnValueOnce({ select: () => ({ lean: () => Promise.resolve({ _id: storyId }) }) });
+        sprintCreateMock.mockResolvedValueOnce(makeSprint({ project_id: proj._id }));
+
+        await svc.createSprint(
+            proj._id,
+            { ...body, story_id: storyId.toString(), member_ids: [member.toString()], goals: ['Log in'], summary: 's', why: 'w' } as never,
+            adminCaller()
+        );
+
+        expect(storyFindOneMock).toHaveBeenCalledWith({ _id: storyId, project_id: proj._id });
+        expect(sprintCreateMock).toHaveBeenCalledWith(
+            expect.objectContaining({ story_id: storyId, member_ids: [member], goals: ['Log in'], goals_done: [], summary: 's', why: 'w' })
+        );
+    });
+
+    it('refuses an epic from another project', async () => {
+        const proj = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        storyFindOneMock.mockReturnValueOnce({ select: () => ({ lean: () => Promise.resolve(null) }) });
+
+        await expect(
+            svc.createSprint(proj._id, { ...body, story_id: new Types.ObjectId().toString() } as never, adminCaller())
+        ).rejects.toMatchObject({ statusCode: 422 });
+        expect(sprintCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('updates goals done and members', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+        const member = new Types.ObjectId();
+
+        await svc.updateSprint(sprint._id, { goals_done: [0, 2], member_ids: [member.toString()] } as never, adminCaller());
+
+        expect((sprint as Record<string, unknown>).goals_done).toEqual([0, 2]);
+        expect((sprint as Record<string, unknown>).member_ids).toEqual([member]);
     });
 });

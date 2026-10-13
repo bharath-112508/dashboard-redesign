@@ -30,6 +30,18 @@ export interface StoryDocument extends Document {
     title: string;
     description: string;
     position: number;
+    // Redesign: the epic document. All optional with empty defaults.
+    goal: string;
+    user_story: string;
+    criteria: string[];
+    /** Indexes of `criteria` that are met. */
+    criteria_done: number[];
+    target_date: string | null;
+    in_scope: string[];
+    out_scope: string[];
+    requirements: string[];
+    risks: string[];
+    open_questions: string[];
     created_by: Types.ObjectId;
     updated_by: Types.ObjectId | null;
     created_at: Date;
@@ -48,6 +60,16 @@ const storySchema = new Schema<StoryDocument>(
         // always 400'd with "Path `description` is required."
         description: { type: String, required: false, default: '', maxlength: STORY_DESCRIPTION_MAX },
         position: { type: Number, required: true, default: 0, min: 0 },
+        goal: { type: String, default: '' },
+        user_story: { type: String, default: '' },
+        criteria: { type: [String], default: [] },
+        criteria_done: { type: [Number], default: [] },
+        target_date: { type: String, default: null },
+        in_scope: { type: [String], default: [] },
+        out_scope: { type: [String], default: [] },
+        requirements: { type: [String], default: [] },
+        risks: { type: [String], default: [] },
+        open_questions: { type: [String], default: [] },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
         updated_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
     },

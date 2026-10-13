@@ -50,6 +50,14 @@ export interface SprintDocument extends Document {
      * late. `null` until the sprint is completed.
      */
     completed_at: Date | null;
+    // Redesign: the epic the sprint belongs to (a story of the same project),
+    // the people on it, and its checklist of goals (indexes of the done ones).
+    story_id: Types.ObjectId | null;
+    member_ids: Types.ObjectId[];
+    goals: string[];
+    goals_done: number[];
+    summary: string;
+    why: string;
     created_by: Types.ObjectId;
     created_at: Date;
     updated_at: Date;
@@ -78,6 +86,12 @@ const sprintSchema = new Schema<SprintDocument>(
         },
         is_archived: { type: Boolean, required: true, default: false },
         completed_at: { type: Date, required: false, default: null },
+        story_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.STORIES, default: null },
+        member_ids: { type: [{ type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS }], default: [] },
+        goals: { type: [String], default: [] },
+        goals_done: { type: [Number], default: [] },
+        summary: { type: String, default: '' },
+        why: { type: String, default: '' },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
     },
     {

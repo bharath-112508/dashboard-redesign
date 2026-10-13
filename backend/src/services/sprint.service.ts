@@ -3,6 +3,7 @@ import { Types } from 'mongoose';
 import { Sprint, type SprintDocument } from '../models/sprint.model.js';
 import { Project, type ProjectDocument } from '../models/project.model.js';
 import { Task } from '../models/task.model.js';
+import { Story } from '../models/story.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES, type RoleType } from '../constants/roles.js';
@@ -54,6 +55,18 @@ const assertWithinProjectWindow = (project: ProjectDocument, start: string, end:
 
 // ─── POST /projects/:project_id/sprints ──────────────────────────────────
 
+/** The epic must be a story of the sprint's project. */
+const storyIdFor = async (raw: string | null | undefined, projectId: Types.ObjectId): Promise<Types.ObjectId | null | undefined> => {
+    if (raw === undefined) return undefined;
+    if (raw === null) return null;
+    const id = new Types.ObjectId(raw);
+    const story = await Story.findOne({ _id: id, project_id: projectId }).select('_id').lean();
+    if (!story) throw AppError.unprocessable('Epic does not belong to the sprint project', ERROR_CODES.STORY_PROJECT_MISMATCH);
+    return id;
+};
+
+const objectIds = (ids: string[] | undefined) => ids?.map((id) => new Types.ObjectId(id));
+
 export const createSprint = async (
     projectId: Types.ObjectId,
     input: CreateSprintBody,
@@ -62,6 +75,7 @@ export const createSprint = async (
     const project = await loadProjectForCaller(projectId, caller);
     assertWithinProjectWindow(project, input.start_date, input.end_date);
 
+    const storyId = await storyIdFor(input.story_id, project._id);
     const created = await Sprint.create({
         project_id: project._id,
         name: input.name,
@@ -69,6 +83,12 @@ export const createSprint = async (
         start_date: input.start_date,
         end_date: input.end_date,
         status: input.status,
+        story_id: storyId ?? null,
+        member_ids: objectIds(input.member_ids) ?? [],
+        goals: input.goals ?? [],
+        goals_done: input.goals_done ?? [],
+        summary: input.summary ?? '',
+        why: input.why ?? '',
         created_by: caller.id,
     });
 
@@ -197,6 +217,12 @@ export const updateSprint = async (
     if (patch.goal !== undefined) sprint.goal = patch.goal;
     if (patch.start_date !== undefined) sprint.start_date = patch.start_date;
     if (patch.end_date !== undefined) sprint.end_date = patch.end_date;
+    if (patch.story_id !== undefined) sprint.story_id = (await storyIdFor(patch.story_id, project._id)) ?? null;
+    if (patch.member_ids !== undefined) sprint.member_ids = objectIds(patch.member_ids) ?? [];
+    if (patch.goals !== undefined) sprint.goals = patch.goals;
+    if (patch.goals_done !== undefined) sprint.goals_done = patch.goals_done;
+    if (patch.summary !== undefined) sprint.summary = patch.summary;
+    if (patch.why !== undefined) sprint.why = patch.why;
     if (patch.status !== undefined) {
         sprint.status = patch.status as SprintStatus;
         // Keep `completed_at` in lock-step with the status: stamp it when the

@@ -23,6 +23,16 @@ import {
 const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId');
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD');
 
+/** Redesign fields: the epic, people, goals checklist and notes. */
+const sprintPlanFields = {
+    story_id: objectIdSchema.nullable(),
+    member_ids: z.array(objectIdSchema).max(100),
+    goals: z.array(z.string().trim().max(500)).max(50),
+    goals_done: z.array(z.number().int().min(0)).max(50),
+    summary: z.string().trim().max(2000),
+    why: z.string().trim().max(2000),
+};
+
 // ─── POST /projects/:project_id/sprints ───────────────────────────────────
 
 export const createSprintBodySchema = z
@@ -32,7 +42,9 @@ export const createSprintBodySchema = z
         start_date: isoDateSchema,
         end_date: isoDateSchema,
         status: z.enum(SPRINT_STATUS_VALUES as unknown as [string, ...string[]]).optional(),
+        ...sprintPlanFields,
     })
+    .partial({ story_id: true, member_ids: true, goals: true, goals_done: true, summary: true, why: true })
     .refine((d) => d.end_date >= d.start_date, {
         path: ['end_date'],
         message: 'end_date must be on or after start_date',
@@ -49,6 +61,7 @@ export const patchSprintBodySchema = z
         start_date: isoDateSchema,
         end_date: isoDateSchema,
         status: z.enum(SPRINT_STATUS_VALUES as unknown as [string, ...string[]]),
+        ...sprintPlanFields,
     })
     .partial()
     .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be supplied' })

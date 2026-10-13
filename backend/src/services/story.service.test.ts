@@ -595,3 +595,45 @@ describe('getStory — task breakdown by sprint', () => {
         expect(backlog?.tasks.map((t) => t.title)).toEqual(['C']);
     });
 });
+
+// ─── Redesign: the epic document ──────────────────────────────────────────
+
+describe('epic document fields', () => {
+    const doc = {
+        goal: 'Clients self-serve',
+        user_story: 'As a client I want…',
+        criteria: ['Can log in', 'Sees projects'],
+        criteria_done: [0],
+        target_date: '2026-12-01',
+        in_scope: ['Login'],
+        out_scope: ['Billing'],
+        requirements: ['SSO'],
+        risks: ['BankID delay'],
+        open_questions: ['Which languages?'],
+    };
+
+    it('createStory stores the epic document and returns it', async () => {
+        const project = makeProject();
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        stubFindOneChain(null);
+        storyCreateMock.mockResolvedValueOnce(makeStory({ project_id: project._id, ...doc }));
+        aggregateStoryDerivedRowsMock.mockResolvedValue([]);
+
+        const out = await svc.createStory(project._id, { title: 'Portal', description: '', ...doc } as never, adminCaller());
+
+        expect(storyCreateMock).toHaveBeenCalledWith(expect.objectContaining(doc));
+        expect(out).toMatchObject(doc);
+    });
+
+    it('updateStory changes only the given document fields', async () => {
+        const project = makeProject();
+        const story = makeStory({ project_id: project._id, ...doc });
+        storyFindByIdMock.mockResolvedValueOnce(story);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        aggregateStoryDerivedRowsMock.mockResolvedValue([]);
+
+        await svc.updateStory(story._id, { criteria_done: [0, 1], target_date: null } as never, adminCaller());
+
+        expect(story).toMatchObject({ criteria_done: [0, 1], target_date: null, goal: 'Clients self-serve' });
+    });
+});

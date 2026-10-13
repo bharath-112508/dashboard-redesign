@@ -29,10 +29,28 @@ const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid Obje
 
 // ─── Bodies ───────────────────────────────────────────────────────────────
 
+const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD');
+const textList = z.array(z.string().trim().max(500)).max(50);
+
+/** Redesign: the epic document the app edits. */
+const epicDocumentFields = {
+    goal: z.string().trim().max(2000),
+    user_story: z.string().trim().max(2000),
+    criteria: textList,
+    criteria_done: z.array(z.number().int().min(0)).max(50),
+    target_date: isoDateSchema.nullable(),
+    in_scope: textList,
+    out_scope: textList,
+    requirements: textList,
+    risks: textList,
+    open_questions: textList,
+};
+
 export const createStoryBodySchema = z.object({
     title: z.string().trim().min(1).max(STORY_TITLE_MAX),
     description: z.string().trim().max(STORY_DESCRIPTION_MAX).default(''),
     position: z.number().int().min(0).optional(),
+    ...Object.fromEntries(Object.entries(epicDocumentFields).map(([k, v]) => [k, v.optional()])),
 });
 export type CreateStoryBody = z.infer<typeof createStoryBodySchema>;
 
@@ -41,6 +59,7 @@ export const patchStoryBodySchema = z
         title: z.string().trim().min(1).max(STORY_TITLE_MAX),
         description: z.string().trim().max(STORY_DESCRIPTION_MAX),
         position: z.number().int().min(0),
+        ...epicDocumentFields,
     })
     .partial()
     .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be supplied' });
