@@ -6,10 +6,10 @@ import { PasswordResetToken } from '../models/password-reset-token.model.js';
 import { AppError } from '../utils/app-error.js';
 import { hashPassword } from '../utils/password.js';
 import { sha256Hex } from '../utils/token-hash.js';
-import { sendPasswordResetEmail } from '../utils/mailer.js';
+import { sendPasswordResetEmail, sendPasswordSetupEmail } from '../utils/mailer.js';
 import { logoutAll } from './auth.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
-import { RESET_TOKEN_BYTES, RESET_TOKEN_TTL_MS } from '../constants/auth.js';
+import { RESET_TOKEN_BYTES, RESET_TOKEN_TTL_MS, SETUP_TOKEN_TTL_MS } from '../constants/auth.js';
 import { resolvePasswordResetTtlMinutes } from './settings.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -235,4 +235,22 @@ export const adminInitiatePasswordReset = async (targetUserId: Types.ObjectId, a
         target: { kind: AUDIT_TARGET_KINDS.USER, id: user._id },
         metadata: {},
     });
+};
+
+// ─── Set-your-password link for a new account (redesign) ─────────────────
+
+/**
+ * Emails a new user a link to choose their own password, so nobody else ever
+ * knows it. Uses the reset-token table and the reset page; the link lasts
+ * SETUP_TOKEN_TTL_MS. Older unused links for the user stop working.
+ */
+export const issuePasswordSetupLink = async (user: { _id: Types.ObjectId; email: string; full_name: string }): Promise<void> => {
+    await PasswordResetToken.updateMany({ user_id: user._id, used_at: null }, { $set: { used_at: new Date() } });
+    const rawToken = base64Url(randomBytes(RESET_TOKEN_BYTES));
+    await PasswordResetToken.create({
+        user_id: user._id,
+        token_hash: sha256Hex(rawToken),
+        expires_at: new Date(Date.now() + SETUP_TOKEN_TTL_MS),
+    });
+    await sendPasswordSetupEmail({ to: user.email, full_name: user.full_name, token: rawToken });
 };

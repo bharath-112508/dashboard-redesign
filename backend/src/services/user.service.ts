@@ -493,6 +493,13 @@ export const updateUser = async (input: {
     if (patch.phone !== undefined) target.phone = patch.phone ?? undefined;
     if (patch.timezone !== undefined) target.timezone = patch.timezone;
     if (patch.slack_user_id !== undefined) target.slack_user_id = patch.slack_user_id;
+    // Only an admin's patch still carries `email` here (self and employment edits are whitelisted above).
+    if (patch.email !== undefined && patch.email !== target.email) {
+        if (await User.exists({ email: patch.email, _id: { $ne: target._id } })) {
+            throw AppError.conflict('Email already exists', ERROR_CODES.EMAIL_ALREADY_EXISTS);
+        }
+        target.email = patch.email;
+    }
     if (patch.email_notifications_enabled !== undefined) {
         target.email_notifications_enabled = patch.email_notifications_enabled;
     }

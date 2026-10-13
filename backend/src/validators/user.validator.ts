@@ -284,6 +284,8 @@ const clientProfilePatchSchema = clientProfileCreateSchema.omit({ company_id: tr
 export const updateUserBodySchema = z
     .object({
         full_name: z.string().trim().min(1).optional(),
+        /** Admins only (others have it stripped by the service): correct a user's sign-in email. */
+        email: z.string().trim().toLowerCase().email().optional(),
         phone: phoneSchema,
         timezone: timezoneSchema,
         slack_user_id: z.string().trim().nullable().optional(),

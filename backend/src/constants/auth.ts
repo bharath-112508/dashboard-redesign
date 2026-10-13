@@ -62,3 +62,5 @@ export const MAX_ACTIVE_SESSIONS_PER_USER = 20;
  */
 export const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 export const RESET_TOKEN_BYTES = 32;
+/** A new contact's "set your password" link lasts longer than a reset link: they may not open it the same day. */
+export const SETUP_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;

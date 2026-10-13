@@ -103,6 +103,8 @@ export const createRepresentativeBodySchema = z
         initial_password: z.string().min(1),
         /** The contact's job title at the client, e.g. "CTO". */
         title: z.string().trim().max(100).optional(),
+        /** Email the new contact a link to choose their own password (redesign). */
+        send_invite: z.boolean().optional(),
     })
     // `.strict()` is load-bearing here, not stylistic: it rejects a body
     // carrying `role` or `company_id` outright rather than silently ignoring
@@ -122,3 +124,12 @@ export const companyRepresentativeParamSchema = z.object({
     user_id: objectIdSchema,
 });
 export type CompanyRepresentativeParam = z.infer<typeof companyRepresentativeParamSchema>;
+
+// ─── POST /companies/:id/responsibles (redesign) ─────────────────────────
+
+/** Puts one Viljetech staff member on the company with a role, or changes their role. */
+export const setResponsibleBodySchema = z
+    .object({ user_id: objectIdSchema, role: z.enum(COMPANY_RESPONSIBLE_ROLES) })
+    .strict();
+
+export type SetResponsibleBody = z.infer<typeof setResponsibleBodySchema>;

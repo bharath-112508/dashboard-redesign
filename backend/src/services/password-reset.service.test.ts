@@ -29,6 +29,7 @@ const {
     tokenUpdateOneMock,
     tokenCreateMock,
     sendPasswordResetEmailMock,
+    sendPasswordSetupEmailMock,
     logoutAllMock,
     hashPasswordMock,
     sha256HexMock,
@@ -43,6 +44,7 @@ const {
     tokenUpdateOneMock: vi.fn(),
     tokenCreateMock: vi.fn(),
     sendPasswordResetEmailMock: vi.fn(),
+    sendPasswordSetupEmailMock: vi.fn(),
     logoutAllMock: vi.fn(),
     hashPasswordMock: vi.fn(),
     sha256HexMock: vi.fn(),
@@ -69,6 +71,7 @@ vi.mock('../models/password-reset-token.model.js', () => ({
 
 vi.mock('../utils/mailer.js', () => ({
     sendPasswordResetEmail: sendPasswordResetEmailMock,
+    sendPasswordSetupEmail: sendPasswordSetupEmailMock,
 }));
 
 vi.mock('./auth.service.js', () => ({
@@ -427,5 +430,28 @@ describe('adminInitiatePasswordReset', () => {
         // Within ~60 minutes of the call window.
         expect(ms).toBeGreaterThanOrEqual(before + 60 * 60_000 - 1000);
         expect(ms).toBeLessThanOrEqual(after + 60 * 60_000 + 1000);
+    });
+});
+
+
+// ─── Redesign: invite a new contact to set their own password ────────────
+
+describe('issuePasswordSetupLink', () => {
+    it('revokes older links, mints a link that lasts 7 days and emails it', async () => {
+        const user = sampleUser();
+        const before = Date.now();
+
+        await svc.issuePasswordSetupLink({ _id: user._id, email: user.email, full_name: user.full_name });
+
+        expect(tokenUpdateManyMock).toHaveBeenCalledWith({ user_id: user._id, used_at: null }, { $set: { used_at: expect.any(Date) } });
+        const created = tokenCreateMock.mock.calls[0][0] as { user_id: unknown; expires_at: Date };
+        expect(created.user_id).toBe(user._id);
+        const days = (created.expires_at.getTime() - before) / 86_400_000;
+        expect(days).toBeGreaterThan(6.9);
+        expect(days).toBeLessThan(7.1);
+        expect(sendPasswordSetupEmailMock).toHaveBeenCalledWith(
+            expect.objectContaining({ to: user.email, full_name: user.full_name, token: expect.any(String) })
+        );
+        expect(sendPasswordResetEmailMock).not.toHaveBeenCalled();
     });
 });

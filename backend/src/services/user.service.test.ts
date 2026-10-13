@@ -923,3 +923,52 @@ describe('updateUser — client contact title', () => {
         await expect(svc.updateUser(adminPatch(t, { client_profile: { title: 'CTO' } }))).rejects.toMatchObject({ statusCode: 400 });
     });
 });
+
+// ─── Redesign: an admin can correct a user's email ───────────────────────
+
+describe('updateUser — email', () => {
+    const asAdmin = (target: ReturnType<typeof sampleUser>, patch: unknown) => ({
+        target_id: target._id as Types.ObjectId,
+        caller_id: new Types.ObjectId(),
+        caller_role: ROLES.ADMIN,
+        caller_role_keys: [ROLES.ADMIN],
+        caller_permissions: [],
+        patch: patch as never,
+    });
+
+    it('lets an admin change the email when nobody else has it', async () => {
+        const t = sampleUser({ role: ROLES.REPRESENTATIVE, email: 'old@x.io' });
+        userFindByIdMock.mockResolvedValueOnce(t);
+        userExistsMock.mockResolvedValueOnce(null);
+
+        await svc.updateUser(asAdmin(t, { email: 'new@x.io' }));
+
+        expect(t.email).toBe('new@x.io');
+        expect(userExistsMock).toHaveBeenCalledWith({ email: 'new@x.io', _id: { $ne: t._id } });
+    });
+
+    it('refuses an email another account already uses', async () => {
+        const t = sampleUser({ email: 'old@x.io' });
+        userFindByIdMock.mockResolvedValueOnce(t);
+        userExistsMock.mockResolvedValueOnce({ _id: new Types.ObjectId() });
+
+        await expect(svc.updateUser(asAdmin(t, { email: 'taken@x.io' }))).rejects.toMatchObject({ code: 'EMAIL_ALREADY_EXISTS' });
+        expect(t.email).toBe('old@x.io');
+    });
+
+    it('ignores an email change from someone editing their own profile', async () => {
+        const t = sampleUser({ email: 'me@x.io' });
+        userFindByIdMock.mockResolvedValueOnce(t);
+
+        await svc.updateUser({
+            target_id: t._id as Types.ObjectId,
+            caller_id: t._id as Types.ObjectId,
+            caller_role: ROLES.EMPLOYEE,
+            caller_role_keys: [ROLES.EMPLOYEE],
+            caller_permissions: [],
+            patch: { email: 'hijack@x.io', full_name: 'Me' } as never,
+        });
+
+        expect(t.email).toBe('me@x.io');
+    });
+});

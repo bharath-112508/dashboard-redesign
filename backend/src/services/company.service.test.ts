@@ -49,8 +49,10 @@ const {
     userFindOneMock: vi.fn(),
 }));
 
+const { companyUpdateOneMock } = vi.hoisted(() => ({ companyUpdateOneMock: vi.fn() }));
 vi.mock('../models/company.model.js', () => ({
     Company: {
+        updateOne: companyUpdateOneMock,
         create: companyCreateMock,
         findById: companyFindByIdMock,
         find: companyFindMock,
@@ -86,6 +88,8 @@ vi.mock('./user.service.js', () => ({
 
 vi.mock('../utils/password.js', () => ({ hashPassword: hashPasswordMock }));
 vi.mock('../utils/password-policy.js', () => ({ assertPasswordPolicy: vi.fn() }));
+const { issuePasswordSetupLinkMock } = vi.hoisted(() => ({ issuePasswordSetupLinkMock: vi.fn() }));
+vi.mock('./password-reset.service.js', () => ({ issuePasswordSetupLink: issuePasswordSetupLinkMock }));
 
 const svc = await import('./company.service.js');
 import { ERROR_CODES } from '../constants/error-codes.js';
@@ -1146,5 +1150,101 @@ describe('createRepresentative — title', () => {
 
         const payload = userCreateMock.mock.calls[0][0] as { client_profile: { title?: string } };
         expect(payload.client_profile.title).toBe('CTO');
+    });
+});
+
+
+describe('createRepresentative — invite to set a password', () => {
+    it('emails a set-your-password link when asked to invite', async () => {
+        const id = new Types.ObjectId();
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userCreateMock.mockResolvedValueOnce({ _id: id, email: 'rep@alnarp.example', full_name: 'Anders Alnarp', toJSON: () => ({}) });
+
+        await svc.createRepresentative(companyId, { ...validBody, send_invite: true }, adminCaller());
+
+        expect(issuePasswordSetupLinkMock).toHaveBeenCalledWith(expect.objectContaining({ _id: id, email: 'rep@alnarp.example' }));
+    });
+
+    it('sends nothing without the invite flag (the existing frontend shares the password itself)', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userCreateMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), toJSON: () => ({}) });
+
+        await svc.createRepresentative(companyId, validBody, adminCaller());
+
+        expect(issuePasswordSetupLinkMock).not.toHaveBeenCalled();
+    });
+
+    it('still creates the contact when the invite email fails', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userCreateMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), email: 'rep@alnarp.example', full_name: 'A', toJSON: () => ({ id: 'x' }) });
+        issuePasswordSetupLinkMock.mockRejectedValueOnce(new Error('smtp down'));
+
+        await expect(svc.createRepresentative(companyId, { ...validBody, send_invite: true }, adminCaller())).resolves.toBeDefined();
+    });
+});
+
+
+// ─── Redesign: one Viljetech staff member at a time ──────────────────────
+
+describe('setResponsible / removeResponsible', () => {
+    const staffId = new Types.ObjectId();
+    /** `User.findById(id).select(...).lean()` */
+    const userChain = (u: unknown) => ({ select: () => ({ lean: () => Promise.resolve(u) }) });
+
+    it('adds a staff member atomically, without touching the others', async () => {
+        companyFindByIdMock.mockResolvedValue(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(userChain({ _id: staffId, role: ROLES.EMPLOYEE, status: 'active' }));
+        companyUpdateOneMock.mockResolvedValueOnce({ modifiedCount: 1 });
+
+        await svc.setResponsible(companyId, { user_id: staffId.toString(), role: 'developer' }, adminCaller());
+
+        expect(companyUpdateOneMock).toHaveBeenCalledTimes(1);
+        const [filter, update] = companyUpdateOneMock.mock.calls[0] as [Record<string, unknown>, Record<string, unknown>];
+        expect(filter).toMatchObject({ _id: companyId, 'responsibles.user_id': { $ne: staffId } });
+        expect(update).toEqual({ $push: { responsibles: { user_id: staffId, role: 'developer' } } });
+    });
+
+    it("changes the role of someone already on the company", async () => {
+        companyFindByIdMock.mockResolvedValue(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(userChain({ _id: staffId, role: ROLES.EMPLOYEE, status: 'active' }));
+        companyUpdateOneMock.mockResolvedValueOnce({ modifiedCount: 0 }).mockResolvedValueOnce({ modifiedCount: 1 });
+
+        await svc.setResponsible(companyId, { user_id: staffId.toString(), role: 'viewer' }, adminCaller());
+
+        expect(companyUpdateOneMock).toHaveBeenNthCalledWith(
+            2,
+            { _id: companyId, 'responsibles.user_id': staffId },
+            { $set: { 'responsibles.$.role': 'viewer' } }
+        );
+    });
+
+    it.each([
+        ['a client user', { role: ROLES.REPRESENTATIVE, status: 'active' }],
+        ['a deactivated person', { role: ROLES.EMPLOYEE, status: 'deactivated' }],
+        ['nobody', null],
+    ])('refuses %s', async (_label, user) => {
+        companyFindByIdMock.mockResolvedValue(makeCompany());
+        userFindByIdMock.mockReturnValueOnce(userChain(user && { _id: staffId, ...user }));
+
+        await expect(svc.setResponsible(companyId, { user_id: staffId.toString(), role: 'developer' }, adminCaller())).rejects.toMatchObject({
+            statusCode: 400,
+        });
+        expect(companyUpdateOneMock).not.toHaveBeenCalled();
+    });
+
+    it('removes one staff member atomically', async () => {
+        companyFindByIdMock.mockResolvedValue(makeCompany());
+        companyUpdateOneMock.mockResolvedValueOnce({ modifiedCount: 1 });
+
+        await svc.removeResponsible(companyId, staffId, adminCaller());
+
+        expect(companyUpdateOneMock).toHaveBeenCalledWith({ _id: companyId }, { $pull: { responsibles: { user_id: staffId } } });
+    });
+
+    it('refuses a caller who may not edit the company', async () => {
+        companyFindByIdMock.mockResolvedValue(makeCompany({ created_by: new Types.ObjectId() }));
+
+        await expect(svc.removeResponsible(companyId, staffId, employeeCaller())).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+        expect(companyUpdateOneMock).not.toHaveBeenCalled();
     });
 });

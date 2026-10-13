@@ -8,6 +8,7 @@ import { PERMISSIONS } from '../constants/permissions.js';
 import {
     companyIdParamSchema,
     companyRepresentativeParamSchema,
+    setResponsibleBodySchema,
     createCompanyBodySchema,
     createRepresentativeBodySchema,
     listCompaniesQuerySchema,
@@ -63,6 +64,20 @@ router.patch(
 
 // Archive, not delete — projects reference `company_id` and historic
 // references must stay resolvable.
+// Viljetech staff on a company, one at a time (redesign). Same bar as editing the company.
+router.post(
+    '/:id/responsibles',
+    requirePermission(PERMISSIONS.COMPANY_WRITE),
+    validate({ params: companyIdParamSchema, body: setResponsibleBodySchema }),
+    asyncHandler(ctrl.postResponsible)
+);
+router.delete(
+    '/:id/responsibles/:user_id',
+    requirePermission(PERMISSIONS.COMPANY_WRITE),
+    validate({ params: companyRepresentativeParamSchema }),
+    asyncHandler(ctrl.deleteResponsible)
+);
+
 router.post(
     '/:id/archive',
     requirePermission(PERMISSIONS.COMPANY_WRITE),

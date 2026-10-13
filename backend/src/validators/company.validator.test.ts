@@ -54,3 +54,12 @@ describe('company logo', () => {
         }
     );
 });
+
+
+describe('createRepresentativeBodySchema — invite', () => {
+    it('accepts send_invite', () => {
+        const base = { email: 'kari@nordlys.no', full_name: 'Kari Berg', initial_password: 'x'.repeat(12) };
+        const r = createRepresentativeBodySchema.safeParse({ ...base, send_invite: true });
+        expect(r.success && r.data.send_invite).toBe(true);
+    });
+});

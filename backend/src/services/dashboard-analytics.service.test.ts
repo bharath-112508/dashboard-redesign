@@ -651,3 +651,13 @@ describe('buildManagerAnalytics — kpi.hours_logged safeSection isolation', () 
         expect(kpi.hours_logged).toEqual({ error: true });
     });
 });
+
+describe('buildAdminAnalytics — active projects (redesign statuses)', () => {
+    it('counts planned projects as not finished, like the overview does', async () => {
+        stubEmptyModels();
+
+        await buildAdminAnalytics(['system.admin'], resolveDashboardRange('month'));
+
+        expect(vi.mocked(Project.countDocuments)).toHaveBeenCalledWith({ status: { $in: ['active', 'planned'] } });
+    });
+});

@@ -1,16 +1,18 @@
 import { Types } from 'mongoose';
 
-import { Company, type CompanyDocument } from '../models/company.model.js';
+import { Company, type CompanyDocument, type CompanyResponsible } from '../models/company.model.js';
 import { Project } from '../models/project.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
-import { ROLES } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES, ROLES } from '../constants/roles.js';
 import { USER_STATUSES } from '../constants/user-statuses.js';
 import { PROJECT_CLIENT_SIDE_ROLES } from '../constants/project.js';
 import { hashPassword } from '../utils/password.js';
 import { assertPasswordPolicy } from '../utils/password-policy.js';
+import { issuePasswordSetupLink } from './password-reset.service.js';
+import logger from '../utils/logger.js';
 import { isAdminLike } from '../utils/role-check.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { deactivateUser, reactivateUser } from './user.service.js';
@@ -649,6 +651,15 @@ export const createRepresentative = async (
         created_by: caller.id,
     });
 
+    if (input.send_invite) {
+        // The account exists either way; a failed email must not undo it (an admin can resend a reset).
+        try {
+            await issuePasswordSetupLink(created);
+        } catch (err) {
+            logger.warn({ err, code: 'PASSWORD_SETUP_EMAIL_FAILED', user_id: created._id.toString() }, 'Could not send the set-your-password email');
+        }
+    }
+
     if (caller.audit) {
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.REPRESENTATIVE_CREATE,
@@ -665,4 +676,63 @@ export const createRepresentative = async (
     // Internal storage pointer — never part of the public surface.
     delete json.profile_photo_blob_key;
     return json;
+};
+
+// ─── Viljetech staff on a company, one at a time (redesign) ──────────────
+//
+// Each call changes one entry with a single atomic update, so two people
+// editing the same company at once can't erase each other's changes (a
+// read-modify-write of the whole array could).
+
+/** Only active internal staff can be responsible for a client company. */
+const assertActiveStaff = async (userId: Types.ObjectId): Promise<void> => {
+    const user = await User.findById(userId).select('_id role status').lean<{ role: string; status: string } | null>();
+    if (!user || user.status !== USER_STATUSES.ACTIVE || (CLIENT_SIDE_ROLES as string[]).includes(user.role)) {
+        throw AppError.validation('Only active Viljetech staff can be responsible for a company.');
+    }
+};
+
+export const setResponsible = async (
+    id: Types.ObjectId,
+    body: { user_id: string; role: CompanyResponsible['role'] },
+    caller: CompanyCaller
+): Promise<Record<string, unknown>> => {
+    const doc = await loadCompanyOrThrow(id);
+    assertCallerCanWriteCompany(doc, caller);
+    const userId = new Types.ObjectId(body.user_id);
+    await assertActiveStaff(userId);
+
+    const added = await Company.updateOne(
+        { _id: id, 'responsibles.user_id': { $ne: userId } },
+        { $push: { responsibles: { user_id: userId, role: body.role } } }
+    );
+    if (added.modifiedCount === 0) {
+        await Company.updateOne({ _id: id, 'responsibles.user_id': userId }, { $set: { 'responsibles.$.role': body.role } });
+    }
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.COMPANY_UPDATE,
+            target: { kind: AUDIT_TARGET_KINDS.COMPANY, id },
+            after: { responsible: { user_id: body.user_id, role: body.role } },
+        });
+    }
+    return toPublicFor(await loadCompanyOrThrow(id), caller);
+};
+
+export const removeResponsible = async (
+    id: Types.ObjectId,
+    userId: Types.ObjectId,
+    caller: CompanyCaller
+): Promise<Record<string, unknown>> => {
+    const doc = await loadCompanyOrThrow(id);
+    assertCallerCanWriteCompany(doc, caller);
+    await Company.updateOne({ _id: id }, { $pull: { responsibles: { user_id: userId } } });
+    if (caller.audit) {
+        await recordAudit(caller.audit, {
+            action: AUDIT_ACTIONS.COMPANY_UPDATE,
+            target: { kind: AUDIT_TARGET_KINDS.COMPANY, id },
+            before: { responsible: { user_id: userId.toString() } },
+        });
+    }
+    return toPublicFor(await loadCompanyOrThrow(id), caller);
 };

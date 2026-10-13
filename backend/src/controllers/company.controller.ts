@@ -10,6 +10,7 @@ import type {
     ListCompaniesQuery,
     ListRepresentativesQuery,
     PatchCompanyBody,
+    SetResponsibleBody,
 } from '../validators/company.validator.js';
 
 /**
@@ -92,4 +93,14 @@ export const postRepresentative = async (req: Request, res: Response): Promise<R
         projectCallerFrom(req)
     );
     return created(res, data);
+};
+
+export const postResponsible = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.setResponsible(idOf(req), req.body as SetResponsibleBody, projectCallerFrom(req));
+    return ok(res, data);
+};
+
+export const deleteResponsible = async (req: Request, res: Response): Promise<Response> => {
+    const data = await service.removeResponsible(idOf(req), new Types.ObjectId(req.params.user_id as string), projectCallerFrom(req));
+    return ok(res, data);
 };

@@ -1,5 +1,6 @@
 // src/services/dashboard-analytics.service.ts
 import { Types } from 'mongoose';
+import { PROJECT_STATUSES } from '../constants/project.js';
 import { TIMESHEET_NO_PROJECT_LABEL } from '../constants/timesheet.js';
 
 import { AttendanceRecord } from '../models/attendance-record.model.js';
@@ -750,7 +751,8 @@ export const buildAdminAnalytics = async (held: Held, range: ResolvedRange): Pro
             return { value: active, deactivated, by_role };
         });
         put('active_projects', PERMISSIONS.PROJECT_READ, async () => ({
-            value: await Project.countDocuments({ status: 'active' }),
+            // Planned is not finished yet, so it counts as active (same as the admin overview).
+            value: await Project.countDocuments({ status: { $in: [PROJECT_STATUSES.ACTIVE, PROJECT_STATUSES.PLANNED] } }),
         }));
         put('hours_logged', PERMISSIONS.TIMESHEET_READ, async () => {
             const [cur, prev] = await Promise.all([

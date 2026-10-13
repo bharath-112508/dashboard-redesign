@@ -409,3 +409,10 @@ describe('updateUserBodySchema — a client contact cannot be moved to another c
         expect(r.success && r.data.client_profile).toEqual({ title: 'CTO' });
     });
 });
+
+describe('updateUserBodySchema — email', () => {
+    it('accepts and lower-cases an email', () => {
+        const r = updateUserBodySchema.safeParse({ email: ' New@X.io ' });
+        expect(r.success && r.data.email).toBe('new@x.io');
+    });
+});

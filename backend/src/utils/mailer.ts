@@ -88,6 +88,33 @@ export const sendPasswordResetEmail = async (input: SendPasswordResetEmailInput)
     await sendEmail({ to: input.to, subject, html, text, context: 'password_reset' });
 };
 
+// ─── Set-your-password invite (new client contacts, redesign) ─────────────
+
+export interface SendPasswordSetupEmailInput {
+    to: string;
+    full_name: string;
+    token: string;
+}
+
+/** Invites a new user to choose their own password. The link uses the reset page, marked as a welcome. */
+export const sendPasswordSetupEmail = async (input: SendPasswordSetupEmailInput): Promise<void> => {
+    const link = `${buildResetUrl(input.token)}&welcome=1`;
+    const subject = 'Set your Viljetech password';
+    const html = `
+        <p>Hi ${escapeHtml(input.full_name)},</p>
+        <p>An account has been created for you on the Viljetech project portal.</p>
+        <p><a href="${link}">Choose your password</a> to sign in. The link works for 7 days.</p>
+        <p>If you weren't expecting this, you can ignore this email.</p>
+    `.trim();
+    const text =
+        `Hi ${input.full_name},\n\n` +
+        'An account has been created for you on the Viljetech project portal.\n' +
+        `Choose your password to sign in (the link works for 7 days):\n${link}\n\n` +
+        "If you weren't expecting this, you can ignore this email.\n";
+
+    await sendEmail({ to: input.to, subject, html, text, context: 'password_setup' });
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 /**
