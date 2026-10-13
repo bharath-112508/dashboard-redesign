@@ -446,3 +446,27 @@ describe('attachments', () => {
     expect(put).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('ticket hours', () => {
+  it('logs the hours added on a ticket as a time entry on it', async () => {
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { time: { '2026-10-12': 2.5 } } }, TODAY)
+    expect(post).toHaveBeenCalledWith('/timesheets', expect.objectContaining({
+      entry_type: 'task_linked',
+      task_id: 't1',
+      project_id: 'p1',
+      local_date: '2026-10-12',
+      billable_hours: 2,
+      billable_minutes: 30,
+      non_billable_hours: 0,
+    }))
+    expect(patch).not.toHaveBeenCalled()
+  })
+
+  it('logs only what was added since the last write', async () => {
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { time: { '2026-10-12': 1 } } }, TODAY)
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { time: { '2026-10-12': 1.5 } } }, TODAY)
+    expect(post.mock.calls.map(c => (c[1] as Record<string, number>).billable_minutes)).toEqual([0, 30])
+    expect(post.mock.calls.map(c => (c[1] as Record<string, number>).billable_hours)).toEqual([1, 0])
+  })
+})
+

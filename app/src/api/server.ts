@@ -14,7 +14,7 @@ import { apiMode } from './http/config'
 import { fetchCompanies, fetchInternalProjects, isCompanyApiCommand, sendCompanyCommand } from './http/companies'
 import { ApiError } from './http/client'
 import { fetchTasks, fetchWorkspace, isBoardApiCommand, sendBoardCommand } from './http/board'
-import { fetchEntries, fetchWeekSubmissions } from './http/timesheet'
+import { fetchEntries, fetchWeekSubmissions, isTimeApiCommand, sendTimeCommand } from './http/timesheet'
 
 /**
  * A mock backend. Data lives in localStorage so it survives reloads and is
@@ -503,6 +503,8 @@ const sendToApi = async (send: (today: string) => Promise<{ id?: string }>, tick
     // A refusal, or a value the backend does not accept: the page shows the backend's reason.
     if (err instanceof ApiError && err.status === 403) throw new RefusedError(err.message)
     if (err instanceof ApiError && err.status === 422) throw new RefusedError(err.fieldMessage ?? err.message)
+    // A submitted week: the person can reopen it.
+    if (err instanceof ApiError && err.code === 'TIMESHEET_WEEK_SUBMITTED') throw new RefusedError(err.message)
     throw err
   }
 }
@@ -525,6 +527,7 @@ export const server = {
     if (apiMode && isCompanyApiCommand(cmd)) return sendToApi(today => sendCompanyCommand(cmd, today))
     if (apiMode && isBoardApiCommand(cmd))
       return sendToApi(today => sendBoardCommand(cmd, today), cmd.type === 'task.create' || cmd.type === 'tickets.task.createTop')
+    if (apiMode && isTimeApiCommand(cmd)) return sendToApi(() => sendTimeCommand(cmd, readSession()))
     await sleep(LATENCY_MS)
     return exclusive(() =>
       acrossTabs(async () => {

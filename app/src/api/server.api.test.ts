@@ -17,11 +17,12 @@ vi.mock('./http/board', () => ({
   sendBoardCommand,
   isBoardApiCommand: (c: { type: string }) => c.type.startsWith('task.'),
 }))
-const { fetchEntries, fetchWeekSubmissions } = vi.hoisted(() => ({
+const { fetchEntries, fetchWeekSubmissions, sendTimeCommand } = vi.hoisted(() => ({
+  sendTimeCommand: vi.fn(async (): Promise<{ id?: string }> => ({ id: 'x9' })),
   fetchEntries: vi.fn(async () => [{ id: 'x1' }]),
   fetchWeekSubmissions: vi.fn(async () => [{ week: '2026-10-05' }]),
 }))
-vi.mock('./http/timesheet', () => ({ fetchEntries, fetchWeekSubmissions, isTimeApiCommand: () => false, sendTimeCommand: vi.fn() }))
+vi.mock('./http/timesheet', () => ({ fetchEntries, fetchWeekSubmissions, isTimeApiCommand: (c: { type: string }) => c.type.startsWith('time.') || c.type.startsWith('week.'), sendTimeCommand }))
 vi.mock('./http/config', () => ({ apiMode: true, API_URL: 'http://x/api/v1' }))
 vi.mock('./http/companies', () => ({
   fetchCompanies,
@@ -92,5 +93,20 @@ describe('backend validation answers', () => {
     const err = await server.send({ type: 'task.update', id: 't1', patch: { status: 'qa' } }).catch(e => e)
     expect(err).toBeInstanceOf(RefusedError)
     expect(err.message).toBe('Status qa is not a status of this project')
+  })
+})
+
+describe('server.send for time in API mode', () => {
+  it('sends time to the backend and gives back the new entry id', async () => {
+    const entry = { id: '', date: '2026-10-12', userId: 'a0', user: 'A', type: 'General', task: null, notes: '', bill: 1, non: 0 }
+    expect(await server.send({ type: 'time.log', entry })).toEqual({ apiId: 'x9' })
+    expect(sendTimeCommand).toHaveBeenCalledWith(expect.objectContaining({ type: 'time.log' }), expect.objectContaining({ personId: 'a0' }))
+  })
+
+  it('shows a locked week as a refusal with its reason', async () => {
+    sendTimeCommand.mockRejectedValueOnce(new ApiError(409, 'TIMESHEET_WEEK_SUBMITTED', 'This week is submitted. Reopen it to change its time.'))
+    const err = await server.send({ type: 'time.remove', id: 'x1' }).catch(e => e)
+    expect(err).toBeInstanceOf(RefusedError)
+    expect(err.message).toBe('This week is submitted. Reopen it to change its time.')
   })
 })

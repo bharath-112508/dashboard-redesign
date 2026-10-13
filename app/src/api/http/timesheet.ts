@@ -1,9 +1,10 @@
-import { api } from './client'
+import { ApiError, api } from './client'
 import { allPages, liveProjects } from './companies'
 import { boardIndex, fetchTasks } from './board'
-import { entryFrom, type BackendEntry } from './timesheetMappers'
+import { entryBody, entryFrom, type BackendEntry } from './timesheetMappers'
 import { isClientRole } from '../session/access'
 import { fmt } from '../../lib/dates'
+import type { TimeCommand } from '../timesheet/commands'
 import type { Session, TimeEntry, WeekSubmission } from '../types'
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -53,4 +54,38 @@ export const fetchWeekSubmissions = async (session: Session | null): Promise<Wee
     const d = new Date(w.submitted_at)
     return { userId: w.user_id, week: w.week_start, when: `${fmt(isoDay(d))}, ${pad(d.getHours())}:${pad(d.getMinutes())}` }
   })
+}
+
+// ─── Writes ──────────────────────────────────────────────────────────────
+
+const TIME_COMMANDS = new Set(['time.log', 'time.remove', 'week.submit', 'week.reopen'])
+export const isTimeApiCommand = (cmd: { type: string }): cmd is TimeCommand => TIME_COMMANDS.has(cmd.type)
+
+const refuse = (message: string) => new ApiError(403, 'NOT_AVAILABLE', message)
+
+/** Sends one time command. The backend always logs and submits as the signed-in person. */
+export const sendTimeCommand = async (cmd: TimeCommand, session: Session | null): Promise<{ id?: string }> => {
+  const self = session?.personId
+  switch (cmd.type) {
+    case 'time.log': {
+      if (cmd.entry.userId !== self) throw refuse('You can only log your own time.')
+      const body = entryBody(cmd.entry, {
+        projectId: ref => (ref ? ref.slice(2) : null),
+        projectOfTask: t => boardIndex.projectOfTask.get(t) ?? null,
+        taskTitle: t => boardIndex.tasks.get(t)?.title ?? '',
+      })
+      const { id } = await api.post<{ id: string }>('/timesheets', body)
+      return { id }
+    }
+    case 'time.remove':
+      await api.delete(`/timesheets/${cmd.id}`)
+      return {}
+    case 'week.submit':
+      if (cmd.submission.userId !== self) throw refuse('You can only submit your own week.')
+      await api.put(`/timesheets/weeks/${cmd.submission.week}`, {})
+      return {}
+    case 'week.reopen':
+      await api.delete(`/timesheets/weeks/${cmd.week}${cmd.userId === self ? '' : `?user_id=${cmd.userId}`}`)
+      return {}
+  }
 }

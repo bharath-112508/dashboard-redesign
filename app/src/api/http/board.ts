@@ -1,4 +1,5 @@
 import { ApiError, api } from './client'
+import { entryBody } from './timesheetMappers'
 import { allPages, liveProjects } from './companies'
 import type { BackendProject } from './companyMappers'
 import {
@@ -363,6 +364,20 @@ const saveAtts = async (id: string, atts: Attachment[]) => {
   }
 }
 
+/**
+ * A ticket's "Log time" adds hours per day; each addition becomes a billable
+ * time entry on the ticket for the signed-in person (the backend logs as the caller).
+ */
+const saveTicketHours = async (id: string, was: Task | undefined, time: Record<string, number>) => {
+  const before = was?.time ?? {}
+  for (const [date, h] of Object.entries(time)) {
+    const added = h - (before[date] ?? 0)
+    if (added <= 0) continue
+    const entry = { id: '', date, userId: '', user: '', type: 'General', task: id, notes: '', bill: added, non: 0 }
+    await api.post('/timesheets', entryBody(entry, { projectId: () => null, projectOfTask: t => boardIndex.projectOfTask.get(t) ?? null, taskTitle: t => boardIndex.tasks.get(t)?.title ?? '' }))
+  }
+}
+
 const saveDeps = async (id: string, before: TaskId[], after: TaskId[]) => {
   for (const d of after) if (!before.includes(d)) await api.post(`/tasks/${id}/dependencies`, { depends_on_task_id: await realTaskId(d) })
   for (const d of before) if (!after.includes(d)) await api.delete(`/tasks/${id}/dependencies/${d}`)
@@ -389,6 +404,7 @@ const updateTask = async (appId: TaskId, patch: Partial<Task>) => {
   if (Object.keys(body).length) await api.patch(`/tasks/${id}`, body)
   const subs = patch.subs ? await saveSubs(id, was?.subs ?? [], patch.subs) : undefined
   if (patch.atts) await saveAtts(id, patch.atts)
+  if (patch.time) await saveTicketHours(id, was, patch.time)
   // What is saved now is the "before" of the next write, until the board reloads.
   if (was) boardIndex.tasks.set(id, { ...was, ...patch, ...(subs ? { subs } : {}) })
 }
