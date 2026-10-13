@@ -541,7 +541,7 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
                 </label>
                 <label className="block">
                   <div className="mb-1 text-[12px] text-muted">Hours after previous</div>
-                  <input
+                  <input placeholder="e.g. 4"
                     type="number"
                     min={0}
                     value={addStep.hours}
@@ -632,7 +632,7 @@ export function FollowUpsTab({ p }: { p: DvProject }) {
               </>
             ) : (
               <>
-                <textarea
+                <textarea placeholder="Add a note for this project…"
                   autoFocus
                   value={pnEdit.text}
                   onChange={e => setPnEdit({ ...pnEdit, text: e.target.value })}

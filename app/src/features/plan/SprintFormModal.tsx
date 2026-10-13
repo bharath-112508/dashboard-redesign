@@ -133,7 +133,7 @@ export function SprintFormModal({ epicId }: { epicId: string }) {
         <div className="mt-1 text-[20px] font-extrabold text-ink">What will this sprint deliver?</div>
         <label className="mt-4 block">
           <span className={labelCls}>Name</span>
-          <input {...register('name')} className={fieldCls} />
+          <input placeholder="e.g. Sprint 3" {...register('name')} className={fieldCls} />
         </label>
         <label className="mt-3.5 block">
           <span className={labelCls}>Sprint goal *</span>

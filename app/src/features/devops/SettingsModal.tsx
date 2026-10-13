@@ -162,7 +162,7 @@ export function SettingsModal({ tab }: { tab: string }) {
                       <div className="flex min-w-0 flex-col gap-1.5">
                         <div className="flex items-center gap-2">
                           <span className="size-2 flex-none rounded-full" style={{ background: x.dot }} />
-                          <input value={x.r.name} onChange={e => x.onName(e.target.value)} className={`${inp} min-w-0 flex-1 font-medium`} />
+                          <input placeholder="Name" value={x.r.name} onChange={e => x.onName(e.target.value)} className={`${inp} min-w-0 flex-1 font-medium`} />
                         </div>
                         <textarea
                           value={x.r.desc}
@@ -199,9 +199,9 @@ export function SettingsModal({ tab }: { tab: string }) {
                   {rows('ladder').map(x => (
                     <div key={x.i} className="grid grid-cols-[24px_1fr_120px_76px] items-center gap-2.5 px-1 py-[5px]" style={{ borderTop: x.border }}>
                       <span className="tnum text-right text-[12px] text-slate">{x.i + 1}</span>
-                      <input value={x.r.name} onChange={e => x.onName(e.target.value)} className={`${inp} min-w-0`} />
+                      <input placeholder="Name" value={x.r.name} onChange={e => x.onName(e.target.value)} className={`${inp} min-w-0`} />
                       <div className="flex items-center gap-1.5">
-                        <input type="number" min={0} value={x.r.num} onChange={e => x.onNum(e.target.value)} className={`${inp} tnum w-16`} />
+                        <input placeholder="e.g. 4" type="number" min={0} value={x.r.num} onChange={e => x.onNum(e.target.value)} className={`${inp} tnum w-16`} />
                         <span className="text-[12px] text-muted">h</span>
                       </div>
                       <Arrows x={x} />
@@ -217,7 +217,7 @@ export function SettingsModal({ tab }: { tab: string }) {
                   {rows('iladder').map(x => (
                     <div key={x.i} className="grid grid-cols-[24px_1fr_76px] items-center gap-2.5 px-1 py-[5px]" style={{ borderTop: x.border }}>
                       <span className="tnum text-right text-[12px] text-slate">{x.i + 1}</span>
-                      <input value={x.r.name} onChange={e => x.onName(e.target.value)} className={`${inp} min-w-0`} />
+                      <input placeholder="Name" value={x.r.name} onChange={e => x.onName(e.target.value)} className={`${inp} min-w-0`} />
                       <Arrows x={x} />
                     </div>
                   ))}
@@ -298,9 +298,9 @@ export function SettingsModal({ tab }: { tab: string }) {
                     {rows('dev').map(x => (
                       <div key={x.i} className="grid grid-cols-[24px_1fr_120px_76px] items-center gap-2.5 px-1 py-[5px]" style={{ borderTop: x.border }}>
                         <span className="tnum text-right text-[12px] text-slate">{x.i + 1}</span>
-                        <input value={x.r.name} onChange={e => x.onName(e.target.value)} className={`${inp} min-w-0`} />
+                        <input placeholder="Name" value={x.r.name} onChange={e => x.onName(e.target.value)} className={`${inp} min-w-0`} />
                         <div className="flex items-center gap-1.5">
-                          <input type="number" min={0} value={x.r.num} onChange={e => x.onNum(e.target.value)} className={`${inp} tnum w-16`} />
+                          <input placeholder="e.g. 4" type="number" min={0} value={x.r.num} onChange={e => x.onNum(e.target.value)} className={`${inp} tnum w-16`} />
                           <span className="text-[12px] text-muted">days</span>
                         </div>
                         <Arrows x={x} />

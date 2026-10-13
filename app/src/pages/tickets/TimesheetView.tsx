@@ -303,11 +303,11 @@ export function TimesheetView() {
             </label>
             <label className={field}>
               Billable h
-              <input type="number" min="0" step="0.5" {...register('bill')} className={`${control} tnum`} />
+              <input placeholder="0" type="number" min="0" step="0.5" {...register('bill')} className={`${control} tnum`} />
             </label>
             <label className={field}>
               Non-bill. h
-              <input type="number" min="0" step="0.5" {...register('non')} className={`${control} tnum`} />
+              <input placeholder="0" type="number" min="0" step="0.5" {...register('non')} className={`${control} tnum`} />
             </label>
             <label className={field} style={{ gridColumn: '1 / -2' }}>
               Notes

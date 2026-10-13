@@ -135,7 +135,7 @@ export function ProfileModal({ session, person, onClose }: Props) {
           <div className="mt-2.5 grid grid-cols-2 gap-3 max-[560px]:grid-cols-1">
             <label>
               <span className={label}>Full name</span>
-              <input className={field} {...form.register('name')} />
+              <input placeholder="e.g. Ingrid Solberg" className={field} {...form.register('name')} />
             </label>
             <label>
               <span className={label}>Email</span>
@@ -201,7 +201,7 @@ export function ProfileModal({ session, person, onClose }: Props) {
             </label>
             <label>
               <span className={label}>Repeat password</span>
-              <input type="password" className={field} autoComplete="new-password" {...form.register('pw2')} />
+              <input placeholder="Type the new password again" type="password" className={field} autoComplete="new-password" {...form.register('pw2')} />
             </label>
           </div>
 

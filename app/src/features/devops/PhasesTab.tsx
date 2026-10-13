@@ -183,7 +183,7 @@ export function PhasesTab({ p }: { p: DvProject }) {
             {devEdit.map((r, i) => (
               <div key={r.id} className="flex items-center gap-2">
                 <span className="tnum w-[18px] text-right text-[12px] text-slate">{i + 1}</span>
-                <input
+                <input placeholder="Name"
                   value={r.name}
                   onChange={e => setDevEdit(devEdit.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
                   className="min-w-0 flex-1 rounded-[9px] border-0 bg-white px-2.5 py-[7px] text-[13px] text-ink outline-0"
@@ -435,7 +435,7 @@ export function PhasesTab({ p }: { p: DvProject }) {
               <div className="mt-1.5 text-[17px] leading-normal tracking-[-0.015em] text-ink [text-wrap:pretty]">{p.phase || 'No phase noted'}</div>
             ) : (
               <>
-                <textarea
+                <textarea placeholder="What is happening now?"
                   autoFocus
                   value={phaseDraft}
                   onChange={e => setPhaseDraft(e.target.value)}
@@ -490,7 +490,7 @@ export function PhasesTab({ p }: { p: DvProject }) {
             <div className="fixed left-1/2 top-1/2 z-[41] w-[480px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-[22px] bg-white p-7 font-normal text-ink shadow-[0_30px_90px_rgba(0,0,0,0.3)]">
               <div className="text-[20px] font-bold tracking-[-0.02em]">Does everything look right?</div>
               <div className="mt-1 text-[13px] text-muted">This becomes the current phase for {p.name} and is logged.</div>
-              <textarea
+              <textarea placeholder="What is happening now?"
                 value={promote.draft}
                 onChange={e => setPromote({ ...promote, draft: e.target.value })}
                 rows={4}

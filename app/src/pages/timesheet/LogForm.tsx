@@ -185,11 +185,11 @@ export function LogForm({
         <div className="grid grid-cols-2 gap-2.5">
           <label className={ui.label}>
             Hours
-            <input type="number" inputMode="numeric" min="0" max="24" step="1" {...register('hours')} className={`${ui.control} tnum`} aria-label="Hours" />
+            <input placeholder="0" type="number" inputMode="numeric" min="0" max="24" step="1" {...register('hours')} className={`${ui.control} tnum`} aria-label="Hours" />
           </label>
           <label className={ui.label}>
             Minutes
-            <input type="number" inputMode="numeric" min="0" max="59" step="5" {...register('minutes')} className={`${ui.control} tnum`} aria-label="Minutes" />
+            <input placeholder="0" type="number" inputMode="numeric" min="0" max="59" step="5" {...register('minutes')} className={`${ui.control} tnum`} aria-label="Minutes" />
           </label>
         </div>
         {err.hours && <span className={ui.error}>{err.hours.message}</span>}

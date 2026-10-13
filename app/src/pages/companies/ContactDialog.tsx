@@ -87,7 +87,7 @@ export function ContactDialog({
         <div className="grid grid-cols-2 gap-3.5 max-[600px]:grid-cols-1">
           <label>
             <span className={labelCls}>Name *</span>
-            <input className={fieldCls} autoFocus {...form.register('name')} />
+            <input placeholder="e.g. Ingrid Solberg" className={fieldCls} autoFocus {...form.register('name')} />
           </label>
           <label>
             <span className={labelCls}>Role</span>
@@ -95,7 +95,7 @@ export function ContactDialog({
           </label>
           <label className="col-span-2 max-[600px]:col-span-1">
             <span className={labelCls}>Email</span>
-            <input className={fieldCls} type="email" {...form.register('email')} />
+            <input placeholder="name@company.com" className={fieldCls} type="email" {...form.register('email')} />
           </label>
         </div>
 

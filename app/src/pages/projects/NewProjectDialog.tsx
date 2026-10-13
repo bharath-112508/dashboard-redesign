@@ -176,11 +176,11 @@ export function NewProjectDialog({
 
           <label className="col-span-2 max-[600px]:col-span-1">
             <span className={labelCls}>Project name *</span>
-            <input className={fieldCls} autoFocus {...form.register('name')} />
+            <input placeholder="e.g. Customer portal" className={fieldCls} autoFocus {...form.register('name')} />
           </label>
           <label className="col-span-2 max-[600px]:col-span-1">
             <span className={labelCls}>What are we building?</span>
-            <textarea className={`${fieldCls} h-auto min-h-[70px] py-2`} {...form.register('desc')} />
+            <textarea placeholder="What the client needs, scope, constraints, links to specs…" className={`${fieldCls} h-auto min-h-[70px] py-2`} {...form.register('desc')} />
           </label>
           <label>
             <span className={labelCls}>Start date</span>

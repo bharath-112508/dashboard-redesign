@@ -305,7 +305,7 @@ function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
       </div>
       {editing ? (
         <>
-          <textarea
+          <textarea placeholder="Describe what you need from the client…"
             ref={descRef}
             value={draft}
             onChange={e => setDraft(e.target.value)}
@@ -570,7 +570,7 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
                   </div>
                   {editing === i ? (
                     <div className="mt-1.5">
-                      <textarea
+                      <textarea placeholder="Write your message…"
                         value={editDraft}
                         onChange={e => setEditDraft(e.target.value)}
                         onKeyDown={e => {

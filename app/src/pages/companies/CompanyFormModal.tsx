@@ -116,15 +116,15 @@ export function CompanyFormModal({
         <div className="grid grid-cols-2 gap-3.5 max-[600px]:grid-cols-1">
           <label className="col-span-2 max-[600px]:col-span-1">
             <span className={labelCls}>Company name *</span>
-            <input className={fieldCls} autoFocus={mode === 'create'} {...form.register('name')} />
+            <input placeholder="e.g. Daco" className={fieldCls} autoFocus={mode === 'create'} {...form.register('name')} />
           </label>
           <label>
             <span className={labelCls}>Industry</span>
-            <input className={fieldCls} {...form.register('industry')} />
+            <input placeholder="e.g. Construction services" className={fieldCls} {...form.register('industry')} />
           </label>
           <label>
             <span className={labelCls}>Country</span>
-            <input className={fieldCls} {...form.register('country')} />
+            <input placeholder="e.g. Norway" className={fieldCls} {...form.register('country')} />
           </label>
           <label>
             <span className={labelCls}>Website</span>
@@ -142,15 +142,15 @@ export function CompanyFormModal({
           </div>
           <label>
             <span className={labelCls}>Main contact</span>
-            <input className={fieldCls} {...form.register('contactName')} />
+            <input placeholder="e.g. Ingrid Solberg" className={fieldCls} {...form.register('contactName')} />
           </label>
           <label>
             <span className={labelCls}>Contact email</span>
-            <input className={fieldCls} type="email" {...form.register('contactEmail')} />
+            <input placeholder="name@company.com" className={fieldCls} type="email" {...form.register('contactEmail')} />
           </label>
           <label className="col-span-2 max-[600px]:col-span-1">
             <span className={labelCls}>Notes</span>
-            <textarea className={`${fieldCls} h-auto min-h-[84px] py-2`} {...form.register('notes')} />
+            <textarea placeholder="Anything the team should know about this client…" className={`${fieldCls} h-auto min-h-[84px] py-2`} {...form.register('notes')} />
           </label>
         </div>
         <div className="mt-5 flex items-center gap-2.5">
