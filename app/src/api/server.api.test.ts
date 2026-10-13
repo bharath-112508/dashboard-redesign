@@ -27,7 +27,8 @@ const { fetchPeopleApi, fetchAccessApi } = vi.hoisted(() => ({
   fetchPeopleApi: vi.fn(async () => [{ id: 'u1' }]),
   fetchAccessApi: vi.fn(async () => ({ perms: {}, devTypes: ['Backend'] })),
 }))
-vi.mock('./http/users', () => ({ fetchPeopleApi, fetchAccessApi, isUserApiCommand: () => false, sendUserCommand: vi.fn() }))
+const sendUserCommand = vi.hoisted(() => vi.fn())
+vi.mock('./http/users', () => ({ fetchPeopleApi, fetchAccessApi, isUserApiCommand: (c: { type: string }) => c.type.startsWith('user.') || c.type === 'profile.update', sendUserCommand }))
 vi.mock('./http/config', () => ({ apiMode: true, API_URL: 'http://x/api/v1' }))
 vi.mock('./http/companies', () => ({
   fetchCompanies,
@@ -118,5 +119,21 @@ describe('server.send for time in API mode', () => {
     const err = await server.send({ type: 'time.remove', id: 'x1' }).catch(e => e)
     expect(err).toBeInstanceOf(RefusedError)
     expect(err.message).toBe('This week is submitted. Reopen it to change its time.')
+  })
+})
+
+describe('user command refusals', () => {
+  it('show a conflict (e.g. the last admin) with its reason', async () => {
+    sendUserCommand.mockRejectedValueOnce(new ApiError(409, 'LAST_ADMIN', 'This is the last active admin.'))
+    const err = await server.send({ type: 'user.remove', id: 'u9' }).catch(e => e)
+    expect(err).toBeInstanceOf(RefusedError)
+    expect(err.message).toBe('This is the last active admin.')
+  })
+
+  it('mark a saved-with-notice refusal as saved', async () => {
+    sendUserCommand.mockRejectedValueOnce(new ApiError(403, 'SAVED_WITH_NOTICE', 'Your details are saved.'))
+    const err = await server.send({ type: 'profile.update', id: 'a0', patch: { pwHash: 'x' } }).catch(e => e)
+    expect(err).toBeInstanceOf(RefusedError)
+    expect(err.saved).toBe(true)
   })
 })

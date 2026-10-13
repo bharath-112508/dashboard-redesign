@@ -37,4 +37,11 @@ describe('setAppAccess', () => {
         expect(out).toEqual({ perms: { dev: ['tk.edit'] }, dev_types: ['Backend', 'QA'] });
         expect(d.save).toHaveBeenCalled();
     });
+
+    it('saves one role\'s ticks without touching the other roles', async () => {
+        const d = doc({ perms: { dev: ['tk.edit'], pm: ['pr.plan'] }, dev_types: null });
+        settingsMock.mockResolvedValueOnce(d);
+        const out = await svc.setAppAccess({ perms: { pm: ['pr.plan', 'ts.all'] } }, { id: new Types.ObjectId(), role: 'admin', audit: undefined } as never);
+        expect(out.perms).toEqual({ dev: ['tk.edit'], pm: ['pr.plan', 'ts.all'] });
+    });
 });

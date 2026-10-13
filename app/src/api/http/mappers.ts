@@ -11,8 +11,8 @@ const ROLE_MAP: Record<string, Role> = {
   representative: 'cuser',
 }
 
-/** Roles a custom "devops" role does not override: admins stay admins, clients stay clients. */
-const KEEPS_ROLE = new Set(['admin', 'client', 'representative'])
+/** Roles a custom "devops" role does not override: only a plain employee becomes a DevOps engineer. */
+const KEEPS_ROLE = new Set(['admin', 'manager', 'team_lead', 'client', 'representative'])
 
 /** The app's role for a backend user. A custom "devops" role wins over the staff roles. */
 export const roleFromBackend = (role: string, roleKeys: readonly string[]): Role =>
@@ -27,6 +27,8 @@ export interface BackendUser {
   /** The user list and `/auth/me` send role keys (e.g. a custom `devops`). */
   role_keys?: string[]
   status: string
+  /** The user's role assignments (system role and any custom ones). */
+  role_ids?: string[]
   timezone: string
   phone?: string | null
   internal_profile?: { employment_type?: 'staff' | 'freelancer' | null; dev_type?: string | null }

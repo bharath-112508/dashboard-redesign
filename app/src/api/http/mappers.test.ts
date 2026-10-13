@@ -10,7 +10,9 @@ describe('roleFromBackend', () => {
     ['client', [], 'cadmin'],
     ['representative', [], 'cuser'],
     ['employee', ['employee', 'devops'], 'devops'],
-    ['team_lead', ['devops'], 'devops'],
+    // A manager or team lead holding devops stays a project manager (editing them must not demote them).
+    ['team_lead', ['devops'], 'pm'],
+    ['manager', ['manager', 'devops'], 'pm'],
     ['admin', ['admin', 'devops'], 'super'],
     ['client', ['devops'], 'cadmin'],
     ['something_new', [], 'dev'],

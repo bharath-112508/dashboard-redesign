@@ -85,22 +85,24 @@ const backendRoleOf = (role: Role, current?: string): string => {
 }
 const CLIENT_SIDE = new Set(['client', 'representative'])
 
-/** Sets whether a staff member holds the custom devops role, keeping their system role. */
-const setDevops = async (id: string, systemRole: string, on: boolean) => {
-  const roles = await api.get<{ id: string; key: string }[]>('/roles')
-  const idOf = (key: string) => roles.find(r => r.key === key)?.id
-  const base = idOf(systemRole)
-  const devops = idOf('devops')
-  if (!base || (on && !devops)) throw refuse('The DevOps role is not set up on the backend yet.')
-  await api.patch(`/users/${id}/roles`, { role_ids: on ? [base, devops] : [base] })
+/** Adds or removes only the custom devops role; every other role the person holds stays. */
+const setDevops = async (id: string, on: boolean) => {
+  const [user, roles] = await Promise.all([api.get<BackendUser>(`/users/${id}`), api.get<{ id: string; key: string }[]>('/roles')])
+  const devops = roles.find(r => r.key === 'devops')?.id
+  if (!devops) throw refuse('The DevOps role is not set up on the backend yet.')
+  const now = user.role_ids ?? []
+  const next = on ? (now.includes(devops) ? now : [...now, devops]) : now.filter(r => r !== devops)
+  if (next.length !== now.length) await api.patch(`/users/${id}/roles`, { role_ids: next })
 }
 
 /** Adds and removes the person on project member lists so they match `projects` ('all' changes nothing). */
 const syncProjects = async (id: string, projects: Person['projects']) => {
   if (projects === 'all') return
-  const all = await liveProjects()
+  const [all, companies] = await Promise.all([liveProjects(), allPages<{ id: string; status: string }>('/companies')])
+  // The form lists projects of active companies only; projects of an archived company are left as they are.
+  const archived = new Set(companies.filter(c => c.status === 'archived').map(c => c.id))
   const wants = new Set(projects)
-  for (const p of all) {
+  for (const p of all.filter(x => !x.company_id || !archived.has(x.company_id))) {
     const has = (p.member_ids ?? []).includes(id)
     if (has && !wants.has(p.id)) await api.post(`/projects/${p.id}/members`, { remove: [id] })
     if (!has && wants.has(p.id)) await api.post(`/projects/${p.id}/members`, { add: [id] })
@@ -137,7 +139,7 @@ const createUser = async (p: Person): Promise<string> => {
     internal_profile: { employment_type: p.emp === 'freelancer' ? 'freelancer' : 'staff', ...(p.devType ? { dev_type: p.devType } : {}) },
   })
   await api.post(`/users/${id}/reset-password`, {})
-  if (p.role === 'devops') await setDevops(id, role, true)
+  if (p.role === 'devops') await setDevops(id, true)
   await syncProjects(id, p.projects)
   await savePhoto(id, p.photo, null)
   return id
@@ -162,10 +164,11 @@ const updateUser = async (id: string, patch: Partial<Person>) => {
   }
   if (Object.keys(body).length) await api.patch(`/users/${id}`, body)
   if (target !== before.role) await api.post(`/users/${id}/change-role`, { new_role: target })
-  if (patch.role && !CLIENT_SIDE.has(target)) {
+  // DevOps applies to plain staff (employee) only; a manager or team lead keeps whatever they hold.
+  if (patch.role && target === 'employee') {
     const has = (before.role_keys ?? []).includes('devops')
     const wants = patch.role === 'devops'
-    if (has !== wants || (wants && target !== before.role)) await setDevops(id, target, wants)
+    if (has !== wants) await setDevops(id, wants)
   }
   if (patch.active !== undefined && patch.active !== (before.status === 'active'))
     await api.post(`/users/${id}/${patch.active ? 'reactivate' : 'deactivate'}`, {})
@@ -215,7 +218,7 @@ export const sendUserCommand = async (cmd: UserApiCommand): Promise<{ id?: strin
       if (p.pwHash) {
         // The backend changes a password only with the current one, which this window does not ask for.
         await api.post('/auth/forgot-password', { email: s.email })
-        throw refuse('Your details are saved. To set the new password, open the link we have emailed you.')
+        throw new ApiError(403, 'SAVED_WITH_NOTICE', 'Your details are saved. To set the new password, open the link we have emailed you.')
       }
       return {}
     }

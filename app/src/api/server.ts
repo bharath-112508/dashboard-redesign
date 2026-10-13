@@ -38,7 +38,12 @@ import { fetchAccessApi, fetchPeopleApi, isUserApiCommand, sendUserCommand } fro
 export type SendResult = { id?: TaskId; apiId?: string }
 
 /** Thrown by `server.send` when the signed-in person's role may not run the command (see session/permissions.ts). */
-export class RefusedError extends Error {}
+export class RefusedError extends Error {
+  /** True when the change was saved and the message is a notice about one part that was not (see profile.update). */
+  constructor(message?: string, readonly saved = false) {
+    super(message)
+  }
+}
 
 const KEY = 'vt.clients.db'
 const LATENCY_MS = 180
@@ -496,16 +501,18 @@ const localToday = () => {
  * the pages already show. A new ticket's backend id is also its `id`, so the
  * ticket window moves from the temporary id to the real one.
  */
-const sendToApi = async (send: (today: string) => Promise<{ id?: string }>, ticket = false): Promise<SendResult> => {
+const sendToApi = async (send: (today: string) => Promise<{ id?: string }>, ticket = false, conflicts = false): Promise<SendResult> => {
   try {
     const { id } = await send(localToday())
     return id ? { apiId: id, ...(ticket ? { id } : {}) } : {}
   } catch (err) {
     // A refusal, or a value the backend does not accept: the page shows the backend's reason.
-    if (err instanceof ApiError && err.status === 403) throw new RefusedError(err.message)
+    if (err instanceof ApiError && err.status === 403) throw new RefusedError(err.message, err.code === 'SAVED_WITH_NOTICE')
     if (err instanceof ApiError && err.status === 422) throw new RefusedError(err.fieldMessage ?? err.message)
     // A submitted week: the person can reopen it.
     if (err instanceof ApiError && err.code === 'TIMESHEET_WEEK_SUBMITTED') throw new RefusedError(err.message)
+    // For people: a conflict such as the last admin or an email already in use.
+    if (conflicts && err instanceof ApiError && err.status === 409) throw new RefusedError(err.message)
     throw err
   }
 }
@@ -531,7 +538,7 @@ export const server = {
     if (apiMode && isBoardApiCommand(cmd))
       return sendToApi(today => sendBoardCommand(cmd, today), cmd.type === 'task.create' || cmd.type === 'tickets.task.createTop')
     if (apiMode && isTimeApiCommand(cmd)) return sendToApi(() => sendTimeCommand(cmd, readSession()))
-    if (apiMode && isUserApiCommand(cmd)) return sendToApi(() => sendUserCommand(cmd))
+    if (apiMode && isUserApiCommand(cmd)) return sendToApi(() => sendUserCommand(cmd), false, true)
     await sleep(LATENCY_MS)
     return exclusive(() =>
       acrossTabs(async () => {

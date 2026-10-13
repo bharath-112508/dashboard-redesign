@@ -23,7 +23,8 @@ export const setAppAccess = async (body: Partial<AppAccess>, caller: ProjectCall
     const s = await getOrInitSettings();
     const before = { perms: s.app_access?.perms ?? null, dev_types: s.app_access?.dev_types ?? null };
     const after: AppAccess = {
-        perms: body.perms !== undefined ? body.perms : before.perms,
+        // Per role: saving one role's ticks keeps the others.
+        perms: body.perms !== undefined ? { ...(before.perms ?? {}), ...body.perms } : before.perms,
         dev_types: body.dev_types !== undefined ? body.dev_types : before.dev_types,
     };
     s.app_access = after;

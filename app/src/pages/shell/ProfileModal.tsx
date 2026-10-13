@@ -90,6 +90,8 @@ export function ProfileModal({ session, person, onClose }: Props) {
     } catch (err) {
       // A refusal carries its own reason (e.g. the backend's, or how to set a new password).
       setSaveError(err instanceof RefusedError ? err.message : 'Your changes could not be saved. Try again.')
+      // The details were saved even so: keep them in the session.
+      if (err instanceof RefusedError && err.saved) writeSession({ ...session, name: v.name, phone: v.phone, tz: v.tz, notif: v.notif })
       return
     }
     writeSession({ ...session, name: v.name, phone: v.phone, tz: v.tz, notif: v.notif })

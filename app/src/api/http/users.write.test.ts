@@ -25,6 +25,7 @@ const backendUser = (extra: Record<string, unknown> = {}) => ({
   email: 'kari@x',
   role: 'employee',
   role_keys: ['employee'],
+  role_ids: ['r-emp'],
   status: 'active',
   timezone: 'UTC',
   phone: null,
@@ -67,6 +68,7 @@ beforeEach(() => {
       { id: 'r-mgr', key: 'manager' },
     ]
     if (path === '/app-access') return { perms: null, dev_types: null }
+    if (path.startsWith('/companies')) return []
     throw new Error(`unexpected ${path}`)
   })
   post.mockResolvedValue({ id: 'u9' })
@@ -116,6 +118,39 @@ describe('user.update', () => {
     await sendUserCommand({ type: 'user.update', id: 'u9', patch: person({ name: 'Kari B', devType: 'Mobile' }) })
     expect(patch).toHaveBeenCalledWith('/users/u9', { full_name: 'Kari B', internal_profile: { dev_type: 'Mobile' } })
     expect(post).not.toHaveBeenCalled()
+  })
+
+  it('turns DevOps on and off without touching the person\'s other roles', async () => {
+    get.mockImplementation(async (path: string) => {
+      if (path === '/users/u9') return backendUser({ role_ids: ['r-emp', 'r-other'] })
+      if (path.startsWith('/roles')) return [{ id: 'r-emp', key: 'employee' }, { id: 'r-dev', key: 'devops' }]
+      return []
+    })
+    await sendUserCommand({ type: 'user.update', id: 'u9', patch: person({ role: 'devops' }) })
+    expect(patch).toHaveBeenCalledWith('/users/u9/roles', { role_ids: ['r-emp', 'r-other', 'r-dev'] })
+    patch.mockClear()
+    get.mockImplementation(async (path: string) => {
+      if (path === '/users/u9') return backendUser({ role_ids: ['r-emp', 'r-dev', 'r-other'], role_keys: ['employee', 'devops', 'other'] })
+      if (path.startsWith('/roles')) return [{ id: 'r-emp', key: 'employee' }, { id: 'r-dev', key: 'devops' }]
+      return []
+    })
+    await sendUserCommand({ type: 'user.update', id: 'u9', patch: person({ role: 'dev' }) })
+    expect(patch).toHaveBeenCalledWith('/users/u9/roles', { role_ids: ['r-emp', 'r-other'] })
+  })
+
+  it('never touches projects of an archived company the form does not show', async () => {
+    liveProjects.mockResolvedValueOnce([
+      { id: 'p1', member_ids: ['u9'], company_id: 'c1' },
+      { id: 'p9', member_ids: ['u9'], company_id: 'c-old' },
+    ])
+    get.mockImplementation(async (path: string) => {
+      if (path === '/users/u9') return backendUser()
+      if (path.startsWith('/companies')) return [{ id: 'c1', status: 'active' }, { id: 'c-old', status: 'archived' }]
+      return []
+    })
+    await sendUserCommand({ type: 'user.update', id: 'u9', patch: person({ projects: [] }) })
+    expect(post).toHaveBeenCalledWith('/projects/p1/members', { remove: ['u9'] })
+    expect(post).not.toHaveBeenCalledWith('/projects/p9/members', expect.anything())
   })
 
   it('changes the role, and turns the DevOps role on', async () => {
@@ -201,6 +236,8 @@ describe('profile.update', () => {
     })
     expect(patch).toHaveBeenCalledWith('/users/u1', { full_name: 'Rahul' })
     expect(post).toHaveBeenCalledWith('/auth/forgot-password', { email: 'rahul@x' })
+    // Marked as saved, so the window keeps the new details.
+    await sendUserCommand({ type: 'profile.update', id: 'u1', patch: { pwHash: 'abc' } }).catch(e => expect(e.code).toBe('SAVED_WITH_NOTICE'))
   })
 
   it('refuses changing someone else\'s profile here', async () => {
