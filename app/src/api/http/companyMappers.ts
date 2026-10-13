@@ -132,3 +132,30 @@ export const companyFrom = (c: BackendCompany, projects: ClientProject[], contac
   archived: c.status === 'archived',
   archivedAt: c.archived_at ? c.archived_at.slice(0, 10) : null,
 })
+
+// ─── App → backend request bodies ────────────────────────────────────────
+
+/** The company fields a person edits (see CompanyFields in companies/commands.ts), plus the name. */
+type CompanyInput = Partial<{ name: string; industry: string; country: string; web: string; notes: string; logo: string }>
+
+/** A `POST`/`PATCH /companies` body with only the fields that were given; `web` is the backend's `website`. */
+export const companyBody = (f: CompanyInput): Record<string, unknown> => {
+  const { web, ...rest } = f
+  return Object.fromEntries(Object.entries({ ...rest, ...(web !== undefined ? { website: web } : {}) }).filter(([, v]) => v !== undefined))
+}
+
+export const responsiblesBody = (ourRoles: Record<PersonId, CompanyRole>) =>
+  Object.entries(ourRoles).map(([user_id, role]) => ({ user_id, role: companyRoleTo(role) }))
+
+/** A `POST /projects` body for a client project (with its company) or an internal one (`companyId` null). */
+export const projectBody = (p: ClientProject | InternalProject, companyId: string | null, today: string): Record<string, unknown> => ({
+  name: p.name,
+  description: p.desc,
+  start_date: p.start || today,
+  end_date: p.due || null,
+  status: statusFromState(p.state),
+  member_ids: p.team,
+  company_id: companyId,
+  ...('area' in p ? { area: p.area } : {}),
+  ...('sup' in p && p.sup ? { support_plan: { until: p.sup.until, quota_hours: p.sup.quota } } : {}),
+})

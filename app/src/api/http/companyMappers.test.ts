@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
+import { COMPANIES_SEED } from '../companies/seed'
 import {
   clientProjectFrom,
+  companyBody,
   companyFrom,
   companyRoleFrom,
   companyRoleTo,
   contactFrom,
   epicFromStory,
   internalProjectFrom,
+  projectBody,
+  responsiblesBody,
   stateFromStatus,
   statusFromState,
   type BackendCompany,
@@ -186,5 +190,79 @@ describe('companyFrom', () => {
 
   it('gives the same company the same colour every time', () => {
     expect(companyFrom(legacy, [], []).p).toBe(companyFrom({ ...legacy }, [], []).p)
+  })
+})
+
+// ─── App → backend request bodies ────────────────────────────────────────
+
+describe('companyBody', () => {
+  it('renames web to website and passes the other profile fields through', () => {
+    expect(companyBody({ name: 'Aurora', web: 'aurora.example', industry: 'Food', country: 'SE', notes: 'n', logo: '' })).toEqual({
+      name: 'Aurora',
+      website: 'aurora.example',
+      industry: 'Food',
+      country: 'SE',
+      notes: 'n',
+      logo: '',
+    })
+  })
+
+  it('sends only the fields that were given', () => {
+    expect(companyBody({ notes: 'x' })).toEqual({ notes: 'x' })
+  })
+})
+
+describe('responsiblesBody', () => {
+  it('turns company roles into the backend list', () => {
+    expect(responsiblesBody({ u1: 'Developer', u2: 'Super admin' })).toEqual([
+      { user_id: 'u1', role: 'developer' },
+      { user_id: 'u2', role: 'super_admin' },
+    ])
+  })
+})
+
+describe('projectBody', () => {
+  const seedProject = COMPANIES_SEED[0].projects[0]
+
+  it('maps a client project, and a project read back from the backend matches it', () => {
+    const body = projectBody(seedProject, 'c1', '2026-10-13')
+    expect(body).toMatchObject({
+      name: seedProject.name,
+      description: seedProject.desc,
+      status: statusFromState(seedProject.state),
+      member_ids: seedProject.team,
+      company_id: 'c1',
+    })
+    const back = clientProjectFrom(
+      {
+        id: 'p1',
+        name: body.name as string,
+        description: body.description as string,
+        status: body.status as string,
+        is_archived: false,
+        start_date: body.start_date as string,
+        end_date: body.end_date as string | null,
+        member_ids: body.member_ids as string[],
+        company_id: 'c1',
+      },
+      [],
+    )
+    expect(back).toMatchObject({ name: seedProject.name, desc: seedProject.desc, state: seedProject.state, due: seedProject.due, team: seedProject.team })
+  })
+
+  it('uses today when there is no start date and null when there is no due date', () => {
+    const body = projectBody({ ...seedProject, start: undefined, due: '' }, 'c1', '2026-10-13')
+    expect(body.start_date).toBe('2026-10-13')
+    expect(body.end_date).toBeNull()
+  })
+
+  it('sends the support plan only when there is one, and the area for an internal project', () => {
+    expect('support_plan' in projectBody({ ...seedProject, sup: undefined }, 'c1', '2026-10-13')).toBe(false)
+    expect(projectBody({ ...seedProject, sup: { until: '2027-06-30', quota: 20, used: 3 } }, 'c1', '2026-10-13').support_plan).toEqual({
+      until: '2027-06-30',
+      quota_hours: 20,
+    })
+    const internal = { id: 'i1', name: 'Infra', desc: '', area: 'Ops', state: 'active' as const, pct: 0, due: '', team: [] }
+    expect(projectBody(internal, null, '2026-10-13')).toMatchObject({ area: 'Ops', company_id: null })
   })
 })
