@@ -1,6 +1,6 @@
 # dashboard-redesign
 
-DevOps dashboard redesign. The front end for the Clients page is in [`app/`](app/) (see `app/README.md`). The original Claude Design handoff is in `project/` and `chats/`; its notes follow.
+DevOps dashboard redesign. The front end for the Clients page is in [`app/`](app/) (see `app/README.md`). The original Claude Design handoff is in `design/project/` and `design/chats/`; its notes follow.
 
 ---
 
@@ -12,9 +12,9 @@ A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported t
 
 ## What you should do — IMPORTANT
 
-**Read the chat transcripts first.** There are 3 chat transcript(s) in `chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+**Read the chat transcripts first.** There are 3 chat transcript(s) in `design/chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
 
-**Read `project/Clients.dc.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+**Read `design/project/Clients.dc.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
 
 **If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
 
@@ -27,5 +27,5 @@ The design medium is **HTML/CSS/JS** — these are prototypes, not production co
 ## Bundle contents
 
 - `README.md` — this file
-- `chats/` — conversation transcripts (read these!)
-- `project/` — the `DevOps dashboard redesign` project files (HTML prototypes, assets, components)
+- `design/chats/` — conversation transcripts (read these!)
+- `design/project/` — the `DevOps dashboard redesign` project files (HTML prototypes, assets, components)

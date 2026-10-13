@@ -1,6 +1,6 @@
 # Clients page
 
-Front-end build of `project/Clients.dc.html` from the Claude Design handoff: the page clients use to follow their project, report bugs and answer the team's questions.
+Front-end build of `design/project/Clients.dc.html` from the Claude Design handoff: the page clients use to follow their project, report bugs and answer the team's questions.
 
 React 19 + TypeScript, Vite, React Router, TanStack Query, Tailwind CSS 4, react-hook-form + Zod. Mock data only; there is no backend.
 
@@ -81,7 +81,7 @@ Daco's accounts-payable app, a project Viljetech delivered, built from `Invoice 
 
 # Tickets page
 
-The team's page, at `/tickets`, built from `project/Tickets.dc.html`. It works on the same tasks, epics, sprints, time entries, questions and DevOps requests as the Clients page, so anything the client does shows up here and the other way round.
+The team's page, at `/tickets`, built from `design/project/Tickets.dc.html`. It works on the same tasks, epics, sprints, time entries, questions and DevOps requests as the Clients page, so anything the client does shows up here and the other way round.
 
 ## What's on the page
 
@@ -117,7 +117,7 @@ The team's page, at `/tickets`, built from `project/Tickets.dc.html`. It works o
 
 # DevOps board
 
-Front-end build of `project/DevOps Board v6.dc.html`, at `/devops/board` and `/devops/list`. It's where the DevOps team tracks each client project's status, follow-ups with the client and the dev team, phases, and the requests and questions that link it to the other pages.
+Front-end build of `design/project/DevOps Board v6.dc.html`, at `/devops/board` and `/devops/list`. It's where the DevOps team tracks each client project's status, follow-ups with the client and the dev team, phases, and the requests and questions that link it to the other pages.
 
 ## What's on the page
 
