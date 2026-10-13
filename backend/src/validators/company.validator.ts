@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { COMPANY_STATUSES } from '../models/company.model.js';
+import { COMPANY_LOGO_MAX, COMPANY_RESPONSIBLE_ROLES, COMPANY_STATUSES } from '../models/company.model.js';
 
 // Local, matching the convention in the other validators (each declares
 // its own rather than importing a shared one).
@@ -23,10 +23,24 @@ const COMPANY_NAME_MAX = 200;
 
 // ─── POST /companies ─────────────────────────────────────────────────────
 
+/** Company profile fields the redesign edits. All optional; empty strings clear them. */
+const companyProfileFields = {
+    industry: z.string().trim().max(100),
+    country: z.string().trim().max(100),
+    website: z.string().trim().max(300),
+    notes: z.string().max(5000),
+    logo: z.string().max(COMPANY_LOGO_MAX),
+    responsibles: z
+        .array(z.object({ user_id: objectIdSchema, role: z.enum(COMPANY_RESPONSIBLE_ROLES) }).strict())
+        .max(100),
+};
+
 export const createCompanyBodySchema = z
     .object({
         name: z.string().trim().min(1, 'Company name is required').max(COMPANY_NAME_MAX),
+        ...companyProfileFields,
     })
+    .partial({ industry: true, country: true, website: true, notes: true, logo: true, responsibles: true })
     .strict();
 
 export type CreateCompanyBody = z.infer<typeof createCompanyBodySchema>;
@@ -37,6 +51,7 @@ export const patchCompanyBodySchema = z
     .object({
         name: z.string().trim().min(1).max(COMPANY_NAME_MAX),
         status: z.enum(COMPANY_STATUSES as unknown as [string, ...string[]]),
+        ...companyProfileFields,
     })
     .partial()
     .strict()
@@ -81,6 +96,8 @@ export const createRepresentativeBodySchema = z
         phone: z.string().trim().max(32).optional(),
         timezone: z.string().trim().optional(),
         initial_password: z.string().min(1),
+        /** The contact's job title at the client, e.g. "CTO". */
+        title: z.string().trim().max(100).optional(),
     })
     // `.strict()` is load-bearing here, not stylistic: it rejects a body
     // carrying `role` or `company_id` outright rather than silently ignoring

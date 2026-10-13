@@ -73,6 +73,8 @@ export type ClientAccessType = 'login' | 'readonly_link';
 export interface ClientProfile {
     company_id: Types.ObjectId;
     access_type: ClientAccessType;
+    /** Job title at the client company, e.g. "CTO". Optional. */
+    title?: string;
 }
 
 // ─── Document ─────────────────────────────────────────────────────────────
@@ -216,6 +218,7 @@ const clientProfileSchema = new Schema<ClientProfile>(
     {
         company_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.COMPANIES, required: true },
         access_type: { type: String, enum: ['login', 'readonly_link'], required: true },
+        title: { type: String, trim: true, maxlength: 100 },
     },
     { _id: false }
 );

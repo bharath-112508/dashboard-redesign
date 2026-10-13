@@ -1074,3 +1074,69 @@ describe('restoreRepresentative', () => {
         expect(reactivateUserMock).not.toHaveBeenCalled();
     });
 });
+
+// ─── Redesign profile fields ─────────────────────────────────────────────
+
+describe('company profile fields (redesign)', () => {
+    it('createCompany stores the profile and the staff on the company', async () => {
+        const userId = new Types.ObjectId().toString();
+        companyCreateMock.mockResolvedValueOnce(makeCompany());
+
+        await svc.createCompany(
+            { name: 'Aurora', industry: 'Retail', country: 'Sweden', responsibles: [{ user_id: userId, role: 'developer' }] },
+            adminCaller()
+        );
+
+        expect(companyCreateMock).toHaveBeenCalledWith(
+            expect.objectContaining({ name: 'Aurora', industry: 'Retail', country: 'Sweden', responsibles: [{ user_id: userId, role: 'developer' }] })
+        );
+    });
+
+    it('patchCompany copies each profile field that is present and leaves the rest', async () => {
+        const doc = makeCompany({ industry: 'Old', notes: 'keep me', responsibles: [] });
+        companyFindByIdMock.mockResolvedValueOnce(doc);
+        const userId = new Types.ObjectId().toString();
+
+        await svc.patchCompany(
+            companyId,
+            { industry: 'Retail', website: 'https://a.example', logo: '', responsibles: [{ user_id: userId, role: 'viewer' }] },
+            adminCaller()
+        );
+
+        expect(doc).toMatchObject({ industry: 'Retail', website: 'https://a.example', logo: '', notes: 'keep me' });
+        expect((doc as Record<string, unknown>).responsibles).toEqual([{ user_id: userId, role: 'viewer' }]);
+        expect(doc.save).toHaveBeenCalled();
+    });
+
+    it('archiveCompany stamps archived_at', async () => {
+        const doc = makeCompany({ archived_at: null });
+        companyFindByIdMock.mockResolvedValueOnce(doc);
+
+        await svc.archiveCompany(companyId, adminCaller());
+
+        expect(doc.status).toBe('archived');
+        expect((doc as Record<string, unknown>).archived_at).toBeInstanceOf(Date);
+    });
+
+    it('patching the status back to active clears archived_at', async () => {
+        const doc = makeCompany({ status: 'archived', archived_at: new Date('2026-10-01') });
+        companyFindByIdMock.mockResolvedValueOnce(doc);
+
+        await svc.patchCompany(companyId, { status: 'active' }, adminCaller());
+
+        expect(doc.status).toBe('active');
+        expect((doc as Record<string, unknown>).archived_at).toBeNull();
+    });
+});
+
+describe('createRepresentative — title', () => {
+    it('stores the contact title on the client profile', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userCreateMock.mockResolvedValueOnce({ _id: new Types.ObjectId(), toJSON: () => ({}) });
+
+        await svc.createRepresentative(companyId, { ...validBody, title: 'CTO' }, adminCaller());
+
+        const payload = userCreateMock.mock.calls[0][0] as { client_profile: { title?: string } };
+        expect(payload.client_profile.title).toBe('CTO');
+    });
+});

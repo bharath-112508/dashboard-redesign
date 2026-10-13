@@ -167,7 +167,8 @@ export const createCompany = async (
 ): Promise<Record<string, unknown>> => {
     let created: CompanyDocument;
     try {
-        created = await Company.create({ name: input.name, created_by: caller.id });
+        const { name, ...profile } = input;
+        created = await Company.create({ name, ...profile, created_by: caller.id });
     } catch (err) {
         if (isNameDuplicateError(err)) {
             throw AppError.conflict('A company with this name already exists', ERROR_CODES.DUPLICATE_RESOURCE, {
@@ -244,6 +245,9 @@ export const getCompany = async (id: Types.ObjectId, caller: CompanyCaller): Pro
 
 // ─── PATCH /companies/:id ────────────────────────────────────────────────
 
+/** The redesign's company profile fields, copied as given when present in a patch. */
+const PROFILE_KEYS = ['industry', 'country', 'website', 'notes', 'logo', 'responsibles'] as const;
+
 export const patchCompany = async (
     id: Types.ObjectId,
     body: PatchCompanyBody,
@@ -259,7 +263,15 @@ export const patchCompany = async (
     const before = { name: doc.name, status: doc.status };
 
     if (body.name !== undefined) doc.name = body.name;
-    if (body.status !== undefined) doc.status = body.status as CompanyDocument['status'];
+    if (body.status !== undefined) {
+        doc.status = body.status as CompanyDocument['status'];
+        // Un-archiving clears the stamp; archiving stamps it (same as archiveCompany).
+        if (doc.status === 'active') doc.archived_at = null;
+        else if (!doc.archived_at) doc.archived_at = new Date();
+    }
+    for (const key of PROFILE_KEYS) {
+        if (body[key] !== undefined) (doc as unknown as Record<string, unknown>)[key] = body[key];
+    }
 
     try {
         await doc.save();
@@ -294,6 +306,7 @@ export const archiveCompany = async (id: Types.ObjectId, caller: CompanyCaller):
     if (doc.status === 'archived') return toPublicFor(doc, caller);
 
     doc.status = 'archived';
+    doc.archived_at = new Date();
     await doc.save();
 
     if (caller.audit) {
@@ -628,6 +641,7 @@ export const createRepresentative = async (
             // From the URL + ownership check, never from the body.
             company_id: company._id,
             access_type: 'login',
+            ...(input.title ? { title: input.title } : {}),
         },
         created_by: caller.id,
     });
