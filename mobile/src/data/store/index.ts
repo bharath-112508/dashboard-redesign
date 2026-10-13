@@ -4,3 +4,4 @@ export * from './hooks';
 export * from './reducer';
 export * from './state';
 export { LEGACY_KEYS, STORAGE_KEY, store } from './store';
+export * from './clientPolicy';

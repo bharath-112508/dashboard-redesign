@@ -1,9 +1,8 @@
 import type { Leave } from '../types';
 
 /**
- * Leave (v5 `LEAVE0`, 6 requests). Kinds use the web `LeaveType` values (DECISIONS 2,
- * B-3): v5's "Comp-off earned" (worked on a Saturday release) maps to Holiday and
- * "Comp-off used" to Personal.
+ * Leave (v5 `LEAVE0`, 6 requests). Kinds are the web `LeaveType` values (DECISIONS 2,
+ * B-3): Annual, Sick, Holiday, Personal.
  */
 export const LEAVE: Leave[] = [
   { id: 1, who: 'Chary', kind: 'Annual', from: '2026-10-20', to: '2026-10-22', days: 3, reason: 'Family trip', st: 'pending' },

@@ -34,7 +34,7 @@ import { DescSheet, LinkSheet, TicketFieldSheet, type TicketField } from './Tick
 
 const IMG = /\.(png|jpe?g|svg|gif|webp)$/i;
 
-/** S5-TICKET Ticket detail (V-20…V-29). Staff edit everything; clients read and comment. */
+/** S5-TICKET Ticket detail (V-20…V-29). Staff edit everything; clients only read it. */
 export function TicketScreen({ ticketKey }: { ticketKey: string }) {
   const t = useAppState((s) => ticket(s, ticketKey));
   const client = useAppState(isClient);
@@ -95,7 +95,7 @@ export function TicketScreen({ ticketKey }: { ticketKey: string }) {
         ]}
         testID="ticket-hero"
       />
-      {client ? <TextBlock tone="info" text="Only comments can be added from the portal. The team updates status and dates." /> : null}
+      {client ? <TextBlock tone="info" text="The team updates this ticket. To reach them, report a bug or answer their questions." testID="ticket-client-info" /> : null}
       <Block title="Ticket details">
         <FieldList
           testID="ticket-fields"
@@ -208,11 +208,15 @@ export function TicketScreen({ ticketKey }: { ticketKey: string }) {
       <Block title="Comments" sub={`${t.comments.length} comments`}>
         <CommentThread
           comments={t.comments}
-          onSend={(text) => {
-            const r = addTicketComment(t.key, text);
-            if (!r.ok) toastResult(r);
-            return r.ok;
-          }}
+          onSend={
+            client
+              ? undefined
+              : (text) => {
+                  const r = addTicketComment(t.key, text);
+                  if (!r.ok) toastResult(r);
+                  return r.ok;
+                }
+          }
           testID="ticket-comments"
         />
       </Block>

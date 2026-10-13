@@ -44,7 +44,7 @@ requires an accessible `label` (DECISIONS 8). See them all at `/dev/kitchen-sink
 | `FieldList` | FieldList | Label 118w + value right (dot, colour), chevron or `icon="pencil"` when tappable; '' → "—" |
 | `TextBlock` | TextBlock | Tones plain / note / info / bad / good |
 | `Button`, `ButtonRow` | Buttons | 48h r14; kinds `p` blue, `s` white, `d` destructive, `g` green, `ink` |
-| `CommentThread` | CommentThread | Bubbles (mine right, blue), empty text, inline composer; `onSend(text)` |
+| `CommentThread` | CommentThread | Bubbles (mine right, blue), empty text, inline composer when `onSend(text)` is given (omit it for a read-only thread, e.g. clients on tickets) |
 | `PickList` | PickList | Sheet rows with a right check box (status / priority / sprint pickers) |
 | `EmptyBlock` | EmptyBlock | Centred 13.5 text in a card |
 

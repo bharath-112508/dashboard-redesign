@@ -317,10 +317,10 @@ test.describe('Ticket (S5-TICKET)', () => {
     await expect(byTestId(page, 'ticket-comments-input')).toHaveValue('');
   });
 
-  test('V-29 a client sees the read-only ticket and can comment', async ({ page }) => {
+  test('V-29 a client sees the ticket read-only: no comments, edits, attachments or time', async ({ page }) => {
     await signInAs(page, 'cadmin');
     await openTicket(page, 'PMT-11');
-    await expect(ticketScreen(page)).toContainText('Only comments can be added from the portal. The team updates status and dates.');
+    await expect(byTestId(page, 'ticket-client-info')).toHaveText('The team updates this ticket. To reach them, report a bug or answer their questions.');
     await expect(byTestId(page, 'ticket-hero')).toContainText('Being fixed');
     await expect(byTestId(page, 'tf-st')).not.toHaveAttribute('role', 'button');
     await expect(byTestId(page, 'tf-sprint')).toHaveCount(0);
@@ -329,9 +329,21 @@ test.describe('Ticket (S5-TICKET)', () => {
     await expect(byTestId(page, 'ticket-blocked')).toHaveCount(0);
     await expect(byTestId(page, 'ticket-time')).toHaveCount(0);
     await expect(byTestId(page, 'sub-add')).toHaveCount(0);
-    await byTestId(page, 'ticket-comments-input').fill('Thanks, we will test on Monday.');
-    await byTestId(page, 'ticket-comments-send').click();
-    await expect(byTestId(page, 'ticket-comments')).toContainText('Ingrid Solberg · just now');
+    await expect(byTestId(page, 'attach')).toHaveCount(0);
+    // the existing comments stay readable; there is no composer
+    await expect(byTestId(page, 'ticket-comments')).toContainText('Push is the last blocker for the Sprint 2 demo.');
+    await expect(byTestId(page, 'ticket-comments-input')).toHaveCount(0);
+    await expect(byTestId(page, 'ticket-comments-send')).toHaveCount(0);
+  });
+
+  test('V-25 a client sees a subtask read-only (no comment composer)', async ({ page }) => {
+    await signInAs(page, 'cuser');
+    await openRoute(page, '/subtask/PMT-11.s2');
+    await expectScreen(page, 'subtask');
+    await expect(byTestId(page, 'sub-comments')).toBeVisible();
+    await expect(byTestId(page, 'sub-comments-input')).toHaveCount(0);
+    await expect(byTestId(page, 'sub-delete')).toHaveCount(0);
+    await expect(byTestId(page, 'sf-time')).toHaveCount(0);
   });
 
   test('V-10 entry: ticket Time "Log" opens SH-LOG preset with the ticket', async ({ page }) => {

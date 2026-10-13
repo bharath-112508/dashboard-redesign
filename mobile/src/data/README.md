@@ -18,7 +18,8 @@ seed/           people, companies (+ PROJECTS, EPICS), sprints, tickets, time (E
                 client (QUESTIONS, BUGS, BUG_CHAT, CLIENT_TEAM), devops (DEVOPS, DEPLOYS, DEVOPS_REQUESTS),
                 dashboardDemo (static demo numbers kept by A-1)
 media/          FACES (assets/faces m0 m1 m2 m4 m5 m6 w0 w1) and LOGO_XML (company logos)
-store/          state.ts, actions.ts, reducer.ts (pure), store.ts (persistence), commands.ts, hooks.ts
+store/          state.ts, actions.ts, reducer.ts (pure), store.ts (persistence), commands.ts, hooks.ts,
+                clientPolicy.ts (what a client may do)
 selectors/      pure functions of AppState
 ```
 
@@ -42,9 +43,13 @@ Import from `@/data` (barrel) or the file.
 - **Time** is in minutes: `{id, who, date, proj: 'c:<id>'|'i:<id>'|'x:admin', key, task, min, bill, note}`.
   Seed `E0` entries have `who: '*'` (they belong to whoever is signed in, as v5's `mine`); generated
   `TEAM_E` entries have `team: true` and are hidden for the signed-in person. Always read through
-  `entriesAll` / `myEntries` / `entriesBetween` / `weekBars`.
+  `entriesAll` / `myEntries` / `entriesBetween` / `weekBars`. The generated time is planned per person
+  (`seed/time.ts` `TEAM`): a little ticket time kept near each ticket's estimate (most under or near, a few
+  up to 25% over; PMT-11 is 6h of 6h) and the rest of each day as project-level work without a ticket
+  (reviews, calls, testing, meetings). Employees log about 32–38h a week, the freelancer Sofia about 20h on
+  four days. Dashboard, timesheet and project totals are all computed from these entries.
 - **Leave** kinds are the web values `Annual | Sick | Holiday | Personal` (DECISIONS 2 / B-3; labels in
-  `LEAVE_KINDS`). v5 comp-off records map to Holiday / Personal. There is no comp-off balance any more.
+  `LEAVE_KINDS`). There is no other leave kind and no other balance.
 - **DevOps** is project-specific (DECISIONS 3): every `DevopsProject` has `projectId`; name, tile and
   company come from the project (`devopsAll`, `devopsByKey`, `devopsFor(projectId)` return a
   `DevopsView` with `name`, `company`, `project`, `openRequests`). The seed adds the DevOps clients
@@ -76,6 +81,7 @@ Keep selectors pure and cheap; `useMemo` in the screen for heavy derivations.
 |---|---|
 | `can(role, page)` | page access, the web `ACC` map (`'My Tickets'` = Tickets) |
 | `perm(role, key, matrix = PDEF)` | action permission; super always true; clients none |
+| `clientActionAllowed(s, action)`, `CLIENT_COMMANDS`, `CLIENT_REFUSED` | client policy (`store/clientPolicy.ts`): clients report bugs and problems, reply on their bugs, answer their questions and (cadmin) manage their team; every other command returns `CLIENT_REFUSED` and the reducer ignores every other action |
 | `myCan(s, page)`, `myPerm(s, key)` | the same for the signed-in person (matrix from the store) |
 | `canSetProjectStatus(role)` | super, admin, pm (status badge, support terms) |
 | `canEditDevopsSettings(role)` | super, admin, devops |
@@ -125,7 +131,7 @@ dispatches one named action (`store/actions.ts`) to the pure reducer and returns
 | V-31 | `createTicket({projectId, title, type, epicId, sprintId, prio, as, due, est, desc})` → `{key}`, "PMT-32 created" | `tickets/create` |
 | V-21/22/48 | `patchTicket(key, patch)` (status → "Moved to Review"; `as` needs tickets.assign) | `tickets/patch` |
 | V-20 | `markTicketRead(key)` (staff) | `tickets/markRead` |
-| V-29 | `addTicketComment(key, text)` | `tickets/addComment` |
+| V-29 | `addTicketComment(key, text)` (staff; clients cannot comment on tickets) | `tickets/addComment` |
 | V-28 | `attachToTicket(key, {n, size})` → "Attachment added" | `tickets/attach` |
 | V-27 | `linkBlocker(key, blockerKey)`, `clearBlockers(key)` | `tickets/patch` |
 | V-23 | `addSubtask(key, title)` → `{id}`, "Subtask added" | `subtasks/add` |
@@ -141,12 +147,12 @@ dispatches one named action (`store/actions.ts`) to the pure reducer and returns
 | V-46 | `createSprint(epicId, {start, weeks})` → "Sprint added" | `sprints/create` |
 | V-47 | `startSprint(id)` → "Sprint 3 started" or "Complete Sprint 2 first" (A-12); `completeSprint(id)` → "Sprint 2 completed" (unfinished → backlog) | `sprints/start`, `sprints/complete` |
 | V-48 | `moveTicketToSprint(key, sprintId \| null)` → "Moved" | `tickets/patch` |
-| V-55 | `createSupportRequest({projectId, kind, title, desc, prio})` → "Sent to the support team" | `tickets/create` |
-| V-53 | `createQuestion({projectId, title, text, task})` → "Question sent to Daco" | `questions/create` |
-| V-60 | `answerQuestion(id, answer)` → "Answer sent to the team" | `questions/answer` |
+| V-55 | `createSupportRequest({projectId, kind, title, desc, prio})` → "Sent to the support team" (clients: `problem` only) | `tickets/create` |
+| V-53 | `createQuestion({projectId, title, text, task})` → "Question sent to Daco" (staff) | `questions/create` |
+| V-60 | `answerQuestion(id, answer)` → "Answer sent to the team" (clients: their projects) | `questions/answer` |
 | V-61 | `reportBug({projectId, epicId, title, desc, file})` → "Bug reported. Thank you." | `bugs/create` |
 | V-62/63 | `replyOnBug(id, text)`, `setBugStatus(id, st)` (staff) | `bugs/reply`, `bugs/setStatus` |
-| V-64 | `saveClientMember({id?, name, title, email})` → "Invite sent" / "Saved" / "Check the email address"; `removeClientMember(id)` → "Member removed" (the sheet confirms first) | `clientTeam/*` |
+| V-64 | `saveClientMember({id?, name, title, email})` → "Invite sent" / "Saved" / "Check the email address"; `removeClientMember(id)` → "Member removed" (the sheet confirms first); cadmin only, own company | `clientTeam/*` |
 | V-71 | `saveUser({id?, name, email, role, devType, emp, projects, active, org})` → "Invite sent to x" / "User saved" / "Someone already uses that email" | `users/add`, `users/update` |
 | V-72 | `setUserActive(id, active)` → "User activated"/"User deactivated"; `removeUser(id)` → "User removed" | `users/setActive`, `users/remove` |
 | V-73 | `addLeave({who, kind, from, to, reason})` → "Leave added" (approver) / "Request sent for approval"; "End date is before start date" | `leave/add` |

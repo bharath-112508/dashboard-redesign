@@ -1,29 +1,32 @@
 import { Block, FileField, IconTile, openTicket, Row, Rows, showToast, toastResult } from '@/components';
 import { fmt } from '@/data/format';
-import type { ProjectView } from '@/data/selectors';
+import { isClient, type ProjectView } from '@/data/selectors';
 import { useActions, useAppState } from '@/data/store';
 
 import { isImageName, projectFiles } from '../derive';
 
-/** Files tab (V-50): upload tile, then project files and ticket attachments. */
+/** Files tab (V-50): upload tile (staff only), then project files and ticket attachments. */
 export function FilesTab({ p }: { p: ProjectView }) {
   const files = useAppState((s) => projectFiles(s, p.id));
+  const client = useAppState(isClient);
   const { addProjectFile } = useActions();
   return (
     <>
-      <FileField
-        label=""
-        value={null}
-        title="Upload a file"
-        sub="Any file type · added to this project"
-        accept="*/*"
-        onPick={(f) => {
-          const r = addProjectFile(p.id, { n: f.n, size: f.size });
-          if (r.ok) showToast(r.toast);
-          else toastResult(r);
-        }}
-        testID="project-file-upload"
-      />
+      {client ? null : (
+        <FileField
+          label=""
+          value={null}
+          title="Upload a file"
+          sub="Any file type · added to this project"
+          accept="*/*"
+          onPick={(f) => {
+            const r = addProjectFile(p.id, { n: f.n, size: f.size });
+            if (r.ok) showToast(r.toast);
+            else toastResult(r);
+          }}
+          testID="project-file-upload"
+        />
+      )}
       <Block title={`${files.length} files`}>
         <Rows empty="No files yet. Files attached to tickets show up here." testID="project-files">
           {files.map((f, i) => (

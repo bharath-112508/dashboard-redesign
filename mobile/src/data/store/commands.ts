@@ -2,7 +2,7 @@ import { DEMO_PASSWORD, TODAY } from '../clock';
 import { DVF, LADDER, PROJECT_STATE, REMINDER_TIME, ROLE_LABEL } from '../constants';
 import { addD, diff, dvDate, hashPw, hm } from '../format';
 import { canDv, canEditDevopsSettings, canEditPermissions, myCan, myPerm } from '../selectors/access';
-import { company, epicsOf, project, sprint, ticketsOf } from '../selectors/projects';
+import { canSeeProject, company, epicsOf, project, sprint, ticketsOf } from '../selectors/projects';
 import { devopsByKey, nextDevopsKey } from '../selectors/devops';
 import { isClientRole, me, personByEmail } from '../selectors/session';
 import { nextTicketKey, subKey, subOf, ticket, tkOrSub } from '../selectors/tickets';
@@ -32,6 +32,7 @@ import type {
   TimeEntry,
 } from '../types';
 import type { Action, DevopsPatch, DevopsSettingsList, SubtaskPatch, TicketPatch } from './actions';
+import { actorIsClient, CLIENT_COMMANDS, CLIENT_REFUSED, clientRefusal } from './clientPolicy';
 import type { AppState } from './state';
 
 // ── Results ────────────────────────────────────────────────────────────────
@@ -174,7 +175,7 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
     return d ?? fail('DevOps project not found');
   };
 
-  return {
+  const commands = {
     // ── Session and profile (V-01…V-04) ─────────────────────────────────────
 
     /** V-01: email + password (DECISIONS 7). */
@@ -303,7 +304,6 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
       const s = get();
       const t = ticket(s, key);
       if (!t) return fail('Ticket not found');
-      if (isClientRole(me(s)?.role)) return fail('Only comments can be added from the portal.');
       if (patch.as && !myPerm(s, 'tickets.assign')) return fail("You can't assign tickets");
       if (patch.sprintId) {
         const sp = sprint(s, patch.sprintId);
@@ -324,7 +324,7 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
       if (t?.unread && !isClientRole(me(s)?.role)) dispatch({ type: 'tickets/markRead', key });
     },
 
-    /** V-29 (clients can comment too). */
+    /** V-29 (staff; clients cannot comment on tickets). */
     addTicketComment(key: string, text: string): Result {
       if (!ticket(get(), key)) return fail('Ticket not found');
       if (blank(text)) return fail('Write a comment first');
@@ -520,11 +520,12 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
 
     // ── Support (V-55) ─────────────────────────────────────────────────────
 
-    /** V-55: a client support ticket on a maintenance project. */
+    /** V-55: a client support ticket on a maintenance project (clients: problems only). */
     createSupportRequest(input: { projectId: string; kind: 'problem' | 'change'; title: string; desc: string; prio?: TicketPrio }): Result<{ key: string }> {
       const s = get();
       const p = project(s, input.projectId);
       if (!p) return fail('Project not found');
+      if (actorIsClient(s) && (input.kind !== 'problem' || !canSeeProject(s, p.id))) return fail(CLIENT_REFUSED);
       if (blank(input.title)) return fail(REQUIRED, 'title');
       if (blank(input.desc)) return fail(REQUIRED, 'desc');
       const key = nextTicketKey(s, p.keyPrefix);
@@ -576,7 +577,9 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
 
     /** V-60 */
     answerQuestion(id: number, answer: string): Result {
-      if (!get().questions.some((q) => q.id === id)) return fail('Question not found');
+      const s = get();
+      const q = s.questions.find((x) => x.id === id);
+      if (!q || (actorIsClient(s) && !canSeeProject(s, q.projectId))) return fail('Question not found');
       if (blank(answer)) return fail('Type your answer first', 'answer');
       dispatch({ type: 'questions/answer', id, answer: answer.trim(), by: meName() });
       return ok('Answer sent to the team');
@@ -587,7 +590,7 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
     /** V-61 */
     reportBug(input: { projectId: string; epicId?: string; title: string; desc: string; file?: Pick<FileRef, 'n' | 'size'> | null }): Result<{ id: string }> {
       const s = get();
-      if (!project(s, input.projectId)) return fail(REQUIRED, 'projectId');
+      if (!project(s, input.projectId) || (actorIsClient(s) && !canSeeProject(s, input.projectId))) return fail(REQUIRED, 'projectId');
       if (blank(input.title)) return fail(REQUIRED, 'title');
       if (blank(input.desc)) return fail(REQUIRED, 'desc');
       const bug: ClientBug = {
@@ -607,7 +610,9 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
 
     /** V-62 */
     replyOnBug(id: string, text: string): Result {
-      if (!get().bugs.some((b) => b.id === id)) return fail('Bug not found');
+      const s = get();
+      const b = s.bugs.find((x) => x.id === id);
+      if (!b || (actorIsClient(s) && !canSeeProject(s, b.projectId))) return fail('Bug not found');
       if (blank(text)) return fail('Write a reply first');
       dispatch({ type: 'bugs/reply', id, comment: { who: meName(), t: text.trim(), when: 'just now' } });
       return ok('');
@@ -636,7 +641,7 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
       if (!EMAIL.test(email)) return fail('Check the email address', 'email');
       const fields = { name: input.name.trim(), title: input.title.trim(), email };
       if (input.id) {
-        if (!s.clientTeam.some((m) => m.id === input.id)) return fail('Member not found');
+        if (!s.clientTeam.some((m) => m.id === input.id && m.companyId === u.org)) return fail('Member not found');
         dispatch({ type: 'clientTeam/update', id: input.id, patch: fields });
         return ok('Saved', { id: input.id });
       }
@@ -646,7 +651,10 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
     },
 
     removeClientMember(id: string): Result {
-      if (!get().clientTeam.some((m) => m.id === id)) return fail('Member not found');
+      const s = get();
+      const u = me(s);
+      if (!u || u.role !== 'cadmin') return fail('Only client admins manage the team');
+      if (!s.clientTeam.some((m) => m.id === id && m.companyId === u.org)) return fail('Member not found');
       dispatch({ type: 'clientTeam/remove', id });
       return ok('Member removed');
     },
@@ -1062,6 +1070,21 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
       dispatch({ type: 'demo/reset' });
     },
   };
+  return clientGuarded(commands, get);
+}
+
+/**
+ * The client policy in the commands: a signed-in client calling anything outside
+ * `CLIENT_COMMANDS` gets `{ok: false, error: CLIENT_REFUSED}` and nothing is dispatched.
+ */
+function clientGuarded<C extends Record<string, (...args: never[]) => unknown>>(commands: C, get: () => AppState): C {
+  const out = { ...commands };
+  for (const name of Object.keys(commands) as (keyof C & string)[]) {
+    if (CLIENT_COMMANDS.has(name)) continue;
+    const f = commands[name];
+    out[name] = ((...args: never[]) => (actorIsClient(get()) ? fail(clientRefusal(name)) : f(...args))) as C[typeof name];
+  }
+  return out;
 }
 
 export type Commands = ReturnType<typeof createCommands>;

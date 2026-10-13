@@ -63,7 +63,7 @@ export const PERMS: readonly { key: PermKey; label: string }[] = [
   { key: 'tickets.assign', label: 'Assign tickets' },
   { key: 'sprints.manage', label: 'Start and complete sprints' },
   { key: 'time.others', label: "See other people's time" },
-  { key: 'leave.approve', label: 'Approve leave and comp-off' },
+  { key: 'leave.approve', label: 'Approve leave' },
   { key: 'companies.edit', label: 'Add and edit companies' },
   { key: 'projects.create', label: 'Start projects' },
   { key: 'users.manage', label: 'Add and edit users' },

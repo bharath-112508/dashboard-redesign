@@ -377,6 +377,26 @@ test.describe('Client portal', () => {
     await expect(byTestId(page, 'question-row-4')).toBeVisible();
   });
 
+  test('V-53 clients answer questions but cannot start one, raise DevOps requests or log time', async ({ page }) => {
+    await signInAs(page, 'cadmin');
+    // an answered question: no "Ask a follow-up" for the client
+    await openRoute(page, '/question/2');
+    await expectScreen(page, 'question');
+    await expect(byTestId(page, 'question-answer')).toContainText('Use the new version');
+    await expect(byTestId(page, 'question-follow-up')).toHaveCount(0);
+    // the portal links to the Questions tab, never to "Raise"
+    await goTab(page, 'projects');
+    await expect(byTestId(page, 'portal-raise')).toHaveCount(0);
+    await expect(byTestId(page, 'portal-questions-all')).toBeVisible();
+    // the sheets clients may not use are refused by the route guard
+    for (const path of ['/sheet/new-question?pid=dacop', '/sheet/devops-request?key=OPS-101', '/sheet/log-time', '/sheet/new-ticket?pid=dacop']) {
+      await openRoute(page, path);
+      await expectScreen(page, 'home');
+      await expect(toast(page), path).toHaveText("You don't have access to this page");
+    }
+    await expect(byTestId(page, 'dash-log-time')).toHaveCount(0);
+  });
+
   test('V-61 report a bug from the Bugs tab', async ({ page }) => {
     await signInAs(page, 'cuser');
     await goTab(page, 'bugs');

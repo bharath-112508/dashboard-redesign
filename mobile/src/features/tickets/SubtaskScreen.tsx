@@ -145,11 +145,15 @@ export function SubtaskScreen({ subId }: { subId: string }) {
       <Block title="Comments">
         <CommentThread
           comments={x.comments}
-          onSend={(text) => {
-            const r = commentOnSubtask(t.key, x.id, text);
-            if (!r.ok) toastResult(r);
-            return r.ok;
-          }}
+          onSend={
+            client
+              ? undefined
+              : (text) => {
+                  const r = commentOnSubtask(t.key, x.id, text);
+                  if (!r.ok) toastResult(r);
+                  return r.ok;
+                }
+          }
           testID="sub-comments"
         />
       </Block>

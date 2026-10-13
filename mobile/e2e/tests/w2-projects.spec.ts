@@ -217,10 +217,13 @@ test.describe('Project tabs', () => {
     await expect(byTestId(page, 'gantt-tasks')).toBeVisible();
     await tab(page, 'questions');
     await expect(byTestId(page, 'project-body-questions')).toBeVisible();
+    await expect(byTestId(page, 'project-raise-question')).toHaveCount(0); // clients answer, they do not ask
     await tab(page, 'bugs');
     await expect(byTestId(page, 'project-body-bugs')).toBeVisible();
+    await expect(byTestId(page, 'project-report-bug')).toBeVisible();
     await tab(page, 'files');
     await expect(byTestId(page, 'project-files')).toContainText('android-log.txt');
+    await expect(byTestId(page, 'project-file-upload')).toHaveCount(0); // read-only for clients
   });
 
   test('V-43 a client cannot open another company\'s project', async ({ page }) => {
@@ -482,7 +485,7 @@ test.describe('Files, team, time, support', () => {
     await expect(page).toHaveURL(/log-time\?proj=c%3Afjp$/);
   });
 
-  test('V-55 client reports a problem and requests a change; staff see them in the queue', async ({ page }) => {
+  test('V-55 client reports a problem (no change requests for clients); staff see it in the queue', async ({ page }) => {
     test.setTimeout(90_000);
     // super puts the Daco project into maintenance so the Daco client gets the Support tab
     await signInAs(page, 'super');
@@ -512,15 +515,14 @@ test.describe('Files, team, time, support', () => {
     await expect(byTestId(page, 'support-your-requests')).toContainText('Login fails on Android');
     await expect(byTestId(page, 'support-your-requests')).toContainText('Problem · Target 11 Oct');
 
-    await byTestId(page, 'support-request-change').click();
-    await expect(page.getByTestId('sheet-support-request')).toContainText('Changes use support hours from your monthly quota.');
-    await expect(page.getByTestId('supreq-prio-High')).toHaveCount(0);
-    await shot(page, '371-sheet-request-change');
-    await page.getByTestId('supreq-title').fill('Add Swedish');
-    await page.getByTestId('supreq-desc').fill('Please add Swedish to the app.');
-    await page.getByTestId('supreq-send').click();
-    await expect(toast(page)).toHaveText('Sent to the support team');
-    await expect(byTestId(page, 'support-your-requests')).toContainText('Change request · Target 24 Oct');
+    // clients raise problems and bugs only: no "Request a change" (product owner)
+    await expect(byTestId(page, 'support-request-change')).toHaveCount(0);
+    await expect(page.getByText('Request a change')).toHaveCount(0);
+    await openRoute(page, '/sheet/support-request?pid=dacop&kind=change');
+    await expect(page.getByTestId('sheet-support-request')).toContainText('Client accounts can only report bugs and answer questions.');
+    await expect(page.getByTestId('supreq-send')).toHaveCount(0);
+    await openRoute(page, '/more'); // the deep-linked sheet hides the tab bar
+    await expectScreen(page, 'more');
     await signOut(page);
 
     await page.getByTestId('account-pm').click();
@@ -528,7 +530,6 @@ test.describe('Files, team, time, support', () => {
     await expectScreen(page, 'home');
     await openProject(page, 'dacop');
     await expect(byTestId(page, 'support-queue')).toContainText('Login fails on Android');
-    await expect(byTestId(page, 'support-queue')).toContainText('Add Swedish');
-    await expect(byTestId(page, 'project-hero')).toContainText('2 open requests');
+    await expect(byTestId(page, 'project-hero')).toContainText('1 open request');
   });
 });

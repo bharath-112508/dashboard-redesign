@@ -24,7 +24,7 @@ export function leaveSub(l: Leave): string {
   return `${leaveDates(l)} · ${l.days} day${l.days > 1 ? 's' : ''}${l.reason ? ` · ${l.reason}` : ''}`;
 }
 
-/** Annual leave left: 25 minus approved annual days (comp-off has no data, DECISIONS 2). */
+/** Annual leave left: 25 minus approved annual days (only Annual counts against the allowance). */
 export function annualLeft(leaves: Leave[], who: string): number {
   return ANNUAL_LEAVE_DAYS - leaves.filter((l) => l.who === who && l.kind === 'Annual' && l.st === 'approved').reduce((a, l) => a + l.days, 0);
 }

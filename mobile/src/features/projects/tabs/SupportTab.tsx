@@ -13,8 +13,8 @@ const UPKEEP_ICON = ['shield-check', 'hard-drive'] as const;
 const kindLabel = (t: Ticket, long: boolean) => (t.support === 'problem' ? 'Problem' : long ? 'Change request' : 'Change');
 
 /**
- * Support tab of a maintenance project. Client: KPIs, report a problem / request a change
- * (V-55), requests and terms. super/admin/pm: hours, request queue, editable terms (V-54).
+ * Support tab of a maintenance project. Client: KPIs, report a problem (V-55; clients do
+ * not request changes), requests and terms. super/admin/pm: hours, request queue, editable terms (V-54).
  * dev/devops: assigned support tickets and upkeep tasks that open SH-LOG preset (V-16).
  */
 export function SupportTab({ p }: { p: ProjectView }) {
@@ -41,9 +41,6 @@ export function SupportTab({ p }: { p: ProjectView }) {
         />
         <ButtonRow>
           <Button title="Report a problem" kind="d" icon="triangle-alert" onPress={() => openSheet('support-request', { pid: p.id, kind: 'problem' })} testID="support-report-problem" />
-        </ButtonRow>
-        <ButtonRow>
-          <Button title="Request a change" icon="git-pull-request-arrow" onPress={() => openSheet('support-request', { pid: p.id, kind: 'change' })} testID="support-request-change" />
         </ButtonRow>
         <Block title="Your requests">
           <Rows empty="No requests yet." testID="support-your-requests">

@@ -1,5 +1,6 @@
 import type { DevopsProject, Ticket } from '../types';
 import type { Action } from './actions';
+import { clientActionAllowed } from './clientPolicy';
 import { createInitialState, type AppState } from './state';
 
 const mapTicket = (s: AppState, key: string, f: (t: Ticket) => Ticket): AppState => ({
@@ -14,8 +15,15 @@ const mapDevops = (s: AppState, key: string, f: (d: DevopsProject) => DevopsProj
 
 const bumpId = (s: AppState, id: number) => Math.max(s.nextId, id + 1);
 
-/** Pure reducer: (state, action) → next state. */
+/**
+ * Pure reducer: (state, action) → next state. An action a signed-in client may not take
+ * (`clientActionAllowed`, the client policy) leaves the state unchanged.
+ */
 export function reducer(s: AppState, a: Action): AppState {
+  return clientActionAllowed(s, a) ? apply(s, a) : s;
+}
+
+function apply(s: AppState, a: Action): AppState {
   switch (a.type) {
     // ── Session and profile ──
     case 'session/signIn':

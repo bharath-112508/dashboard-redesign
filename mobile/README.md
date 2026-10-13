@@ -93,6 +93,14 @@ and are re-exported from `src/nav/access.ts`, which also holds `ROUTE_ACCESS` (o
 the toast "You don't have access to this page", and `Screen` / `BottomSheet` render an access-denied
 state meanwhile. Permission checks inside a screen (e.g. the "+" on Projects) stay with the owner.
 
+**Clients raise bugs and answer questions only** (product owner). Ingrid (cadmin) and Lars (cuser) may
+report bugs and problems (report-bug sheet, Support "Report a problem"), reply on their bugs, answer the
+questions sent to them, view their projects and portal, and the client admin manages their own team. They
+may not request a change, raise DevOps requests, start questions, comment on or edit tickets and subtasks,
+upload project files or log time: the UI hides those controls, and the store refuses them twice
+(`src/data/store/clientPolicy.ts`): the commands return "Client accounts can only report bugs and answer
+questions." and the reducer ignores any other action while a client is signed in.
+
 ## Store and actions
 
 One persisted store (`src/data/store`, AsyncStorage key `vt.mobile.v5`, `STATE_VERSION = 2`). Screens

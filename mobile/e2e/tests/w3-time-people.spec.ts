@@ -530,7 +530,7 @@ test.describe('people', () => {
     await expect(byTestId(page, 'kpi-pending')).toContainText('2');
     // a developer can read a request but not decide it
     await byTestId(page, 'my-leave-pending').getByRole('button').first().click();
-    await expect(page.getByTestId('sheet-approve')).toContainText('Admins approve leave and comp-off.');
+    await expect(page.getByTestId('sheet-approve')).toContainText('Admins approve leave.');
     await expect(page.getByTestId('approve-approve')).toHaveCount(0);
   });
 

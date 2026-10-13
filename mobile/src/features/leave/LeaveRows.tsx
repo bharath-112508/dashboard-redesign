@@ -42,7 +42,7 @@ export function LeaveRows({ items, empty, testID }: { items: Leave[]; empty?: st
 
 /**
  * SH-APPROVE (V-74): Dates, Days, Reason, Status. With `leave.approve` and pending:
- * Reject / Approve. Otherwise the info "Admins approve leave and comp-off."
+ * Reject / Approve. Otherwise the info "Admins approve leave."
  */
 export function ApproveSheet({ id, onClose }: { id: number | null; onClose: () => void }) {
   const l = useAppState((s) => (id == null ? null : (s.leaves.find((x) => x.id === id) ?? null)));
@@ -72,7 +72,7 @@ export function ApproveSheet({ id, onClose }: { id: number | null; onClose: () =
               <Button title="Approve" icon="check" kind="g" onPress={() => decide('approved')} testID="approve-approve" />
             </ButtonRow>
           ) : null}
-          {can ? null : <TextBlock tone="info" text="Admins approve leave and comp-off." />}
+          {can ? null : <TextBlock tone="info" text="Admins approve leave." />}
         </>
       ) : null}
     </BottomSheet>
