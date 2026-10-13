@@ -5,7 +5,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { recordAudit } from './audit.service.js';
-import { scopedUserIdFilter } from './reporting-scope.service.js';
+import { scopedUserIdFilter, teamScopeIdsOf } from './reporting-scope.service.js';
 import type { ProjectCaller } from './project.service.js';
 
 /** The Monday of a YYYY-MM-DD date, as YYYY-MM-DD. */
@@ -28,13 +28,25 @@ const toPublic = (doc: TimesheetWeekDocument) => ({
 
 /** Team reviewers (the same roles that read the team timesheet). */
 const isReviewer = (role: string) => role === ROLES.ADMIN || role === ROLES.MANAGER || role === ROLES.TEAM_LEAD;
-const isManagerOrAdmin = (role: string) => role === ROLES.ADMIN || role === ROLES.MANAGER;
 
-/** Refuses a change to time in a week that is submitted (409). */
+/**
+ * Refuses a change to time in a week that is submitted (409).
+ * ponytail: a check then a write, not one atomic step; a write racing the
+ * submit itself can slip in. Fine at this scale; a transaction closes it.
+ */
 export const assertWeekOpen = async (userId: Types.ObjectId, date: string): Promise<void> => {
     if (await TimesheetWeek.exists({ user_id: userId, week_start: weekOf(date) })) {
         throw AppError.conflict('This week is submitted. Reopen it to change its time.', ERROR_CODES.TIMESHEET_WEEK_SUBMITTED);
     }
+};
+
+/** Which of these weeks the person has submitted (for checking many rows at once). */
+export const submittedWeeks = async (userId: Types.ObjectId, weeks: string[]): Promise<Set<string>> => {
+    if (!weeks.length) return new Set();
+    const rows = await TimesheetWeek.find({ user_id: userId, week_start: { $in: weeks } })
+        .select('week_start')
+        .lean<{ week_start: string }[]>();
+    return new Set(rows.map((r) => r.week_start));
 };
 
 // ─── GET /timesheets/weeks ───────────────────────────────────────────────
@@ -86,14 +98,16 @@ export const submitWeek = async (week: string, caller: ProjectCaller) => {
 export const reopenWeek = async (week: string, userId: string | undefined, caller: ProjectCaller): Promise<{ reopened: true }> => {
     assertMonday(week);
     const target = userId ? new Types.ObjectId(userId) : caller.id;
-    if (!target.equals(caller.id) && !isManagerOrAdmin(caller.role)) {
-        throw AppError.forbidden('Only a manager can reopen someone else\'s week');
+    // Someone else's week: an admin for anyone, a manager for their own team (as they read it).
+    if (!target.equals(caller.id) && caller.role !== ROLES.ADMIN) {
+        const team = caller.role === ROLES.MANAGER ? await teamScopeIdsOf(caller.id) : [];
+        if (!team.some((id) => id.equals(target))) throw AppError.forbidden('Only a manager of their team can reopen someone else\'s week');
     }
-    await TimesheetWeek.deleteOne({ user_id: target, week_start: week });
-    if (caller.audit) {
+    const removed = await TimesheetWeek.findOneAndDelete({ user_id: target, week_start: week });
+    if (caller.audit && removed) {
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.TIMESHEET_WEEK_REOPEN,
-            target: { kind: AUDIT_TARGET_KINDS.TIMESHEET_WEEK, id: target },
+            target: { kind: AUDIT_TARGET_KINDS.TIMESHEET_WEEK, id: removed._id },
             metadata: { user_id: target.toString(), week_start: week },
         });
     }

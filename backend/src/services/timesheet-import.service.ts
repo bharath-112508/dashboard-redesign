@@ -14,6 +14,7 @@ import { ERROR_CODES } from '../constants/error-codes.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { exceedsDailyThreshold, loadPolicy, overlapsApprovedLeave, sumDailyTotalMinutes } from './timesheet.service.js';
 import type { ProjectCaller } from './project.service.js';
+import { submittedWeeks, weekOf } from './timesheet-week.service.js';
 
 /**
  * Bulk timesheet import — resolution and validation.
@@ -183,11 +184,14 @@ export const validateImportRows = async (
     const taskByKey = new Map(tasks.map((t) => [taskKey(t.project_id, t.task_number), t]));
 
     const today = todayLocal();
+    // Redesign: a submitted week is locked for imports too.
+    const locked = await submittedWeeks(caller.id, [...new Set(rows.map((r) => weekOf(r.date)))]);
 
     const verdicts: ImportRowVerdict[] = rows.map((r) => {
         const blocked = (reason: string): ImportRowVerdict => ({ row_number: r.row_number, ok: false, reason });
 
         if (r.date > today) return blocked(`${r.date} is in the future.`);
+        if (locked.has(weekOf(r.date))) return blocked(`The week of ${weekOf(r.date)} is submitted — reopen it first.`);
 
         // REQUIRED on every row, matching `createEntry`. Internal time —
         // meetings, training, 1:1s — goes to an internal project rather than

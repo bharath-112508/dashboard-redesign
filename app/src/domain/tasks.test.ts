@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ticketIdFromParam } from './tasks'
+import { compareTaskIds, ticketIdFromParam } from './tasks'
 
 describe('ticketIdFromParam', () => {
   it('reads a number, a PMT key, a backend id and a subtask id', () => {
@@ -13,5 +13,12 @@ describe('ticketIdFromParam', () => {
   it('refuses anything else', () => {
     expect(ticketIdFromParam('<script>')).toBeNull()
     expect(ticketIdFromParam(null)).toBeNull()
+  })
+})
+
+describe('compareTaskIds', () => {
+  it('orders number ids as numbers and backend ids by creation', () => {
+    expect(['10', '9', '100'].sort(compareTaskIds)).toEqual(['9', '10', '100'])
+    expect(['65a000000000000000000000', '650000000000000000000000'].sort(compareTaskIds)).toEqual(['650000000000000000000000', '65a000000000000000000000'])
   })
 })

@@ -51,8 +51,13 @@ describe('sendTimeCommand', () => {
   })
 
   it('removes an entry', async () => {
-    await sendTimeCommand({ type: 'time.remove', id: 'x1' }, me)
-    expect(del).toHaveBeenCalledWith('/timesheets/x1')
+    await sendTimeCommand({ type: 'time.remove', id: '6ace39ef63d8ea9a59dcf3a7' }, me)
+    expect(del).toHaveBeenCalledWith('/timesheets/6ace39ef63d8ea9a59dcf3a7')
+  })
+
+  it('refuses removing an entry that is still being saved', async () => {
+    await expect(sendTimeCommand({ type: 'time.remove', id: '3' }, me)).rejects.toMatchObject({ status: 403 })
+    expect(del).not.toHaveBeenCalled()
   })
 
   it('submits and reopens the person\'s own week', async () => {

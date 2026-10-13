@@ -2,8 +2,11 @@ import { diff, TODAY } from '../lib/dates'
 import { pal, person as greyPerson, type Person } from '../lib/theme'
 import type { Sprint, Status, Task, TaskId, TimeEntry } from '../api/types'
 
-/** Orders ticket ids as numbers when they are number-like (12 before 100). */
-export const compareTaskIds = (a: TaskId, b: TaskId) => a.localeCompare(b, undefined, { numeric: true })
+/**
+ * Orders ids by creation: number-like ids as numbers (9 before 10), backend
+ * ids by their hex text (an ObjectId starts with its creation time).
+ */
+export const compareTaskIds = (a: TaskId, b: TaskId) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0)
 
 export const taskKey = (t: Pick<Task, 'id' | 'subKey'>) => t.subKey || 'PMT-' + t.id
 

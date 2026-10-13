@@ -39,7 +39,7 @@ export const entryFrom = (
   const area = e.entry_type === 'general' ? e.general_category ?? undefined : undefined
   const type = e.work_type || 'General'
   // A description that only stood in for an empty note reads as no note.
-  const fill = [area, e.task_id ? ctx.taskTitle(e.task_id) : '', e.work_type].filter(Boolean)
+  const fill = [area, e.task_id ? ctx.taskTitle(e.task_id).trim() : '', e.work_type].filter(Boolean)
   const project = ctx.projectRef(e.project_id)
   const epic = e.task_id ? ctx.epicOfTask(e.task_id) : undefined
   return {

@@ -30,7 +30,7 @@ const entry = (id: string, user_id: string, extra: Record<string, unknown> = {})
   ...extra,
 })
 
-const FROM = rangeStart(new Date('2026-10-13T12:00:00'))
+const FROM = '2026-08-31'
 
 beforeEach(() => {
   get.mockReset()
@@ -42,8 +42,9 @@ beforeEach(() => {
 })
 
 describe('rangeStart', () => {
-  it('is the first day of the previous month', () => {
-    expect(FROM).toBe('2026-09-01')
+  it('is the Monday on or before the first day of the previous month, so a straddling week is whole', () => {
+    expect(rangeStart(new Date('2026-10-13T12:00:00'))).toBe('2026-08-31')
+    expect(rangeStart(new Date('2026-07-20T12:00:00'))).toBe('2026-06-01')
   })
 })
 

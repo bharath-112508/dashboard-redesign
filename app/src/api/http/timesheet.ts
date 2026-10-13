@@ -12,7 +12,12 @@ const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d
 
 /** Time is read from the first day of the previous month: this month's and last month's weeks. */
 // ponytail: older time is not loaded; add a from-date to the history view if people need to look further back.
-export const rangeStart = (now = new Date()) => isoDay(new Date(now.getFullYear(), now.getMonth() - 1, 1))
+export const rangeStart = (now = new Date()) => {
+  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  // Back to its Monday, so a week that straddles the month is loaded whole.
+  first.setDate(first.getDate() - ((first.getDay() + 6) % 7))
+  return isoDay(first)
+}
 
 /** Staff who read their team's time (the backend scopes the list to their team). */
 const readsTeam = (s: Session) => s.role === 'super' || s.role === 'pm'
@@ -78,6 +83,8 @@ export const sendTimeCommand = async (cmd: TimeCommand, session: Session | null)
       return { id }
     }
     case 'time.remove':
+      // A row just logged has a temporary id until the list reloads.
+      if (!/^[a-f0-9]{24}$/i.test(cmd.id)) throw refuse('This entry is still being saved. Try again in a moment.')
       await api.delete(`/timesheets/${cmd.id}`)
       return {}
     case 'week.submit':

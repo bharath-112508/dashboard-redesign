@@ -3,7 +3,8 @@ import { Types } from 'mongoose';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
 
-const { upsertMock, findMock, deleteOneMock, existsMock, scopedMock, auditMock } = vi.hoisted(() => ({
+const { upsertMock, findMock, deleteOneMock, existsMock, scopedMock, auditMock, teamMock } = vi.hoisted(() => ({
+    teamMock: vi.fn(),
     upsertMock: vi.fn(),
     findMock: vi.fn(),
     deleteOneMock: vi.fn(),
@@ -13,9 +14,9 @@ const { upsertMock, findMock, deleteOneMock, existsMock, scopedMock, auditMock }
 }));
 
 vi.mock('../models/timesheet-week.model.js', () => ({
-    TimesheetWeek: { findOneAndUpdate: upsertMock, find: findMock, deleteOne: deleteOneMock, exists: existsMock },
+    TimesheetWeek: { findOneAndUpdate: upsertMock, find: findMock, findOneAndDelete: deleteOneMock, exists: existsMock },
 }));
-vi.mock('./reporting-scope.service.js', () => ({ scopedUserIdFilter: scopedMock }));
+vi.mock('./reporting-scope.service.js', () => ({ scopedUserIdFilter: scopedMock, teamScopeIdsOf: teamMock }));
 vi.mock('./audit.service.js', () => ({ recordAudit: auditMock }));
 
 const svc = await import('./timesheet-week.service.js');
@@ -88,11 +89,26 @@ describe('reopenWeek', () => {
         expect(deleteOneMock).toHaveBeenCalledWith({ user_id: me, week_start: '2026-10-12' });
     });
 
-    it('lets a manager reopen someone else\'s week', async () => {
+    it('lets a manager reopen a team member\'s week', async () => {
         const other = new Types.ObjectId();
-        deleteOneMock.mockResolvedValueOnce({ deletedCount: 1 });
+        teamMock.mockResolvedValueOnce([other]);
+        deleteOneMock.mockResolvedValueOnce(row(other, '2026-10-12'));
         await svc.reopenWeek('2026-10-12', other.toString(), caller(ROLES.MANAGER));
         expect(deleteOneMock).toHaveBeenCalledWith({ user_id: other, week_start: '2026-10-12' });
+    });
+
+    it('refuses a manager reopening a week outside their team', async () => {
+        teamMock.mockResolvedValueOnce([new Types.ObjectId()]);
+        await expect(svc.reopenWeek('2026-10-12', new Types.ObjectId().toString(), caller(ROLES.MANAGER))).rejects.toMatchObject({ statusCode: 403 });
+        expect(deleteOneMock).not.toHaveBeenCalled();
+    });
+
+    it('lets an admin reopen anyone\'s week', async () => {
+        const other = new Types.ObjectId();
+        deleteOneMock.mockResolvedValueOnce(null);
+        await svc.reopenWeek('2026-10-12', other.toString(), caller(ROLES.ADMIN));
+        expect(deleteOneMock).toHaveBeenCalledWith({ user_id: other, week_start: '2026-10-12' });
+        expect(teamMock).not.toHaveBeenCalled();
     });
 
     it('refuses an employee reopening someone else\'s week', async () => {

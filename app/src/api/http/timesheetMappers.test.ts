@@ -61,6 +61,11 @@ describe('entryFrom', () => {
     expect(entryFrom(be({ entry_type: 'task_linked', task_id: 't1', general_category: null, description: 'Login' }), readCtx).notes).toBe('')
   })
 
+  it('compares a stand-in description to the ticket title as stored (trimmed)', () => {
+    const ctx = { ...readCtx, taskTitle: () => '  Login ' }
+    expect(entryFrom(be({ entry_type: 'task_linked', task_id: 't1', general_category: null, description: 'Login' }), ctx).notes).toBe('')
+  })
+
   it('reads an entry with no work type as General', () => {
     expect(entryFrom(be({ work_type: null }), readCtx).type).toBe('General')
   })

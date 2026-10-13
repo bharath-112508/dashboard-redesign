@@ -454,7 +454,7 @@ describe('ticket hours', () => {
       entry_type: 'task_linked',
       task_id: 't1',
       project_id: 'p1',
-      local_date: '2026-10-12',
+      local_date: TODAY,
       billable_hours: 2,
       billable_minutes: 30,
       non_billable_hours: 0,
@@ -467,6 +467,22 @@ describe('ticket hours', () => {
     await sendBoardCommand({ type: 'task.update', id: 't1', patch: { time: { '2026-10-12': 1.5 } } }, TODAY)
     expect(post.mock.calls.map(c => (c[1] as Record<string, number>).billable_minutes)).toEqual([0, 30])
     expect(post.mock.calls.map(c => (c[1] as Record<string, number>).billable_hours)).toEqual([1, 0])
+  })
+
+  it('does not log the first amount twice when two adds overlap', async () => {
+    let release: (v: { id: string }) => void = () => {}
+    post.mockReturnValueOnce(new Promise(r => (release = r)))
+    const first = sendBoardCommand({ type: 'task.update', id: 't1', patch: { time: { '2026-10-10': 1 } } }, TODAY)
+    const second = sendBoardCommand({ type: 'task.update', id: 't1', patch: { time: { '2026-10-10': 1.5 } } }, TODAY)
+    release({ id: 'x1' })
+    await Promise.all([first, second])
+    const minutes = post.mock.calls.map(c => (c[1] as Record<string, number>).billable_hours * 60 + (c[1] as Record<string, number>).billable_minutes)
+    expect(minutes).toEqual([60, 30])
+  })
+
+  it('logs ticket hours on the real day, not the date the drawer keys them by', async () => {
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { time: { '2026-10-10': 2 } } }, TODAY)
+    expect(post).toHaveBeenCalledWith('/timesheets', expect.objectContaining({ local_date: TODAY, billable_hours: 2 }))
   })
 })
 

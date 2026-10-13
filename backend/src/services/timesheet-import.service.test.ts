@@ -36,6 +36,12 @@ vi.mock('./timesheet.service.js', () => ({
     createEntry: vi.fn(async () => ({ data: {}, warnings: {} })),
 }));
 
+const submittedWeeksMock = vi.hoisted(() => vi.fn());
+vi.mock('./timesheet-week.service.js', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('./timesheet-week.service.js')>()),
+    submittedWeeks: submittedWeeksMock,
+}));
+
 const svc = await import('./timesheet-import.service.js');
 
 const PROJECT_A = new Types.ObjectId();
@@ -80,6 +86,7 @@ beforeEach(() => {
     );
     taskFindMock.mockReturnValue(lean([{ _id: TASK, task_number: 142, project_id: PROJECT_A }]));
     entryFindMock.mockReturnValue(lean([]));
+    submittedWeeksMock.mockResolvedValue(new Set());
 });
 
 describe('validateImportRows — project resolution', () => {
@@ -221,6 +228,17 @@ describe('validateImportRows — tickets', () => {
         const out = await svc.validateImportRows([row({ ticket: 'NMF-142', context: 'Standup' })], caller as never);
         expect(out.rows[0]!.ok).toBe(true);
         expect(out.rows[0]!.resolved?.general_category).toBeNull();
+    });
+});
+
+describe('validateImportRows — submitted weeks', () => {
+    it('blocks a row dated in a week the person has submitted', async () => {
+        const { weekOf } = await import('./timesheet-week.service.js');
+        submittedWeeksMock.mockResolvedValueOnce(new Set([weekOf(past)]));
+        const out = await svc.validateImportRows([row()], caller as never);
+        expect(submittedWeeksMock).toHaveBeenCalledWith(caller.id, [weekOf(past)]);
+        expect(out.rows[0]!.ok).toBe(false);
+        expect(out.rows[0]!.reason).toMatch(/submitted/i);
     });
 });
 
