@@ -97,11 +97,11 @@ const projectBase = (p: BackendProject) => ({
   team: p.member_ids,
 })
 
-export const clientProjectFrom = (p: BackendProject, epics: EpicSummary[]): ClientProject => ({
+/** `used`: billable hours logged on the project this month. */
+export const clientProjectFrom = (p: BackendProject, epics: EpicSummary[], used = 0): ClientProject => ({
   ...projectBase(p),
   epics,
-  // ponytail: `used` is 0 until the timesheets slice sums this month's hours on the project.
-  ...(p.support_plan ? { sup: { until: p.support_plan.until, quota: p.support_plan.quota_hours, used: 0 } } : {}),
+  ...(p.support_plan ? { sup: { until: p.support_plan.until, quota: p.support_plan.quota_hours, used } } : {}),
 })
 
 export const internalProjectFrom = (p: BackendProject): InternalProject => {

@@ -32,6 +32,22 @@ export const allPages = async <T>(path: string): Promise<T[]> => {
   }
 }
 
+const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+/** Billable hours logged on a project this month (a support plan's "used"); 0 when the summary cannot be read. */
+const hoursUsedThisMonth = async (projectId: string): Promise<number> => {
+  const now = new Date()
+  const from = day(new Date(now.getFullYear(), now.getMonth(), 1))
+  try {
+    const rows = await api.get<{ billable_total_minutes: number }[]>(
+      `/timesheets/summary?project_id=${projectId}&from_date=${from}&to_date=${day(now)}&group_by=project`,
+    )
+    return Math.round((rows.reduce((m, r) => m + r.billable_total_minutes, 0) / 60) * 10) / 10
+  } catch {
+    return 0
+  }
+}
+
 /** The projects the signed-in person may see, without archived ones (the app has no archived projects). */
 export const liveProjects = async () => (await allPages<BackendProject>('/projects')).filter(p => !p.is_archived)
 
@@ -58,7 +74,10 @@ export const fetchCompanies = async (session: Session | null): Promise<Company[]
     companies.map(async c => {
       const own = projects.filter(p => p.company_id === c.id)
       const withEpics = await Promise.all(
-        own.map(async p => clientProjectFrom(p, (await allPages<BackendStory>(`/projects/${p.id}/stories`)).map(epicFromStory))),
+        own.map(async p => {
+          const [stories, used] = await Promise.all([allPages<BackendStory>(`/projects/${p.id}/stories`), p.support_plan ? hoursUsedThisMonth(p.id) : 0])
+          return clientProjectFrom(p, stories.map(epicFromStory), used)
+        }),
       )
       // Contacts: staff see every company's; a client admin only their own; a client user may not list them.
       const mayList = !clientUser && (!isClientRole(session.role) || c.id === session.orgId)

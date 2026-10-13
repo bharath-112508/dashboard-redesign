@@ -62,6 +62,32 @@ describe('fetchCompanies', () => {
     expect(aurora.contacts).toEqual([{ personId: 'u7', name: 'Emma', role: 'CEO', email: 'e@x', projects: ['p1'], admin: true }])
   })
 
+  it('reads a support plan\'s hours used this month from the timesheets', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-13T12:00:00'))
+    serve({
+      '/companies?limit=100&page=1': [{ id: 'c1', name: 'Aurora Foods AB', status: 'active' }],
+      '/projects?limit=100&page=1': [project('p1', 'c1', { support_plan: { until: '2026-12-31', quota_hours: 20 } })],
+      '/projects/p1/stories?limit=100&page=1': [],
+      '/companies/c1/representatives?limit=100&page=1': [],
+      '/timesheets/summary?project_id=p1&from_date=2026-10-01&to_date=2026-10-13&group_by=project': [{ group_key: 'p1', billable_total_minutes: 330, total_minutes: 400 }],
+    })
+    const [c] = await fetchCompanies(staff)
+    vi.useRealTimers()
+    expect(c.projects[0].sup).toEqual({ until: '2026-12-31', quota: 20, used: 5.5 })
+  })
+
+  it('shows no hours used when the summary cannot be read', async () => {
+    serve({
+      '/companies?limit=100&page=1': [{ id: 'c1', name: 'Aurora Foods AB', status: 'active' }],
+      '/projects?limit=100&page=1': [project('p1', 'c1', { support_plan: { until: '2026-12-31', quota_hours: 20 } })],
+      '/projects/p1/stories?limit=100&page=1': [],
+      '/companies/c1/representatives?limit=100&page=1': [],
+    })
+    const [c] = await fetchCompanies(staff)
+    expect(c.projects[0].sup?.used).toBe(0)
+  })
+
   it('leaves out contacts who were removed (the backend deactivates them)', async () => {
     serve({
       '/companies?limit=100&page=1': [{ id: 'c1', name: 'Aurora Foods AB', status: 'active' }],
