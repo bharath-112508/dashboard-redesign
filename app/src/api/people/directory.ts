@@ -1,14 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { qk } from '../queries'
 import { server } from '../server'
-import { api } from '../http/client'
+import { allPages } from '../http/companies'
 import { apiMode } from '../http/config'
 import { personFromUser, type BackendUser } from '../http/mappers'
 import { isClientRole } from '../session/access'
 import { readSession } from '../session/store'
 import type { Person, PersonId, Session } from '../types'
-
-const PAGE = 100
 
 /** The directory: the mock's people in mock mode, the backend's users in API mode. */
 export const fetchPeople = async (session: Session | null): Promise<Person[]> => {
@@ -30,12 +28,7 @@ export const fetchPeople = async (session: Session | null): Promise<Person[]> =>
       },
     ]
   }
-  const people: Person[] = []
-  for (let page = 1; ; page++) {
-    const batch = await api.get<BackendUser[]>(`/users?limit=${PAGE}&page=${page}`)
-    people.push(...batch.map(personFromUser))
-    if (batch.length < PAGE) return people
-  }
+  return (await allPages<BackendUser>('/users')).map(personFromUser)
 }
 
 /** Every person in the directory. The one source for name, role, colour and photo. */

@@ -10,6 +10,8 @@ import type { Db } from './types'
 import { setSaveProblem } from '../components/SaveNotice'
 import { refusal } from './session/permissions'
 import { readSession } from './session/store'
+import { apiMode } from './http/config'
+import { fetchCompanies, fetchInternalProjects } from './http/companies'
 
 /**
  * A mock backend. Data lives in localStorage so it survives reloads and is
@@ -445,6 +447,9 @@ const acrossTabs = <T>(fn: () => Promise<T>): Promise<T> => {
 
 export const server = {
   async get<K extends Exclude<keyof Db, 'version'>>(resource: K): Promise<Db[K]> {
+    // API mode: these resources come from the backend; everything else is still the mock.
+    if (apiMode && resource === 'companies') return (await fetchCompanies(readSession())) as Db[K]
+    if (apiMode && resource === 'internalProjects') return (await fetchInternalProjects(readSession())) as Db[K]
     await sleep(LATENCY_MS)
     return exclusive(async () => clone((await current())[resource]))
   },
