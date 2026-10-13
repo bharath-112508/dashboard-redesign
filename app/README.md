@@ -30,7 +30,9 @@ What comes from the backend so far:
 
 - **Phase 1b-2 (part 1):** epics, sprints and tickets on the Tickets and Clients pages (board, backlog, list, overview, epics & sprints, timeline), My tickets and the dashboard ticket widgets. The adapter is `src/api/http/board.ts` (mappings in `boardMappers.ts`).
 
-Timesheets, DevOps, questions, ticket comments, history and attachments still show the mock data.
+- **Phase 1b-2 (part 2):** the ticket drawer's comments, history and attachments (`src/api/http/ticketDetails.ts`), read for the open ticket only.
+
+Timesheets, DevOps and questions still show the mock data.
 
 Epics, sprints and tickets in API mode:
 
@@ -42,7 +44,9 @@ Epics, sprints and tickets in API mode:
 - Priorities include **Critical** and **Urgent**, and the type **Story** (new backend values; a backend `improvement` shows as Story).
 - Developers may plan tickets of projects they are members of (title, priority, dates, type, labels, sprint, epic) as well as their work fields. A change the backend refuses snaps back with its reason.
 - People on tickets are matched by name to the project's members; someone who is not a member shows without a name.
-- Comments in the ticket drawer are refused for now ("Comments come with the next update."); history, attachments and hours per ticket stay empty.
+- The drawer's Activity tab shows the ticket's real comments and history (the first 100 of each). Posting a comment saves it; @mentions are kept as plain text and do not notify anyone yet.
+- Attaching a file uploads it to the backend's file storage (a signed upload link, then the file goes straight to storage). The storage must allow uploads from the app's address (CORS); otherwise the drawer says "The file could not be uploaded. Try again." The drawer has no download or remove button for attachments yet.
+- Hours per ticket stay empty until the timesheets slice.
 - Every write reloads the whole board (five requests per project). Fine at Demo DB size; a single board endpoint is the upgrade.
 - The **Redesign test epic**, its sprint and the ticket RTP-2 (with one subtask) on the Redesign Test Portal project were made by the API checks on 13 Oct 2026.
 
