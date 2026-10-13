@@ -135,7 +135,7 @@ export interface Task {
  * current Tickets views can still show it.
  */
 export interface TimeEntry {
-  id: number
+  id: string
   date: string
   userId: PersonId
   user: string

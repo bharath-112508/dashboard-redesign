@@ -1,3 +1,4 @@
+import { compareTaskIds } from '../../domain/tasks'
 import { useState } from 'react'
 import { usePeople } from '../../api/people/directory'
 import { useEntries, useTasks, useWorkspace } from '../../api/queries'
@@ -69,7 +70,7 @@ export function TimesheetsTab() {
     setProject('all')
     setBillable('all')
   }
-  const sorted = [...rows].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+  const sorted = [...rows].sort((a, b) => b.date.localeCompare(a.date) || compareTaskIds(b.id, a.id))
 
   return (
     <div className="flex flex-col gap-5">

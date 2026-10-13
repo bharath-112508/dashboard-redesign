@@ -10,7 +10,7 @@ import { diff, fmt, TODAY } from '../../lib/dates'
 import { useMe, useTeamPeople } from '../../features/tickets/useMe'
 import { usePerson } from '../../state/page'
 import { useUi } from '../../state/ui'
-import { taskKey } from '../../domain/tasks'
+import { compareTaskIds, taskKey } from '../../domain/tasks'
 import { useOpenTask } from '../../features/useOpenTask'
 import { useOpenRequest } from '../../features/tickets/DevopsPanel'
 
@@ -104,12 +104,12 @@ export function TimesheetView() {
           notes: x.notes,
           bill: x.bill,
           non: x.non,
-          sortId: x.id,
+          sortId: String(x.id),
           open: () => t && openTask(t),
           remove: () => send({ type: 'time.remove', id: x.id }),
         }
       })
-      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.sortId - a.sortId)),
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : compareTaskIds(b.sortId, a.sortId))),
     ...reqs.flatMap(r =>
       (r.logs || []).flatMap((x, i) =>
         x.date && userOkName(x.by) && rangeOk(x.date)

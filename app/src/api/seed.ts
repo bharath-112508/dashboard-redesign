@@ -208,7 +208,7 @@ const ENTRIES: TimeEntry[] = (
     ['2026-09-29', 'Rahul', 'General', 9, '- Started onboarding layout and navigation', 3.5, 0],
   ] as const
 ).map((r, i) => ({
-  id: i + 1,
+  id: String(i + 1),
   date: r[0],
   userId: personIdByName(r[1]),
   user: r[1],
@@ -232,7 +232,7 @@ const TICKET_HOURS: [string, string, number, number][] = [
 const ALL_ENTRIES: TimeEntry[] = [
   ...ENTRIES,
   ...TICKET_HOURS.map(([date, user, task, bill], i) => ({
-    id: ENTRIES.length + i + 1,
+    id: String(ENTRIES.length + i + 1),
     date,
     userId: personIdByName(user),
     user,
@@ -244,7 +244,7 @@ const ALL_ENTRIES: TimeEntry[] = [
   })),
 ]
 
-export const DB_VERSION = 6
+export const DB_VERSION = 7
 
 export const createSeed = (): Db => {
   const sprints = buildSprints()

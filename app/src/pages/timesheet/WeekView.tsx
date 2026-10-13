@@ -1,3 +1,4 @@
+import { compareTaskIds } from '../../domain/tasks'
 import { useMemo, useState } from 'react'
 import { useSend } from '../../api/queries'
 import { taskLabel, type ProjectOption } from '../../api/timesheet/projects'
@@ -13,7 +14,7 @@ import type { TimeEntry } from '../../api/types'
 export function WeekView({ ctx, projects, week, setWeek }: { ctx: TimeCtx; projects: ProjectOption[]; week: string; setWeek: (w: string) => void }) {
   const send = useSend()
   const [day, setDay] = useState(() => (inRange(TODAY, { from: week, to: addDays(week, 6) }) ? TODAY : week))
-  const [confirmId, setConfirmId] = useState<number | null>(null)
+  const [confirmId, setConfirmId] = useState<string | null>(null)
 
   const days = weekDays(week)
   const weekEntries = useMemo(
@@ -31,7 +32,7 @@ export function WeekView({ ctx, projects, week, setWeek }: { ctx: TimeCtx; proje
   const idle = idleHours(dayTotals, TODAY)
   const isCurrent = week === weekStart(TODAY)
 
-  const dayEntries = ctx.mine.filter(e => e.date === day).sort((a, b) => a.id - b.id)
+  const dayEntries = ctx.mine.filter(e => e.date === day).sort((a, b) => compareTaskIds(a.id, b.id))
   const dayTotal = totalsOf(dayEntries).total
 
   const move = (weeks: number) => {

@@ -64,7 +64,8 @@ export const cardAvatars = (names: string[], person: (n: string) => Person = gre
     : [{ name: 'Unassigned', i: '+', bg: '#FFFFFF', color: '#3B4A5E', ring: 'inset 0 0 0 1.5px #A9B6C5' }]
 
 /** The id for a new time entry: one more than the largest id in the shared store. */
-export const nextEntryId = (entries: TimeEntry[]) => Math.max(0, ...entries.map(e => e.id)) + 1
+export const nextEntryId = (entries: TimeEntry[]) =>
+  String(Math.max(0, ...entries.map(e => Number(e.id)).filter(Number.isFinite)) + 1)
 
 /**
  * The ticket a `?ticket=` value names: a number ("12") or a key ("PMT-12").

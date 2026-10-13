@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { stringPersonIds, stringTaskIds } from './server'
+import { stringEntryIds, stringPersonIds, stringTaskIds } from './server'
 
 describe('stringPersonIds (DB version 5)', () => {
   const v4 = {
@@ -53,5 +53,18 @@ describe('stringTaskIds (DB version 6)', () => {
   it('leaves ids that are already strings alone, so running it twice changes nothing', () => {
     const once = stringTaskIds(v5)
     expect(stringTaskIds(once)).toEqual(once)
+  })
+})
+
+describe('stringEntryIds (DB version 7)', () => {
+  const v6 = { version: 6, entries: [{ id: 4, task: '12', bill: 2 }, { id: '5', task: null, area: 'Admin' }] }
+
+  it('turns time entry ids into strings and keeps the rest', () => {
+    expect((stringEntryIds(v6) as typeof v6).entries).toEqual([{ id: '4', task: '12', bill: 2 }, { id: '5', task: null, area: 'Admin' }])
+  })
+
+  it('changes nothing the second time', () => {
+    const once = stringEntryIds(v6)
+    expect(stringEntryIds(once)).toEqual(once)
   })
 })

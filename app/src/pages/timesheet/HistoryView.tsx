@@ -1,3 +1,4 @@
+import { compareTaskIds } from '../../domain/tasks'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fmt, TODAY } from '../../lib/dates'
 import { download, toCsv, toPdf, pdfLines, toXlsx } from '../../api/timesheet/export'
@@ -63,7 +64,7 @@ export function HistoryView({ ctx, scope, onLeaveScope }: { ctx: TimeCtx; scope?
           if (scope && (!v || !scope.values.includes(v))) return false
           return !projectF || v === projectF
         })
-        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id)),
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : compareTaskIds(b.id, a.id))),
     [ctx.mine, ctx.tasks, ctx.companies, period, custom.from, custom.to, projectF, scope],
   )
   const totals = totalsOf(rows)

@@ -8,7 +8,7 @@ import { logTime } from '../../api/timesheet'
 import type { ProjectOption } from '../../api/timesheet/projects'
 import { avatarOf } from '../../api/people/avatar'
 import type { Person, Session, Status, Task, TimeEntry } from '../../api/types'
-import { statusOf, taskKey } from '../../domain/tasks'
+import { compareTaskIds, statusOf, taskKey } from '../../domain/tasks'
 import { Backdrop, Icon, PATHS } from '../../components/ui'
 import { useEscape } from '../../features/useEscape'
 
@@ -108,7 +108,7 @@ export function LogTime({ me, person, projects, defaultProject, projectLabel, ti
     reset({ ...BLANK, project: v.project, mode: v.mode })
   })
 
-  const remove = (id: number) => send({ type: 'time.remove', id })
+  const remove = (id: string) => send({ type: 'time.remove', id })
   const byId = useMemo(() => new Map(allTasks.map(t => [t.id, t])), [allTasks])
 
   const saveBg = valid ? '#3F9079' : '#A9B6C5'
@@ -245,7 +245,7 @@ export function LogTime({ me, person, projects, defaultProject, projectLabel, ti
         <ul className="overflow-hidden rounded-b-[15px] border-t-[1.5px] border-line-3 bg-white">
           {todays
             .slice()
-            .sort((a, b) => b.id - a.id)
+            .sort((a, b) => compareTaskIds(b.id, a.id))
             .map(e => {
               const t = e.task !== null ? byId.get(e.task) : undefined
               const hours = e.bill + e.non

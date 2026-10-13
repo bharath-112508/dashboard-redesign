@@ -1,3 +1,4 @@
+import { nextEntryId } from '../../domain/tasks'
 import type { Db, PersonId, TimeEntry, WeekSubmission } from '../types'
 import type { Resource } from '../commands'
 import { projectOfTask } from './projects'
@@ -17,18 +18,18 @@ import { projectOfTask } from './projects'
  */
 export type TimeCommand =
   | { type: 'time.log'; entry: TimeEntry }
-  | { type: 'time.remove'; id: number }
+  | { type: 'time.remove'; id: string }
   | { type: 'week.submit'; submission: WeekSubmission }
   | { type: 'week.reopen'; userId: PersonId; week: string }
 
 /** An entry before it has an id. */
-export type NewTimeEntry = Omit<TimeEntry, 'id'> & { id?: number }
+export type NewTimeEntry = Omit<TimeEntry, 'id'> & { id?: string }
 
 /**
  * The `time.log` command for an entry. Send it with `useSend()` (or `useSendAsync()`),
  * for example `send(logTime({ date, userId, user, type, task, notes, bill, non }))`.
  */
-export const logTime = (entry: NewTimeEntry): TimeCommand => ({ type: 'time.log', entry: { ...entry, id: entry.id ?? 0 } })
+export const logTime = (entry: NewTimeEntry): TimeCommand => ({ type: 'time.log', entry: { ...entry, id: entry.id ?? '' } })
 
 export const touchesTime = (cmd: { type: string }): Resource[] => {
   switch (cmd.type) {
@@ -48,7 +49,7 @@ export const assignTimeIds = <C extends { type: string }>(db: Db, cmd: C): C => 
   if (cmd.type !== 'time.log') return cmd
   const c = cmd as unknown as TimeCommand & { type: 'time.log' }
   if (c.entry.id && !db.entries.some(e => e.id === c.entry.id)) return cmd
-  const next = Math.max(0, ...db.entries.map(e => e.id)) + 1
+  const next = nextEntryId(db.entries)
   return { ...c, entry: { ...c.entry, id: next } } as unknown as C
 }
 
