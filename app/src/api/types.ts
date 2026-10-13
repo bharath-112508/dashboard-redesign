@@ -55,6 +55,10 @@ export interface Activity {
 }
 
 export interface Attachment {
+  /** The backend's attachment id (API mode). */
+  id?: string
+  /** API mode: the picked file waiting to be uploaded (see api/http/board.ts attachFile). */
+  fileRef?: string
   name: string
   size: string
   date: string

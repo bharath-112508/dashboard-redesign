@@ -30,6 +30,8 @@ export interface BoardIndex {
   sprintMemberIds: Map<string, string[]>
   /** Each ticket's collaborator ids as stored, so people the board cannot name are kept. */
   collaboratorIds: Map<TaskId, string[]>
+  /** Status id → its name, for history lines. */
+  statusNames: Map<string, string>
 }
 
 export interface Board {
@@ -53,6 +55,7 @@ const emptyIndex = (): BoardIndex => ({
   tasks: new Map(),
   sprintMemberIds: new Map(),
   collaboratorIds: new Map(),
+  statusNames: new Map(),
 })
 
 /** The last board loaded, for writes (which project a ticket is in, which story an epic is). */
@@ -143,6 +146,7 @@ export const loadBoard = async (session: Session | null): Promise<Board> => {
     }
   }
   for (const t of tasks) index.tasks.set(t.id, t)
+  for (const s of statuses) index.statusNames.set(s.id, s.name)
   boardIndex = index
   return { workspace: { statuses, epics, sprints, devopsLinks: {} }, tasks, index }
 }
