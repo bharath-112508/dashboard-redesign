@@ -1,6 +1,9 @@
 import { diff, TODAY } from '../lib/dates'
 import { pal, person as greyPerson, type Person } from '../lib/theme'
-import type { Sprint, Status, Task, TimeEntry } from '../api/types'
+import type { Sprint, Status, Task, TaskId, TimeEntry } from '../api/types'
+
+/** Orders ticket ids as numbers when they are number-like (12 before 100). */
+export const compareTaskIds = (a: TaskId, b: TaskId) => a.localeCompare(b, undefined, { numeric: true })
 
 export const taskKey = (t: Pick<Task, 'id' | 'subKey'>) => t.subKey || 'PMT-' + t.id
 
@@ -35,7 +38,9 @@ export const activeSprint = (sprints: Sprint[], epic: string) =>
 export const sprintsOf = (sprints: Sprint[], epic: string) =>
   sprints.filter(x => x.epic === epic).sort((a, b) => (a.start < b.start ? -1 : 1))
 
-export const nextTaskId = (tasks: Task[]) => Math.max(0, ...tasks.filter(t => !t.parent).map(t => t.id)) + 1
+/** Next free number-like id among top-level tickets; backend ids (not numbers) are skipped. */
+export const nextTaskId = (tasks: Task[]): TaskId =>
+  String(Math.max(0, ...tasks.filter(t => !t.parent).map(t => Number(t.id)).filter(Number.isFinite)) + 1)
 
 /** First line of the description without markdown symbols. */
 export const blurb = (desc: string) =>
@@ -65,8 +70,10 @@ export const nextEntryId = (entries: TimeEntry[]) => Math.max(0, ...entries.map(
  * The ticket a `?ticket=` value names: a number ("12") or a key ("PMT-12").
  * Returns null for anything else, so a bad link opens nothing.
  */
-export const ticketIdFromParam = (v: string | null | undefined): number | null => {
+export const ticketIdFromParam = (v: string | null | undefined): TaskId | null => {
   if (v == null) return null
   const m = /^(?:PMT-)?(\d+)$/i.exec(v.trim())
-  return m ? +m[1] : null
+  if (m) return String(+m[1])
+  // A backend id, as the link carries it.
+  return /^[a-z0-9~-]+$/i.test(v.trim()) ? v.trim() : null
 }

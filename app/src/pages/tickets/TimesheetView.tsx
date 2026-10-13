@@ -182,7 +182,7 @@ export function TimesheetView() {
           userId: pid,
           user: pname,
           type: f.type,
-          task: +f.task,
+          task: f.task,
           notes: f.notes.trim(),
           bill,
           non,

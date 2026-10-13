@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent as Reac
 import { useLocation } from 'react-router'
 import { useEntries } from '../../api/queries'
 import type { Command } from '../../api/commands'
-import type { Attachment, Subtask, Task } from '../../api/types'
+import type { Attachment, Subtask, Task, TaskId } from '../../api/types'
 import { Markdown } from '../../components/Markdown'
 import { Avatar, Backdrop, CloseButton, CountPill, Icon, Label, PATHS, Scrim, TabButton, unassigned } from '../../components/ui'
 import { diff, fmt, short, TODAY } from '../../lib/dates'
@@ -48,11 +48,11 @@ const subsOf = (raw: Task, tasks: Task[]): Subtask[] =>
   })
 
 /** The full ticket, opened from the board, plan or timeline. Subtasks open in the same drawer. */
-export function TicketDrawer({ id }: { id: number }) {
+export function TicketDrawer({ id }: { id: TaskId }) {
   const tasks = useScopedTasks() ?? []
   const overlay = useOverlay()
   const isClient = useIsClient()
-  const [navStack, setNavStack] = useState<number[]>([])
+  const [navStack, setNavStack] = useState<TaskId[]>([])
   const [initialTab, setInitialTab] = useState<Tab>('details')
   const [railHide, setRailHide] = useState<boolean | null>(null)
   const raw0 = tasks.find(t => t.id === id)
@@ -63,7 +63,7 @@ export function TicketDrawer({ id }: { id: number }) {
     // Only the item and the role decide the redirect.
   }, [isClient, isBug, id])
 
-  const go = (to: number, tab: Tab = 'details', stack = navStack) => {
+  const go = (to: TaskId, tab: Tab = 'details', stack = navStack) => {
     setNavStack(stack)
     setInitialTab(tab)
     overlay.open('ticket', to, { replace: true })
@@ -115,10 +115,10 @@ function TicketBody({
   raw0: Task
   tasks: Task[]
   initialTab: Tab
-  navStack: number[]
+  navStack: TaskId[]
   railHide: boolean | null
   setRailHide: (v: boolean) => void
-  go: (to: number, tab?: Tab, stack?: number[]) => void
+  go: (to: TaskId, tab?: Tab, stack?: TaskId[]) => void
   onClose: () => void
 }) {
   const ws = useScopedWorkspace()!
@@ -225,7 +225,7 @@ function TicketBody({
       go(x.sid, 'details', stack)
       return
     }
-    const sid = 100000 + parent.id * 100 + i + 1
+    const sid = `${parent.id}.${i + 1}`
     const rec: Task = {
       id: sid,
       parent: parent.id,
@@ -922,8 +922,8 @@ function TicketBody({
                         <select
                           value=""
                           onChange={e => {
-                            const v = +e.target.value
-                            if (v) upd({ deps: [...raw.deps, v] }, 'linked PMT-' + v + ' as a blocker')
+                            const o = tasks.find(t => t.id === e.target.value)
+                            if (o) upd({ deps: [...raw.deps, o.id] }, 'linked ' + taskKey(o) + ' as a blocker')
                           }}
                           className="absolute inset-0 w-full cursor-pointer opacity-0"
                         >

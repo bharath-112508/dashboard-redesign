@@ -6,7 +6,7 @@ import { INTERNAL_PROJECTS_SEED, withDriverAppSupport } from './projects/seed'
 import { linkDevopsProjects, upgradeDevopsNames } from './devops/seed'
 import { withInvoiceMatch } from '../features/invoice-match/commands'
 import { linkChatAnswers } from './clients/commands'
-import type { Db } from './types'
+import type { Db, TaskId } from './types'
 import { setSaveProblem } from '../components/SaveNotice'
 import { refusal } from './session/permissions'
 import { readSession } from './session/store'
@@ -32,7 +32,7 @@ import { ApiError } from './http/client'
  */
 
 /** What a write did: the mock's numeric id for a new item, or (API mode) the backend's id. */
-export type SendResult = { id?: number; apiId?: string }
+export type SendResult = { id?: TaskId; apiId?: string }
 
 /** Thrown by `server.send` when the signed-in person's role may not run the command (see session/permissions.ts). */
 export class RefusedError extends Error {}
@@ -73,8 +73,8 @@ const isDb = (v: unknown): v is Db => {
  * Everything else is kept, so nobody loses their tickets on upgrade.
  */
 const migrate = (v: unknown): unknown => {
-  if (isObj(v) && v.version === 2) return stringPersonIds(migrate3(upgrade2(v)))
-  if (isObj(v) && (v.version === 3 || v.version === 4 || v.version === DB_VERSION)) return stringPersonIds(migrate3(v))
+  if (isObj(v) && v.version === 2) return stringTaskIds(stringPersonIds(migrate3(upgrade2(v))))
+  if (isObj(v) && typeof v.version === 'number' && v.version >= 3 && v.version <= DB_VERSION) return stringTaskIds(stringPersonIds(migrate3(v)))
   return v
 }
 
@@ -104,6 +104,31 @@ export const stringPersonIds = (v: unknown): unknown => {
       contacts: each(c.contacts, k => ({ ...k, personId: s(k.personId) })),
       projects: each(c.projects, withTeam),
     })),
+  }
+}
+
+/**
+ * Version 6: ticket ids are strings, as the backend's are. Converts every
+ * stored ticket reference; safe to run on every load.
+ */
+export const stringTaskIds = (v: unknown): unknown => {
+  if (!isObj(v)) return v
+  const s = (x: unknown) => (typeof x === 'number' ? String(x) : x)
+  const each = (list: unknown, fn: (o: Record<string, unknown>) => Record<string, unknown>) =>
+    Array.isArray(list) ? list.map(o => (isObj(o) ? fn(o) : o)) : list
+  const withTask = (o: Record<string, unknown>) => ('task' in o ? { ...o, task: s(o.task) } : o)
+  return {
+    ...v,
+    version: DB_VERSION,
+    tasks: each(v.tasks, t => ({
+      ...t,
+      id: s(t.id),
+      ...(Array.isArray(t.deps) ? { deps: t.deps.map(s) } : {}),
+      ...('parent' in t ? { parent: s(t.parent) } : {}),
+      ...(Array.isArray(t.subs) ? { subs: each(t.subs, k => ('sid' in k ? { ...k, sid: s(k.sid) } : k)) } : {}),
+    })),
+    entries: each(v.entries, withTask),
+    questions: each(v.questions, withTask),
   }
 }
 

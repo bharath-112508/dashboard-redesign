@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { Attachment, ChatFile, ChatMessage, ClientPriority, Question, Task } from '../../api/types'
+import type { Attachment, ChatFile, ChatMessage, ClientPriority, Question, Task, TaskId } from '../../api/types'
 import { Avatar, CloseButton, Icon, Label, PATHS } from '../../components/ui'
 import { diff, fmt, todayLabel, TODAY } from '../../lib/dates'
 import { isImageName, readFiles } from '../../lib/files'
@@ -49,7 +49,7 @@ interface Model {
 }
 
 /** A question from the team, or a bug the client reported: the item on the left, the chat on the right. */
-export function ConversationModal({ bugId, questionId }: { bugId?: number; questionId?: number }) {
+export function ConversationModal({ bugId, questionId }: { bugId?: TaskId; questionId?: number }) {
   const tasks = useScopedTasks() ?? []
   const questions = useScopedQuestions() ?? []
   const overlay = useOverlay()

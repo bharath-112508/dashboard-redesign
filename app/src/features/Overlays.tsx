@@ -19,7 +19,7 @@ export function Overlays() {
   }
   // ?ticket= takes a number or a key such as PMT-12 (My tickets links use the key).
   const ticket = ticketIdFromParam(get('ticket'))
-  const bug = num('bug')
+  const bug = ticketIdFromParam(get('bug'))
   const question = num('question')
   const request = num('request')
   const sprint = get('sprint')

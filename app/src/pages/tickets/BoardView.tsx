@@ -1,6 +1,6 @@
 import { useState, type DragEvent, type ReactNode } from 'react'
 import { useRequests, useSend, useWorkspace } from '../../api/queries'
-import type { DevopsRequest, Priority, Task } from '../../api/types'
+import type { DevopsRequest, Priority, Task, TaskId } from '../../api/types'
 import { Icon, PATHS } from '../../components/ui'
 import { diff, short, TODAY } from '../../lib/dates'
 import { usePerson } from '../../state/page'
@@ -29,7 +29,7 @@ export function BoardView() {
   const openTask = useOpenTask()
   const openRequest = useOpenRequest()
   const createTicket = useCreateTicket()
-  const [dragId, setDragId] = useState<number | null>(null)
+  const [dragId, setDragId] = useState<TaskId | null>(null)
   const [over, setOver] = useState<string | null>(null)
 
   const sprintShort = (id: string | null) => {

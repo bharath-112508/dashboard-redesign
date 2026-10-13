@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useScopedTasks, useScopedWorkspace, useActorSendAsync, useActorName } from '../state/access'
-import type { Task } from '../api/types'
+import type { Task, TaskId } from '../api/types'
 import { TODAY } from '../lib/dates'
 import { activeSprint, nextTaskId } from '../domain/tasks'
 import { useOverlay } from '../state/ui'
@@ -32,14 +32,14 @@ export const useCreateTicket = () => {
   const me = useActorName()
   const overlay = useOverlay()
   /** Whether the ticket window still shows `id` (the user may have moved on). */
-  const showing = (id: number) => new URLSearchParams(window.location.search).get('ticket') === String(id)
+  const showing = (id: TaskId) => new URLSearchParams(window.location.search).get('ticket') === String(id)
   /** `top` adds the ticket at the top of its column instead of the bottom. */
   return async (p: { epic: string; sprint?: string | null; status?: string; type?: Task['type']; top?: boolean }) => {
     if (!ws) return
     const id = nextTaskId(tasks)
     const sprint = p.sprint !== undefined ? p.sprint : activeSprint(ws.sprints, p.epic)?.id ?? null
     overlay.open('ticket', id)
-    let saved: { id?: number }
+    let saved: { id?: TaskId }
     try {
       saved = await send({
         type: p.top ? 'tickets.task.createTop' : 'task.create',

@@ -463,21 +463,21 @@ test.describe('Clients: a client only raises bugs and answers questions', () => 
   })
 
   test('CL-28 the command layer refuses commands a client forges, and still runs them for the team', async ({ page }) => {
-    const task = (id: number, title: string) => ({
+    const task = (id: string, title: string) => ({
       id, title, type: 'Task', status: 'todo', prio: 'Medium', due: '', assignee: '', assignees: [], contribs: [], est: '',
       desc: '', atts: [], subs: [], deps: [], epic: 'mob', sprint: null, start: '2026-10-10', time: {}, acts: [],
     })
     const forged = [
-      { type: 'task.create', task: task(9001, 'Forged client task') },
-      { type: 'task.update', id: 13, patch: { desc: 'Forged description' }, log: 'edited' },
-      { type: 'task.update', id: 13, patch: { subs: [{ t: 'Forged subtask', done: false }] } },
-      { type: 'task.update', id: 13, patch: { time: { '2026-10-10': 5 } }, log: 'logged 5h' },
-      { type: 'task.update', id: 13, patch: { status: 'prog' }, log: 'moved it to In progress' },
-      { type: 'task.comment', id: 13, text: 'Forged comment' },
+      { type: 'task.create', task: task('9001', 'Forged client task') },
+      { type: 'task.update', id: '13', patch: { desc: 'Forged description' }, log: 'edited' },
+      { type: 'task.update', id: '13', patch: { subs: [{ t: 'Forged subtask', done: false }] } },
+      { type: 'task.update', id: '13', patch: { time: { '2026-10-10': 5 } }, log: 'logged 5h' },
+      { type: 'task.update', id: '13', patch: { status: 'prog' }, log: 'moved it to In progress' },
+      { type: 'task.comment', id: '13', text: 'Forged comment' },
       { type: 'request.create', request: { id: 9001, key: 'OPS-101', pname: 'Daco platform', rkey: 'REQ-9001', type: 'Deployment', prio: 'Medium', to: '', text: 'Forged request', by: 'Ingrid Solberg', when: 'just now' } },
-      { type: 'question.create', question: { id: 9001, by: 'Ingrid Solberg', title: 'Forged question', text: '', when: 'just now', task: 13, answer: '' } },
+      { type: 'question.create', question: { id: 9001, by: 'Ingrid Solberg', title: 'Forged question', text: '', when: 'just now', task: '13', answer: '' } },
       // A batch that hides a refused command among allowed ones is refused as a whole.
-      { type: 'batch', cmds: [{ type: 'batch', cmds: [] }, { type: 'task.comment', id: 13, text: 'Forged in a batch' }] },
+      { type: 'batch', cmds: [{ type: 'batch', cmds: [] }, { type: 'task.comment', id: '13', text: 'Forged in a batch' }] },
     ]
     await signIn(page, 'cadmin')
     await openBoard(page)
@@ -492,14 +492,14 @@ test.describe('Clients: a client only raises bugs and answers questions', () => 
     expect(stored).toContain('"devopsLinks"')
     for (const text of ['Forged client task', 'Forged description', 'Forged subtask', 'Forged comment', 'Forged request', 'Forged question', 'Forged in a batch'])
       expect(stored).not.toContain(text)
-    const t13 = await page.evaluate(() => JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}').tasks.find((t: { id: number }) => t.id === 13))
+    const t13 = await page.evaluate(() => JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}').tasks.find((t: { id: string }) => t.id === '13'))
     expect(t13.status).toBe('todo')
     expect(t13.time ?? {}).toEqual({})
 
     // The same write from a team member goes through.
     await signIn(page, 'pm')
     await openBoard(page)
-    expect(await sendCommand(page, { type: 'task.comment', id: 13, text: 'Team comment via the command layer' })).toEqual({ ok: true })
+    expect(await sendCommand(page, { type: 'task.comment', id: '13', text: 'Team comment via the command layer' })).toEqual({ ok: true })
     await waitSaved(page, 'Team comment via the command layer')
   })
 })

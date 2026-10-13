@@ -1,5 +1,5 @@
 import { nextTaskId } from '../domain/tasks'
-import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, PersonId, Question, RequestComment, Sprint, Task } from './types'
+import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, PersonId, Question, RequestComment, Sprint, Task, TaskId } from './types'
 import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
 import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/commands'
 import { reduceCompanies, touchesCompanies, type CompaniesCommand } from './companies/commands'
@@ -21,10 +21,10 @@ export type Command =
   /** `top`: put the task first in the list (the header "+" on the Bugs column). */
   | { type: 'task.create'; task: Task; top?: boolean }
   /** `who` is the signed-in person; it names the author of the activity line. */
-  | { type: 'task.update'; id: number; patch: Partial<Task>; log?: string; who?: string }
-  | { type: 'task.delete'; id: number }
-  | { type: 'task.comment'; id: number; text: string; who?: string }
-  | { type: 'bug.message'; id: number; message: ChatMessage }
+  | { type: 'task.update'; id: TaskId; patch: Partial<Task>; log?: string; who?: string }
+  | { type: 'task.delete'; id: TaskId }
+  | { type: 'task.comment'; id: TaskId; text: string; who?: string }
+  | { type: 'bug.message'; id: TaskId; message: ChatMessage }
   | { type: 'question.message'; id: number; message: ChatMessage }
   | { type: 'request.comment'; id: number; comment: RequestComment }
   // Shared by the Tickets page and the DevOps board.
@@ -84,7 +84,7 @@ export const touches = (cmd: Command): Resource[] => {
   }
 }
 
-const mapTask = (db: Db, id: number, f: (t: Task) => Task): Db => ({
+const mapTask = (db: Db, id: TaskId, f: (t: Task) => Task): Db => ({
   ...db,
   tasks: db.tasks.map(t => (t.id === id ? f(t) : t)),
 })
@@ -119,7 +119,7 @@ export const assignIds = (db: Db, cmd: Command): Command => {
 }
 
 /** The id of the top-level task a command creates, if it creates one. */
-export const createdId = (cmd: Command): number | undefined =>
+export const createdId = (cmd: Command): TaskId | undefined =>
   cmd.type === 'task.create' || cmd.type === 'tickets.task.createTop' ? cmd.task.id : undefined
 
 export const reduce = (db: Db, input: Command): Db => {

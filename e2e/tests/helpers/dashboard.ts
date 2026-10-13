@@ -20,11 +20,11 @@ export async function primeStore(page: Page) {
  * Sets a ticket's due date in the stored db, then reloads so the page reads it.
  * Used to create overdue tickets, since the seed has none open. Needs primeStore first.
  */
-export async function setTaskDue(page: Page, taskId: number, due: string) {
+export async function setTaskDue(page: Page, taskId: string, due: string) {
   await page.evaluate(
     ([key, id, d]) => {
       const db = JSON.parse(localStorage.getItem(key) as string)
-      const task = db.tasks.find((t: { id: number }) => t.id === id)
+      const task = db.tasks.find((t: { id: string }) => t.id === id)
       if (!task) throw new Error(`no task ${id}`)
       task.due = d
       localStorage.setItem(key, JSON.stringify(db))

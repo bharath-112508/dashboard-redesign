@@ -83,7 +83,7 @@ const hist = (who: string, what: string, when: string): Activity => ({ kind: 'hi
 /** The project's delivered tickets, numbered from `firstId` (the prototype used 9000+, which would push every new ticket key past PMT-9000). */
 export const imTasks = (firstId: number): Task[] =>
   IM_TASK_ROWS.map(([title, type, epic, sprint, assignee, due], k) => ({
-    id: firstId + k,
+    id: String(firstId + k),
     title,
     type,
     status: 'done',

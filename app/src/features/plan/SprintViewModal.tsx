@@ -10,6 +10,7 @@ import { statusOf, taskKey } from '../../domain/tasks'
 import { useOpenTask } from '../useOpenTask'
 import { useEscape } from '../useEscape'
 import type { Command } from '../../api/commands'
+import type { TaskId } from '../../api/types'
 import { onActivate } from './keyboard'
 
 const C = 2 * Math.PI * 50
@@ -27,7 +28,7 @@ export function SprintViewModal({ id }: { id: string }) {
   const me = useMe()
   const { side } = usePage()
   const [picking, setPicking] = useState(false)
-  const [picked, setPicked] = useState<number[]>([])
+  const [picked, setPicked] = useState<TaskId[]>([])
   const [confirming, setConfirming] = useState(false)
 
   const x = ws.sprints.find(y => y.id === id)

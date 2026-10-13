@@ -15,7 +15,7 @@ describe('refuseBeforeSending (API mode)', () => {
     const qc = new QueryClient()
     qc.setQueryData(['tasks'], [])
     refusal.mockReturnValueOnce('A client user cannot delete a ticket.')
-    expect(() => refuseBeforeSending(qc, { type: 'task.delete', id: 1 })).toThrow(RefusedError)
+    expect(() => refuseBeforeSending(qc, { type: 'task.delete', id: '1' })).toThrow(RefusedError)
   })
 
   it('leaves company and project commands to the backend, which knows what each client may do there', () => {

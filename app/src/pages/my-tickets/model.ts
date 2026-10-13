@@ -1,6 +1,6 @@
 import { diff, TODAY } from '../../lib/dates'
 import type { Epic, Sprint, Task, TimeEntry } from '../../api/types'
-import { assigneesOf, estimateHours, isCritical, isOverdue, loggedHours } from '../../domain/tasks'
+import { assigneesOf, compareTaskIds, estimateHours, isCritical, isOverdue, loggedHours } from '../../domain/tasks'
 
 /**
  * My tickets is a view over the same ticket and time store as the Tickets page,
@@ -68,7 +68,7 @@ export const groupMine = (tasks: Task[], by: 'due' | 'sprint' | 'proj', sprints:
   const byDue = (a: Task, b: Task) => {
     const ka = a.due || '\uffff'
     const kb = b.due || '\uffff'
-    return ka < kb ? -1 : ka > kb ? 1 : a.id - b.id
+    return ka < kb ? -1 : ka > kb ? 1 : compareTaskIds(a.id, b.id)
   }
   const map = new Map<string, Group>()
   const put = (key: string, label: string, t: Task) => {
@@ -129,7 +129,7 @@ export const needsYou = (mine: Task[]) =>
       if (isCritical(a) !== isCritical(b)) return isCritical(a) ? -1 : 1
       const ka = a.due || '\uffff'
       const kb = b.due || '\uffff'
-      return ka < kb ? -1 : ka > kb ? 1 : a.id - b.id
+      return ka < kb ? -1 : ka > kb ? 1 : compareTaskIds(a.id, b.id)
     })
 
 /**

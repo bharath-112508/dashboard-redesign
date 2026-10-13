@@ -1,5 +1,5 @@
 import { useState, type DragEvent, type KeyboardEvent } from 'react'
-import type { DevopsRequest, Priority, Task } from '../../api/types'
+import type { DevopsRequest, Priority, Task, TaskId } from '../../api/types'
 import { Icon, PATHS } from '../../components/ui'
 import { diff, short, TODAY } from '../../lib/dates'
 import { activeSprint, nextTaskId } from '../../domain/tasks'
@@ -46,7 +46,7 @@ export function BoardView() {
   const list = useBoardTasks()
   const requests = useScopedRequests() ?? []
   const questions = useScopedQuestions() ?? []
-  const [dragId, setDragId] = useState<number | null>(null)
+  const [dragId, setDragId] = useState<TaskId | null>(null)
   /** The column with the quick-add field open, and what is typed in it. */
   const [adding, setAdding] = useState<{ status: string; title: string } | null>(null)
   const [over, setOver] = useState<string | null>(null)

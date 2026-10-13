@@ -58,7 +58,7 @@ test.describe('Dashboard', () => {
     await page.clock.setFixedTime(new Date('2026-10-10T12:00:00'))
     await primeStore(page)
     await openDashboard(page, 'admin', 'Vivek')
-    await setTaskDue(page, 10, '2026-10-08')
+    await setTaskDue(page, '10', '2026-10-08')
     await page.getByRole('button', { name: /Overdue tickets/i }).click()
     const drawer = page.getByRole('dialog', { name: 'Overdue tickets' })
     await expect(drawer).toContainText('1 ticket')
@@ -320,7 +320,7 @@ test.describe('My tickets', () => {
   test('MT-04 grouping by due date shows due groups, including Overdue', async ({ page }) => {
     await primeStore(page)
     await openMyTickets(page, 'dev')
-    await setTaskDue(page, 10, '2026-10-08')
+    await setTaskDue(page, '10', '2026-10-08')
     await expect(listCard(page).getByText('Overdue', { exact: true })).toBeVisible()
     await expect(listCard(page).locator('[data-row="PMT-10"]')).toBeVisible()
     await expect(page.getByLabel('Group by')).toHaveValue('due')

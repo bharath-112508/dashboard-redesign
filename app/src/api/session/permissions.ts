@@ -1,5 +1,5 @@
 import type { Command } from '../commands'
-import type { Db, PersonId, Session, Task } from '../types'
+import type { Db, PersonId, Session, Task, TaskId } from '../types'
 import { buildScope, scopeQuestions } from '../../domain/scope'
 import { isClientRole } from './access'
 
@@ -37,7 +37,7 @@ export const refusal = (db: Db, cmd: Command, actor: Actor | null): string | nul
 const clientRefusal = (db: Db, cmd: Command, actor: Actor): string | null => {
   const scope = buildScope(actor.orgId, db.companies ?? [], db.workspace)
   const tasks = db.tasks ?? []
-  const ownBug = (id: number) => {
+  const ownBug = (id: TaskId) => {
     const t = tasks.find(x => x.id === id)
     return !!t && !!t.clientBug && !t.parent && scope.epicIds.includes(t.epic)
   }

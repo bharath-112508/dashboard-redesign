@@ -100,29 +100,29 @@ const base = (t: Partial<Seed> & Pick<Seed, 'id' | 'title' | 'type' | 'status' |
 
 const buildTasks = (sprints: Sprint[]): Task[] => {
   const T0: Seed[] = [
-    base({ id: 1, title: 'Add company', type: 'Bug', status: 'todo', prio: 'Low', due: '2026-10-17',
+    base({ id: '1', title: 'Add company', type: 'Bug', status: 'todo', prio: 'Low', due: '2026-10-17',
       desc: 'A user should be able to register company directly from here in way of pop up while creating the project.',
       atts: [{ name: 'Screenshot 2026-10-07.png', size: '93 KB', date: '7 Oct 2026' }],
       acts: [hist('Bharath Reddy Panyala', 'added an attachment', '2d ago'), hist('Bharath Reddy Panyala', 'created the task', '2d ago')] }),
-    base({ id: 2, title: 'naming system is not uniform', type: 'Bug', status: 'todo', prio: 'Low', due: '2026-10-14', acts: [hist('Bharath Reddy Panyala', 'created the task', '2d ago')] }),
-    base({ id: 3, title: 'Creating ticket', type: 'Bug', status: 'todo', prio: 'Low', due: '2026-10-13', acts: [hist('Bharath Reddy Panyala', 'created the task', '2d ago')] }),
-    base({ id: 4, title: 'Link tickets to the DevOps board', type: 'Task', status: 'todo', prio: 'Medium', due: '2026-10-20', assignee: 'Rahul', est: '6h', acts: [hist('Rahul', 'created the task', '1d ago')] }),
-    base({ id: 5, title: 'Notify the assignee on @mentions', type: 'Task', status: 'todo', prio: 'Medium', due: '2026-10-22', acts: [hist('Rahul', 'created the task', '1d ago')] }),
-    base({ id: 6, title: 'Custom statuses per project', type: 'Story', status: 'todo', prio: 'Low', due: '2026-10-28', acts: [hist('Rahul', 'created the task', '1d ago')] }),
-    base({ id: 7, title: 'Export timesheet to CSV', type: 'Task', status: 'todo', prio: 'Low', due: '2026-10-30', acts: [hist('Rahul', 'created the task', '1d ago')] }),
-    base({ id: 8, title: 'Email reminders before the due date', type: 'Story', status: 'todo', prio: 'Medium', due: '2026-11-04', acts: [hist('Rahul', 'created the task', '1d ago')] }),
-    base({ id: 9, title: 'Onboarding screens', type: 'Story', status: 'done', prio: 'Medium', due: '2026-10-03', assignee: 'Rahul', contribs: ['Chary'], est: '12h', acts: [hist('Rahul', 'created the task', '2w ago')] }),
-    base({ id: 10, title: 'Login with BankID', type: 'Task', status: 'prog', prio: 'High', due: '2026-10-15', assignee: 'Chary', est: '8h',
+    base({ id: '2', title: 'naming system is not uniform', type: 'Bug', status: 'todo', prio: 'Low', due: '2026-10-14', acts: [hist('Bharath Reddy Panyala', 'created the task', '2d ago')] }),
+    base({ id: '3', title: 'Creating ticket', type: 'Bug', status: 'todo', prio: 'Low', due: '2026-10-13', acts: [hist('Bharath Reddy Panyala', 'created the task', '2d ago')] }),
+    base({ id: '4', title: 'Link tickets to the DevOps board', type: 'Task', status: 'todo', prio: 'Medium', due: '2026-10-20', assignee: 'Rahul', est: '6h', acts: [hist('Rahul', 'created the task', '1d ago')] }),
+    base({ id: '5', title: 'Notify the assignee on @mentions', type: 'Task', status: 'todo', prio: 'Medium', due: '2026-10-22', acts: [hist('Rahul', 'created the task', '1d ago')] }),
+    base({ id: '6', title: 'Custom statuses per project', type: 'Story', status: 'todo', prio: 'Low', due: '2026-10-28', acts: [hist('Rahul', 'created the task', '1d ago')] }),
+    base({ id: '7', title: 'Export timesheet to CSV', type: 'Task', status: 'todo', prio: 'Low', due: '2026-10-30', acts: [hist('Rahul', 'created the task', '1d ago')] }),
+    base({ id: '8', title: 'Email reminders before the due date', type: 'Story', status: 'todo', prio: 'Medium', due: '2026-11-04', acts: [hist('Rahul', 'created the task', '1d ago')] }),
+    base({ id: '9', title: 'Onboarding screens', type: 'Story', status: 'done', prio: 'Medium', due: '2026-10-03', assignee: 'Rahul', contribs: ['Chary'], est: '12h', acts: [hist('Rahul', 'created the task', '2w ago')] }),
+    base({ id: '10', title: 'Login with BankID', type: 'Task', status: 'prog', prio: 'High', due: '2026-10-15', assignee: 'Chary', est: '8h',
       subs: [{ t: 'Test flow', done: false }, { t: 'Error states', done: true }], acts: [hist('Rahul', 'created the task', '1w ago')] }),
-    base({ id: 11, title: 'Push notifications setup', type: 'Task', status: 'todo', prio: 'Medium', due: '2026-10-17', assignee: 'Rahul', est: '6h', acts: [hist('Rahul', 'created the task', '1w ago')] }),
-    base({ id: 12, title: 'App crashes when opening a task offline', type: 'Bug', status: 'review', prio: 'Critical', due: '2026-10-12', assignee: 'Chary', est: '3h', acts: [hist('Chary', 'created the task', '3d ago')] }),
-    base({ id: 13, title: 'Offline mode for the task list', type: 'Story', status: 'todo', prio: 'Medium', due: '2026-10-24', assignee: 'Vivek', acts: [hist('Rahul', 'created the task', '1w ago')] }),
-    base({ id: 14, title: 'Profile and settings', type: 'Task', status: 'todo', prio: 'Low', due: '2026-11-06', assignee: 'Bharath Reddy Panyala', acts: [hist('Rahul', 'created the task', '1w ago')] }),
-    base({ id: 15, title: 'Dark mode', type: 'Story', status: 'todo', prio: 'Low', due: '', acts: [hist('Rahul', 'created the task', '1w ago')] }),
-    base({ id: 16, title: 'App Store and Play Store release', type: 'Task', status: 'todo', prio: 'High', due: '2026-12-18', assignee: 'Rahul', acts: [hist('Rahul', 'created the task', '1w ago')] }),
+    base({ id: '11', title: 'Push notifications setup', type: 'Task', status: 'todo', prio: 'Medium', due: '2026-10-17', assignee: 'Rahul', est: '6h', acts: [hist('Rahul', 'created the task', '1w ago')] }),
+    base({ id: '12', title: 'App crashes when opening a task offline', type: 'Bug', status: 'review', prio: 'Critical', due: '2026-10-12', assignee: 'Chary', est: '3h', acts: [hist('Chary', 'created the task', '3d ago')] }),
+    base({ id: '13', title: 'Offline mode for the task list', type: 'Story', status: 'todo', prio: 'Medium', due: '2026-10-24', assignee: 'Vivek', acts: [hist('Rahul', 'created the task', '1w ago')] }),
+    base({ id: '14', title: 'Profile and settings', type: 'Task', status: 'todo', prio: 'Low', due: '2026-11-06', assignee: 'Bharath Reddy Panyala', acts: [hist('Rahul', 'created the task', '1w ago')] }),
+    base({ id: '15', title: 'Dark mode', type: 'Story', status: 'todo', prio: 'Low', due: '', acts: [hist('Rahul', 'created the task', '1w ago')] }),
+    base({ id: '16', title: 'App Store and Play Store release', type: 'Task', status: 'todo', prio: 'High', due: '2026-12-18', assignee: 'Rahul', acts: [hist('Rahul', 'created the task', '1w ago')] }),
   ]
   // [epic, sprint, start]
-  const PLACE: Record<number, [string, string | null, string]> = {
+  const PLACE: Record<string, [string, string | null, string]> = {
     1: ['web', 'w1', '2026-10-08'], 2: ['web', 'w1', '2026-10-08'], 3: ['web', 'w1', '2026-10-09'], 4: ['web', 'w1', '2026-10-12'],
     5: ['web', 'w2', '2026-10-19'], 6: ['web', 'w2', '2026-10-21'], 7: ['web', null, '2026-10-21'], 8: ['web', null, '2026-10-26'],
     9: ['mob', 'm1', '2026-09-29'], 10: ['mob', 'm2', '2026-10-06'], 11: ['mob', 'm2', '2026-10-12'], 12: ['mob', 'm2', '2026-10-09'],
@@ -163,7 +163,7 @@ const buildTasks = (sprints: Sprint[]): Task[] => {
   ]
   clientBugs.forEach((b, i) => {
     tasks.push({
-      id: 17 + i,
+      id: String(17 + i),
       title: b.title,
       type: 'Bug',
       status: 'todo',
@@ -213,7 +213,7 @@ const ENTRIES: TimeEntry[] = (
   userId: personIdByName(r[1]),
   user: r[1],
   type: r[2],
-  task: r[3],
+  task: String(r[3]),
   notes: r[4],
   bill: r[5],
   non: r[6],
@@ -237,14 +237,14 @@ const ALL_ENTRIES: TimeEntry[] = [
     userId: personIdByName(user),
     user,
     type: 'General',
-    task,
+    task: String(task),
     notes: '',
     bill,
     non: 0,
   })),
 ]
 
-export const DB_VERSION = 5
+export const DB_VERSION = 6
 
 export const createSeed = (): Db => {
   const sprints = buildSprints()
@@ -278,7 +278,7 @@ export const createSeed = (): Db => {
         title: 'Which languages at launch?',
         text: 'Should the app support only Swedish at launch, or English too? This decides how we set up translations for every screen.',
         when: '2 days ago',
-        task: 10,
+        task: '10',
         answer: '',
       },
       {

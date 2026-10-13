@@ -1,5 +1,5 @@
 import { taskKey } from '../../domain/tasks'
-import type { Company, InternalProject, Task, TimeEntry } from '../types'
+import type { Company, InternalProject, Task, TaskId, TimeEntry } from '../types'
 
 /**
  * Projects on time entries. A value is `c:<client project id>` or `i:<internal project id>`.
@@ -70,7 +70,7 @@ export const projectOfEpic = (epic: string | undefined, companies: Company[]): s
 }
 
 /** The project a ticket's time belongs to, from its epic. */
-export const projectOfTask = (taskId: number, tasks: Task[], companies: Company[]): string | undefined =>
+export const projectOfTask = (taskId: TaskId, tasks: Task[], companies: Company[]): string | undefined =>
   projectOfEpic(tasks.find(t => t.id === taskId)?.epic, companies)
 
 /** The project of an entry: the stored one, or the one its ticket implies (for entries written before `project` existed). */

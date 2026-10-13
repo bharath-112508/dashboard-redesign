@@ -1,6 +1,6 @@
 import type { DevopsDb } from '../devops/types'
-import type { Company, DevopsRequest, Person, PersonId, Priority, Question, Role, Session, Task, TaskType, TimeEntry, Workspace } from '../types'
-import { activeSprint, assigneesOf, estimateHours, loggedHours, statusOf, taskKey } from '../../domain/tasks'
+import type { Company, DevopsRequest, Person, PersonId, Priority, Question, Role, Session, Task, TaskId, TaskType, TimeEntry, Workspace } from '../types'
+import { activeSprint, assigneesOf, compareTaskIds, estimateHours, loggedHours, statusOf, taskKey } from '../../domain/tasks'
 import { addDays, diff, short } from '../../lib/dates'
 import { isClientRole } from '../session/access'
 import { APPROVALS, BUDGETS, LEAVE_ATTENDANCE, type StaticListRow } from './static'
@@ -155,7 +155,7 @@ export interface Widget {
 }
 
 export interface DrawerRow {
-  id: number
+  id: TaskId
   key: string
   title: string
   prio: Priority
@@ -986,7 +986,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
             rows: top
               .filter(t => t.status === 'done')
               .slice()
-              .sort((a, b) => b.id - a.id)
+              .sort((a, b) => compareTaskIds(b.id, a.id))
               .slice(0, 4)
               .map((t): ListRow => ({ id: `dl-${t.id}`, tag: 'Done', tone: 'green', title: t.title, meta: epicName(t.epic), href: ROUTE.clients })),
           },

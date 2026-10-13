@@ -91,7 +91,7 @@ export function LogTime({ me, person, projects, defaultProject, projectLabel, ti
   const initials = avatarOf(person ?? { name: me.name, colour: '#1B2D45', photo: '' }, { showPhoto: false }).initials
 
   const onSave = handleSubmit(v => {
-    const task = v.mode === 'ticket' ? allTasks.find(t => t.id === +v.task) : undefined
+    const task = v.mode === 'ticket' ? allTasks.find(t => t.id === v.task) : undefined
     send(logTime({
         date: today,
         userId: me.personId,

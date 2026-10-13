@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { stringPersonIds } from './server'
+import { stringPersonIds, stringTaskIds } from './server'
 
 describe('stringPersonIds (DB version 5)', () => {
   const v4 = {
@@ -28,5 +28,30 @@ describe('stringPersonIds (DB version 5)', () => {
   it('leaves ids that are already strings alone, so running it twice changes nothing', () => {
     const once = stringPersonIds(v4)
     expect(stringPersonIds(once)).toEqual(once)
+  })
+})
+
+describe('stringTaskIds (DB version 6)', () => {
+  const v5 = {
+    version: 5,
+    tasks: [
+      { id: 12, title: 'Login', deps: [3, '4'], subs: [{ t: 'a', done: false, sid: 1201 }, { t: 'b', done: true }] },
+      { id: 1201, title: 'a', parent: 12, deps: [], subs: [] },
+    ],
+    entries: [{ id: 1, task: 12, bill: 2 }, { id: 2, task: null, area: 'Admin' }],
+    questions: [{ id: 3, task: 12, title: 'Q' }],
+  }
+
+  it('turns every stored ticket id into a string and keeps the rest of each record', () => {
+    const v6 = stringTaskIds(v5) as typeof v5
+    expect(v6.tasks[0]).toEqual({ id: '12', title: 'Login', deps: ['3', '4'], subs: [{ t: 'a', done: false, sid: '1201' }, { t: 'b', done: true }] })
+    expect(v6.tasks[1]).toMatchObject({ id: '1201', parent: '12' })
+    expect(v6.entries).toEqual([{ id: 1, task: '12', bill: 2 }, { id: 2, task: null, area: 'Admin' }])
+    expect(v6.questions[0]).toEqual({ id: 3, task: '12', title: 'Q' })
+  })
+
+  it('leaves ids that are already strings alone, so running it twice changes nothing', () => {
+    const once = stringTaskIds(v5)
+    expect(stringTaskIds(once)).toEqual(once)
   })
 })

@@ -77,11 +77,14 @@ export interface ChatMessage {
   files: ChatFile[]
 }
 
+/** Ticket id: a number-like string in the browser store, the backend's id in API mode. */
+export type TaskId = string
+
 export interface Subtask {
   t: string
   done: boolean
   /** Id of the full subtask record once it has been opened. */
-  sid?: number
+  sid?: TaskId
   due?: string
   assignee?: string
   note?: string
@@ -93,7 +96,7 @@ export interface ClientBugInfo {
 }
 
 export interface Task {
-  id: number
+  id: TaskId
   title: string
   type: TaskType
   status: string
@@ -106,14 +109,14 @@ export interface Task {
   desc: string
   atts: Attachment[]
   subs: Subtask[]
-  deps: number[]
+  deps: TaskId[]
   epic: string
   sprint: string | null
   start: string
   time: Record<string, number>
   acts: Activity[]
   /** Set on subtask records: id of the parent task. */
-  parent?: number
+  parent?: TaskId
   subKey?: string
   /** A ticket created from the plan view that has no title yet. */
   isNew?: boolean
@@ -134,7 +137,7 @@ export interface TimeEntry {
   user: string
   type: string
   /** Ticket id, or null for a text entry (then `area` is set). */
-  task: number | null
+  task: TaskId | null
   area?: string
   epic?: string
   /**
@@ -302,7 +305,7 @@ export interface Question {
   title: string
   text: string
   when: string
-  task: number | null
+  task: TaskId | null
   answer: string
   answeredWhen?: string
   comments?: ChatMessage[]
