@@ -23,7 +23,22 @@ cd app && npm run dev:api            # http://localhost:5200
 
 Sign in with a real Demo DB account. The `VITE_API_URL` variable switches the app into API mode (`src/api/http/config.ts`).
 
-What comes from the backend so far (Phase 1a): sign-in, sign-out, the session (name, role, company) and the people directory. Every other screen still shows the mock data. Also:
+What comes from the backend so far:
+
+- **Phase 1a:** sign-in, sign-out, the session (name, role, company) and the people directory.
+- **Phase 1b-1:** companies (profile, client contacts, Viljetech staff on the company, archive) and projects (client and internal: create, progress from their tasks, epics from the project's stories, team, state including Planned and Maintenance). The adapter is `src/api/http/companies.ts`.
+
+Every other screen (tickets, epics and sprints, timesheets, DevOps, questions, dashboard numbers) still shows the mock data, so in API mode a real project shows no epics in the Clients portal or the epic pickers yet.
+
+Companies and projects in API mode:
+
+- Adding a client contact creates a client user on that company with a random starting password nobody sees; the person sets their own with "Forgot password". The contact's admin switch makes them a client admin. A contact needs an email.
+- Making a client admin a regular contact again is refused by the backend for now.
+- Company logos are stored in the company as an image of at most 200 KB.
+- The support plan's hours used this month show 0 until timesheets come from the backend.
+- **Redesign Test AB** (archived), its project and its contact in the Demo DB were made by the API check on 13 Oct 2026; they are safe to ignore.
+
+Also:
 
 - In API mode the login page lists **Demo DB accounts**, one per user type (`src/api/http/sampleAccounts.ts`). Picking one fills in its email; type its password. Two types have no backend account yet and are shown greyed out with the reason: **Admin** (the backend's admins sign in as Super admin) and **DevOps engineer** (no DevOps role in the backend yet). Mock mode keeps the sample users and the `demo` password.
 - Backend roles map to the app's roles in `src/api/http/mappers.ts`: admin → Super admin, manager and team lead → Project manager, employee → Developer, client → Client admin, representative → Client user, and a custom `devops` role → DevOps engineer.
