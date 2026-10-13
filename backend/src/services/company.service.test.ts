@@ -747,6 +747,14 @@ describe('listRepresentatives — project scoping per role', () => {
         expect((row.projects as { code: string }[]).map((p) => p.code)).toEqual(['NFD']);
     });
 
+    it('returns each person\'s title, or an empty string when they have none', async () => {
+        stub([{ ...rep, client_profile: { title: 'Product owner' } }, client], [projA]);
+
+        const { data } = await svc.listRepresentatives(companyId, PAGE, adminCaller());
+
+        expect(data.map((r) => r.title)).toEqual(['Product owner', '']);
+    });
+
     it('a representative on no project gets an empty list, not every project', async () => {
         const lonely = { ...rep, _id: new Types.ObjectId() };
         stub([lonely], [projA, projB]);

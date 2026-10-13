@@ -34,9 +34,11 @@ export interface BackendUser {
   last_login_at: string | null
 }
 
+/** A stable non-negative number from an id, for picking colours. */
+export const hashOf = (id: string) => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7)
+
 /** A stable avatar colour from the person's id. */
-const colourOf = (id: string) =>
-  NEW_PERSON_COLOURS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % NEW_PERSON_COLOURS.length]
+const colourOf = (id: string) => NEW_PERSON_COLOURS[hashOf(id) % NEW_PERSON_COLOURS.length]
 
 const empOf = (t: 'staff' | 'freelancer' | null | undefined) =>
   t === 'freelancer' ? ('freelancer' as const) : t === 'staff' ? ('employee' as const) : undefined

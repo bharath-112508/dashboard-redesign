@@ -335,6 +335,7 @@ type PersonRow = {
     email: string;
     role: string;
     status: string;
+    client_profile?: { title?: string };
 };
 
 type ProjectRow = {
@@ -372,6 +373,8 @@ const shapePerson = (u: PersonRow, projects: ProjectRow[]): Record<string, unkno
         // distinction is the whole point of the roster, so it's surfaced.
         role: u.role,
         status: u.status,
+        /** Job title at the client, e.g. "CTO"; '' when none was given. */
+        title: u.client_profile?.title ?? '',
         /** How `projects` was derived — the UI must not label a
          *  company-level client's list as "assigned to". */
         project_access: isCompanyLevel ? 'company' : 'assigned',
@@ -400,7 +403,7 @@ export const listRepresentatives = async (
     const skip = (query.page - 1) * query.limit;
     const [rows, total, projects] = await Promise.all([
         User.find(filter)
-            .select('_id full_name email role status')
+            .select('_id full_name email role status client_profile.title')
             .sort({ full_name: 1 })
             .skip(skip)
             .limit(query.limit)
@@ -457,7 +460,7 @@ export const getRepresentative = async (
 
     const [person, projects] = await Promise.all([
         User.findOne({ _id: userId, ...peopleFilter(id) })
-            .select('_id full_name email role status')
+            .select('_id full_name email role status client_profile.title')
             .lean<PersonRow | null>(),
         Project.find({ company_id: id })
             .select('_id name code representative_ids')
