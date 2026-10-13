@@ -173,6 +173,12 @@ const defaultStatusOrderSchema = new Schema<DefaultStatusOrder>(
 
 // ─── Project document ────────────────────────────────────────────────────
 
+/** A delivered project's support agreement: a monthly quota of hours until a date. */
+export interface ProjectSupportPlan {
+    until: string;
+    quota_hours: number;
+}
+
 export interface ProjectDocument extends Document {
     _id: Types.ObjectId;
     name: string;
@@ -182,6 +188,10 @@ export interface ProjectDocument extends Document {
     end_date: string | null;
     status: ProjectStatus;
     is_archived: boolean;
+    /** Internal projects: the area the work belongs to (redesign). '' when unset. */
+    area: string;
+    /** Support agreement for a project in maintenance (redesign). */
+    support_plan: ProjectSupportPlan | null;
     member_ids: Types.ObjectId[];
     company_id: Types.ObjectId | null;
     representative_ids: Types.ObjectId[];
@@ -252,6 +262,17 @@ const projectSchema = new Schema<ProjectDocument>(
             default: PROJECT_STATUSES.ACTIVE,
         },
         is_archived: { type: Boolean, required: true, default: false },
+        area: { type: String, trim: true, default: '' },
+        support_plan: {
+            type: new Schema<ProjectSupportPlan>(
+                {
+                    until: { type: String, required: true, match: [ISO_DATE_REGEX, 'until must be YYYY-MM-DD'] },
+                    quota_hours: { type: Number, required: true, min: 0 },
+                },
+                { _id: false }
+            ),
+            default: null,
+        },
         member_ids: {
             type: [{ type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS }],
             default: [],

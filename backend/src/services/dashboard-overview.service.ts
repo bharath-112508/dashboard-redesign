@@ -121,8 +121,9 @@ const projectStatusForImpl = async (filter: Record<string, unknown>): Promise<Pr
     let completed = 0;
     let on_hold = 0;
     for (const r of rows) {
-        if (r._id === PROJECT_STATUSES.ACTIVE) active += r.count;
-        else if (r._id === PROJECT_STATUSES.COMPLETED) completed += r.count;
+        // Planned is not finished yet, so it counts with active; maintenance is delivered.
+        if (r._id === PROJECT_STATUSES.ACTIVE || r._id === PROJECT_STATUSES.PLANNED) active += r.count;
+        else if (r._id === PROJECT_STATUSES.COMPLETED || r._id === PROJECT_STATUSES.MAINTENANCE) completed += r.count;
         else if (r._id === PROJECT_STATUSES.ON_HOLD) on_hold += r.count;
     }
     return { active, completed, on_hold, total: active + completed + on_hold };

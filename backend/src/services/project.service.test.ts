@@ -620,7 +620,8 @@ describe('listProjects — visibility filter', () => {
 
         const [filter] = projectFindMock.mock.calls[0]!;
         const f = filter as Record<string, unknown>;
-        expect(f.status).toEqual({ $ne: 'completed' });
+        // Delivered work can't be late: completed and maintenance (delivered, under support) are both excluded.
+        expect(f.status).toEqual({ $nin: ['completed', 'maintenance'] });
         expect(f.is_archived).toBe(false);
         // A `$lt` on an existing value — never a null sweep, because a project
         // with no end_date had no deadline to miss.
@@ -864,6 +865,34 @@ describe('updateProject', () => {
         await svc.updateProject(proj._id, { name: 'Renamed' }, adminCaller());
 
         expect(proj.completed_at).toBe(shippedAt);
+    });
+
+    it('stamps completed_at when the status moves to maintenance (delivered)', async () => {
+        const proj = makeProject({ status: 'active', end_date: '2026-12-31' });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { status: 'maintenance' }, adminCaller());
+
+        expect(proj.completed_at).toBeInstanceOf(Date);
+    });
+
+    it('keeps completed_at when a completed project moves into maintenance', async () => {
+        const shippedAt = new Date('2026-03-01T10:00:00Z');
+        const proj = makeProject({ status: 'completed', end_date: '2026-12-31', completed_at: shippedAt });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { status: 'maintenance' }, adminCaller());
+
+        expect(proj.completed_at).toBe(shippedAt);
+    });
+
+    it('saves the area and the support plan', async () => {
+        const proj = makeProject({ status: 'maintenance', end_date: '2026-12-31', completed_at: new Date() });
+        projectFindByIdMock.mockResolvedValueOnce(proj);
+
+        await svc.updateProject(proj._id, { area: 'Infra', support_plan: { until: '2027-06-30', quota_hours: 20 } } as never, adminCaller());
+
+        expect(proj).toMatchObject({ area: 'Infra', support_plan: { until: '2027-06-30', quota_hours: 20 } });
     });
 
     it('clears completed_at when a completed project is re-opened', async () => {

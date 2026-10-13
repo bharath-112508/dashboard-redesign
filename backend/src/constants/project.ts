@@ -27,11 +27,21 @@ export const PROJECT_STATUSES = {
     ACTIVE: 'active',
     COMPLETED: 'completed',
     ON_HOLD: 'on_hold',
+    /** Not started yet (redesign). Counts as not finished. */
+    PLANNED: 'planned',
+    /** Delivered and under a support plan (redesign). Counts as delivered. */
+    MAINTENANCE: 'maintenance',
 } as const;
 
 export type ProjectStatus = (typeof PROJECT_STATUSES)[keyof typeof PROJECT_STATUSES];
 
 export const PROJECT_STATUS_VALUES: readonly ProjectStatus[] = Object.values(PROJECT_STATUSES);
+
+/** Statuses that mean the work was delivered: it carries a delivery stamp and can't be overdue. */
+export const DELIVERED_PROJECT_STATUSES: readonly ProjectStatus[] = [PROJECT_STATUSES.COMPLETED, PROJECT_STATUSES.MAINTENANCE];
+
+export const isDeliveredStatus = (status: string | undefined): boolean =>
+    status !== undefined && (DELIVERED_PROJECT_STATUSES as readonly string[]).includes(status);
 
 // ─── Sprint status ───────────────────────────────────────────────────────
 

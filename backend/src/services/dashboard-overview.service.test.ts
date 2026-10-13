@@ -165,6 +165,19 @@ describe('projectStatusFor', () => {
         expect(matchStage.is_archived).toEqual({ $ne: true });
     });
 
+    it('counts planned as not finished (active) and maintenance as delivered (completed)', async () => {
+        projectAggregateMock.mockResolvedValueOnce([
+            { _id: PROJECT_STATUSES.ACTIVE, count: 2 },
+            { _id: PROJECT_STATUSES.PLANNED, count: 1 },
+            { _id: PROJECT_STATUSES.COMPLETED, count: 3 },
+            { _id: PROJECT_STATUSES.MAINTENANCE, count: 2 },
+        ]);
+
+        const out = await overview.projectStatusFor({});
+
+        expect(out).toEqual({ active: 3, completed: 5, on_hold: 0, total: 8 });
+    });
+
     it('falls back to all-zero shape when the aggregation throws', async () => {
         projectAggregateMock.mockRejectedValueOnce(new Error('boom'));
 

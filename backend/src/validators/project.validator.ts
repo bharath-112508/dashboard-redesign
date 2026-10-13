@@ -34,6 +34,10 @@ import {
 const objectIdSchema = z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId');
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD');
 
+/** Redesign: the area of an internal project, and a maintenance support plan. */
+const areaSchema = z.string().trim().max(100);
+const supportPlanSchema = z.object({ until: isoDateSchema, quota_hours: z.number().min(0).max(10000) }).strict();
+
 // ─── Custom-task-status sub-schema ────────────────────────────────────────
 
 const customStatusKeySchema = z
@@ -138,6 +142,8 @@ export const createProjectBodySchema = z
         // internal project with no client side.
         company_id: objectIdSchema.nullable().optional(),
         representative_ids: z.array(objectIdSchema).max(PROJECT_CLIENTS_MAX).default([]),
+        area: areaSchema.optional(),
+        support_plan: supportPlanSchema.nullable().optional(),
         custom_task_statuses: z
             .array(createCustomStatusBodySchema)
             .max(CUSTOM_STATUSES_PER_PROJECT_MAX)
@@ -170,6 +176,8 @@ export const patchProjectBodySchema = z
         completed_on: isoDateSchema.nullable().optional(),
         status: z.enum(PROJECT_STATUS_VALUES as unknown as [string, ...string[]]),
         is_archived: z.boolean(),
+        area: areaSchema,
+        support_plan: supportPlanSchema.nullable(),
         /**
          * Re-assign (or clear, with null) the client company.
          *

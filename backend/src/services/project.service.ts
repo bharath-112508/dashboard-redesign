@@ -19,6 +19,8 @@ import {
     PROJECT_COMPANY_SCOPED_ROLES,
     PROJECT_MEMBER_SCOPED_ROLES,
     PROJECT_REPRESENTATIVE_SCOPED_ROLES,
+    DELIVERED_PROJECT_STATUSES,
+    isDeliveredStatus,
     PROJECT_STATUSES,
     type ProjectStatus,
     withAllDefaultStatuses,
@@ -622,10 +624,9 @@ export const createProject = async (
                 // TODAY, which is what produced `Late 120d` on freshly entered
                 // historical work. Absent, "now" is still the right default:
                 // the common case is completing something as it happens.
-                completed_at:
-                    input.status === PROJECT_STATUSES.COMPLETED
-                        ? (resolveCompletedAt(input.completed_on) ?? new Date())
-                        : null,
+                completed_at: isDeliveredStatus(input.status)
+                    ? (resolveCompletedAt(input.completed_on) ?? new Date())
+                    : null,
                 created_by: caller.id,
             });
             break;
@@ -686,7 +687,7 @@ export const listProjects = async (
     // that would sweep nulls in.
     if (query.overdue) {
         filter.end_date = { $lt: dayjs().tz(DEFAULT_TIMEZONE).format(DATE_FORMAT) };
-        filter.status = { $ne: PROJECT_STATUSES.COMPLETED };
+        filter.status = { $nin: [...DELIVERED_PROJECT_STATUSES] };
         filter.is_archived = false;
     }
 
@@ -963,6 +964,8 @@ export const updateProject = async (
     if (patch.status !== undefined) doc.status = patch.status as ProjectStatus;
     if (patch.is_archived !== undefined) doc.is_archived = patch.is_archived;
     if (patch.board_wip_limits !== undefined) doc.set('board_wip_limits', patch.board_wip_limits);
+    if (patch.area !== undefined) doc.area = patch.area;
+    if (patch.support_plan !== undefined) doc.support_plan = patch.support_plan;
     if (patch.board_quick_filters !== undefined) {
         // Entries without an id are new (Mongoose assigns `_id`); existing ids are kept.
         doc.set(
@@ -1015,9 +1018,10 @@ export const updateProject = async (
     // and folds any post-delivery tasks back into ordinary scope. That is the
     // correct reading: the project is being declared not-delivered.
     const suppliedCompletedAt = resolveCompletedAt(patch.completed_on);
-    if (doc.status === PROJECT_STATUSES.COMPLETED && statusBefore !== PROJECT_STATUSES.COMPLETED) {
+    // Maintenance is delivered work too: moving completed → maintenance keeps the stamp.
+    if (isDeliveredStatus(doc.status) && !isDeliveredStatus(statusBefore)) {
         doc.completed_at = suppliedCompletedAt ?? new Date();
-    } else if (doc.status !== PROJECT_STATUSES.COMPLETED) {
+    } else if (!isDeliveredStatus(doc.status)) {
         doc.completed_at = null;
     } else if (suppliedCompletedAt) {
         // Already completed and the caller is correcting the date — the one
