@@ -25,7 +25,7 @@ Sign in with a real Demo DB account. The `VITE_API_URL` variable switches the ap
 
 What comes from the backend so far (Phase 1a): sign-in, sign-out, the session (name, role, company) and the people directory. Every other screen still shows the mock data. Also:
 
-- The login page looks the same in both modes. In API mode its sample users are mock accounts, so picking one and signing in is refused.
+- In API mode the login page lists **Demo DB accounts**, one per user type (`src/api/http/sampleAccounts.ts`). Picking one fills in its email; type its password. Two types have no backend account yet and are shown greyed out with the reason: **Admin** (the backend's admins sign in as Super admin) and **DevOps engineer** (no DevOps role in the backend yet). Mock mode keeps the sample users and the `demo` password.
 - Backend roles map to the app's roles in `src/api/http/mappers.ts`: admin → Super admin, manager and team lead → Project manager, employee → Developer, client → Client admin, representative → Client user, and a custom `devops` role → DevOps engineer.
 - Client users see only themselves in the people directory: the backend does not let client roles list users.
 - Accounts with two-step sign-in (MFA) cannot sign in yet. This must be added before go-live.

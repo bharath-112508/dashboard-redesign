@@ -7,6 +7,7 @@ import { qk, useCompanies } from '../../api/queries'
 import { findPersonByEmail } from '../../api/people/directory'
 import { apiSignIn } from '../../api/http/auth'
 import { apiMode } from '../../api/http/config'
+import { DEMO_DB_ACCOUNTS } from '../../api/http/sampleAccounts'
 import { server } from '../../api/server'
 import { ROLE_LABEL } from '../../api/session/access'
 import { DEMO_PASSWORD, signIn } from '../../api/session/signIn'
@@ -42,6 +43,15 @@ const schema = z.object({
   password: z.string(),
 })
 type Form = z.infer<typeof schema>
+
+/** One entry in the account list next to the form. Without an email it is a role the backend lacks. */
+interface AccountRow {
+  key: string
+  name: string
+  sub: string
+  role: Role
+  email?: string
+}
 
 const input = 'w-full rounded-[10px] border-[1.5px] bg-white px-[13px] text-[14px] text-ink outline-0'
 
@@ -82,11 +92,41 @@ export function LoginPage() {
 
   const pick = (addr: string) => {
     form.setValue('email', addr)
-    form.setValue('password', DEMO_PASSWORD)
+    // API mode: real accounts, so the person types the password; the app never holds it.
+    form.setValue('password', apiMode ? '' : DEMO_PASSWORD)
     form.clearErrors()
+    if (apiMode) form.setFocus('password')
   }
 
   const orgName = (orgId: string) => companies.find(c => c.id === orgId)?.name ?? orgId
+
+  /** The account list: the sample users in mock mode, the Demo DB accounts (and the roles it lacks) in API mode. */
+  const rows: AccountRow[] = apiMode
+    ? DEMO_DB_ACCOUNTS.map((a, i) =>
+        a.account
+          ? {
+              key: a.account.email,
+              name: a.account.name + (a.variant ? ` · ${a.variant}` : ''),
+              sub: `${a.account.email} · ${a.account.org}`,
+              role: a.role,
+              email: a.account.email,
+            }
+          : { key: `missing-${i}`, name: ROLE_LABEL[a.role], sub: a.missing ?? '', role: a.role },
+      )
+    : SAMPLE_EMAILS.flatMap(addr => {
+        const u = findPersonByEmail(people, addr)
+        return u
+          ? [
+              {
+                key: addr,
+                name: u.name + (u.emp === 'freelancer' ? ' · Freelancer' : ''),
+                sub: `${u.email} · ${u.org === 'vt' ? 'Viljetech' : orgName(u.org)}`,
+                role: u.role,
+                email: addr,
+              },
+            ]
+          : []
+      })
 
   return (
     <div className="grid min-h-screen place-items-center bg-canvas px-5 py-8 font-medium text-ink">
@@ -146,23 +186,43 @@ export function LoginPage() {
             </button>
           </form>
           <div className="mt-3 text-[12.5px] text-muted">
-            Demo password for the sample users: <b>demo</b>. Pick a sample user on the right to fill in both fields.
+            {apiMode ? (
+              <>Signing in to the Demo DB. Pick an account on the right to fill in its email, then enter its password.</>
+            ) : (
+              <>
+                Demo password for the sample users: <b>demo</b>. Pick a sample user on the right to fill in both fields.
+              </>
+            )}
           </div>
         </section>
 
         <section className="overflow-hidden rounded-[20px] bg-white shadow-[0_0_0_1.5px_#D6DEE8]">
           <div className="border-b-[1.5px] border-line-3 px-5 py-4">
-            <div className="text-[15px] font-bold">Sample users</div>
-            <div className="text-[12.5px] text-muted">One per user type</div>
+            <div className="text-[15px] font-bold">{apiMode ? 'Demo DB accounts' : 'Sample users'}</div>
+            <div className="text-[12.5px] text-muted">{apiMode ? 'One per user type, and the types the backend does not have yet' : 'One per user type'}</div>
           </div>
-          {SAMPLE_EMAILS.map(addr => {
-            const u = findPersonByEmail(people, addr)
-            if (!u) return null
+          {rows.map(r => {
+            const addr = r.email
+            if (!addr) {
+              // A role the backend has no account for yet: shown, not selectable.
+              return (
+                <div key={r.key} className="flex items-center gap-3 border-t-[1.5px] border-[#EEF3FB] px-5 py-3 opacity-60">
+                  <span className="grid size-[34px] flex-none place-items-center rounded-lg bg-line text-[12px] font-bold text-muted">–</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[14px] font-bold">{r.name}</div>
+                    <div className="text-[12.5px] text-muted">{r.sub}</div>
+                  </div>
+                  <span className="inline-flex h-[22px] flex-none items-center whitespace-nowrap rounded-md bg-canvas px-2 text-[11.5px] font-bold text-muted">
+                    Not in backend
+                  </span>
+                </div>
+              )
+            }
             const on = email.trim().toLowerCase() === addr
-            const [chipBg, chipInk] = CHIP[u.role]
+            const [chipBg, chipInk] = CHIP[r.role]
             return (
               <div
-                key={addr}
+                key={r.key}
                 role="button"
                 tabIndex={0}
                 onClick={() => pick(addr)}
@@ -174,22 +234,17 @@ export function LoginPage() {
                 }}
                 className={`flex cursor-pointer items-center gap-3 border-t-[1.5px] border-[#EEF3FB] px-5 py-3 ${on ? 'bg-[#F2F6FE]' : 'hover:bg-canvas'}`}
               >
-                <span className="grid size-[34px] flex-none place-items-center rounded-lg bg-ink text-[12px] font-bold text-white">{initials(u.name)}</span>
+                <span className="grid size-[34px] flex-none place-items-center rounded-lg bg-ink text-[12px] font-bold text-white">{initials(r.name)}</span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-bold">
-                    {u.name}
-                    {u.emp === 'freelancer' ? ' · Freelancer' : ''}
-                  </div>
-                  <div className="truncate text-[12.5px] text-muted">
-                    {u.email} · {u.org === 'vt' ? 'Viljetech' : orgName(u.org)}
-                  </div>
+                  <div className="text-[14px] font-bold">{r.name}</div>
+                  <div className="truncate text-[12.5px] text-muted">{r.sub}</div>
                 </div>
                 <span
                   className="inline-flex h-[22px] flex-none items-center gap-1.5 whitespace-nowrap rounded-md pl-[7px] pr-2 text-[11.5px] font-bold"
                   style={{ background: chipBg, color: chipInk }}
                 >
                   <span className="size-1.5 rounded-full" style={{ background: chipInk }} />
-                  {ROLE_LABEL[u.role]}
+                  {ROLE_LABEL[r.role]}
                 </span>
               </div>
             )
