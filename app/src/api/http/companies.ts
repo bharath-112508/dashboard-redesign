@@ -1,17 +1,23 @@
 import { api } from './client'
 import {
   clientProjectFrom,
+  companyBody,
   companyFrom,
+  companyRoleTo,
   contactFrom,
   epicFromStory,
   internalProjectFrom,
+  projectBody,
+  statusFromState,
   type BackendCompany,
   type BackendProject,
   type BackendRepresentative,
   type BackendStory,
 } from './companyMappers'
 import { isClientRole } from '../session/access'
-import type { Company, InternalProject, Session } from '../types'
+import type { CompaniesCommand } from '../companies/commands'
+import type { ProjectsCommand } from '../projects/commands'
+import type { Company, CompanyContact, InternalProject, PersonId, Session } from '../types'
 
 const PAGE = 100
 
@@ -62,4 +68,161 @@ export const fetchCompanies = async (session: Session | null): Promise<Company[]
 export const fetchInternalProjects = async (session: Session | null): Promise<InternalProject[]> => {
   if (!session || isClientRole(session.role)) return []
   return (await liveProjects()).filter(p => !p.company_id).map(internalProjectFrom)
+}
+
+// ─── Writes ──────────────────────────────────────────────────────────────
+
+/** The commands this adapter sends to the backend in API mode. */
+export type CompanyApiCommand = CompaniesCommand | ProjectsCommand
+
+const COMMAND_TYPES = new Set<string>([
+  'company.create',
+  'company.update',
+  'company.archive',
+  'company.contact.save',
+  'company.contact.remove',
+  'company.responsible.save',
+  'company.responsible.remove',
+  'company.project.create',
+  'project.client.setState',
+  'project.internal.create',
+  'project.internal.setState',
+])
+
+export const isCompanyApiCommand = (cmd: { type: string }): cmd is CompanyApiCommand => COMMAND_TYPES.has(cmd.type)
+
+const LOWER = 'abcdefghijkmnpqrstuvwxyz'
+const UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+const DIGIT = '23456789'
+const SYMBOL = '!@#$%^&*-_=+'
+const ALL = LOWER + UPPER + DIGIT + SYMBOL
+
+/**
+ * A starting password for a new client contact that nobody sees: the person
+ * sets their own with "Forgot password". It has one of each character class,
+ * so it passes the backend's password policy whatever it requires.
+ */
+export const randomPassword = (): string => {
+  const pick = (set: string) => set[crypto.getRandomValues(new Uint32Array(1))[0] % set.length]
+  const chars = [pick(LOWER), pick(UPPER), pick(DIGIT), pick(SYMBOL), ...Array.from({ length: 20 }, () => pick(ALL))]
+  // Shuffle so the classes are not always in the first four places.
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1)
+    ;[chars[i], chars[j]] = [chars[j], chars[i]]
+  }
+  return chars.join('')
+}
+
+/** Adds or removes one person on a project roster (`members` or `representatives`). */
+const roster = (projectId: string, list: 'members' | 'representatives', change: 'add' | 'remove', person: PersonId) =>
+  api.post(`/projects/${projectId}/${list}`, { [change]: [person] })
+
+/** Creates a client contact: the user, their admin role, and their projects. Returns their id. */
+const createContact = async (companyId: string, c: CompanyContact): Promise<PersonId> => {
+  const { id } = await api.post<{ id: string }>(`/companies/${companyId}/representatives`, {
+    email: c.email,
+    full_name: c.name,
+    ...(c.role ? { title: c.role } : {}),
+    initial_password: randomPassword(),
+  })
+  if (c.admin) await api.post(`/users/${id}/change-role`, { new_role: 'client' })
+  for (const p of c.projects) await roster(p, 'representatives', 'add', id)
+  return id
+}
+
+const updateContact = async (companyId: string, c: CompanyContact & { personId: PersonId }) => {
+  const before = await api.get<BackendRepresentative>(`/companies/${companyId}/representatives/${c.personId}`)
+  await api.patch(`/users/${c.personId}`, { full_name: c.name, client_profile: { title: c.role } })
+  if (!!c.admin !== (before.role === 'client')) {
+    await api.post(`/users/${c.personId}/change-role`, { new_role: c.admin ? 'client' : 'representative' })
+  }
+  const had = new Set(before.projects.map(p => p.id))
+  const wants = new Set(c.projects)
+  for (const p of had) if (!wants.has(p)) await roster(p, 'representatives', 'remove', c.personId)
+  for (const p of wants) if (!had.has(p)) await roster(p, 'representatives', 'add', c.personId)
+}
+
+/** Sets (or, with `role` null, removes) a staff member on a company, and their membership of its projects. */
+const setResponsible = async (companyId: string, person: PersonId, role: string | null, projects: string[]) => {
+  const company = await api.get<BackendCompany>(`/companies/${companyId}`)
+  const others = (company.responsibles ?? []).filter(r => r.user_id !== person)
+  await api.patch(`/companies/${companyId}`, { responsibles: role ? [...others, { user_id: person, role }] : others })
+  const own = (await allPages<BackendProject>('/projects')).filter(p => p.company_id === companyId)
+  for (const p of own) {
+    const has = p.member_ids.includes(person)
+    const wants = projects.includes(p.id)
+    if (has && !wants) await roster(p.id, 'members', 'remove', person)
+    if (!has && wants) await roster(p.id, 'members', 'add', person)
+  }
+}
+
+/**
+ * Sends a company or project command to the backend. Resolves with the
+ * backend's id for a create, so the page can open what it just made.
+ * A refusal from the backend rejects with its ApiError.
+ */
+export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string): Promise<{ id?: string }> => {
+  switch (cmd.type) {
+    case 'company.create': {
+      const c = cmd.company
+      const roles = Object.keys(c.ourRoles).length
+        ? { responsibles: Object.entries(c.ourRoles).map(([user_id, r]) => ({ user_id, role: companyRoleTo(r) })) }
+        : {}
+      const { id } = await api.post<{ id: string }>('/companies', {
+        ...companyBody({ name: c.name, industry: c.industry, country: c.country, web: c.web, notes: c.notes, logo: c.logo }),
+        ...roles,
+      })
+      // A backend contact is a login account, so it needs an email.
+      for (const k of c.contacts) if (k.email) await createContact(id, k)
+      return { id }
+    }
+    case 'company.update': {
+      const body = companyBody(cmd.patch)
+      if (Object.keys(body).length) await api.patch(`/companies/${cmd.id}`, body)
+      if (cmd.main?.email) {
+        const people = await allPages<BackendRepresentative>(`/companies/${cmd.id}/representatives`)
+        const main = people.find(p => p.email.toLowerCase() === cmd.main!.email.toLowerCase())
+        if (main) await api.patch(`/users/${main.id}`, { full_name: cmd.main.name })
+        else await createContact(cmd.id, { personId: null, name: cmd.main.name, role: 'Main contact', email: cmd.main.email, projects: [] })
+      }
+      return {}
+    }
+    case 'company.archive':
+      if (cmd.archived) await api.post(`/companies/${cmd.id}/archive`)
+      else await api.patch(`/companies/${cmd.id}`, { status: 'active' })
+      return {}
+    case 'company.contact.save': {
+      const c = cmd.contact
+      if (c.personId) {
+        await updateContact(cmd.companyId, { ...c, personId: c.personId })
+        return {}
+      }
+      return { id: await createContact(cmd.companyId, c) }
+    }
+    case 'company.contact.remove': {
+      // The app's contact list is built from this same backend list, in this order.
+      const people = await allPages<BackendRepresentative>(`/companies/${cmd.companyId}/representatives`)
+      const person = people[cmd.index]
+      if (person) await api.delete(`/companies/${cmd.companyId}/representatives/${person.id}`)
+      return {}
+    }
+    case 'company.responsible.save':
+      await setResponsible(cmd.companyId, cmd.personId, companyRoleTo(cmd.role), cmd.projects)
+      return {}
+    case 'company.responsible.remove':
+      await setResponsible(cmd.companyId, cmd.personId, null, [])
+      return {}
+    case 'company.project.create': {
+      const { id } = await api.post<{ id: string }>('/projects', projectBody(cmd.project, cmd.companyId, today))
+      return { id }
+    }
+    case 'project.internal.create': {
+      const { id } = await api.post<{ id: string }>('/projects', projectBody(cmd.project, null, today))
+      return { id }
+    }
+    case 'project.client.setState':
+    case 'project.internal.setState':
+      await api.patch(`/projects/${cmd.id}`, { status: statusFromState(cmd.state) })
+      return {}
+  }
 }

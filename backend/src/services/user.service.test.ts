@@ -890,3 +890,36 @@ describe('listUserPhotos', () => {
         expect((await svc.listUserPhotos([a.toString()])).data).toEqual([]);
     });
 });
+
+// ─── Redesign: a client contact's title ──────────────────────────────────
+
+describe('updateUser — client contact title', () => {
+    const adminPatch = (target: ReturnType<typeof sampleUser>, patch: unknown) => ({
+        target_id: target._id as Types.ObjectId,
+        caller_id: new Types.ObjectId(),
+        caller_role: ROLES.ADMIN,
+        caller_role_keys: [ROLES.ADMIN],
+        caller_permissions: [],
+        patch: patch as never,
+    });
+
+    it("lets an admin set a representative's title, keeping the rest of the client profile", async () => {
+        const companyId = new Types.ObjectId();
+        const t = sampleUser({ role: ROLES.REPRESENTATIVE, client_profile: { company_id: companyId, access_type: 'login' } });
+        userFindByIdMock.mockResolvedValueOnce(t);
+
+        await svc.updateUser(adminPatch(t, { client_profile: { title: 'Product owner' } }));
+
+        const cp = t.client_profile as Record<string, unknown>;
+        expect(cp.title).toBe('Product owner');
+        expect(String(cp.company_id)).toBe(String(companyId));
+        expect(cp.access_type).toBe('login');
+    });
+
+    it('still refuses a client profile on internal staff', async () => {
+        const t = sampleUser({ role: ROLES.EMPLOYEE });
+        userFindByIdMock.mockResolvedValueOnce(t);
+
+        await expect(svc.updateUser(adminPatch(t, { client_profile: { title: 'CTO' } }))).rejects.toMatchObject({ statusCode: 400 });
+    });
+});

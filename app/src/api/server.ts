@@ -11,7 +11,8 @@ import { setSaveProblem } from '../components/SaveNotice'
 import { refusal } from './session/permissions'
 import { readSession } from './session/store'
 import { apiMode } from './http/config'
-import { fetchCompanies, fetchInternalProjects } from './http/companies'
+import { fetchCompanies, fetchInternalProjects, isCompanyApiCommand, sendCompanyCommand } from './http/companies'
+import { ApiError } from './http/client'
 
 /**
  * A mock backend. Data lives in localStorage so it survives reloads and is
@@ -30,7 +31,8 @@ import { fetchCompanies, fetchInternalProjects } from './http/companies'
  * in-memory copy always keeps the change, so later saves still go through.
  */
 
-export type SendResult = { id?: number }
+/** What a write did: the mock's numeric id for a new item, or (API mode) the backend's id. */
+export type SendResult = { id?: number; apiId?: string }
 
 /** Thrown by `server.send` when the signed-in person's role may not run the command (see session/permissions.ts). */
 export class RefusedError extends Error {}
@@ -445,6 +447,23 @@ const acrossTabs = <T>(fn: () => Promise<T>): Promise<T> => {
   return navigator.locks.request(KEY, () => fn()) as unknown as Promise<T>
 }
 
+/** Today in the browser's time zone, as YYYY-MM-DD: the backend stores real dates. */
+const localToday = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** API mode: sends the command to the backend. A 403 becomes the RefusedError the pages already show. */
+const sendToApi = async (cmd: Parameters<typeof sendCompanyCommand>[0]): Promise<SendResult> => {
+  try {
+    const { id } = await sendCompanyCommand(cmd, localToday())
+    return id ? { apiId: id } : {}
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 403) throw new RefusedError(err.message)
+    throw err
+  }
+}
+
 export const server = {
   async get<K extends Exclude<keyof Db, 'version'>>(resource: K): Promise<Db[K]> {
     // API mode: these resources come from the backend; everything else is still the mock.
@@ -456,6 +475,7 @@ export const server = {
 
   /** Applies a command and resolves with what it did (the id of a new task, for example). */
   async send(cmd: Command): Promise<SendResult> {
+    if (apiMode && isCompanyApiCommand(cmd)) return sendToApi(cmd)
     await sleep(LATENCY_MS)
     return exclusive(() =>
       acrossTabs(async () => {

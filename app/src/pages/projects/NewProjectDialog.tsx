@@ -98,8 +98,8 @@ export function NewProjectDialog({
           epics: [],
           ...start,
         }
-        await send({ type: 'company.project.create', companyId: v.companyId, project })
-        onCreated?.({ kind: 'client', companyId: v.companyId, id: project.id })
+        const result = await send({ type: 'company.project.create', companyId: v.companyId, project })
+        onCreated?.({ kind: 'client', companyId: v.companyId, id: result?.apiId ?? project.id })
       } else {
         const project: InternalProject = {
           id: newId('i'),
@@ -112,8 +112,8 @@ export function NewProjectDialog({
           team: v.team,
           ...start,
         }
-        await send({ type: 'project.internal.create', project })
-        onCreated?.({ kind: 'internal', id: project.id })
+        const result = await send({ type: 'project.internal.create', project })
+        onCreated?.({ kind: 'internal', id: result?.apiId ?? project.id })
       }
       onClose()
     } catch {
@@ -271,7 +271,7 @@ function CompanyPicker({
     }
     const id = newId('c')
     try {
-      await send({
+      const result = await send({
         type: 'company.create',
         company: {
           id,
@@ -288,7 +288,7 @@ function CompanyPicker({
           archivedAt: null,
         },
       })
-      onPick(id)
+      onPick(result?.apiId ?? id)
       setAdding(false)
       setOpen(false)
     } catch {

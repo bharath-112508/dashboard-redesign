@@ -14,7 +14,7 @@ import { assertPasswordPolicy } from '../utils/password-policy.js';
 import { isAdminLike } from '../utils/role-check.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { PERMISSIONS } from '../constants/permissions.js';
-import { ROLES, type RoleType } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES, ROLES, type RoleType } from '../constants/roles.js';
 import { PROJECT_COMPANY_SCOPED_ROLES } from '../constants/project.js';
 import { EMPLOYMENT_TYPES, USER_STATUSES } from '../constants/user-statuses.js';
 import type { PaginationMeta } from '../utils/api-response.js';
@@ -440,10 +440,12 @@ export const updateUser = async (input: {
     }
 
     // Role consistency: can't add internal_profile to a client or vice versa.
-    if (patch.internal_profile && target.role === ROLES.CLIENT) {
+    // Both client-side roles (company-level client and project-scoped representative) carry a client profile.
+    const clientSide = CLIENT_SIDE_ROLES.includes(target.role);
+    if (patch.internal_profile && clientSide) {
         throw AppError.validation("An internal profile doesn't apply to client accounts.");
     }
-    if (patch.client_profile && target.role !== ROLES.CLIENT) {
+    if (patch.client_profile && !clientSide) {
         throw AppError.validation('A client profile only applies to client accounts.');
     }
 

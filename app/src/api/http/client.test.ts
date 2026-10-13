@@ -153,6 +153,14 @@ describe('api client', () => {
     expect(readTokens()).toBeNull()
   })
 
+  it('sends DELETE with the bearer token', async () => {
+    const f = vi.fn(async (_url: string, _init: RequestInit) => new Response(null, { status: 204 }))
+    const api = createClient('http://x/api/v1', f)
+    expect(await api.delete('/companies/c1/representatives/u1')).toBeUndefined()
+    expect(f.mock.calls[0][1].method).toBe('DELETE')
+    expect(authOf(f.mock.calls[0][1])).toBe('Bearer a1')
+  })
+
   it('returns undefined for 204 No Content', async () => {
     const api = createClient('http://x/api/v1', vi.fn(async () => new Response(null, { status: 204 })))
     expect(await api.post('/auth/logout', { refresh_token: 'r1' })).toBeUndefined()

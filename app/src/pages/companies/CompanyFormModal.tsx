@@ -90,9 +90,10 @@ export function CompanyFormModal({
           archived: false,
           archivedAt: null,
         }
-        await send({ type: 'company.create', company: created })
+        const result = await send({ type: 'company.create', company: created })
         onClose()
-        navigate(`/companies/${id}`)
+        // API mode: open the id the backend gave the company.
+        navigate(`/companies/${result?.apiId ?? id}`)
         return
       }
       if (!company) return

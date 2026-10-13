@@ -146,6 +146,8 @@ const internalProfileCreateSchema = z.object({
 const clientProfileCreateSchema = z.object({
     company_id: z.string().regex(/^[a-f0-9]{24}$/i, 'Must be a valid ObjectId'),
     access_type: z.enum(['login', 'readonly_link']),
+    /** Job title at the client company, e.g. "CTO" (redesign). */
+    title: z.string().trim().max(100).optional(),
 });
 
 const roleEnum = z.enum([ROLES.ADMIN, ROLES.MANAGER, ROLES.TEAM_LEAD, ROLES.EMPLOYEE, ROLES.CLIENT]);

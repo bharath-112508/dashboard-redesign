@@ -395,3 +395,10 @@ describe('userPhotosQuerySchema', () => {
         ).toBe(false);
     });
 });
+
+describe('updateUserBodySchema — client contact title', () => {
+    it('accepts a client profile with only a title, and keeps the title', () => {
+        const r = updateUserBodySchema.safeParse({ client_profile: { title: 'CTO' } });
+        expect(r.success && r.data.client_profile).toEqual({ title: 'CTO' });
+    });
+});
