@@ -1,8 +1,14 @@
 import type { ChatMessage, Question } from '../api/types'
 
-/** The conversation as shown in the chat: the client's first answer, then every message. */
+/**
+ * Whether the answer is shown as a message of its own, before the chat. An
+ * answer that came from the chat (`answerIdx`) is that chat message, so it is not.
+ */
+export const answerShownFirst = (q: Question) => !!q.answer && q.answerIdx == null
+
+/** The conversation as shown in the chat: the client's first answer (when it is not a chat message), then every message. */
 export const threadOf = (q: Question): ChatMessage[] => [
-  ...(q.answer ? [{ who: q.answerBy || 'Client', side: 'client' as const, text: q.answer, when: q.answeredWhen || '', files: [] }] : []),
+  ...(answerShownFirst(q) ? [{ who: q.answerBy || 'Client', side: 'client' as const, text: q.answer, when: q.answeredWhen || '', files: [] }] : []),
   ...(q.comments || []),
 ]
 

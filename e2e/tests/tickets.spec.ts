@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { signIn } from './helpers/session'
+import { test, expect, type Page } from '@playwright/test'
+import { sendCommand, signIn } from './helpers/session'
 import { closeDrawer, column, detailPill, drawerTitle, expectNotSaved, expectSaved, menu, openActivity, openSprintWindow, openTickets, pillOption, uniq } from './helpers/tickets'
 
 // Seeded tickets used below (Mobile app epic, To do column unless noted).
@@ -384,45 +384,64 @@ test.describe('Tickets: team workspace', () => {
     await expect(page.getByText('Need a staging environment for the Sprint 2 build').first()).toBeVisible()
   })
 
-  test('TK-32 a new release shows a toast; View deployment opens the DevOps status with the deployments', async ({ page }) => {
+  /** Picks one epic in the Tickets epic picker (the picker is multi-select: `from` is the one to drop). */
+  async function pickEpic(page: Page, epic: string, from: string) {
+    await page.getByRole('button', { name: /^Epic/ }).click()
+    await menu(page).getByText(epic, { exact: true }).click()
+    await menu(page).getByText(from, { exact: true }).click()
+    await page.locator('div.fixed.inset-0').first().click()
+    await expect(page.getByRole('button', { name: /^Epic/ })).toContainText(epic)
+  }
+
+  test('TK-32 the Web app epic links to Daco\'s own DevOps item (OPS-101), so no release toast or deployments show', async ({ page }) => {
     await signIn(page, 'dev')
     await openTickets(page, 'board')
-    // Web app is linked to OPS-106 (ARC · Fast), whose newest release (2.6.2) the person hasn't seen.
-    // v4 design: the toast title is "<client> · <project> <version> is live".
-    const toast = page.getByRole('status').filter({ hasText: 'is live' })
-    await expect(toast).toContainText('ARC · Fast 2.6.2 is live')
-    await expect(toast).toContainText('Bug fixes for ticket import. Deployed automatically.')
-    await toast.getByRole('button', { name: 'View deployment' }).click()
-    await expect(toast).toHaveCount(0)
-    await expect(page.getByRole('button', { name: /^Epic/ })).toContainText('Web app')
-    await expect(page.getByText('Deployments', { exact: true })).toBeVisible()
-    await expect(page.getByText('Profile settings · rolled back')).toBeVisible()
-    await expect(page.getByText('First go-live', { exact: true })).toBeVisible()
+    await pickEpic(page, 'Web app', 'Mobile app')
+    // DevOps is project specific: Web app is Daco's, so it shows Daco platform (OPS-101), not ARC's Fast (OPS-106).
+    const devops = page.getByRole('button', { name: /^DevOps/ })
+    await expect(devops).not.toContainText('Live')
+    await devops.click()
+    await expect(page.getByText('OPS-101', { exact: true })).toBeVisible()
+    await expect(page.getByText('Daco platform', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Linked to epic Web app')).toBeVisible()
+    await expect(page.getByText('Deployments', { exact: true })).toHaveCount(0)
+    // OPS-101 has no releases, and no epic links to OPS-106 any more: the "is live" toast never shows.
+    await expect(page.getByRole('status').filter({ hasText: 'is live' })).toHaveCount(0)
+    const linked = await page.evaluate(() => JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}').workspace?.devopsLinks)
+    if (linked) expect(linked).toMatchObject({ mob: 'OPS-101', web: 'OPS-101' })
   })
 
-  test('TK-33 the DevOps button shows the live version and NEW until the panel is opened', async ({ page }) => {
+  test('TK-33 the DevOps button shows the project status (no live version, no NEW) on both Daco epics', async ({ page }) => {
     await signIn(page, 'dev')
     await openTickets(page, 'board')
-    await page.getByRole('status').filter({ hasText: 'is live' }).getByRole('button', { name: 'Dismiss' }).click()
-    await page.getByRole('button', { name: /^Epic/ }).click()
-    await menu(page).getByText('Web app', { exact: true }).click()
-    await menu(page).getByText('Mobile app', { exact: true }).click()
-    await page.locator('div.fixed.inset-0').first().click()
     const devops = page.getByRole('button', { name: /^DevOps/ })
-    await expect(devops).toContainText('Live 2.6.2')
-    await expect(devops).toContainText('NEW')
-    await devops.click()
-    await expect(page.getByText('Deployments', { exact: true })).toBeVisible()
-    await page.locator('div.fixed.inset-0').first().click()
+    await expect(devops).toContainText('Not started')
     await expect(devops).not.toContainText('NEW')
-    await page.reload()
+    await pickEpic(page, 'Web app', 'Mobile app')
+    await expect(devops).toContainText('Not started')
+    await expect(devops).not.toContainText('Live')
+    await expect(devops).not.toContainText('NEW')
     await expect(page.getByRole('status').filter({ hasText: 'is live' })).toHaveCount(0)
-    await page.getByRole('button', { name: /^Epic/ }).click()
-    await menu(page).getByText('Web app', { exact: true }).click()
-    await menu(page).getByText('Mobile app', { exact: true }).click()
-    await page.locator('div.fixed.inset-0').first().click()
-    await expect(page.getByRole('button', { name: /^DevOps/ })).toContainText('Live 2.6.2')
-    await expect(page.getByRole('button', { name: /^DevOps/ })).not.toContainText('NEW')
+  })
+
+  test('TK-34 a store saved with the Web app epic on OPS-106 is moved to OPS-101 on load', async ({ page }) => {
+    await signIn(page, 'dev')
+    await openTickets(page, 'board')
+    // Write a store as an older build saved it: Web app still linked to ARC's Fast (OPS-106).
+    expect(await sendCommand(page, { type: 'batch', cmds: [] })).toEqual({ ok: true })
+    await expectSaved(page, '"devopsLinks"')
+    await page.evaluate(() => {
+      const db = JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}')
+      db.workspace.devopsLinks.web = 'OPS-106'
+      localStorage.setItem('vt.clients.db', JSON.stringify(db))
+    })
+    await openTickets(page, 'board')
+    await pickEpic(page, 'Web app', 'Mobile app')
+    const devops = page.getByRole('button', { name: /^DevOps/ })
+    await expect(devops).not.toContainText('Live')
+    await devops.click()
+    await expect(page.getByText('OPS-101', { exact: true })).toBeVisible()
+    await expect(page.getByText('Deployments', { exact: true })).toHaveCount(0)
   })
 
   test('TK-26 a question to the client is raised', async ({ page }) => {

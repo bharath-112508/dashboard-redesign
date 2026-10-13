@@ -45,6 +45,21 @@ export const writeSession = (s: Session) => {
   window.dispatchEvent(new Event(CHANGED))
 }
 
+/** Keys older builds kept for the session that sign-in removes (spec 01 data effect: the prototype's role switch). */
+const LEGACY_KEYS = ['vt.dashRole']
+
+/** Signs a person in: drops the legacy keys, then stores the new session. */
+export const startSession = (s: Session) => {
+  for (const k of LEGACY_KEYS) {
+    try {
+      localStorage.removeItem(k)
+    } catch {
+      // Storage is blocked; there is nothing to remove.
+    }
+  }
+  writeSession(s)
+}
+
 export const clearSession = () => {
   try {
     localStorage.removeItem(KEY)

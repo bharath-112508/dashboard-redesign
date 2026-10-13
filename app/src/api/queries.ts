@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { reduce, touches, type Command, type Resource } from './commands'
 import { server } from './server'
+import { refusal } from './session/permissions'
+import { readSession } from './session/store'
 import type { Db } from './types'
 import { DEFAULT_DEV_TYPES, DEFAULT_PERMS } from './users/access'
 
@@ -63,7 +65,8 @@ const useCommandMutation = () => {
       await Promise.all(keys.map(k => qc.cancelQueries({ queryKey: [k] })))
       const prev = Object.fromEntries(keys.map(k => [k, qc.getQueryData([k])]))
       const db = cachedDb(qc, keys)
-      if (db) {
+      // A command the role may not run is not shown even for a moment; the server refuses it.
+      if (db && !refusal(db, cmd, readSession())) {
         const next = reduce(db, cmd)
         keys.forEach(k => qc.setQueryData([k], next[k]))
       }

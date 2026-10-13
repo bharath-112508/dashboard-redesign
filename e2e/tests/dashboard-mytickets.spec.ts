@@ -54,6 +54,8 @@ test.describe('Dashboard', () => {
   })
 
   test('DB-02 admin: Overdue tickets drawer lists late tickets and closes with Escape', async ({ page }) => {
+    // The dashboard counts overdue from the real date; pin it to the demo's today so the seed's due dates stay ahead.
+    await page.clock.setFixedTime(new Date('2026-10-10T12:00:00'))
     await primeStore(page)
     await openDashboard(page, 'admin', 'Vivek')
     await setTaskDue(page, 10, '2026-10-08')
@@ -66,6 +68,8 @@ test.describe('Dashboard', () => {
   })
 
   test('DB-02 admin: Overdue tickets drawer shows the empty state when nothing is late', async ({ page }) => {
+    // The dashboard counts overdue from the real date; pin it to the demo's today so the seed's due dates stay ahead.
+    await page.clock.setFixedTime(new Date('2026-10-10T12:00:00'))
     await openDashboard(page, 'admin', 'Vivek')
     await page.getByRole('button', { name: /Overdue tickets/i }).click()
     const drawer = page.getByRole('dialog', { name: 'Overdue tickets' })

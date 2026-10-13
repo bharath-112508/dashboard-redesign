@@ -5,8 +5,11 @@ import { COMPANIES_SEED } from './companies/seed'
 import { INTERNAL_PROJECTS_SEED, withDriverAppSupport } from './projects/seed'
 import { linkDevopsProjects, upgradeDevopsNames } from './devops/seed'
 import { withInvoiceMatch } from '../features/invoice-match/commands'
+import { linkChatAnswers } from './clients/commands'
 import type { Db } from './types'
 import { setSaveProblem } from '../components/SaveNotice'
+import { refusal } from './session/permissions'
+import { readSession } from './session/store'
 
 /**
  * A mock backend. Data lives in localStorage so it survives reloads and is
@@ -26,6 +29,9 @@ import { setSaveProblem } from '../components/SaveNotice'
  */
 
 export type SendResult = { id?: number }
+
+/** Thrown by `server.send` when the signed-in person's role may not run the command (see session/permissions.ts). */
+export class RefusedError extends Error {}
 
 const KEY = 'vt.clients.db'
 const LATENCY_MS = 180
@@ -81,6 +87,8 @@ const migrate3base = (input: Record<string, unknown>): Record<string, unknown> =
 const fields3 = (v: Record<string, unknown>): Record<string, unknown> => ({
   ...v,
   ...devopsNames(v),
+  workspace: webEpicLink(v.workspace),
+  questions: linkChatAnswers(v.questions),
   version: DB_VERSION,
   leave: Array.isArray(v.leave) ? v.leave : [],
   notifications: Array.isArray(v.notifications) ? v.notifications : [],
@@ -89,6 +97,16 @@ const fields3 = (v: Record<string, unknown>): Record<string, unknown> => ({
   weekSubmissions: Array.isArray(v.weekSubmissions) ? v.weekSubmissions : [],
   companies: withDriverAppSupport(v.companies),
 })
+
+/**
+ * The Daco "Web app" epic was linked to ARC's DevOps item (OPS-106). DevOps is
+ * project specific, so it links to Daco's own item, OPS-101. Only a link still
+ * on the old value moves.
+ */
+const webEpicLink = (ws: unknown): unknown =>
+  isObj(ws) && isObj(ws.devopsLinks) && ws.devopsLinks.web === 'OPS-106'
+    ? { ...ws, devopsLinks: { ...ws.devopsLinks, web: 'OPS-101' } }
+    : ws
 
 /** DevOps sample projects saved under their pre-v4 names get the client / project split. */
 const devopsNames = (v: Record<string, unknown>) =>
@@ -410,6 +428,9 @@ export const server = {
         await storeCommandFiles(cmd)
         for (;;) {
           const base = await current()
+          // The mock backend's authorization: the actor is the signed-in session, never what the command claims.
+          const why = refusal(base, cmd, readSession())
+          if (why) throw new RefusedError(why)
           const applied = assignIds(base, cmd)
           const next = reduce(base, applied)
           // Another tab saved while this was being prepared: apply the command to its copy instead.

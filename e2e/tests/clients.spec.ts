@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { signIn } from './helpers/session'
+import { sendCommand, signIn } from './helpers/session'
 
 /**
  * Clients portal: "Your projects" (portal home), the board, Epics & sprints
@@ -181,19 +181,36 @@ test.describe('Clients portal: board, bugs and questions', () => {
     await expect(page.getByText('Reopened the question')).toBeVisible()
   })
 
-  test('CL-09 client user edits their own message in a question', async ({ page }) => {
+  test('CL-09 client user edits their own answer and only the new text shows everywhere', async ({ page }) => {
     await signIn(page, 'cuser')
     await openBoard(page)
     await card(page, QUESTION_TITLE).click()
     await page.getByPlaceholder('Write your answer…').fill('First draft answer')
     await page.getByRole('button', { name: 'Send' }).click()
-    await expect(page.getByText('First draft answer').first()).toBeVisible()
+    // The answer is one message in the chat, not two.
+    await expect(page.getByText('First draft answer')).toHaveCount(1)
     await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
     await page.getByLabel('Edit message').fill('Final answer after review')
     await page.getByRole('button', { name: 'Save' }).click()
-    await expect(page.getByText('Final answer after review')).toBeVisible()
+    await expect(page.getByText('Final answer after review')).toHaveCount(1)
     await expect(page.getByText('First draft answer')).toHaveCount(0)
-    await waitSaved(page, 'Final answer after review')
+    // The stored answer (read by lists, the Tickets panel and the dashboard) follows the edit.
+    await page.waitForFunction(t => {
+      const db = JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}')
+      const q = (db.questions ?? []).find((x: { title: string }) => x.title === t)
+      return !!q && q.answer === 'Final answer after review' && !JSON.stringify(q).includes('First draft answer')
+    }, QUESTION_TITLE, { timeout: 8000 })
+    await openBoard(page)
+    await card(page, QUESTION_TITLE).click()
+    await expect(page.getByText('Final answer after review')).toHaveCount(1)
+    await expect(page.getByText('First draft answer')).toHaveCount(0)
+    // The team sees the same single, edited answer in the question window from the Tickets questions panel.
+    await signIn(page, 'pm')
+    await page.goto('/tickets/board')
+    await page.getByText('Questions to client').first().click()
+    await page.getByText(QUESTION_TITLE).first().click()
+    await expect(page.getByText('Final answer after review')).toHaveCount(1)
+    await expect(page.getByText('First draft answer')).toHaveCount(0)
   })
 
   test('CL-24 Escape closes the bug window', async ({ page }) => {
@@ -229,13 +246,14 @@ test.describe('Clients board: tasks, drawer and filters', () => {
     await waitSaved(page, 'Write release notes')
   })
 
-  test('CL-10 client admin can add a task from the To do column quick add (spec: cadmin)', async ({ page }) => {
+  test('CL-10 client admin cannot add a task: no quick add on the status columns, only Report a bug', async ({ page }) => {
     await signIn(page, 'cadmin')
     await openBoard(page)
-    await page.getByRole('button', { name: 'Add to To do' }).click()
-    await page.keyboard.type('Client-side task')
-    await page.keyboard.press('Enter')
-    await expect(card(page, 'Client-side task')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Report a bug' }).first()).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Project Management tool' })).toBeVisible()
+    await expect(card(page, TEAM_TASK)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Add to To do' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Add to / })).toHaveCount(0)
   })
 
   test('CL-11 client user opens a task card and the ticket drawer shows it', async ({ page }) => {
@@ -277,12 +295,13 @@ test.describe('Clients board: tasks, drawer and filters', () => {
     await waitSaved(page, 'Cache the task list so it opens without signal.')
   })
 
-  test('CL-13 client admin can edit the description of a task (spec: cadmin, team)', async ({ page }) => {
+  test('CL-13 client admin cannot edit the description of a team task', async ({ page }) => {
     await signIn(page, 'cadmin')
     await openBoard(page)
     await card(page, TEAM_TASK).click()
-    await page.getByRole('button', { name: 'Edit', exact: true }).first().click()
-    await expect(page.getByRole('button', { name: 'Save' })).toBeVisible()
+    await expect(page.getByText('View only')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save' })).toHaveCount(0)
   })
 
   test('CL-14 team member adds a subtask to a task', async ({ page }) => {
@@ -296,12 +315,13 @@ test.describe('Clients board: tasks, drawer and filters', () => {
     await waitSaved(page, 'Measure cache size')
   })
 
-  test('CL-14 client admin can add a subtask to a task (spec: cadmin, team)', async ({ page }) => {
+  test('CL-14 client admin cannot add a subtask to a team task', async ({ page }) => {
     await signIn(page, 'cadmin')
     await openBoard(page)
     await card(page, TEAM_TASK).click()
-    await page.getByText('Add subtasks', { exact: true }).click()
-    await expect(page.getByPlaceholder('Add a subtask and press Enter')).toBeVisible()
+    await expect(page.getByText('View only')).toBeVisible()
+    await expect(page.getByText('Add subtasks', { exact: true })).toHaveCount(0)
+    await expect(page.getByPlaceholder('Add a subtask and press Enter')).toHaveCount(0)
   })
 
   test('CL-15 team member links a blocking task', async ({ page }) => {
@@ -322,32 +342,51 @@ test.describe('Clients board: tasks, drawer and filters', () => {
     await page.locator('#tk-log').selectOption('2')
     await page.getByRole('button', { name: 'Add', exact: true }).click()
     await expect(page.getByText('2h', { exact: true }).first()).toBeVisible()
-    // The store write lands about 180 ms after the change; wait for it before reopening.
-    await page.waitForTimeout(1000)
+    // The store write lands about 180 ms after the change; wait for the stored entry before reopening.
+    await page.waitForFunction(t => {
+      const db = JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}')
+      const task = (db.tasks ?? []).find((x: { title: string }) => x.title === t)
+      return !!task && Object.values(task.time ?? {}).some(h => Number(h) >= 2)
+    }, TEAM_TASK, { timeout: 8000 })
     await openBoard(page)
     await card(page, TEAM_TASK).click()
     await expect(page.getByText('2h', { exact: true }).first()).toBeVisible()
   })
 
-  test('CL-16 client admin can log time on a task (spec: cadmin, team)', async ({ page }) => {
+  test('CL-16 client admin cannot log time on a task', async ({ page }) => {
     await signIn(page, 'cadmin')
     await openBoard(page)
     await card(page, TEAM_TASK).click()
-    await expect(page.getByRole('button', { name: 'Log hours' })).toBeEnabled()
+    await expect(page.getByText('View only')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Log hours' })).toHaveCount(0)
+    await expect(page.locator('#tk-log')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Add', exact: true })).toHaveCount(0)
   })
 
-  test('CL-17 client user comments on a task and the comment survives reload', async ({ page }) => {
+  test('CL-17 client user cannot comment on a team task (the activity is read-only)', async ({ page }) => {
     await signIn(page, 'cuser')
     await openBoard(page)
     await card(page, TEAM_TASK).click()
     await page.getByRole('button', { name: /^Activity/ }).click()
+    // The filters still work; there is no comment box or Comment button.
     await page.getByRole('button', { name: 'Comments', exact: true }).first().click()
+    await expect(page.getByRole('button', { name: 'History', exact: true })).toBeVisible()
+    await expect(page.getByPlaceholder('Write a comment, @mention someone…')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Comment', exact: true })).toHaveCount(0)
+  })
+
+  test('CL-17 team member comments on a task and the comment survives reload', async ({ page }) => {
+    await signIn(page, 'pm')
+    await openBoard(page)
+    await card(page, TEAM_TASK).click()
+    await page.getByRole('button', { name: /^Activity/ }).click()
     await page.getByPlaceholder('Write a comment, @mention someone…').fill('Any update on the offline cache?')
     await page.keyboard.press('Enter')
     await expect(page.getByText('Any update on the offline cache?')).toBeVisible()
     await waitSaved(page, 'Any update on the offline cache?')
     await openBoard(page)
     await card(page, TEAM_TASK).click()
+    await page.getByRole('button', { name: /^Activity/ }).click()
     await expect(page.getByText('Any update on the offline cache?')).toBeVisible()
   })
 
@@ -393,5 +432,74 @@ test.describe('Clients: epics & sprints, timeline', () => {
     await expect.poll(async () => main.innerText()).not.toBe(initial)
     await page.getByRole('button', { name: 'Today' }).click()
     await expect.poll(async () => main.innerText()).toBe(initial)
+  })
+})
+
+test.describe('Clients: a client only raises bugs and answers questions', () => {
+  test('CL-26 client admin cannot raise a DevOps request: Tickets is closed to them and the request window is read-only', async ({ page }) => {
+    await signIn(page, 'cadmin')
+    await page.goto('/tickets/board')
+    await expect(page).toHaveURL(/\/dashboard$/)
+    await expect(page.getByRole('button', { name: 'Raise a ticket' })).toHaveCount(0)
+    await openBoard(page)
+    await card(page, 'Need a staging environment for the Sprint 2 build').click()
+    await expect(page).toHaveURL(/request=/)
+    await expect(page.getByText('Need a staging environment for the Sprint 2 build').first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Overview/ }).first()).toBeVisible()
+    await expect(page.getByPlaceholder('Write a comment to DevOps…')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Comment', exact: true })).toHaveCount(0)
+  })
+
+  test('CL-27 client user cannot start a question: only the team raises them', async ({ page }) => {
+    await signIn(page, 'cuser')
+    await openBoard(page)
+    await expect(card(page, QUESTION_TITLE)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Raise a question' })).toHaveCount(0)
+    await page.goto('/tickets/board')
+    await expect(page).toHaveURL(/\/dashboard$/)
+    await page.goto('/devops/board')
+    await expect(page).toHaveURL(/\/dashboard$/)
+    await expect(page.getByRole('button', { name: 'Raise a question' })).toHaveCount(0)
+  })
+
+  test('CL-28 the command layer refuses commands a client forges, and still runs them for the team', async ({ page }) => {
+    const task = (id: number, title: string) => ({
+      id, title, type: 'Task', status: 'todo', prio: 'Medium', due: '', assignee: '', assignees: [], contribs: [], est: '',
+      desc: '', atts: [], subs: [], deps: [], epic: 'mob', sprint: null, start: '2026-10-10', time: {}, acts: [],
+    })
+    const forged = [
+      { type: 'task.create', task: task(9001, 'Forged client task') },
+      { type: 'task.update', id: 13, patch: { desc: 'Forged description' }, log: 'edited' },
+      { type: 'task.update', id: 13, patch: { subs: [{ t: 'Forged subtask', done: false }] } },
+      { type: 'task.update', id: 13, patch: { time: { '2026-10-10': 5 } }, log: 'logged 5h' },
+      { type: 'task.update', id: 13, patch: { status: 'prog' }, log: 'moved it to In progress' },
+      { type: 'task.comment', id: 13, text: 'Forged comment' },
+      { type: 'request.create', request: { id: 9001, key: 'OPS-101', pname: 'Daco platform', rkey: 'REQ-9001', type: 'Deployment', prio: 'Medium', to: '', text: 'Forged request', by: 'Ingrid Solberg', when: 'just now' } },
+      { type: 'question.create', question: { id: 9001, by: 'Ingrid Solberg', title: 'Forged question', text: '', when: 'just now', task: 13, answer: '' } },
+      // A batch that hides a refused command among allowed ones is refused as a whole.
+      { type: 'batch', cmds: [{ type: 'batch', cmds: [] }, { type: 'task.comment', id: 13, text: 'Forged in a batch' }] },
+    ]
+    await signIn(page, 'cadmin')
+    await openBoard(page)
+    for (const cmd of forged) {
+      const res = await sendCommand(page, cmd)
+      expect(res.ok, `${JSON.stringify(cmd).slice(0, 80)} should be refused`).toBe(false)
+      if (!res.ok) expect(res.error).toContain('Clients cannot')
+    }
+    // Nothing forged reached the store (a harmless allowed write makes sure it exists).
+    expect(await sendCommand(page, { type: 'batch', cmds: [] })).toEqual({ ok: true })
+    const stored = await page.evaluate(() => localStorage.getItem('vt.clients.db') ?? '')
+    expect(stored).toContain('"devopsLinks"')
+    for (const text of ['Forged client task', 'Forged description', 'Forged subtask', 'Forged comment', 'Forged request', 'Forged question', 'Forged in a batch'])
+      expect(stored).not.toContain(text)
+    const t13 = await page.evaluate(() => JSON.parse(localStorage.getItem('vt.clients.db') ?? '{}').tasks.find((t: { id: number }) => t.id === 13))
+    expect(t13.status).toBe('todo')
+    expect(t13.time ?? {}).toEqual({})
+
+    // The same write from a team member goes through.
+    await signIn(page, 'pm')
+    await openBoard(page)
+    expect(await sendCommand(page, { type: 'task.comment', id: 13, text: 'Team comment via the command layer' })).toEqual({ ok: true })
+    await waitSaved(page, 'Team comment via the command layer')
   })
 })
