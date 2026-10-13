@@ -24,14 +24,16 @@ export interface BackendUser {
   full_name: string
   email: string
   role: string
-  /** Only `/auth/me` sends role keys; the user list does not. */
+  /** The user list and `/auth/me` send role keys (e.g. a custom `devops`). */
   role_keys?: string[]
   status: string
   timezone: string
   phone?: string | null
-  internal_profile?: { employment_type?: 'staff' | 'freelancer' | null }
+  internal_profile?: { employment_type?: 'staff' | 'freelancer' | null; dev_type?: string | null }
   client_profile?: { company_id?: string }
   last_login_at: string | null
+  /** A signed link to the person's photo, or null. */
+  profile_photo_url?: string | null
 }
 
 /** A stable non-negative number from an id, for picking colours. */
@@ -59,6 +61,9 @@ export const personFromUser = (u: BackendUser): Person => {
     tz: u.timezone,
     ...(emp ? { emp } : {}),
     ...(u.phone ? { phone: u.phone } : {}),
+    ...(u.internal_profile?.dev_type ? { devType: u.internal_profile.dev_type } : {}),
+    // A real photo, or '' for initials (never the design's sample faces).
+    photo: u.profile_photo_url ?? '',
   }
 }
 

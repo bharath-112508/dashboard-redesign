@@ -23,6 +23,11 @@ const { fetchEntries, fetchWeekSubmissions, sendTimeCommand } = vi.hoisted(() =>
   fetchWeekSubmissions: vi.fn(async () => [{ week: '2026-10-05' }]),
 }))
 vi.mock('./http/timesheet', () => ({ fetchEntries, fetchWeekSubmissions, isTimeApiCommand: (c: { type: string }) => c.type.startsWith('time.') || c.type.startsWith('week.'), sendTimeCommand }))
+const { fetchPeopleApi, fetchAccessApi } = vi.hoisted(() => ({
+  fetchPeopleApi: vi.fn(async () => [{ id: 'u1' }]),
+  fetchAccessApi: vi.fn(async () => ({ perms: {}, devTypes: ['Backend'] })),
+}))
+vi.mock('./http/users', () => ({ fetchPeopleApi, fetchAccessApi, isUserApiCommand: () => false, sendUserCommand: vi.fn() }))
 vi.mock('./http/config', () => ({ apiMode: true, API_URL: 'http://x/api/v1' }))
 vi.mock('./http/companies', () => ({
   fetchCompanies,
@@ -42,6 +47,11 @@ describe('server.get in API mode', () => {
     expect(await server.get('internalProjects')).toEqual([{ id: 'i1' }])
     expect(fetchCompanies).toHaveBeenCalledWith(expect.objectContaining({ personId: 'a0' }))
     expect(fetchInternalProjects).toHaveBeenCalledWith(expect.objectContaining({ personId: 'a0' }))
+  })
+
+  it('reads people and the permission grid from the backend', async () => {
+    expect(await server.get('people')).toEqual([{ id: 'u1' }])
+    expect(await server.get('access')).toEqual({ perms: {}, devTypes: ['Backend'] })
   })
 
   it('reads time entries and submitted weeks from the backend', async () => {
