@@ -15,6 +15,8 @@ export interface BackendEntry {
   work_type?: string | null
   /** Present on the team list. */
   user?: { id: string; full_name: string } | null
+  /** The ticket's id and title (both lists). */
+  task?: { id: string; title: string | null } | null
 }
 
 /** Decimal hours as whole hours and minutes (1.75 → 1 h 45 m). */
@@ -39,7 +41,8 @@ export const entryFrom = (
   const area = e.entry_type === 'general' ? e.general_category ?? undefined : undefined
   const type = e.work_type || 'General'
   // A description that only stood in for an empty note reads as no note.
-  const fill = [area, e.task_id ? ctx.taskTitle(e.task_id).trim() : '', e.work_type].filter(Boolean)
+  const title = e.task?.title ?? (e.task_id ? ctx.taskTitle(e.task_id) : '')
+  const fill = [area, title.trim(), e.work_type].filter(Boolean)
   const project = ctx.projectRef(e.project_id)
   const epic = e.task_id ? ctx.epicOfTask(e.task_id) : undefined
   return {

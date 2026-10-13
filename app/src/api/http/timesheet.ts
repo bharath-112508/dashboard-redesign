@@ -1,6 +1,6 @@
 import { ApiError, api } from './client'
 import { allPages, liveProjects } from './companies'
-import { boardIndex, fetchTasks } from './board'
+import { boardIndex } from './board'
 import { entryBody, entryFrom, type BackendEntry } from './timesheetMappers'
 import { isClientRole } from '../session/access'
 import { fmt } from '../../lib/dates'
@@ -24,8 +24,9 @@ const readsTeam = (s: Session) => s.role === 'super' || s.role === 'pm'
 
 /**
  * The signed-in person's time entries, and their team's for a manager or
- * admin. Clients have no timesheet. The board is read first so ticket entries
- * know their epic and title.
+ * admin. Clients have no timesheet. Entries name their own ticket, so the
+ * board is not waited for (an entry's epic is filled in when the board is
+ * already loaded; pages find it from the ticket otherwise).
  */
 export const fetchEntries = async (session: Session | null): Promise<TimeEntry[]> => {
   if (!session || isClientRole(session.role)) return []
@@ -34,7 +35,6 @@ export const fetchEntries = async (session: Session | null): Promise<TimeEntry[]
     liveProjects(),
     allPages<BackendEntry>(`/timesheets/me?from_date=${from}`),
     readsTeam(session) ? allPages<BackendEntry>(`/timesheets?from_date=${from}`) : Promise.resolve([]),
-    fetchTasks(session),
   ])
   const kind = new Map(projects.map(p => [p.id, p.company_id ? 'c' : 'i']))
   const ctx = {

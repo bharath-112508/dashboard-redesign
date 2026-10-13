@@ -828,6 +828,15 @@ describe('list & summary RBAC', () => {
         expect(entryFindMock).toHaveBeenCalledWith(expect.objectContaining({ user_id: caller.id }));
     });
 
+    it('listMyEntries names each entry\'s ticket (redesign: no board needed to show it)', async () => {
+        const taskId = new Types.ObjectId();
+        const caller = employeeCaller();
+        stubFind([makeEntry({ user_id: caller.id, task_id: taskId }), makeEntry({ user_id: caller.id, task_id: null })]);
+        taskFindMock.mockReturnValueOnce({ select: () => ({ lean: () => Promise.resolve([{ _id: taskId, title: 'Login' }]) }) });
+        const out = await svc.listMyEntries({ page: 1, limit: 20 }, caller);
+        expect(out.data.map((r) => r.task)).toEqual([{ id: taskId.toString(), title: 'Login' }, null]);
+    });
+
     it('listAllEntries rejects an employee caller with FORBIDDEN', async () => {
         await expect(svc.listAllEntries({ page: 1, limit: 20 }, employeeCaller())).rejects.toMatchObject({
             code: ERROR_CODES.FORBIDDEN,

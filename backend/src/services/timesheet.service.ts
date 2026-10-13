@@ -704,8 +704,14 @@ export const listMyEntries = async (
         TimesheetEntry.find(filter).sort({ local_date: -1, created_at: -1 }).skip(skip).limit(query.limit),
         TimesheetEntry.countDocuments(filter),
     ]);
+    // Redesign: each entry names its ticket, so a timesheet can show it without loading the board.
+    const taskIds = [...new Set(rows.flatMap((r) => (r.task_id ? [r.task_id.toString()] : [])))].map((id) => new Types.ObjectId(id));
+    const taskMap = await loadTimesheetTaskDisplays(taskIds);
     return {
-        data: rows.map(toPublic),
+        data: rows.map((r) => ({
+            ...toPublic(r),
+            task: r.task_id ? (taskMap.get(r.task_id.toString()) ?? { id: r.task_id.toString(), title: null }) : null,
+        })),
         meta: {
             page: query.page,
             limit: query.limit,

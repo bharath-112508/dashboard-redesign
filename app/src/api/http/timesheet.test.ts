@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Session } from '../types'
 
-const { get, liveProjects } = vi.hoisted(() => ({ get: vi.fn(), liveProjects: vi.fn() }))
+const { get, liveProjects, fetchTasks } = vi.hoisted(() => ({ get: vi.fn(), liveProjects: vi.fn(), fetchTasks: vi.fn(async () => []) }))
 vi.mock('./client', async importOriginal => ({ ...(await importOriginal<typeof import('./client')>()), api: { get } }))
 vi.mock('./companies', async importOriginal => ({ ...(await importOriginal<typeof import('./companies')>()), liveProjects }))
 vi.mock('./board', () => ({
-  fetchTasks: async () => [],
+  fetchTasks,
   boardIndex: { tasks: new Map([['t1', { id: 't1', title: 'Login', epic: 'e1' }]]), projectOfTask: new Map([['t1', 'p1']]) },
 }))
 
@@ -70,6 +70,13 @@ describe('fetchEntries', () => {
       ['x2', 'Rahul'],
       ['x3', 'Chary'],
     ])
+  })
+
+  it('does not wait for the ticket board, and names tickets from the entry itself', async () => {
+    get.mockResolvedValueOnce([entry('x1', 'u1', { task_id: 't7', description: 'Payments', task: { id: 't7', title: 'Payments' } })])
+    const [e] = await fetchEntries(dev)
+    expect(fetchTasks).not.toHaveBeenCalled()
+    expect(e.notes).toBe('')
   })
 
   it('reads nothing for a client', async () => {
