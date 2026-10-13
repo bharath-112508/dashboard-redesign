@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 
 import { User, type UserDocument } from '../models/user.model.js';
 import { RefreshToken } from '../models/refresh-token.model.js';
+import { Company } from '../models/company.model.js';
 import { AppError } from '../utils/app-error.js';
 import { createAccessToken, createRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
@@ -545,6 +546,11 @@ export const getMe = async (user_id: Types.ObjectId): Promise<Record<string, unk
     // post-login read.
     const authCtx = await resolveAuthContext(user._id, user.role);
 
+    // Client-side people need their company's name for the portal brand, and
+    // /auth/me is the only user read a client role may make.
+    const companyId = user.client_profile?.company_id ?? null;
+    const company = companyId ? await Company.findById(companyId).select('name').lean() : null;
+
     // `session_count` is best-effort. Step 27 added a Mongo round-trip
     // to the hot `/auth/me` path; a transient `RefreshToken`
     // failure would otherwise 500 the entire endpoint and break the FE
@@ -581,6 +587,9 @@ export const getMe = async (user_id: Types.ObjectId): Promise<Record<string, unk
         // it to avoid offering screens that are permanently empty. `null` for
         // users predating the field, which consumers read as staff.
         employment_type: user.internal_profile?.employment_type ?? null,
+        company_id: companyId ? companyId.toString() : null,
+        company_name: company?.name ?? null,
+        phone: user.phone ?? null,
     };
 };
 

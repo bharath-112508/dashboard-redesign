@@ -69,6 +69,11 @@ vi.mock('../models/user.model.js', () => ({
     },
 }));
 
+const { companyFindByIdMock } = vi.hoisted(() => ({ companyFindByIdMock: vi.fn() }));
+vi.mock('../models/company.model.js', () => ({
+    Company: { findById: companyFindByIdMock },
+}));
+
 vi.mock('../models/refresh-token.model.js', () => ({
     RefreshToken: {
         create: refreshCreateMock,
@@ -915,6 +920,37 @@ describe('revokeSession', () => {
         expect(r1).toEqual({ revoked: true, id: sessionId.toString() });
         expect(r2).toEqual({ revoked: true, id: sessionId.toString() });
         expect(recordAuditMock).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('getMe company and phone', () => {
+    it('returns the client company id, its name and the client phone', async () => {
+        const userId = new Types.ObjectId();
+        const companyId = new Types.ObjectId();
+        userFindByIdMock.mockResolvedValueOnce(
+            baseUser({ _id: userId, role: 'representative', phone: '+47 1', client_profile: { company_id: companyId } })
+        );
+        refreshCountMock.mockResolvedValueOnce(1);
+        companyFindByIdMock.mockReturnValueOnce({ select: () => ({ lean: async () => ({ name: 'Daco' }) }) });
+
+        const me = await auth.getMe(userId);
+
+        expect(me.company_id).toBe(companyId.toString());
+        expect(me.company_name).toBe('Daco');
+        expect(me.phone).toBe('+47 1');
+    });
+
+    it('returns null company fields and the staff phone for internal staff', async () => {
+        const userId = new Types.ObjectId();
+        userFindByIdMock.mockResolvedValueOnce(baseUser({ _id: userId, phone: '+91 2' }));
+        refreshCountMock.mockResolvedValueOnce(1);
+
+        const me = await auth.getMe(userId);
+
+        expect(me.company_id).toBeNull();
+        expect(me.company_name).toBeNull();
+        expect(me.phone).toBe('+91 2');
+        expect(companyFindByIdMock).not.toHaveBeenCalled();
     });
 });
 
