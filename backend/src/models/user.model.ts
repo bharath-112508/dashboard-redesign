@@ -171,6 +171,8 @@ export interface UserDocument extends Document {
     last_password_changed_at: Date | null;
     created_by: Types.ObjectId | null;
     deactivated_at: Date | null;
+    /** True while the user is deactivated only because their company was archived; restoring the company reactivates them. */
+    deactivated_by_company_archive?: boolean;
     created_at: Date;
     updated_at: Date;
 }
@@ -330,6 +332,7 @@ const userSchema = new Schema<UserDocument>(
         last_password_changed_at: { type: Date, default: null },
         created_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
         deactivated_at: { type: Date, default: null },
+        deactivated_by_company_archive: { type: Boolean, default: false },
     },
     {
         ...BASE_SCHEMA_OPTIONS,

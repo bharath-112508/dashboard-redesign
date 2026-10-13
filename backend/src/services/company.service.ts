@@ -263,6 +263,7 @@ export const patchCompany = async (
         throw AppError.forbidden("Only an admin can change a company's status.", ERROR_CODES.FORBIDDEN);
     }
     const before = { name: doc.name, status: doc.status };
+    const statusBefore = doc.status;
 
     if (body.name !== undefined) doc.name = body.name;
     if (body.status !== undefined) {
@@ -294,7 +295,47 @@ export const patchCompany = async (
             after: { name: doc.name, status: doc.status },
         });
     }
+    if (statusBefore !== 'archived' && doc.status === 'archived') await suspendCompanyContacts(doc._id, caller);
+    if (statusBefore === 'archived' && doc.status === 'active') await resumeCompanyContacts(doc._id, caller);
     return toPublicFor(doc, caller);
+};
+
+// ─── Archive / restore and the company's contacts (redesign) ─────────────
+//
+// An archived company's contacts can't sign in; restoring the company lets
+// them in again. Only the people the archive switched off come back: a
+// contact removed on purpose stays removed (see removeRepresentative).
+
+const markArchived = (ids: Types.ObjectId[], value: boolean) =>
+    ids.length ? User.updateMany({ _id: { $in: ids } }, { $set: { deactivated_by_company_archive: value } }) : Promise.resolve();
+
+const suspendCompanyContacts = async (companyId: Types.ObjectId, caller: CompanyCaller): Promise<void> => {
+    const rows = await User.find({
+        'client_profile.company_id': companyId,
+        status: USER_STATUSES.ACTIVE,
+        role: { $in: CLIENT_SIDE_ROLES },
+    })
+        .select('_id')
+        .lean<{ _id: Types.ObjectId }[]>();
+    // A client archiving their own company keeps their own sign-in (deactivateUser refuses self anyway).
+    const ids = rows.map((r) => r._id).filter((id) => !id.equals(caller.id));
+    for (const id of ids) {
+        await deactivateUser({ target_id: id, caller_id: caller.id, reason: 'company_archived', audit: caller.audit });
+    }
+    await markArchived(ids, true);
+};
+
+const resumeCompanyContacts = async (companyId: Types.ObjectId, caller: CompanyCaller): Promise<void> => {
+    const rows = await User.find({
+        'client_profile.company_id': companyId,
+        status: USER_STATUSES.DEACTIVATED,
+        deactivated_by_company_archive: true,
+    })
+        .select('_id')
+        .lean<{ _id: Types.ObjectId }[]>();
+    const ids = rows.map((r) => r._id);
+    for (const id of ids) await reactivateUser(id, caller.audit);
+    await markArchived(ids, false);
 };
 
 // ─── POST /companies/:id/archive ─────────────────────────────────────────
@@ -310,6 +351,7 @@ export const archiveCompany = async (id: Types.ObjectId, caller: CompanyCaller):
     doc.status = 'archived';
     doc.archived_at = new Date();
     await doc.save();
+    await suspendCompanyContacts(doc._id, caller);
 
     if (caller.audit) {
         await recordAudit(caller.audit, {
@@ -542,12 +584,15 @@ export const removeRepresentative = async (
 
     // `deactivateUser` also blocks self-removal, revokes refresh tokens,
     // cascades share-link revocation for clients, and writes the audit row.
-    return deactivateUser({
+    const removed = await deactivateUser({
         target_id: target._id,
         caller_id: caller.id,
         reason: 'removed_from_company',
         audit: caller.audit,
     });
+    // Removed on purpose: restoring an archived company must not bring them back.
+    await markArchived([target._id], false);
+    return removed;
 };
 
 // ─── POST /companies/:id/representatives/:user_id/restore ────────────────

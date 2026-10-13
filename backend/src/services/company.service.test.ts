@@ -61,8 +61,10 @@ vi.mock('../models/company.model.js', () => ({
     COMPANY_STATUSES: ['active', 'archived'],
 }));
 
+const { userUpdateManyMock } = vi.hoisted(() => ({ userUpdateManyMock: vi.fn() }));
 vi.mock('../models/user.model.js', () => ({
     User: {
+        updateMany: userUpdateManyMock,
         create: userCreateMock,
         exists: userExistsMock,
         find: userFindMock,
@@ -1123,6 +1125,7 @@ describe('company profile fields (redesign)', () => {
     it('archiveCompany stamps archived_at', async () => {
         const doc = makeCompany({ archived_at: null });
         companyFindByIdMock.mockResolvedValueOnce(doc);
+        userFindMock.mockReturnValueOnce({ select: () => ({ lean: () => Promise.resolve([]) }) });
 
         await svc.archiveCompany(companyId, adminCaller());
 
@@ -1133,6 +1136,7 @@ describe('company profile fields (redesign)', () => {
     it('patching the status back to active clears archived_at', async () => {
         const doc = makeCompany({ status: 'archived', archived_at: new Date('2026-10-01') });
         companyFindByIdMock.mockResolvedValueOnce(doc);
+        userFindMock.mockReturnValueOnce({ select: () => ({ lean: () => Promise.resolve([]) }) });
 
         await svc.patchCompany(companyId, { status: 'active' }, adminCaller());
 
@@ -1273,5 +1277,70 @@ describe('setResponsible — edge cases', () => {
 
         expect(companyUpdateOneMock).toHaveBeenCalledTimes(3);
         expect(companyUpdateOneMock.mock.calls[2][1]).toEqual({ $push: { responsibles: { user_id: staffId, role: 'viewer' } } });
+    });
+});
+
+
+// ─── Redesign: archiving a company switches its contacts' sign-in off ────
+
+describe('archive / restore and the company contacts', () => {
+    const kari = new Types.ObjectId();
+    const nina = new Types.ObjectId();
+    /** `User.find(filter).select('_id').lean()` */
+    const idsChain = (ids: Types.ObjectId[]) => ({ select: () => ({ lean: () => Promise.resolve(ids.map((_id) => ({ _id }))) }) });
+
+    it('archiving deactivates every active contact of the company and marks why', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindMock.mockReturnValueOnce(idsChain([kari, nina]));
+        const caller = adminCaller();
+
+        await svc.archiveCompany(companyId, caller);
+
+        const filter = userFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter).toMatchObject({ 'client_profile.company_id': companyId, status: 'active' });
+        expect(deactivateUserMock.mock.calls.map((c) => String((c[0] as { target_id: unknown }).target_id))).toEqual([String(kari), String(nina)]);
+        expect(deactivateUserMock).toHaveBeenCalledWith(expect.objectContaining({ reason: 'company_archived', caller_id: caller.id }));
+        expect(userUpdateManyMock).toHaveBeenCalledWith({ _id: { $in: [kari, nina] } }, { $set: { deactivated_by_company_archive: true } });
+    });
+
+    it('archiving through PATCH status does the same', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindMock.mockReturnValueOnce(idsChain([kari]));
+
+        await svc.patchCompany(companyId, { status: 'archived' }, adminCaller());
+
+        expect(deactivateUserMock).toHaveBeenCalledWith(expect.objectContaining({ target_id: kari, reason: 'company_archived' }));
+    });
+
+    it('restoring reactivates only the contacts the archive switched off', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany({ status: 'archived', archived_at: new Date() }));
+        userFindMock.mockReturnValueOnce(idsChain([kari]));
+
+        await svc.patchCompany(companyId, { status: 'active' }, adminCaller());
+
+        const filter = userFindMock.mock.calls[0][0] as Record<string, unknown>;
+        expect(filter).toMatchObject({ 'client_profile.company_id': companyId, status: 'deactivated', deactivated_by_company_archive: true });
+        expect(reactivateUserMock).toHaveBeenCalledWith(kari, undefined);
+        expect(userUpdateManyMock).toHaveBeenCalledWith({ _id: { $in: [kari] } }, { $set: { deactivated_by_company_archive: false } });
+    });
+
+    it('a renamed company that stays active touches no contacts', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+
+        await svc.patchCompany(companyId, { name: 'New name' }, adminCaller());
+
+        expect(userFindMock).not.toHaveBeenCalled();
+        expect(deactivateUserMock).not.toHaveBeenCalled();
+    });
+
+    it('removing a contact by hand clears the mark, so restoring the company does not bring them back', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindByIdMock.mockReturnValueOnce({
+            select: () => ({ lean: () => Promise.resolve({ _id: kari, role: ROLES.REPRESENTATIVE, status: 'deactivated', client_profile: { company_id: companyId } }) }),
+        });
+
+        await svc.removeRepresentative(companyId, kari, adminCaller());
+
+        expect(userUpdateManyMock).toHaveBeenCalledWith({ _id: { $in: [kari] } }, { $set: { deactivated_by_company_archive: false } });
     });
 });

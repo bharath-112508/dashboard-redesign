@@ -643,6 +643,7 @@ export const reactivateUser = async (
 
     target.status = USER_STATUSES.ACTIVE;
     target.deactivated_at = null;
+    target.deactivated_by_company_archive = false;
     // Symmetric with deactivate — validate only the changed status fields so a
     // stale `extra_permissions` entry can't block the flip.
     await target.save({ validateModifiedOnly: true });
