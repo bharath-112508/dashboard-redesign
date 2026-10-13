@@ -5,6 +5,11 @@ const { fetchCompanies, fetchInternalProjects, sendCompanyCommand } = vi.hoisted
   fetchInternalProjects: vi.fn(async () => [{ id: 'i1' }]),
   sendCompanyCommand: vi.fn(async (): Promise<{ id?: string }> => ({ id: 'c1' })),
 }))
+const { fetchWorkspace, fetchTasks } = vi.hoisted(() => ({
+  fetchWorkspace: vi.fn(async () => ({ statuses: [], epics: [{ id: 'e1' }], sprints: [], devopsLinks: {} })),
+  fetchTasks: vi.fn(async () => [{ id: 't1' }]),
+}))
+vi.mock('./http/board', () => ({ fetchWorkspace, fetchTasks }))
 vi.mock('./http/config', () => ({ apiMode: true, API_URL: 'http://x/api/v1' }))
 vi.mock('./http/companies', () => ({
   fetchCompanies,
@@ -24,6 +29,12 @@ describe('server.get in API mode', () => {
     expect(await server.get('internalProjects')).toEqual([{ id: 'i1' }])
     expect(fetchCompanies).toHaveBeenCalledWith(expect.objectContaining({ personId: 'a0' }))
     expect(fetchInternalProjects).toHaveBeenCalledWith(expect.objectContaining({ personId: 'a0' }))
+  })
+
+  it('reads the workspace and tickets from the backend', async () => {
+    expect((await server.get('workspace')).epics).toEqual([{ id: 'e1' }])
+    expect(await server.get('tasks')).toEqual([{ id: 't1' }])
+    expect(fetchTasks).toHaveBeenCalledWith(expect.objectContaining({ personId: 'a0' }))
   })
 })
 

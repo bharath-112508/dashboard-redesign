@@ -33,7 +33,7 @@ export const allPages = async <T>(path: string): Promise<T[]> => {
 }
 
 /** The projects the signed-in person may see, without archived ones (the app has no archived projects). */
-const liveProjects = async () => (await allPages<BackendProject>('/projects')).filter(p => !p.is_archived)
+export const liveProjects = async () => (await allPages<BackendProject>('/projects')).filter(p => !p.is_archived)
 
 /**
  * The companies the signed-in person may see, each with its client projects

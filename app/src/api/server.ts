@@ -13,6 +13,7 @@ import { readSession } from './session/store'
 import { apiMode } from './http/config'
 import { fetchCompanies, fetchInternalProjects, isCompanyApiCommand, sendCompanyCommand } from './http/companies'
 import { ApiError } from './http/client'
+import { fetchTasks, fetchWorkspace } from './http/board'
 
 /**
  * A mock backend. Data lives in localStorage so it survives reloads and is
@@ -494,6 +495,8 @@ export const server = {
     // API mode: these resources come from the backend; everything else is still the mock.
     if (apiMode && resource === 'companies') return (await fetchCompanies(readSession())) as Db[K]
     if (apiMode && resource === 'internalProjects') return (await fetchInternalProjects(readSession())) as Db[K]
+    if (apiMode && resource === 'workspace') return (await fetchWorkspace(readSession())) as Db[K]
+    if (apiMode && resource === 'tasks') return (await fetchTasks(readSession())) as Db[K]
     await sleep(LATENCY_MS)
     return exclusive(async () => clone((await current())[resource]))
   },

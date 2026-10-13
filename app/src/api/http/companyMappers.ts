@@ -19,6 +19,8 @@ export interface BackendCompany {
 export interface BackendProject {
   id: string
   name: string
+  /** Ticket key prefix, e.g. AFSP. */
+  code?: string
   description?: string
   status: string
   is_archived: boolean
