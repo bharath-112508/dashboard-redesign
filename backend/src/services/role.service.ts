@@ -105,6 +105,40 @@ export const seedSystemRoles = async (): Promise<void> => {
     }
 };
 
+// ─── Redesign: the DevOps engineer role ─────────────────────────────────
+
+/** A custom role: a DevOps engineer is a staff member (employee) who also holds this key. */
+export const DEVOPS_ROLE_KEY = 'devops';
+
+/** Creates the `devops` custom role with the employee permissions if it is missing; never overwrites it. */
+export const ensureDevopsRole = async (): Promise<void> => {
+    const employee = SYSTEM_ROLE_DEFINITIONS.find((d) => d.key === 'employee');
+    await Role.updateOne(
+        { key: DEVOPS_ROLE_KEY },
+        {
+            $setOnInsert: {
+                key: DEVOPS_ROLE_KEY,
+                is_system: false,
+                display_name: 'DevOps engineer',
+                description: 'Staff who run deployments and infrastructure (redesign).',
+                permissions: employee?.permissions ?? [],
+                created_by: null,
+                updated_by: null,
+            },
+        },
+        { upsert: true }
+    );
+};
+
+/** Role id → key, for showing people's roles in a list. */
+export const roleKeysByIds = async (ids: Types.ObjectId[]): Promise<Map<string, string>> => {
+    if (!ids.length) return new Map();
+    const roles = await Role.find({ _id: { $in: ids } })
+        .select('_id key')
+        .lean<{ _id: Types.ObjectId; key: string }[]>();
+    return new Map(roles.map((r) => [r._id.toString(), r.key]));
+};
+
 // ─── System-role lookup ────────────────────────────────────────────────
 
 /**

@@ -39,6 +39,8 @@ export interface InternalProfile {
     employee_id?: string;
     job_title?: string;
     department?: string;
+    /** Redesign: developer type (Frontend, Backend, Mobile…). */
+    dev_type?: string | null;
     date_of_joining?: string; // YYYY-MM-DD
     /**
      * How this person is engaged — `staff` or `freelancer`. Orthogonal to
@@ -203,6 +205,7 @@ const internalProfileSchema = new Schema<InternalProfile>(
         employee_id: { type: String, required: false, trim: true },
         job_title: { type: String, required: false, trim: true },
         department: { type: String, required: false, trim: true },
+        dev_type: { type: String, required: false, trim: true, default: null },
         date_of_joining: { type: String, required: false },
         employment_type: {
             type: String,

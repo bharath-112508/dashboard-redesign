@@ -403,3 +403,19 @@ describe('updateUserBodySchema — email', () => {
         expect(r.success && r.data.email).toBe('new@x.io');
     });
 });
+
+describe('developer type (redesign)', () => {
+    it('is accepted on create and on update', () => {
+        const c = createUserBodySchema.safeParse({ ...baseCreatePayload, internal_profile: { ...baseInternalProfile, dev_type: 'Backend' } });
+        expect(c.success).toBe(true);
+        if (c.success) expect(c.data.internal_profile?.dev_type).toBe('Backend');
+        const u = updateUserBodySchema.safeParse({ internal_profile: { dev_type: 'Mobile' } });
+        expect(u.success).toBe(true);
+        if (u.success) expect(u.data.internal_profile?.dev_type).toBe('Mobile');
+    });
+
+    it('can be cleared', () => {
+        const u = updateUserBodySchema.safeParse({ internal_profile: { dev_type: null } });
+        expect(u.success).toBe(true);
+    });
+});

@@ -26,7 +26,7 @@ import { initializeBalancesForUserYear } from './leave-balance.service.js';
 import { notifyUserInvited } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { withTransaction } from '../utils/with-transaction.js';
-import { getSystemRoleByKey } from './role.service.js';
+import { getSystemRoleByKey, roleKeysByIds } from './role.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import dayjs, { DEFAULT_TIMEZONE } from '../utils/date.js';
 import { resolveProfilePhotoTtlMinutes, signProfilePhotoUrl } from './profile-photo.service.js';
@@ -319,8 +319,14 @@ export const listUsers = async (
         loadPhotoTtlMinutes(),
     ]);
 
+    // Redesign: role keys, so a custom role such as `devops` shows in the directory.
+    const roleIds = [...new Set(rows.flatMap((u) => (u.role_ids ?? []).map(String)))].map((id) => new Types.ObjectId(id));
+    const keyOf = await roleKeysByIds(roleIds);
     return {
-        data: rows.map((u) => toPublicUser(u, photoTtl)),
+        data: rows.map((u) => ({
+            ...toPublicUser(u, photoTtl),
+            role_keys: (u.role_ids ?? []).map((id) => keyOf.get(String(id))).filter((k): k is string => !!k),
+        })),
         meta: {
             page: query.page,
             limit: query.limit,

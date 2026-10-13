@@ -27,7 +27,7 @@ import { seedDefaultLeaveTypes } from './services/leave-type.service.js';
 // wasted work. If a future env needs a re-migration, the function is
 // preserved in git history and can be re-introduced behind an explicit
 // boot flag rather than running unconditionally.
-import { bootstrapRolesMigration } from './services/role.service.js';
+import { bootstrapRolesMigration, ensureDevopsRole } from './services/role.service.js';
 import { migratePlaintextSlackBotToken } from './services/slack-settings.service.js';
 import { migrateShareLinkTokensToHashed } from './services/share-link.service.js';
 import { migrateDisallowedPushEndpoints } from './services/push-subscription.service.js';
@@ -330,6 +330,8 @@ const startServer = async () => {
         // on any pre-RBAC users still carrying only the legacy `role`
         // string. Idempotent on a fully-migrated DB.
         await bootstrapRolesMigration();
+        // Redesign: the DevOps engineer custom role (created once if missing).
+        await ensureDevopsRole().catch((err: unknown) => logger.warn({ err }, 'DevOps role seed failed; will retry on next boot'));
 
         // M16 — BUG-040 one-time backfill of multi-segment attendance
         // was removed (was running on every boot even though the DB

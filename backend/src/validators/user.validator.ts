@@ -135,6 +135,8 @@ const internalProfileCreateSchema = z.object({
     // from this one — still express "clear it" for an existing record.
     reporting_manager_id: objectIdSchema.nullable().optional(),
     emergency_contact: emergencyContactSchema.optional(),
+    /** Redesign: developer type (Frontend, Backend, Mobile…); null clears it. */
+    dev_type: z.string().trim().max(40).nullable().optional(),
 });
 
 /**

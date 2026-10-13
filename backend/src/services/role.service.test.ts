@@ -88,6 +88,35 @@ const findChain = <T>(value: T) => ({
     select: () => ({ lean: () => Promise.resolve(value) }),
 });
 
+// ─── Redesign: the DevOps engineer role ─────────────────────────────────
+
+describe('ensureDevopsRole', () => {
+    it('creates a custom devops role with the employee permissions, only when missing', async () => {
+        roleUpdateOneMock.mockResolvedValue({ upsertedCount: 1 });
+        await service.ensureDevopsRole();
+        const [filter, update, options] = roleUpdateOneMock.mock.calls[0];
+        expect(filter).toEqual({ key: 'devops' });
+        expect(options).toMatchObject({ upsert: true });
+        // Only on insert: an admin's later edits to the role are kept.
+        expect(update).not.toHaveProperty('$set');
+        const employee = SYSTEM_ROLE_DEFINITIONS.find((d) => d.key === 'employee')!;
+        expect(update.$setOnInsert).toMatchObject({ key: 'devops', is_system: false, permissions: employee.permissions });
+    });
+});
+
+describe('roleKeysByIds', () => {
+    it('maps role ids to their keys', async () => {
+        const a = new Types.ObjectId();
+        roleFindMock.mockReturnValueOnce({ select: () => ({ lean: () => Promise.resolve([{ _id: a, key: 'devops' }]) }) });
+        expect(await service.roleKeysByIds([a])).toEqual(new Map([[a.toString(), 'devops']]));
+    });
+
+    it('asks nothing for no ids', async () => {
+        expect(await service.roleKeysByIds([])).toEqual(new Map());
+        expect(roleFindMock).not.toHaveBeenCalled();
+    });
+});
+
 // ─── seedSystemRoles ─────────────────────────────────────────────────────
 
 describe('seedSystemRoles', () => {

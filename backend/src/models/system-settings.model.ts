@@ -196,6 +196,8 @@ export interface SystemSettingsDocument extends Document {
     company: CompanySettings;
     payroll: PayrollSettings;
     billing: BillingSettings;
+    /** Redesign: the app's Roles & permissions grid (display only) and developer types. */
+    app_access?: { perms?: Record<string, string[]> | null; dev_types?: string[] | null } | null;
 
     default_timezone: string;
 
@@ -431,6 +433,7 @@ const systemSettingsSchema = new Schema<SystemSettingsDocument>(
         company: { type: companySchema, required: true },
         payroll: { type: payrollSchema, default: () => ({}) },
         billing: { type: billingSchema, default: () => ({}) },
+        app_access: { type: Schema.Types.Mixed, default: null },
 
         default_timezone: { type: String, required: true },
 

@@ -106,8 +106,10 @@ vi.mock('./audit.service.js', () => ({
     recordAudit: recordAuditMock,
 }));
 
+const roleKeysByIdsMock = vi.hoisted(() => vi.fn(async () => new Map<string, string>()));
 vi.mock('./role.service.js', () => ({
     getSystemRoleByKey: getSystemRoleByKeyMock,
+    roleKeysByIds: roleKeysByIdsMock,
 }));
 
 const { issuePasswordSetupLinkMock, revokePendingPasswordLinksMock } = vi.hoisted(() => ({
@@ -868,6 +870,21 @@ describe('listUsers — employment_type filter', () => {
     it('omits the predicate entirely when no employment_type is asked for', async () => {
         const filter = await runList();
         expect(filter).not.toHaveProperty('internal_profile.employment_type');
+    });
+});
+
+describe('listUsers — role keys (redesign)', () => {
+    it('gives each person their role keys, so a DevOps engineer is recognised', async () => {
+        const devopsRole = new Types.ObjectId();
+        const employeeRole = new Types.ObjectId();
+        const row = { _id: new Types.ObjectId(), role_ids: [employeeRole, devopsRole], toJSON() { return { id: String(this._id), role_ids: this.role_ids } } };
+        userFindMock.mockReturnValueOnce({ collation: () => ({ sort: () => ({ skip: () => ({ limit: () => Promise.resolve([row]) }) }) }) });
+        userCountMock.mockReturnValueOnce({ collation: () => Promise.resolve(1) });
+        settingsMock.mockResolvedValueOnce({ uploads: { sas_token_ttl_minutes: 15 } });
+        photoTtlMock.mockReturnValueOnce(15);
+        roleKeysByIdsMock.mockResolvedValueOnce(new Map([[employeeRole.toString(), 'employee'], [devopsRole.toString(), 'devops']]));
+        const out = await svc.listUsers({ page: 1, limit: 20 } as never);
+        expect(out.data[0]).toMatchObject({ role_keys: ['employee', 'devops'] });
     });
 });
 
