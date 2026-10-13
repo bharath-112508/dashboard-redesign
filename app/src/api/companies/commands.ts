@@ -26,6 +26,8 @@ export type CompaniesCommand =
       id: string
       patch: Partial<CompanyFields>
       main?: { name: string; email: string }
+      /** The main contact as it was when the form opened, so only real changes are sent (API mode). */
+      mainBefore?: { name: string; email: string }
       /** The current main contact's person id, so the backend updates that contact (API mode). */
       mainPersonId?: PersonId | null
     }

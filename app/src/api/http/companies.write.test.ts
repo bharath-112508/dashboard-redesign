@@ -120,6 +120,39 @@ describe('company.update and company.archive', () => {
     expect(post).not.toHaveBeenCalled()
   })
 
+  it('leaves the main contact alone when the form did not change it (a non-admin may not edit users)', async () => {
+    patch.mockResolvedValue({})
+    await sendCompanyCommand(
+      {
+        type: 'company.update',
+        id: 'c1',
+        patch: { notes: 'n' },
+        main: { name: 'Kari Berg', email: 'kari@test.example' },
+        mainBefore: { name: 'Kari Berg', email: 'kari@test.example' },
+        mainPersonId: 'u9',
+      },
+      TODAY,
+    )
+    expect(patch).toHaveBeenCalledTimes(1)
+    expect(patch).toHaveBeenCalledWith('/companies/c1', { notes: 'n' })
+  })
+
+  it('sends only the email when only the email changed', async () => {
+    patch.mockResolvedValue({})
+    await sendCompanyCommand(
+      {
+        type: 'company.update',
+        id: 'c1',
+        patch: {},
+        main: { name: 'Kari Berg', email: 'kari.new@test.example' },
+        mainBefore: { name: 'Kari Berg', email: 'kari@test.example' },
+        mainPersonId: 'u9',
+      },
+      TODAY,
+    )
+    expect(patch).toHaveBeenCalledWith('/users/u9', { email: 'kari.new@test.example' })
+  })
+
   it('adds a main contact when the company has none yet', async () => {
     post.mockResolvedValueOnce({ id: 'u10' })
     await sendCompanyCommand({ type: 'company.update', id: 'c1', patch: {}, main: { name: 'New Person', email: 'new@test.example' }, mainPersonId: null }, TODAY)

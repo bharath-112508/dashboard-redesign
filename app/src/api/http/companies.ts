@@ -216,8 +216,15 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
       if (Object.keys(body).length) await api.patch(`/companies/${cmd.id}`, body)
       if (cmd.main?.email) {
         // The existing main contact is updated by id (name and email); without one, it is added.
-        if (cmd.mainPersonId) await api.patch(`/users/${cmd.mainPersonId}`, { full_name: cmd.main.name, email: cmd.main.email })
-        else await createContact(cmd.id, { personId: null, name: cmd.main.name, role: 'Main contact', email: cmd.main.email, projects: [] })
+        if (cmd.mainPersonId) {
+          // Only what changed: editing a user is an admin action, so an unchanged contact must not be sent.
+          const before = cmd.mainBefore
+          const changes = {
+            ...(cmd.main.name !== before?.name ? { full_name: cmd.main.name } : {}),
+            ...(cmd.main.email !== before?.email ? { email: cmd.main.email } : {}),
+          }
+          if (Object.keys(changes).length) await api.patch(`/users/${cmd.mainPersonId}`, changes)
+        } else await createContact(cmd.id, { personId: null, name: cmd.main.name, role: 'Main contact', email: cmd.main.email, projects: [] })
       }
       return {}
     }

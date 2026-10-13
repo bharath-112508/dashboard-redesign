@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tansta
 import { reduce, touches, type Command, type Resource } from './commands'
 import { RefusedError, server } from './server'
 import { apiMode } from './http/config'
+import { isCompanyApiCommand } from './http/companies'
 import { refusal } from './session/permissions'
 import { readSession } from './session/store'
 import type { Db } from './types'
@@ -63,7 +64,8 @@ const cachedDb = (qc: QueryClient, needed: Resource[]): Db | null => {
  * The backend enforces the rules too; this keeps the message and timing the same as mock mode.
  */
 export const refuseBeforeSending = (qc: QueryClient, cmd: Command) => {
-  if (!apiMode) return
+  // Company and project commands are judged by the backend: the mock's client rules are stricter there.
+  if (!apiMode || isCompanyApiCommand(cmd)) return
   const db = cachedDb(qc, touches(cmd))
   const why = db && refusal(db, cmd, readSession())
   if (why) throw new RefusedError(why)

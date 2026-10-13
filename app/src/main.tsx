@@ -4,7 +4,7 @@ import { BrowserRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App } from './App'
 import { onSignedOut } from './api/http/client'
-import { clearSession } from './api/session/store'
+import { clearSession, readSession } from './api/session/store'
 import './index.css'
 
 const queryClient = new QueryClient({
@@ -13,6 +13,8 @@ const queryClient = new QueryClient({
 
 // When the backend refuses to refresh the sign-in (expired, or signed out elsewhere), sign out here too; the guard then shows /login.
 onSignedOut(() => {
+  // Several failing calls can report sign-out at once; act once.
+  if (!readSession()) return
   clearSession()
   queryClient.clear()
 })

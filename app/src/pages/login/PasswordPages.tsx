@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { apiForgotPassword, apiResetPassword, type PasswordResult } from '../../api/http/auth'
 
@@ -70,9 +70,13 @@ export function ForgotPasswordPage() {
 
 export function ResetPasswordPage() {
   const [params] = useSearchParams()
-  const token = params.get('token') ?? ''
+  // Read once, then taken out of the address bar and history so the link can't be reused from there.
+  const [token] = useState(() => params.get('token') ?? '')
   // The invitation a new contact gets uses this same page.
   const welcome = params.get('welcome') === '1'
+  useEffect(() => {
+    if (params.has('token')) window.history.replaceState(null, '', `/reset-password${welcome ? '?welcome=1' : ''}`)
+  }, [params, welcome])
   const [password, setPassword] = useState('')
   const [repeat, setRepeat] = useState('')
   const [busy, setBusy] = useState(false)

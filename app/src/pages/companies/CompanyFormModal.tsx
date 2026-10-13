@@ -111,6 +111,7 @@ export function CompanyFormModal({
         id: company.id,
         patch: fields,
         main: { name: v.contactName, email: v.contactEmail },
+        mainBefore: { name: company.contacts[0]?.name ?? '', email: company.contacts[0]?.email ?? '' },
         mainPersonId: company.contacts[0]?.personId ?? null,
       })
       onClose()
