@@ -397,6 +397,7 @@ export const createEntry = async (input: CreateTimesheetBody, caller: Caller): P
         idle_minutes: input.idle_minutes,
         ...totals,
         description: input.description ?? '',
+        work_type: input.work_type ?? null,
         last_edited_by: caller.id,
         last_edited_at: new Date(),
     });
@@ -483,6 +484,7 @@ export const patchEntry = async (
     if (patch.idle_hours !== undefined) entry.idle_hours = patch.idle_hours;
     if (patch.idle_minutes !== undefined) entry.idle_minutes = patch.idle_minutes;
     if (patch.description !== undefined) entry.description = patch.description;
+    if (patch.work_type !== undefined) entry.work_type = patch.work_type;
 
     if (entry.entry_type === TIMESHEET_ENTRY_TYPES.GENERAL && patch.general_category !== undefined) {
         entry.general_category = patch.general_category;

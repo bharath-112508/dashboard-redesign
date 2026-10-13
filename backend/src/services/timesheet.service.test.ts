@@ -733,6 +733,43 @@ describe('submitted weeks', () => {
     });
 });
 
+describe('work type (redesign)', () => {
+    it('stores the work type with a new entry', async () => {
+        const me = employeeCaller();
+        entryCreateMock.mockImplementationOnce(async (doc: Record<string, unknown>) => makeEntry(doc));
+        stubAggregate(60);
+        await svc.createEntry(
+            {
+                local_date: today(),
+                entry_type: 'general',
+                project_id: new Types.ObjectId().toString(),
+                sprint_id: null,
+                task_id: null,
+                general_category: 'Planning',
+                billable_hours: 1,
+                billable_minutes: 0,
+                non_billable_hours: 0,
+                non_billable_minutes: 0,
+                idle_hours: 0,
+                idle_minutes: 0,
+                description: 'standup',
+                work_type: 'Meeting',
+            } as never,
+            me
+        );
+        expect(entryCreateMock).toHaveBeenCalledWith(expect.objectContaining({ work_type: 'Meeting' }));
+    });
+
+    it('changes the work type on an entry', async () => {
+        const owner = new Types.ObjectId();
+        const entry = makeEntry({ user_id: owner, local_date: daysAgo(1) });
+        entryFindByIdMock.mockResolvedValueOnce(entry);
+        stubAggregate(60);
+        await svc.patchEntry(entry._id, { work_type: 'Review' } as never, employeeCaller(owner));
+        expect((entry as Record<string, unknown>).work_type).toBe('Review');
+    });
+});
+
 describe('deleteEntry', () => {
     it('rejects an owner deleting outside the self-edit window', async () => {
         const owner = new Types.ObjectId();

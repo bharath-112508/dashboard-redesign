@@ -54,6 +54,8 @@ export interface TimesheetEntryDocument extends Document {
     total_minutes: number;
 
     description: string;
+    /** Redesign: what kind of work, e.g. Meeting. */
+    work_type: string | null;
 
     last_edited_by: Types.ObjectId;
     last_edited_at: Date;
@@ -93,6 +95,7 @@ const timesheetEntrySchema = new Schema<TimesheetEntryDocument>(
         total_minutes: { type: Number, required: true, default: 0 },
 
         description: { type: String, default: '', trim: true, maxlength: TIMESHEET_DESCRIPTION_MAX },
+        work_type: { type: String, default: null, trim: true, maxlength: 40 },
 
         last_edited_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, required: true },
         last_edited_at: { type: Date, required: true, default: () => new Date() },

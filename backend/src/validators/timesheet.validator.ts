@@ -59,6 +59,9 @@ const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be a YYYY-MM
 // time across three parallel buckets: billable, non-billable, and idle
 // (non-productive downtime). Idle fields default to 0 so existing clients
 // that don't send them keep working.
+/** Redesign: what kind of work (General, Meeting, Review, DevOps); free text, optional. */
+const workTypeSchema = z.string().trim().max(40).nullable();
+
 const durationSchema = z.object({
     billable_hours: z.number().int().min(0).max(TIMESHEET_HOURS_MAX),
     billable_minutes: z.number().int().min(0).max(TIMESHEET_MINUTES_MAX),
@@ -79,6 +82,7 @@ const taskLinkedCreateSchema = z
         task_id: objectIdSchema,
         general_category: z.null().optional(),
         description: descriptionSchema,
+        work_type: workTypeSchema.optional(),
     })
     .extend(durationSchema.shape);
 
@@ -113,6 +117,7 @@ const generalCreateSchema = z
          */
         general_category: z.string().trim().min(1).max(TIMESHEET_GENERAL_CATEGORY_MAX).nullable().optional(),
         description: descriptionSchema,
+        work_type: workTypeSchema.optional(),
     })
     .extend(durationSchema.shape);
 
@@ -150,6 +155,7 @@ export const patchTimesheetBodySchema = z
          */
         local_date: isoDateSchema,
         description: descriptionSchema,
+        work_type: workTypeSchema.optional(),
         // Both nullable: on a general entry either one may be cleared, as long
         // as the OTHER still attributes the time. That pairwise rule needs the
         // stored row to evaluate — and so does whether this may be free text —
