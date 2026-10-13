@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useLocation } from 'react-router'
-import { useEntries } from '../../api/queries'
+import { useEntries, useTicketDetails } from '../../api/queries'
 import type { Command } from '../../api/commands'
 import type { Attachment, Subtask, Task, TaskId } from '../../api/types'
 import { Markdown } from '../../components/Markdown'
@@ -58,7 +58,10 @@ export function TicketDrawer({ id }: { id: TaskId }) {
   const [railHide, setRailHide] = useState<boolean | null>(null)
   // API mode: a draft ticket that got its title now lives under its backend id.
   const alias = ticketAlias(id)
-  const raw0 = tasks.find(t => t.id === id) ?? (alias ? tasks.find(t => t.id === alias) : undefined)
+  const found = tasks.find(t => t.id === id) ?? (alias ? tasks.find(t => t.id === alias) : undefined)
+  // API mode: comments, history and attachments are read for the open ticket only.
+  const details = useTicketDetails(found?.id ?? id).data
+  const raw0 = found && details ? { ...found, acts: details.acts, atts: details.atts } : found
   useEffect(() => {
     if (alias && raw0?.id === alias) overlay.open('ticket', alias, { replace: true })
   }, [alias, raw0?.id])

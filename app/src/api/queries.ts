@@ -5,6 +5,7 @@ import { RefusedError, server } from './server'
 import { apiMode } from './http/config'
 import { isCompanyApiCommand } from './http/companies'
 import { isBoardApiCommand } from './http/board'
+import { fetchTicketDetails } from './http/ticketDetails'
 import { refusal } from './session/permissions'
 import { readSession } from './session/store'
 import type { Db } from './types'
@@ -32,6 +33,14 @@ const RESOURCES: Resource[] = ['workspace', 'tasks', 'entries', 'weekSubmissions
 
 export const useWorkspace = () => useQuery({ queryKey: qk.workspace, queryFn: () => server.get('workspace') })
 export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: () => server.get('tasks') })
+
+/** API mode: the open ticket's comments, history and attachments (the mock keeps them on the ticket). */
+export const ticketDetailsQuery = (id: string) => ({
+  queryKey: ['ticketDetails', id],
+  queryFn: () => fetchTicketDetails(id),
+  enabled: apiMode,
+})
+export const useTicketDetails = (id: string) => useQuery(ticketDetailsQuery(id))
 export const useEntries = () => useQuery({ queryKey: qk.entries, queryFn: () => server.get('entries') })
 export const useQuestions = () => useQuery({ queryKey: qk.questions, queryFn: () => server.get('questions') })
 export const useRequests = () => useQuery({ queryKey: qk.requests, queryFn: () => server.get('requests') })
@@ -99,7 +108,7 @@ const useCommandMutation = () => {
       // them, so only the last write to finish refetches (everything it and
       // the earlier skipped writes touched).
       if (qc.isMutating() > 1) return
-      return Promise.all(RESOURCES.map(k => qc.invalidateQueries({ queryKey: [k] })))
+      return Promise.all([...RESOURCES, 'ticketDetails'].map(k => qc.invalidateQueries({ queryKey: [k] })))
     },
   })
 }
