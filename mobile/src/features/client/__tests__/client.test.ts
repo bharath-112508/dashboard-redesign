@@ -39,4 +39,19 @@ describe('client portal helpers', () => {
     expect(L.find((x) => x.company.id === 'nord')?.waiting).toBe(1);
     expect(L.find((x) => x.company.id === 'hav')).toBeUndefined();
   });
+
+  it('clients list: only companies with a portal contact or an open question or bug', () => {
+    const h = harness(1);
+    // Fjordline has projects but no contacts and nothing open; the DevOps-only companies likewise
+    expect(clientSummaries(h.get()).map((x) => x.company.id)).toEqual(['daco', 'nord']);
+    // a contact with portal access brings a company in
+    h.cmd.saveContact('fjord', null, { name: 'Ann Holm', role: 'IT', email: 'ann@fjordline.se', projects: ['fjp'], admin: false });
+    expect(clientSummaries(h.get()).map((x) => x.company.id)).toContain('fjord');
+  });
+
+  it('V-64 removing a team member toasts "Member removed"', () => {
+    const h = harness(7);
+    expect(h.cmd.removeClientMember('ct2')).toMatchObject({ ok: true, toast: 'Member removed' });
+    expect(h.get().clientTeam.map((m) => m.id)).toEqual(['ct1']);
+  });
 });

@@ -18,7 +18,7 @@ export interface DayCell {
   today?: boolean;
 }
 
-/** Day strip (SPEC §6.2): 7 equal cells 64h r12; selected ink-filled, today blue border. */
+/** Day strip (SPEC §6.2): 7 equal cells 64h r12; selected ink-filled (also when it is today, as the prototype), an unselected today gets a blue border. */
 export function DayStrip({ days, selected, onSelect }: { days: DayCell[]; selected: string; onSelect: (date: string) => void }) {
   return (
     <View style={styles.row}>
@@ -32,7 +32,7 @@ export function DayStrip({ days, selected, onSelect }: { days: DayCell[]; select
             a11yRole="button"
             selected={on}
             onPress={() => onSelect(d.date)}
-            style={[styles.cell, { backgroundColor: on ? colors.ink : colors.surface, borderColor: d.today ? colors.primary : on ? colors.ink : colors.ringCard }]}
+            style={[styles.cell, { backgroundColor: on ? colors.ink : colors.surface, borderColor: on ? colors.ink : d.today ? colors.primary : colors.ringCard }]}
             testID={`day-${d.date}`}
           >
             <Txt v="tab" color={fg} style={styles.dim}>

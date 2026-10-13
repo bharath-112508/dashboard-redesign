@@ -42,7 +42,7 @@ describe('projects list', () => {
 
   it('row sub and deadline meta', () => {
     const s = get();
-    expect(projectRowSub(project(s, 'fjp')!)).toBe('Fjordline Logistics · Support until 30 Aug');
+    expect(projectRowSub(project(s, 'fjp')!)).toBe('Fjordline Logistics · Support until 30 Aug 2027');
     expect(projectRowSub(project(s, 'i1')!)).toBe('Internal · Platform & tooling');
     expect(deadlineMeta(project(s, 'nordp')!)).toEqual({ text: 'Deadline passed 8 Oct', late: true });
     expect(deadlineMeta(project(s, 'dacop')!)).toEqual({ text: 'Deadline 20 Dec', late: false });

@@ -32,7 +32,7 @@ function Hatch() {
 /**
  * Week bars (SPEC §6.2): 7 columns 120h, stacked idle (hatched) / non-billable (violet) /
  * billable (blue), day and total labels, legend and a foot total. Freelancers: `idle`
- * false hides idle.
+ * false hides idle. Day totals never wrap (long values such as "26h 45m" use a smaller size).
  */
 export function WeekBars({ days, foot, idle = true, testID }: { days: WeekBar[]; foot?: string; idle?: boolean; testID?: string }) {
   const cap = Math.max(480, ...days.map((d) => d.billMin + d.nonMin));
@@ -55,13 +55,14 @@ export function WeekBars({ days, foot, idle = true, testID }: { days: WeekBar[];
       <View style={styles.labels}>
         {days.map((d, i) => {
           const t = d.billMin + d.nonMin;
+          const text = t ? hm(t) : '–';
           return (
             <View key={i} style={styles.label}>
-              <Txt v="tab" w={700} color={colors.ink3}>
+              <Txt v="tab" w={700} color={colors.ink3} numberOfLines={1}>
                 {d.day}
               </Txt>
-              <Txt v="tiny" w={600} color={t ? colors.ink : colors.faint}>
-                {t ? hm(t) : '–'}
+              <Txt v="tiny" w={600} color={t ? colors.ink : colors.faint} numberOfLines={1} style={text.length > 6 ? styles.long : null}>
+                {text}
               </Txt>
             </View>
           );
@@ -96,7 +97,9 @@ const styles = StyleSheet.create({
   bars: { flexDirection: 'row', gap: 6, height: 120, alignItems: 'flex-end' },
   col: { flex: 1, height: '100%', justifyContent: 'flex-end', gap: 2, borderRadius: 6, backgroundColor: colors.bg, overflow: 'hidden' },
   labels: { marginTop: 6, flexDirection: 'row', gap: 6 },
-  label: { flex: 1, alignItems: 'center' },
+  // a label may use the gaps next to its column, so "26h 45m" stays on one line
+  label: { flex: 1, minWidth: 0, marginHorizontal: -3, alignItems: 'center' },
+  long: { fontSize: 9.5, letterSpacing: -0.3 },
   legend: { marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   swatch: { width: 9, height: 9, borderRadius: 2 },

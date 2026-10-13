@@ -1,5 +1,7 @@
 /** Formatting and date helpers (SPEC §3 "Formats"). Dates are ISO "YYYY-MM-DD". */
 
+import { TODAY } from './clock';
+
 export const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
 export const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
@@ -18,17 +20,22 @@ export function addD(iso: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** "10 Oct" (non-ISO input is returned as is). */
+/**
+ * "10 Oct"; a date in another year than TODAY includes the year ("30 Aug 2027"), so a
+ * date across a year boundary is never read as this year's (integration decision).
+ * Non-ISO input is returned as is.
+ */
 export function fmt(iso?: string | null): string {
   if (!iso || !ISO_DAY.test(iso)) return iso ?? '';
-  const [, m, d] = iso.slice(0, 10).split('-');
-  return `${+d} ${MON[+m - 1]}`;
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return `${+d} ${MON[+m - 1]}${y === TODAY.slice(0, 4) ? '' : ` ${y}`}`;
 }
 
-/** "10 Oct 2026". */
+/** "10 Oct 2026" (always with the year). */
 export function fmtY(iso?: string | null): string {
   if (!iso || !ISO_DAY.test(iso)) return iso ?? '';
-  return `${fmt(iso)} ${iso.slice(0, 4)}`;
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return `${+d} ${MON[+m - 1]} ${y}`;
 }
 
 /** "Sat" */

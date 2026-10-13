@@ -6,6 +6,8 @@ import { ALL_TABS, type TabKey } from './tabs';
 interface NavRoute {
   name: string;
   params?: object;
+  /** set on the route a URL opened (deep link); pushed routes have none */
+  path?: string;
   state?: NavState;
 }
 interface NavState {
@@ -22,6 +24,11 @@ export interface ShellRoute {
   underSheet: string;
   /** number of screens on the (app) stack */
   depth: number;
+  /**
+   * The screen the app was opened on by a deep link, when no tab has been chosen since
+   * (the tab bar then highlights the tab that owns it, `deepLinkOwner`), else null.
+   */
+  deepLink: string | null;
 }
 
 function findApp(state: NavState | undefined): NavState | undefined {
@@ -91,5 +98,10 @@ export function useShellRoute(): ShellRoute {
       break;
     }
   }
-  return { tab, top, underSheet: under, depth: routes.length };
+  // A deep link puts (tabs) under the opened screen with Home focused, no tab chosen and the
+  // URL path on the opened route (pushed routes carry no path).
+  const first = routes[1];
+  const chosen = !!(tabsRoute?.params as { screen?: string } | undefined)?.screen || (tabsRoute?.state?.index ?? 0) !== 0;
+  const deepLink = first?.path && !first.name.startsWith('sheet/') && !chosen ? first.name : null;
+  return { tab, top, underSheet: under, depth: routes.length, deepLink };
 }

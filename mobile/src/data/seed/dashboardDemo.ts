@@ -26,11 +26,11 @@ export const SUPPORT_DEMO = {
   uptime: '99.98%',
   incidents: 1,
   sla: '96%',
-  /** support hours used per month, Jul–Oct */
+  /** support hours used per month, Jul–Oct (the prototype's 7, 9, 8h; Oct is computed) */
   hoursByMonth: [
-    { m: 'Jul', h: 8 },
-    { m: 'Aug', h: 11 },
-    { m: 'Sep', h: 9 },
+    { m: 'Jul', h: 7 },
+    { m: 'Aug', h: 9 },
+    { m: 'Sep', h: 8 },
     { m: 'Oct', h: 6 },
   ],
 } as const;

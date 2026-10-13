@@ -47,3 +47,33 @@ export function tabsFor(role: Role): readonly TabDef[] {
 export function isTabOf(role: Role | null | undefined, key: string): key is TabKey {
   return !!role && TABS_BY_ROLE[role].some((t) => t.key === key);
 }
+
+/**
+ * The tab that owns a pushed screen when the app was opened on it by a deep link (no tab
+ * was chosen yet): the first of the candidates the role has, else Home.
+ */
+const DEEP_LINK_OWNER: Record<string, readonly TabKey[]> = {
+  'ticket/[key]': ['tickets', 'projects'],
+  'subtask/[key]': ['tickets', 'projects'],
+  'project/[id]': ['projects'],
+  'dvp/[key]': ['devops', 'more'],
+  'request/[id]': ['devops', 'more'],
+  'stack/devops': ['devops', 'more'],
+  'question/[id]': ['questions', 'more'],
+  'bug/[id]': ['bugs', 'more'],
+  'portal/[co]': ['more'],
+  clients: ['more'],
+  emp: ['more'],
+  users: ['more'],
+  'user/[id]': ['more'],
+  companies: ['more'],
+  'company/[id]': ['more'],
+  'company-time/[id]': ['more'],
+  dvset: ['more'],
+  leave: ['more'],
+  me: ['more'],
+};
+
+export function deepLinkOwner(routeName: string, role: Role | null | undefined): TabKey {
+  return (DEEP_LINK_OWNER[routeName] ?? []).find((t) => isTabOf(role, t)) ?? 'home';
+}

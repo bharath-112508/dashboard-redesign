@@ -18,6 +18,8 @@ describe('format', () => {
     expect(hm(45)).toBe('45m');
     expect(hm(0)).toBe('0h');
     expect(fmt('2026-10-10')).toBe('10 Oct');
+    expect(fmt('2027-08-30')).toBe('30 Aug 2027'); // another year than TODAY: with the year
+    expect(fmt('2025-12-31')).toBe('31 Dec 2025');
     expect(fmtL('2026-10-10')).toBe('Sat 10 Oct');
     expect(dvDate('2026-10-12T07:00')).toBe('12 Oct 2026, 07:00');
     expect(dvDate('2026-11-30')).toBe('30 Nov 2026');
@@ -74,10 +76,10 @@ describe('projVis per role', () => {
 describe('morePages per role', () => {
   it('matches SPEC §2.5 (+ leave for staff)', () => {
     const labels = (r: Parameters<typeof morePages>[0]) => morePages(r).map((p) => p.label);
-    expect(labels('super')).toEqual(['Companies', 'DevOps board', 'Clients', 'Employee timesheets', 'Users', 'Leave & comp-off']);
-    expect(labels('pm')).toEqual(['Companies', 'Clients', 'Employee timesheets', 'Leave & comp-off']);
-    expect(labels('dev')).toEqual(['Companies', 'Leave & comp-off']);
-    expect(labels('devops')).toEqual(['Leave & comp-off']);
+    expect(labels('super')).toEqual(['Companies', 'DevOps board', 'Clients', 'Employee timesheets', 'Users', 'Leave']);
+    expect(labels('pm')).toEqual(['Companies', 'Clients', 'Employee timesheets', 'Leave']);
+    expect(labels('dev')).toEqual(['Companies', 'Leave']);
+    expect(labels('devops')).toEqual(['Leave']);
     expect(labels('cadmin')).toEqual(['Your team']);
     expect(labels('cuser')).toEqual([]);
   });

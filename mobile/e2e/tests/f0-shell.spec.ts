@@ -27,14 +27,14 @@ import {
  * every placeholder route reachable, push/pop, URL and inline sheets, toast, persistence.
  */
 
-/** More → Pages per account (SPEC §2.5, plus "Leave & comp-off" for staff, A-2). */
+/** More → Pages per account (SPEC §2.5, plus "Leave" for staff, A-2). */
 const MORE_PAGES: Record<AccountKey, string[]> = {
-  super: ['Companies', 'DevOps board', 'Clients', 'Employee timesheets', 'Users', 'Leave & comp-off'],
-  admin: ['Companies', 'DevOps board', 'Clients', 'Employee timesheets', 'Users', 'Leave & comp-off'],
-  pm: ['Companies', 'Clients', 'Employee timesheets', 'Leave & comp-off'],
-  dev: ['Companies', 'Leave & comp-off'],
-  freelancer: ['Companies', 'Leave & comp-off'],
-  devops: ['Leave & comp-off'],
+  super: ['Companies', 'DevOps board', 'Clients', 'Employee timesheets', 'Users', 'Leave'],
+  admin: ['Companies', 'DevOps board', 'Clients', 'Employee timesheets', 'Users', 'Leave'],
+  pm: ['Companies', 'Clients', 'Employee timesheets', 'Leave'],
+  dev: ['Companies', 'Leave'],
+  freelancer: ['Companies', 'Leave'],
+  devops: ['Leave'],
   cadmin: ['Your team'],
   cuser: [],
 };
@@ -269,6 +269,30 @@ test.describe('every route and URL sheet is reachable', () => {
 });
 
 test.describe('navigation, sheets, toast, persistence', () => {
+  test('a deep-linked screen highlights the tab that owns it, not Home', async ({ page }) => {
+    await signInAs(page, 'pm');
+    await openRoute(page, '/ticket/PMT-11');
+    await expectScreen(page, 'ticket');
+    await expect.poll(() => selectedTab(page)).toBe('Tickets');
+    await openRoute(page, '/project/dacop');
+    await expectScreen(page, 'project');
+    await expect.poll(() => selectedTab(page)).toBe('Projects');
+    await openRoute(page, '/companies');
+    await expectScreen(page, 'companies');
+    await expect.poll(() => selectedTab(page)).toBe('More');
+    // choosing a tab resets the stack; a screen pushed from Home keeps Home
+    await goTab(page, 'home');
+    expect(await selectedTab(page)).toBe('Home');
+    await byTestId(page, 'header-search').click();
+    await expectScreen(page, 'search');
+    expect(await selectedTab(page)).toBe('Home');
+    await signOut(page);
+    await signInAs(page, 'devops');
+    await openRoute(page, '/dvp/OPS-101');
+    await expectScreen(page, 'dvp');
+    await expect.poll(() => selectedTab(page)).toBe('DevOps');
+  });
+
   test('push and pop keep the tab bar and the owning tab (V-05)', async ({ page }) => {
     await signInAs(page, 'super');
     await goTab(page, 'more');

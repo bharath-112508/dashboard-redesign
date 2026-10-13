@@ -34,8 +34,9 @@ export interface ClientSummary {
 }
 
 /**
- * Clients list (S5-CLIENTS): non-archived companies with projects, with waiting
- * questions, open bugs (by project, A-16) and contacts.
+ * Clients list (S5-CLIENTS): non-archived companies that use the portal, i.e. with at
+ * least one contact with portal access (projects to see) or an open question or bug
+ * (integration decision); with waiting questions, open bugs (by project, A-16) and contacts.
  */
 export function clientSummaries(s: AppState): ClientSummary[] {
   return s.companies
@@ -49,7 +50,9 @@ export function clientSummaries(s: AppState): ClientSummary[] {
         waiting: s.questions.filter((q) => ids.has(q.projectId) && isOpenQuestion(q)).length,
         openBugs: s.bugs.filter((b) => ids.has(b.projectId) && b.st !== 'done').length,
         contacts: c.contacts.length,
+        portal: c.contacts.some((x) => x.admin || x.projects.some((id) => ids.has(id))),
       };
     })
-    .filter((x) => x.projectNames.length);
+    .filter((x) => x.portal || x.waiting > 0 || x.openBugs > 0)
+    .map(({ portal: _portal, ...x }) => x);
 }

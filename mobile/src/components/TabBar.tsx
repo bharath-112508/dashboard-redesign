@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { me, openQuestions, unreadTotal } from '@/data/selectors';
 import { useAppState } from '@/data/store';
 import { goTab } from '@/nav/routes';
-import { tabsFor, type TabKey } from '@/nav/tabs';
+import { deepLinkOwner, tabsFor, type TabKey } from '@/nav/tabs';
 import { useShellRoute } from '@/nav/useActiveTab';
 import { colors, radii, shadows, tabBar } from '@/theme';
 
@@ -16,16 +16,19 @@ import { Txt } from './Txt';
 /**
  * Floating tab bar (SPEC §1.1, §1.3, D-CMP-4): left/right 12, bottom 22, 66 high, radius
  * 24, white with a ring and shadow, equal columns. Shown on every signed-in screen; a URL
- * sheet covers it. Badges: Tickets = unread on my tickets (staff), Questions = open
+ * sheet covers it. The highlighted tab owns the stack; on a deep-linked screen it is the tab
+ * that owns that screen (`deepLinkOwner`). Badges: Tickets = unread on my tickets (staff), Questions = open
  * questions (clients).
  */
 export function TabBar() {
   const role = useAppState((s) => me(s)?.role ?? null);
   const unread = useAppState(unreadTotal);
   const questions = useAppState((s) => openQuestions(s).length);
-  const { tab, top } = useShellRoute();
+  const { tab: stackTab, top, deepLink } = useShellRoute();
   const insets = useSafeAreaInsets();
   if (!role || top.startsWith('sheet/')) return null;
+  // a deep-linked screen highlights the tab that owns it, not Home
+  const tab = deepLink ? deepLinkOwner(deepLink, role) : stackTab;
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: Math.max(tabBar.bottom, insets.bottom) }]}>
       <View style={styles.bar} accessibilityRole="tablist" testID="tab-bar">

@@ -112,7 +112,8 @@ Feature packages never add actions; a missing one is added under the feature and
 ## Navigation
 
 One stack per session (SPEC §1.2): a tab is the root, pushed screens go on top, the tab bar shows on
-every signed-in screen and highlights the tab that owns the stack. Tapping a tab resets the stack. In-screen
+every signed-in screen and highlights the tab that owns the stack (a deep-linked screen: the tab that owns
+that screen, e.g. Tickets for `/ticket/PMT-11`, More for `/companies`). Tapping a tab resets the stack. In-screen
 state (tab, filters, segments) is component state.
 
 Use `src/nav/routes.ts`, not hard-coded paths:
@@ -186,7 +187,7 @@ F0 created every route. Each W package replaces only the bodies of the files it 
 | `(app)/dvp/[key].tsx` | S5-DVP (`?tab=`) | `screen-dvp` | W4 |
 | `(app)/request/[id].tsx` | S5-REQ | `screen-request` | W4 |
 | `(app)/dvset.tsx` | S5-DVSET | `screen-dvset` | W4 |
-| `(app)/clients.tsx`, `(app)/portal/[co].tsx` | S5-CLIENTS, S5-PORTAL staff view | `screen-clients`, `screen-portal` | W4 |
+| `(app)/clients.tsx`, `(app)/portal/[co].tsx` | S5-CLIENTS (companies with a portal contact or an open question/bug), S5-PORTAL staff view | `screen-clients`, `screen-portal` | W4 |
 | `(app)/(tabs)/questions.tsx`, `(app)/question/[id].tsx` | S5-QUESTIONS, S5-QUESTION | `screen-questions`, `screen-question` | W4 |
 | `(app)/(tabs)/bugs.tsx`, `(app)/bug/[id].tsx` | S5-BUGS, S5-BUG | `screen-bugs`, `screen-bug` | W4 |
 | `(app)/sheet/devops-request.tsx`, `new-question.tsx`, `report-bug.tsx`, `client-member.tsx` | SH-NEWREQ, SH-NEWQ, SH-NEWBUG, SH-CMEMBER | `sheet-<name>` | W4 |

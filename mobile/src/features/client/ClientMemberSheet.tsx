@@ -1,13 +1,16 @@
 import { useState } from 'react';
 
-import { BottomSheet, Button, ButtonRow, Form, TextField, showToast } from '@/components';
+import { BottomSheet, Button, ButtonRow, ConfirmSheet, Form, TextField, showToast } from '@/components';
 import { clientTeamOf, me } from '@/data/selectors';
 import { useActions, useAppState } from '@/data/store';
 import { closeSheet } from '@/nav/routes';
 
 import { useFormErrors } from '../devops/formErrors';
 
-/** SH-CMEMBER (URL sheet `client-member`, V-64): add, edit (by email) or remove a team member. */
+/**
+ * SH-CMEMBER (URL sheet `client-member`, V-64): add, edit (by email) or remove a team member.
+ * Remove asks for confirmation (SH-CONFIRM) and toasts "Member removed".
+ */
 export function ClientMemberSheet({ email }: { email?: string }) {
   const ex = useAppState((s) => {
     const u = me(s);
@@ -18,6 +21,7 @@ export function ClientMemberSheet({ email }: { email?: string }) {
   const [name, setName] = useState(ex?.name ?? '');
   const [title, setTitle] = useState(ex?.title ?? '');
   const [mail, setMail] = useState(ex?.email ?? '');
+  const [confirm, setConfirm] = useState(false);
   const save = () => {
     if (!fe.need({ name, title, email: mail })) return;
     const r = saveClientMember({ id: ex?.id, name, title, email: mail });
@@ -40,16 +44,31 @@ export function ClientMemberSheet({ email }: { email?: string }) {
           <Button
             title="Remove"
             kind="d"
-            onPress={() => {
-              const r = removeClientMember(ex.id);
-              if (!r.ok) showToast(r.error);
-              else closeSheet();
-            }}
+            onPress={() => setConfirm(true)}
             testID="member-remove"
           />
         ) : null}
         <Button title={ex ? 'Save' : 'Add member'} onPress={save} testID="member-save" />
       </ButtonRow>
+      {ex ? (
+        <ConfirmSheet
+          visible={confirm}
+          title={`Remove ${ex.name}?`}
+          text="They can no longer sign in to your portal. Their questions and bugs are kept."
+          confirm="Remove"
+          onClose={() => setConfirm(false)}
+          onConfirm={() => {
+            const r = removeClientMember(ex.id);
+            if (!r.ok) {
+              showToast(r.error);
+              return;
+            }
+            showToast(r.toast);
+            closeSheet();
+          }}
+          testID="member-remove-confirm"
+        />
+      ) : null}
     </BottomSheet>
   );
 }

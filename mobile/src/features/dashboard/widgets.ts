@@ -278,11 +278,8 @@ function weekWidget(s: AppState, who: string | null, free: boolean, id: string):
   if (who === null) {
     const people = loggers(s, WEEK_MONDAY, addD(WEEK_MONDAY, 6));
     const emp = employees(s).filter((p) => people.includes(p.name)).length;
-    const exact = weekBars(s, WEEK_MONDAY, null, { people: emp });
-    const total = exact.reduce((a, d) => a + d.billMin + d.nonMin, 0);
-    // team bars show whole hours (labels stay on one line, as in the prototype)
-    const r = (m: number) => Math.round(m / 60) * 60;
-    const days = exact.map((d) => ({ ...d, billMin: r(d.billMin), nonMin: r(d.nonMin), idleMin: r(d.idleMin) }));
+    const days = weekBars(s, WEEK_MONDAY, null, { people: emp });
+    const total = days.reduce((a, d) => a + d.billMin + d.nonMin, 0);
     return { id, k: 'bars', title: 'Team hours this week', sub: `${plural(people.length, 'person', 'people')} · 8h a day each`, link: 'Employee timesheets', go: page('emp'), days, idle: true, foot: `${hours(total)} logged` };
   }
   const days = weekBars(s, WEEK_MONDAY, who, { idle: !free });

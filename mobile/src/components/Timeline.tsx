@@ -38,7 +38,9 @@ export function Timeline({ items, empty, testID }: { items: TimelineItem[]; empt
         const body = (
           <>
             <View style={styles.rail}>
-              <View style={[styles.dot, { backgroundColor: x.dot, borderColor: x.ring ?? colors.track }]} />
+              <View style={[styles.ring, { backgroundColor: x.ring ?? colors.track }]}>
+                <View style={[styles.dot, { backgroundColor: x.dot }]} />
+              </View>
               <View style={[styles.line, { backgroundColor: last ? colors.transparent : colors.ringCard }]} />
             </View>
             <View style={styles.main}>
@@ -79,7 +81,9 @@ const styles = StyleSheet.create({
   card: { paddingVertical: 8, paddingHorizontal: 14 },
   item: { flexDirection: 'row', gap: 12 },
   rail: { width: 17, alignItems: 'center' },
-  dot: { marginTop: 11, width: 17, height: 17, borderRadius: 9, borderWidth: 3 },
+  // 11px dot inside a 3px ring (the prototype's box-shadow); a transparent ring leaves the dot at 11px
+  ring: { marginTop: 11, width: 17, height: 17, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  dot: { width: 11, height: 11, borderRadius: 6 },
   line: { flex: 1, width: 2 },
   main: { flex: 1, minWidth: 0, paddingTop: 9, paddingBottom: 11 },
   top: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },

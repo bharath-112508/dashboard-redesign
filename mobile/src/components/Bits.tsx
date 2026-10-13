@@ -66,7 +66,7 @@ export function TypeTag({ type }: { type: TicketType }) {
 /** Ticket key / version in monospace 11.5/700. */
 export function MonoKey({ k, color = colors.ink3, size = 11.5 }: { k: string; color?: string; size?: number }) {
   return (
-    <Txt v="key" color={color} style={{ fontSize: size }} numberOfLines={1}>
+    <Txt v="key" color={color} style={{ fontSize: size, flexShrink: 0 }} numberOfLines={1}>
       {k}
     </Txt>
   );

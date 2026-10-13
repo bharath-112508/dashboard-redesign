@@ -6,7 +6,7 @@ Screens **read** with selectors and **write** with named commands; they never to
 
 ```
 clock.ts        TODAY ('2026-10-10', the one place to change it), WEEK_MONDAY, DAY_MIN, WEEK_MIN, DEMO_PASSWORD
-format.ts       diff, addD, fmt ("10 Oct"), fmtY, fmtL ("Sat 10 Oct"), fmtRange, hm (minutes → "1h 30m"),
+format.ts       diff, addD, fmt ("10 Oct"; "30 Aug 2027" outside TODAY's year), fmtY, fmtL ("Sat 10 Oct"), fmtRange, hm (minutes → "1h 30m"),
                 ini, monday, dvDate (ISO → "12 Oct 2026, 07:00"), dvShort, plural, csv, hash, hashPw
 types.ts        entity types (DELTA §3), web names and ids
 constants.ts    ROLES, ROLE_LABEL, ROLE_COLOURS, PAGE_ACCESS (ACC), PERMS, PDEF, TICKET_STATUS (+client labels),
@@ -146,7 +146,7 @@ dispatches one named action (`store/actions.ts`) to the pure reducer and returns
 | V-60 | `answerQuestion(id, answer)` → "Answer sent to the team" | `questions/answer` |
 | V-61 | `reportBug({projectId, epicId, title, desc, file})` → "Bug reported. Thank you." | `bugs/create` |
 | V-62/63 | `replyOnBug(id, text)`, `setBugStatus(id, st)` (staff) | `bugs/reply`, `bugs/setStatus` |
-| V-64 | `saveClientMember({id?, name, title, email})` → "Invite sent" / "Saved" / "Check the email address"; `removeClientMember(id)` | `clientTeam/*` |
+| V-64 | `saveClientMember({id?, name, title, email})` → "Invite sent" / "Saved" / "Check the email address"; `removeClientMember(id)` → "Member removed" (the sheet confirms first) | `clientTeam/*` |
 | V-71 | `saveUser({id?, name, email, role, devType, emp, projects, active, org})` → "Invite sent to x" / "User saved" / "Someone already uses that email" | `users/add`, `users/update` |
 | V-72 | `setUserActive(id, active)` → "User activated"/"User deactivated"; `removeUser(id)` → "User removed" | `users/setActive`, `users/remove` |
 | V-73 | `addLeave({who, kind, from, to, reason})` → "Leave added" (approver) / "Request sent for approval"; "End date is before start date" | `leave/add` |

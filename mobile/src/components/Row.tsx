@@ -43,7 +43,7 @@ export interface RowProps {
   strike?: boolean;
   /** leading tile: <Avatar/>, <IconTile/>, <ProjectTile/>, <CompanyTile/>, <TextTile/> */
   lead?: ReactNode;
-  /** left check box 26 r8 (subtasks) */
+  /** left check box 26 r8 (subtasks), green when done */
   check?: { on: boolean; onToggle?: () => void; label: string };
   /** priority dot colour (or a priority name resolved by the caller) */
   dot?: string;
@@ -87,7 +87,7 @@ export function Row(p: RowProps) {
           checked={p.check.on}
           onPress={p.check.onToggle}
           disabled={!p.check.onToggle}
-          style={[styles.checkL, p.check.on ? styles.checkOn : styles.checkOff]}
+          style={[styles.checkL, p.check.on ? styles.checkDone : styles.checkOff]}
           testID={p.testID ? `${p.testID}-check` : undefined}
         >
           {p.check.on ? <Icon name="check" size={15} color={colors.white} strokeWidth={3} /> : null}
@@ -226,5 +226,7 @@ const styles = StyleSheet.create({
   checkL: { width: 26, height: 26, borderRadius: 8, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   pick: { width: 24, height: 24, borderRadius: radii.badge, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   checkOn: { borderColor: colors.primary, backgroundColor: colors.primary },
+  /** done subtask / task: green, as the prototype */
+  checkDone: { borderColor: colors.green, backgroundColor: colors.green },
   checkOff: { borderColor: colors.lineInput, backgroundColor: colors.surface },
 });

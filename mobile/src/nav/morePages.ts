@@ -27,7 +27,7 @@ const CANDIDATES: { page: Page; key: PageKey; tab?: string; label: string; icon:
 /**
  * The More page's "Pages" list (`morePages`, SPEC §2.5): pages `can()` allows that are
  * not already a tab. Clients never get Clients; Users reads "Your team" for clients.
- * Staff also get "Leave & comp-off" → My leave (A-2).
+ * Staff also get "Leave" → My leave (A-2).
  */
 export function morePages(role: Role | null | undefined): MorePage[] {
   if (!role) return [];
@@ -38,6 +38,6 @@ export function morePages(role: Role | null | undefined): MorePage[] {
       ? { key: c.key, label: 'Your team', icon: 'users', sub: 'Your colleagues in the portal' }
       : { key: c.key, label: c.label, icon: c.icon, sub: c.sub },
   );
-  if (!client) L.push({ key: 'leave', label: 'Leave & comp-off', icon: 'calendar-plus', sub: 'Your balance and requests' });
+  if (!client) L.push({ key: 'leave', label: 'Leave', icon: 'calendar-plus', sub: 'Your balance and requests' });
   return L;
 }

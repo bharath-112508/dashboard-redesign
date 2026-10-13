@@ -648,7 +648,7 @@ export function createCommands(get: () => AppState, dispatch: (a: Action) => voi
     removeClientMember(id: string): Result {
       if (!get().clientTeam.some((m) => m.id === id)) return fail('Member not found');
       dispatch({ type: 'clientTeam/remove', id });
-      return ok('');
+      return ok('Member removed');
     },
 
     // ── Users (V-71, V-72) ─────────────────────────────────────────────────

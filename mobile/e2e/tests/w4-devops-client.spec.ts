@@ -237,8 +237,7 @@ test.describe('DevOps project', () => {
     await signInAs(page, 'pm');
     await openRoute(page, '/project/inoffi?tab=devops');
     await expectScreen(page, 'project');
-    const embed = byTestId(page, 'project-devops');
-    test.skip((await embed.count()) === 0, 'the project page (W2) does not mount ProjectDevopsTab in this branch');
+    await expect(byTestId(page, 'project-devops')).toBeVisible();
     await byTestId(page, 'project-send-request').click();
     await sheet(page, 'sheet-devops-request').getByTestId('req-text').fill('Second staging slot');
     await byTestId(page, 'req-send').click();
@@ -452,6 +451,13 @@ test.describe('Client portal', () => {
     // remove
     await byTestId(page, 'client-team').getByRole('button', { name: 'Maja Holm' }).click();
     await byTestId(page, 'member-remove').click();
+    // asks first: Cancel keeps the member
+    await expect(byTestId(page, 'member-remove-confirm')).toContainText('Remove Maja Holm?');
+    await byTestId(page, 'member-remove-confirm-cancel').click();
+    await expect(sheet(page, 'sheet-client-member').getByTestId('member-name')).toHaveValue('Maja Holm');
+    await byTestId(page, 'member-remove').click();
+    await byTestId(page, 'member-remove-confirm-ok').click();
+    await expect(toast(page)).toHaveText('Member removed');
     await expect(byTestId(page, 'client-team')).not.toContainText('Maja Holm');
     await expect(byTestId(page, 'client-team')).toContainText('Anna Lindqvist');
   });
