@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:redesign": "PORT=3101 CORS_ORIGIN=http://localhost:5173,http://localhost:5200 APP_BASE_URL=http://localhost:5200 EMAIL_TRANSPORT=stub JOBS_ENABLED=false SLACK_OUTBOUND_ENABLED=false VAPID_PUBLIC_KEY= tsx watch src/index.ts",
     "build": "tsc && node scripts/copy-payroll-assets.mjs",
     "start": "node dist/index.js",
     "clean": "rm -rf dist",

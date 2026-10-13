@@ -10,6 +10,7 @@ import {
     SLACK_TEXT_MAX,
 } from '../constants/slack.js';
 import { decryptSecret } from './crypto-aes.js';
+import { SLACK_OUTBOUND_ENABLED } from '../config/server.config.js';
 import type { SlackSettings } from '../models/system-settings.model.js';
 
 /**
@@ -72,7 +73,7 @@ export interface PostOrUpdateInput {
 }
 
 export const isSlackConfigured = (settings: SlackSettings | null | undefined): boolean => {
-    if (!settings) return false;
+    if (!SLACK_OUTBOUND_ENABLED || !settings) return false;
     return settings.enabled === true && Boolean(settings.bot_token);
 };
 

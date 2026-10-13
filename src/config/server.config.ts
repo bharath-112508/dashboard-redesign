@@ -280,6 +280,14 @@ const parseBool = (raw: string | undefined, defaultValue: boolean): boolean => {
 export const JOBS_ENABLED = parseBool(process.env.JOBS_ENABLED, true);
 
 /**
+ * `SLACK_OUTBOUND_ENABLED` — master switch for every outbound Slack call.
+ * The bot token lives in the database (`SystemSettings.slack`), so a dev
+ * server pointed at a shared database would otherwise post to the real
+ * workspace. Set it to false on any instance that must stay silent.
+ */
+export const SLACK_OUTBOUND_ENABLED = parseBool(process.env.SLACK_OUTBOUND_ENABLED, true);
+
+/**
  * `BILLING_MODULES_ENABLED` — master switch for the money surfaces:
  * billing rates, cost rates, client engagements, invoices, and the
  * Billing + Margin reports.
