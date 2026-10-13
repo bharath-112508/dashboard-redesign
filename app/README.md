@@ -28,7 +28,23 @@ What comes from the backend so far:
 - **Phase 1a:** sign-in, sign-out, the session (name, role, company) and the people directory.
 - **Phase 1b-1:** companies (profile, client contacts, Viljetech staff on the company, archive) and projects (client and internal: create, progress from their tasks, epics from the project's stories, team, state including Planned and Maintenance). The adapter is `src/api/http/companies.ts`.
 
-Every other screen (tickets, epics and sprints, timesheets, DevOps, questions, dashboard numbers) still shows the mock data, so in API mode a real project shows no epics in the Clients portal or the epic pickers yet.
+- **Phase 1b-2 (part 1):** epics, sprints and tickets on the Tickets and Clients pages (board, backlog, list, overview, epics & sprints, timeline), My tickets and the dashboard ticket widgets. The adapter is `src/api/http/board.ts` (mappings in `boardMappers.ts`).
+
+Timesheets, DevOps, questions, ticket comments, history and attachments still show the mock data.
+
+Epics, sprints and tickets in API mode:
+
+- An epic is a project's story. Tickets with no story show under that project's **No epic**, which cannot be edited; moving a ticket there clears its story.
+- A sprint made before sprints had an epic shows under every epic its tickets are in (and under No epic when it has none). It is still one sprint: editing it from any epic changes it everywhere.
+- A new epic goes into the project open on the Clients page (`?project=`), else the project of the selected epic, else the first project.
+- Ticket keys are the backend's (`<project code>-<number>`, e.g. `AFS-7`). Subtasks are linked child tasks, shown as the checklist lines.
+- **"+ Create ticket"** opens an empty ticket that is only created on the backend once it has a title; left empty it is discarded, as in mock mode.
+- Priorities include **Critical** and **Urgent**, and the type **Story** (new backend values; a backend `improvement` shows as Story).
+- Developers may plan tickets of projects they are members of (title, priority, dates, type, labels, sprint, epic) as well as their work fields. A change the backend refuses snaps back with its reason.
+- People on tickets are matched by name to the project's members; someone who is not a member shows without a name.
+- Comments in the ticket drawer are refused for now ("Comments come with the next update."); history, attachments and hours per ticket stay empty.
+- Every write reloads the whole board (five requests per project). Fine at Demo DB size; a single board endpoint is the upgrade.
+- The **Redesign test epic**, its sprint and the ticket RTP-2 (with one subtask) on the Redesign Test Portal project were made by the API checks on 13 Oct 2026.
 
 Companies and projects in API mode:
 

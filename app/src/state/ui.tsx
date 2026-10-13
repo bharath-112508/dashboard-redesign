@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLocation, useSearchParams } from 'react-router'
 import type { Priority, TaskType } from '../api/types'
+import { useWorkspace } from '../api/queries'
 
 /** Board filters and selections shared by the Clients page views. */
 interface UiState {
@@ -35,6 +36,11 @@ export function UiProvider({ children }: { children: ReactNode }) {
     },
     [],
   )
+  // The picked epic must exist (the backend's epics have their own ids): otherwise pick the first one.
+  const epics = useWorkspace().data?.epics
+  useEffect(() => {
+    if (epics?.length && !epics.some(e => e.id === s.epic)) setEpics([epics[0].id])
+  }, [epics, s.epic, setEpics])
   const clearFilters = useCallback(() => setS(p => ({ ...p, mine: false, typeF: '', prioF: '', q: '' })), [])
   const v = useMemo<UiApi>(
     () => ({ ...s, set, setEpics, clearFilters, hasFilters: s.mine || !!s.typeF || !!s.prioF || !!s.q }),
