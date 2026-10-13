@@ -260,7 +260,8 @@ export const createSeed = (): Db => {
       ],
       epics: EPICS,
       sprints,
-      devopsLinks: { mob: 'OPS-101', web: 'OPS-106' },
+      // DevOps is project specific: both Daco epics link to Daco's own DevOps item.
+      devopsLinks: { mob: 'OPS-101', web: 'OPS-101' },
     },
     tasks: buildTasks(sprints),
     entries: ALL_ENTRIES,

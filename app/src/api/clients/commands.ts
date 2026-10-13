@@ -1,4 +1,4 @@
-import type { Db, ClientTeamMember } from '../types'
+import type { Db, ClientTeamMember, Question } from '../types'
 import type { Resource } from '../commands'
 
 /** The client team collection is part of the db. Declared here so api/types.ts only gains new types. */
@@ -9,6 +9,12 @@ declare module '../types' {
   interface Question {
     /** Who wrote the first client answer (stored as `answer`), so the chat can name them. */
     answerBy?: string
+    /**
+     * Set when the answer came from the chat: the index in `comments` of the client
+     * message it mirrors. The thread then shows that message once (not the answer
+     * as well), and editing the message edits the answer with it.
+     */
+    answerIdx?: number
   }
 }
 
@@ -47,10 +53,32 @@ export const reduceClients = (db: Db, input: { type: string }): Db => {
           const comments = q.comments ?? []
           const m = comments[c.index]
           if (!m || m.who !== c.who) return q
-          return { ...q, comments: comments.map((x, i) => (i === c.index ? { ...x, text: c.text } : x)) }
+          return {
+            ...q,
+            comments: comments.map((x, i) => (i === c.index ? { ...x, text: c.text } : x)),
+            // The stored answer mirrors this message: keep it in step, so lists show the new text.
+            ...(q.answerIdx === c.index ? { answer: c.text || 'Sent files' } : {}),
+          }
         }),
       }
     default:
       return db
   }
 }
+
+/**
+ * Stores saved before `answerIdx` hold a chat answer twice: as `answer` and as the
+ * client's message in `comments`. Links the answer to that message so it shows once.
+ */
+export const linkChatAnswers = (questions: unknown): unknown =>
+  Array.isArray(questions)
+    ? questions.map(q => {
+        if (!q || typeof q !== 'object') return q
+        const x = q as Question
+        if (!x.answer || x.answerIdx != null || !Array.isArray(x.comments)) return q
+        const i = x.comments.findIndex(m => m.side === 'client')
+        const m = x.comments[i]
+        const same = !!m && (m.text || 'Sent files') === x.answer && (!x.answerBy || m.who === x.answerBy)
+        return same ? { ...x, answerIdx: i } : q
+      })
+    : questions

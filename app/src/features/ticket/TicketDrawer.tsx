@@ -128,7 +128,7 @@ function TicketBody({
   const loc = useLocation()
   const { person, side } = usePage()
   const view = loc.pathname.split('/')[2] || 'board'
-  // Client users can comment on any ticket, but only change their own bugs (View only otherwise).
+  // Clients only raise bugs and answer questions: a team ticket (or a subtask) is View only, with no comments.
   const isClient = useIsClient()
   const ro = isClient && !raw0.clientBug
 
@@ -282,7 +282,7 @@ function TicketBody({
   // ---------- comments
   const post = () => {
     const v = cDraft.trim()
-    if (!v) return
+    if (!v || ro) return
     send({ type: 'task.comment', id, text: v })
     setCDraft('')
   }
@@ -841,7 +841,7 @@ function TicketBody({
                         </span>
                       )}
                       <span className="ml-auto inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] font-semibold text-blue-ink">
-                        {raw.subs.length ? 'Open' : 'Add subtasks'}
+                        {raw.subs.length || ro ? 'Open' : 'Add subtasks'}
                         <Icon d={PATHS.next} size={13} sw={2.6} />
                       </span>
                     </div>
@@ -947,7 +947,7 @@ function TicketBody({
                       <span className="text-[15px] font-bold text-ink">Comments</span>
                       <span className="tnum text-[12px] text-ink-2">{comments.length}</span>
                     </div>
-                    <CommentBox value={cDraft} onChange={setCDraft} onPost={post} />
+                    {!ro && <CommentBox value={cDraft} onChange={setCDraft} onPost={post} />}
                     <div className="mt-1.5 flex flex-col">
                       {comments.map((a, i) => {
                         const m = person(a.who)
@@ -1008,7 +1008,7 @@ function TicketBody({
             {tab === 'act' && (
               <>
                 <div className="rounded-[14px] border-[1.5px] border-line bg-canvas p-1">
-                  <textarea
+                  {!ro && <textarea
                     value={cDraft}
                     onChange={e => setCDraft(e.target.value)}
                     onKeyDown={e => {
@@ -1020,8 +1020,8 @@ function TicketBody({
                     rows={2}
                     placeholder="Write a comment, @mention someone…"
                     className="w-full resize-y border-0 bg-transparent px-3 py-2.5 text-[14px] leading-normal text-ink outline-0"
-                  />
-                  <div className="flex items-center gap-1 px-1.5 pb-1.5">
+                  />}
+                  <div className={`flex items-center gap-1 px-1.5 ${ro ? 'py-1.5' : 'pb-1.5'}`}>
                     {(
                       [
                         ['all', 'All'],
@@ -1039,14 +1039,14 @@ function TicketBody({
                         {label}
                       </button>
                     ))}
-                    <button
+                    {!ro && <button
                       type="button"
                       onClick={post}
                       className="ml-auto h-[30px] cursor-pointer rounded-lg border-0 bg-blue px-3.5 text-[13px] font-semibold text-white"
                       style={{ opacity: cDraft.trim() ? 1 : 0.45 }}
                     >
                       Comment
-                    </button>
+                    </button>}
                   </div>
                 </div>
                 <div className="flex flex-col">

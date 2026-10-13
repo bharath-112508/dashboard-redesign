@@ -9,7 +9,7 @@ import { usePage } from '../../state/page'
 import { useOverlay } from '../../state/ui'
 import { useActorName, useActorSend, useScopedQuestions, useScopedTasks, useScopedWorkspace } from '../../state/access'
 import { statusOf, taskKey, fileExt } from '../../domain/tasks'
-import { clientQuestionState, threadOf } from '../../domain/questions'
+import { answerShownFirst, clientQuestionState, threadOf } from '../../domain/questions'
 import { EscapeHoldContext, useEscapeHold, type EscapeHold } from './escapeHold'
 
 
@@ -130,12 +130,13 @@ function QuestionConversation({ q, close }: { q: Question; close: () => void }) 
     waitLbl: team ? 'Waiting for the client to answer' : 'The team is waiting for your answer',
     teamWait: !team && !!last && last.side === 'client',
     send: message => send({ type: 'question.message', id: q.id, message }),
-    // The first client answer is stored as `answer` (index -1), not in `comments`, so comment indexes start after it.
+    // An answer stored only as `answer` (seed data) is shown first as index -1, so comment indexes start after it.
+    // An answer that came from the chat is its message in `comments`; editing it updates the answer too.
     edit: {
       canEdit: c => c.side === side && c.who === me,
       save: (i, text) => {
-        const first = !!q.answer && i === 0
-        send({ type: 'question.editMessage', id: q.id, index: first ? -1 : i - (q.answer ? 1 : 0), who: me, text })
+        const lead = answerShownFirst(q) ? 1 : 0
+        send({ type: 'question.editMessage', id: q.id, index: i < lead ? -1 : i - lead, who: me, text })
       },
     },
   }

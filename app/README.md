@@ -15,13 +15,20 @@ npm run build      # typecheck + production build
 
 - **Board**: three kinds of column.
   - **Bugs:** only bugs the client reported. This is the only place clients add tickets.
-  - **Questions to client:** shows whether each question needs an answer, has new replies, is waiting for the team, or is solved.
+  - **Questions to client:** shows whether each question needs an answer, has new replies, is waiting for the team, or is solved. A client's first reply is also stored as the question's `answer`, linked to its chat message (`answerIdx`), so the chat shows it once and editing it updates the answer that lists, the Tickets questions panel and the dashboard read.
   - **Status columns:** To do, In progress, Review and Done. Cards can be dragged between them. DevOps requests for the epic's linked project show here too.
 - **Epics & sprints**: the epic → sprint → task tree, with the epic requirement doc, sprint overview, "New sprint", "New epic" and "+ Create ticket".
 - **Timeline**: a Gantt of the epic's tasks grouped by sprint, in a days or weeks scale.
 - **Windows**: each window is opened by a URL parameter, so the browser's back button closes it and links can point straight at it.
   - **Ticket drawer** (`?ticket=`): includes subtask pages.
   - **Bug window** (`?bug=`): the client's own bug, with progress, a priority they can change, a description they can edit, attachments and a chat.
+
+### What a client can do
+
+Product decision: **a client only raises bugs and answers the questions sent to them.** Client roles (cadmin, cuser) may report bugs (Report a bug, InvoiceMatch Send feedback); work on their own bugs (chat, priority, description, attachments); reply to their questions, edit their own messages and mark a question solved or reopen it; view their projects, board, Epics & sprints, Timeline and the live app; and a client admin manages their own team (portal team and Colleagues). They may not create or quick-add tasks, edit team tasks, add subtasks, log time, move tasks, comment on team tasks (or DevOps requests, which they see read-only), raise DevOps requests or start questions.
+
+- **UI:** no quick add on the status columns, no dragging, a team ticket opens as **View only** with no comment box, the request window has no comment box, and the Tickets and DevOps pages are closed to them.
+- **Command layer:** `api/session/permissions.ts` (`refusal`) is checked by the mock server on every command against the signed-in session (`vt.session`), never against what the command says about its author, so a command forged in the browser is refused (`RefusedError`, "Clients cannot …") and nothing is saved. The optimistic cache update runs the same check, so a refused command never shows. Team roles are not limited by it. A real backend has to repeat this check.
   - **Question window** (`?question=`).
   - **DevOps request** (`?request=`): only comments can be added.
   - **Report a bug** (`?report=1`).
@@ -111,8 +118,8 @@ The team's page, at `/tickets`, built from `project/Tickets.dc.html`. It works o
 - **Questions and requests use their ids.** A new question gets the next free id. A new request gets the next free id and `REQ-<count>`, rather than `Date.now()`.
 
 - **The DevOps board is built (see below); Tickets may still be a placeholder.** Data the prototype shares between pages (client bugs, questions, DevOps requests) lives in the mock backend.
-- **The DevOps status in the epic bar is live.** It reads the linked project (`workspace.devopsLinks`: Mobile app → OPS-101, Web app → OPS-106) from the DevOps board's data, so a status change on the board shows here. The label keeps the Clients page's own colours. On Tickets, a project with releases (`DvProject.releases`) shows "Live <version>" in green instead of its status, plus the company of the linked project (v5: `DvProject.project`) next to the project name when it is a client project.
-- **Release notices (v4).** When a project linked to an epic has a release the signed-in person hasn't seen, the DevOps button shows **NEW** and a "<client> · <project> <version> is live" toast appears once (9 s, View deployment / Dismiss). View deployment switches to that epic and opens the Status tab. Opening the panel marks the release as seen. Seen releases are kept per person in `localStorage` (`vt.deploySeen`). The prototype fakes the 2.6.2 release arriving six seconds after load; here 2.6.2 is in the release seed (`api/devops/releases.ts`), so the notice shows on first visit.
+- **The DevOps status in the epic bar is live.** It reads the linked project (`workspace.devopsLinks`: Mobile app and Web app → OPS-101, Daco platform; DevOps is project specific, so both Daco epics link to Daco's own item. Stores saved with Web app on ARC's OPS-106 are moved to OPS-101 by `migrate3`, only while the link is still OPS-106) from the DevOps board's data, so a status change on the board shows here. The label keeps the Clients page's own colours. On Tickets, a project with releases (`DvProject.releases`) shows "Live <version>" in green instead of its status, plus the company of the linked project (v5: `DvProject.project`) next to the project name when it is a client project.
+- **Release notices (v4).** When a project linked to an epic has a release the signed-in person hasn't seen, the DevOps button shows **NEW** and a "<client> · <project> <version> is live" toast appears once (9 s, View deployment / Dismiss). View deployment switches to that epic and opens the Status tab. Opening the panel marks the release as seen. Seen releases are kept per person in `localStorage` (`vt.deploySeen`). The prototype fakes the 2.6.2 release arriving six seconds after load; here 2.6.2 is in the release seed (on OPS-106, ARC's Fast). Since the Web app epic links to Daco's OPS-101, which has no releases, no seeded epic links to a project with releases: the toast, the NEW badge and the Deployments timeline do not show on Tickets with the sample data (the timeline still shows on the DevOps board's OPS-106 panel).
 - **Today is fixed at 10 Oct 2026**, as in the design, so overdue and "days left" labels match the mock data.
 
 # DevOps board
@@ -231,9 +238,10 @@ Pages not built yet (Dashboard, Companies, Projects, My tickets, Timesheet, Empl
 
 ## Sign-in and roles
 
+- Sign-in removes the legacy `vt.dashRole` key (the prototype's role switch, spec 01 data effect) before it stores the session (`startSession` in `api/session/store.ts`).
 - Sign-in checks the email against the directory (case and spaces ignored) and the password against the demo password `demo`. A password set from the profile replaces it for that person (stored as a SHA-256 hash; needs https or localhost).
 - Deactivated people cannot sign in. Only `active` people can, and Ola Nilsen is seeded inactive.
-- The role map (`access.ts`) is the prototype's `ACC`. It is enforced in the client only. A backend has to repeat it.
+- The role map (`access.ts`) is the prototype's `ACC`. It is enforced in the client only. A backend has to repeat it. What clients may write is checked in the command layer as well (see "What a client can do").
 - No session goes to `/login`. A page the role cannot open shows "Your role (…) does not have access to …" and goes to `/dashboard`.
 - Client users see the company brand and "Project portal". Their avatars show initials only.
 

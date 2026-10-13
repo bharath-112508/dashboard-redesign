@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { useActorName, useActorSend, useScopedRequests, useScopedWorkspace } from '../../state/access'
+import { useActorName, useActorSend, useIsClient, useScopedRequests, useScopedWorkspace } from '../../state/access'
 import { Markdown } from '../../components/Markdown'
 import { Avatar, Backdrop, CloseButton, CountPill, Icon, Label, PATHS, TabButton } from '../../components/ui'
 import { diff, fmt, TODAY } from '../../lib/dates'
@@ -17,7 +17,7 @@ const lockIcon = (
   </svg>
 )
 
-/** A DevOps request linked to this project. Managed by DevOps; only comments can be added here. */
+/** A DevOps request linked to this project. Managed by DevOps; the team can only add comments here, and clients only read it. */
 export function RequestDrawer({ id }: { id: number }) {
   const person = usePerson()
   const r = (useScopedRequests() ?? []).find(x => x.id === id)
@@ -25,6 +25,7 @@ export function RequestDrawer({ id }: { id: number }) {
   const ui = useUi()
   const send = useActorSend()
   const me = useActorName()
+  const isClient = useIsClient()
   const overlay = useOverlay()
   const [tab, setTab] = useState<'ov' | 'act'>('ov')
   const [draft, setDraft] = useState('')
@@ -57,7 +58,7 @@ export function RequestDrawer({ id }: { id: number }) {
 
   const post = () => {
     const t = draft.trim()
-    if (!t) return
+    if (!t || isClient) return
     send({ type: 'request.comment', id: r.id, comment: { by: me, text: t, when: 'just now', side: 'tickets' } })
     setDraft('')
   }
@@ -195,7 +196,7 @@ export function RequestDrawer({ id }: { id: number }) {
                 })}
                 {!comments.length && <div className="text-[13.5px] text-muted">No comments yet.</div>}
               </div>
-              <div className="mt-3 rounded-[14px] border-[1.5px] border-line bg-canvas p-1">
+              {!isClient && <div className="mt-3 rounded-[14px] border-[1.5px] border-line bg-canvas p-1">
                 <textarea
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
@@ -220,7 +221,7 @@ export function RequestDrawer({ id }: { id: number }) {
                     Comment
                   </button>
                 </div>
-              </div>
+              </div>}
             </>
           ) : (
             <div className="mt-3 flex flex-col">

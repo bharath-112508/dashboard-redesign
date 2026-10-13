@@ -155,9 +155,14 @@ export const reduce = (db: Db, input: Command): Db => {
             : {
                 ...q,
                 comments: [...(q.comments || []), cmd.message],
-                // The client's first message is also stored as their answer.
+                // The client's first message is also stored as their answer, linked to the message (answerIdx).
                 ...(cmd.message.side === 'client' && !q.answer
-                  ? { answer: cmd.message.text || 'Sent files', answeredWhen: cmd.message.when, answerBy: cmd.message.who }
+                  ? {
+                      answer: cmd.message.text || 'Sent files',
+                      answeredWhen: cmd.message.when,
+                      answerBy: cmd.message.who,
+                      answerIdx: (q.comments || []).length,
+                    }
                   : {}),
               },
         ),

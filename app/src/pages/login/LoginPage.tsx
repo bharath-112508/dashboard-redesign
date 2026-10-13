@@ -8,7 +8,7 @@ import { findPersonByEmail, usePeople } from '../../api/people/directory'
 import { server } from '../../api/server'
 import { ROLE_LABEL } from '../../api/session/access'
 import { DEMO_PASSWORD, signIn } from '../../api/session/signIn'
-import { useSession, writeSession } from '../../api/session/store'
+import { startSession, useSession } from '../../api/session/store'
 import type { Role } from '../../api/types'
 import { initials } from '../../lib/media'
 
@@ -67,7 +67,7 @@ export function LoginPage() {
       form.setError(result.field, { type: 'manual', message: result.message })
       return
     }
-    writeSession(result.session)
+    startSession(result.session)
     navigate('/dashboard', { replace: true })
   })
 
