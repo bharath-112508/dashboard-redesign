@@ -214,38 +214,12 @@ export const createUserBodySchema = z
                     message: `internal_profile is required for role=${data.role}`,
                 });
             }
-            // Every team-facing surface — leave approvals, team attendance,
-            // team timesheets, comp-off ledger, team leave balances, the Slack
-            // App Home — narrows a non-admin reviewer to their direct reports
-            // via `reporting-scope.service`. Someone created without a manager
-            // is therefore invisible to every reviewer except an admin, on
-            // every one of those screens at once, and nothing surfaces the
-            // omission. It was optional and quietly skipped.
-            //
-            // Admin is exempt because the admin IS the root of the chain —
-            // requiring one there would mean inventing a manager for the
-            // person at the top.
-            // Staff-only employment record. Skipped for freelancers, whose
-            // engagement carries none of these.
-            if (data.internal_profile && data.internal_profile.employment_type !== EMPLOYMENT_TYPES.FREELANCER) {
-                const required = ['employee_id', 'job_title', 'department', 'date_of_joining'] as const;
-                for (const field of required) {
-                    if (!data.internal_profile[field]) {
-                        ctx.addIssue({
-                            code: z.ZodIssueCode.custom,
-                            path: ['internal_profile', field],
-                            message: `${field.replace(/_/g, ' ')} is required for staff`,
-                        });
-                    }
-                }
-            }
-            if (data.role !== ROLES.ADMIN && data.internal_profile && !data.internal_profile.reporting_manager_id) {
-                ctx.addIssue({
-                    code: z.ZodIssueCode.custom,
-                    path: ['internal_profile', 'reporting_manager_id'],
-                    message: 'Pick a reporting manager — team screens and leave approvals route through it.',
-                });
-            }
+            // Redesign (13 Oct 2026, the user's call): the staff record (employee id,
+            // job title, department, joining date) and the reporting manager are
+            // optional, because the new Add user form does not ask for them.
+            // Cost, accepted: a person with no reporting manager shows on team
+            // screens (leave approvals, team timesheets, attendance) for admins only
+            // until one is set.
             if (data.client_profile) {
                 ctx.addIssue({
                     code: z.ZodIssueCode.custom,

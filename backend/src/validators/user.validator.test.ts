@@ -273,18 +273,13 @@ describe('createUserBodySchema — reporting manager', () => {
         internal_profile: { ...baseInternalProfile, ...profile },
     });
 
-    it.each([['employee'], ['team_lead'], ['manager']])('requires one for role=%s', (role) => {
-        const r = createUserBodySchema.safeParse(withProfile({ reporting_manager_id: undefined }, role));
-        expect(r.success).toBe(false);
-        if (!r.success) {
-            expect(r.error.issues.some((i) => i.path.includes('reporting_manager_id'))).toBe(true);
-        }
+    // Redesign (13 Oct 2026, the user's call): optional — the new Add user form has no manager field.
+    it.each([['employee'], ['team_lead'], ['manager']])('no longer requires one for role=%s', (role) => {
+        expect(createUserBodySchema.safeParse(withProfile({ reporting_manager_id: undefined }, role)).success).toBe(true);
     });
 
-    it('rejects an explicit null just as it rejects an omission', () => {
-        // `null` is what the create form sent by default, so this is the shape
-        // the gap actually arrived in.
-        expect(createUserBodySchema.safeParse(withProfile({ reporting_manager_id: null })).success).toBe(false);
+    it('accepts an explicit null too', () => {
+        expect(createUserBodySchema.safeParse(withProfile({ reporting_manager_id: null })).success).toBe(true);
     });
 
     it('accepts one when supplied', () => {
@@ -353,31 +348,23 @@ describe('createUserBodySchema — freelancer employment record', () => {
         expect(r.success).toBe(true);
     });
 
-    it('still REFUSES staff sending the same empty strings', () => {
+    // Redesign (13 Oct 2026, the user's call): the staff record is optional too.
+    it('accepts staff sending the same empty strings, stored as absent', () => {
         const r = createUserBodySchema.safeParse({
             ...baseCreatePayload,
             internal_profile: { ...baseInternalProfile, ...blanks, employment_type: 'staff' },
         });
-        expect(r.success).toBe(false);
-        if (!r.success) {
-            const fields = r.error.issues.map((i) => i.path.join('.'));
-            expect(fields).toEqual(
-                expect.arrayContaining([
-                    'internal_profile.employee_id',
-                    'internal_profile.job_title',
-                    'internal_profile.department',
-                    'internal_profile.date_of_joining',
-                ])
-            );
-        }
+        expect(r.success).toBe(true);
+        if (r.success) expect(r.data.internal_profile?.employee_id).toBeUndefined();
     });
 
-    it('defaults to staff, so an omitted employment_type still requires the record', () => {
+    it('defaults to staff when employment_type is omitted', () => {
         const r = createUserBodySchema.safeParse({
             ...baseCreatePayload,
             internal_profile: { ...baseInternalProfile, ...blanks },
         });
-        expect(r.success).toBe(false);
+        expect(r.success).toBe(true);
+        if (r.success) expect(r.data.internal_profile?.employment_type).toBe('staff');
     });
 });
 
