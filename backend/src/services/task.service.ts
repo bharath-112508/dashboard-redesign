@@ -15,6 +15,7 @@ import {
     DEFAULT_TASK_STATUSES,
     DEFAULT_TASK_STATUS_VALUES,
     TASK_CLIENT_PATCH_FIELDS,
+    TASK_REPORT_PRIORITY_VALUES,
     TASK_CREATOR_PATCH_FIELDS,
     TASK_DEPENDENCIES_MAX,
     TASK_EMPLOYEE_PATCH_FIELDS,
@@ -184,13 +185,20 @@ export const assertEmployeePatchScope = (patch: PatchTaskBody, task: TaskDocumen
                 ERROR_CODES.TASK_WRITE_FORBIDDEN
             );
         }
+        // Urgent and critical are the team's call: a reporter stays within what they could report with.
+        if (patch.priority !== undefined && !TASK_REPORT_PRIORITY_VALUES.includes(patch.priority as never)) {
+            throw AppError.forbidden(
+                `A reported issue's priority may be: ${TASK_REPORT_PRIORITY_VALUES.join(', ')}`,
+                ERROR_CODES.TASK_WRITE_FORBIDDEN
+            );
+        }
         return;
     }
     // Fields outside the employee whitelist are never allowed for any employee.
     // The creator gets a wider set — see `TASK_CREATOR_PATCH_FIELDS`.
     const isCreator = task.created_by.equals(caller.id);
     // Employees only reach a task through a project they are a member of, so the planning fields apply to all of them.
-    const allowed = [...TASK_EMPLOYEE_PATCH_FIELDS, ...TASK_CREATOR_PATCH_FIELDS, ...TASK_MEMBER_PATCH_FIELDS];
+    const allowed = [...new Set([...TASK_EMPLOYEE_PATCH_FIELDS, ...TASK_CREATOR_PATCH_FIELDS, ...TASK_MEMBER_PATCH_FIELDS])];
     const offending = Object.keys(patch).filter((k) => !allowed.includes(k));
     if (offending.length > 0) {
         throw AppError.forbidden(

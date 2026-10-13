@@ -75,5 +75,5 @@ export const ticketIdFromParam = (v: string | null | undefined): TaskId | null =
   const m = /^(?:PMT-)?(\d+)$/i.exec(v.trim())
   if (m) return String(+m[1])
   // A backend id, as the link carries it.
-  return /^[a-z0-9~-]+$/i.test(v.trim()) ? v.trim() : null
+  return /^[a-z0-9~.-]+$/i.test(v.trim()) ? v.trim() : null
 }

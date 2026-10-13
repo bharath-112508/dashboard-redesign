@@ -609,10 +609,10 @@ describe('sprint epic link, members and goals', () => {
     const body = { name: 'Sprint 3', goal: '', start_date: '2026-02-01', end_date: '2026-02-14' };
 
     it('stores the epic (a story of the same project), members, goals, summary and why', async () => {
-        const proj = makeProject();
+        const member = new Types.ObjectId();
+        const proj = makeProject({ member_ids: [member] });
         loadProjectForCallerMock.mockResolvedValueOnce(proj);
         const storyId = new Types.ObjectId();
-        const member = new Types.ObjectId();
         storyFindOneMock.mockReturnValueOnce({ select: () => ({ lean: () => Promise.resolve({ _id: storyId }) }) });
         sprintCreateMock.mockResolvedValueOnce(makeSprint({ project_id: proj._id }));
 
@@ -640,15 +640,58 @@ describe('sprint epic link, members and goals', () => {
     });
 
     it('updates goals done and members', async () => {
-        const proj = makeProject();
-        const sprint = makeSprint({ project_id: proj._id });
+        const member = new Types.ObjectId();
+        const proj = makeProject({ member_ids: [member] });
+        const sprint = makeSprint({ project_id: proj._id, goals: ['a', 'b', 'c'] });
         sprintFindByIdMock.mockResolvedValueOnce(sprint);
         loadProjectForCallerMock.mockResolvedValueOnce(proj);
-        const member = new Types.ObjectId();
 
         await svc.updateSprint(sprint._id, { goals_done: [0, 2], member_ids: [member.toString()] } as never, adminCaller());
 
         expect((sprint as Record<string, unknown>).goals_done).toEqual([0, 2]);
         expect((sprint as Record<string, unknown>).member_ids).toEqual([member]);
+    });
+
+    it('refuses a sprint member who is not on the project', async () => {
+        const proj = makeProject({ member_ids: [new Types.ObjectId()] });
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await expect(
+            svc.createSprint(proj._id, { ...body, member_ids: [new Types.ObjectId().toString()] } as never, adminCaller())
+        ).rejects.toMatchObject({ statusCode: 422 });
+        expect(sprintCreateMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps a member the sprint already has, even if they left the project', async () => {
+        const former = new Types.ObjectId();
+        const proj = makeProject({ member_ids: [] });
+        const sprint = makeSprint({ project_id: proj._id, member_ids: [former] });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await svc.updateSprint(sprint._id, { member_ids: [former.toString()] } as never, adminCaller());
+
+        expect(sprint.save).toHaveBeenCalled();
+    });
+
+    it('refuses a done goal that does not exist', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, goals: ['only one'] });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await expect(svc.updateSprint(sprint._id, { goals_done: [3] } as never, adminCaller())).rejects.toMatchObject({ statusCode: 422 });
+        expect(sprint.save).not.toHaveBeenCalled();
+    });
+
+    it('drops the done marks of goals that were removed', async () => {
+        const proj = makeProject();
+        const sprint = makeSprint({ project_id: proj._id, goals: ['a', 'b', 'c'], goals_done: [0, 2] });
+        sprintFindByIdMock.mockResolvedValueOnce(sprint);
+        loadProjectForCallerMock.mockResolvedValueOnce(proj);
+
+        await svc.updateSprint(sprint._id, { goals: ['a', 'b'] } as never, adminCaller());
+
+        expect((sprint as Record<string, unknown>).goals_done).toEqual([0]);
     });
 });

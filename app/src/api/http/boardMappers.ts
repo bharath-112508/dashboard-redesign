@@ -200,10 +200,8 @@ export const taskBody = (
   if (patch.est !== undefined) b.estimated_hours = parseFloat(patch.est) || 0
   if (patch.desc !== undefined) b.description = patch.desc
   const people = patch.assignees ?? (patch.assignee !== undefined ? (patch.assignee ? [patch.assignee] : []) : undefined)
-  if (people) {
-    b.assignee_ids = toIds(people)
-    b.primary_assignee_id = (b.assignee_ids as string[])[0] ?? null
-  }
+  // The backend keeps primary_assignee_id in step with assignee_ids (and employees may not send it).
+  if (people) b.assignee_ids = toIds(people)
   if (patch.contribs !== undefined) b.collaborator_ids = toIds(patch.contribs)
   if (patch.epic !== undefined) b.story_id = ctx.storyIdOf(patch.epic)
   if (patch.sprint !== undefined) b.sprint_id = ctx.realSprintId(patch.sprint)

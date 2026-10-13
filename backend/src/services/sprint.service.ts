@@ -67,6 +67,20 @@ const storyIdFor = async (raw: string | null | undefined, projectId: Types.Objec
 
 const objectIds = (ids: string[] | undefined) => ids?.map((id) => new Types.ObjectId(id));
 
+/** Sprint members are project members; someone already on the sprint stays even after leaving the project. */
+const assertSprintMembers = (ids: string[] | undefined, projectMembers: Types.ObjectId[] = [], current: Types.ObjectId[] = []) => {
+    if (!ids) return;
+    const allowed = new Set([...projectMembers, ...current].map(String));
+    if (ids.some((id) => !allowed.has(id)))
+        throw AppError.unprocessable('Sprint members must be members of the project', ERROR_CODES.VALIDATION_ERROR);
+};
+
+/** A done goal points at one of the sprint's goals. */
+const assertGoalsDone = (done: number[] | undefined, goals: string[] = []) => {
+    if (done?.some((i) => i >= goals.length))
+        throw AppError.unprocessable('A done goal must be one of the sprint goals', ERROR_CODES.VALIDATION_ERROR);
+};
+
 export const createSprint = async (
     projectId: Types.ObjectId,
     input: CreateSprintBody,
@@ -75,6 +89,8 @@ export const createSprint = async (
     const project = await loadProjectForCaller(projectId, caller);
     assertWithinProjectWindow(project, input.start_date, input.end_date);
 
+    assertSprintMembers(input.member_ids, project.member_ids);
+    assertGoalsDone(input.goals_done, input.goals);
     const storyId = await storyIdFor(input.story_id, project._id);
     const created = await Sprint.create({
         project_id: project._id,
@@ -213,6 +229,11 @@ export const updateSprint = async (
     const before = toPublic(sprint);
     const prevStatus = sprint.status;
 
+    assertSprintMembers(patch.member_ids, project.member_ids, sprint.member_ids);
+    assertGoalsDone(patch.goals_done, patch.goals ?? sprint.goals);
+    // Fewer goals and no new done marks: drop the marks of goals that are gone.
+    if (patch.goals !== undefined && patch.goals_done === undefined)
+        sprint.goals_done = (sprint.goals_done ?? []).filter((i) => i < (patch.goals as string[]).length);
     if (patch.name !== undefined) sprint.name = patch.name;
     if (patch.goal !== undefined) sprint.goal = patch.goal;
     if (patch.start_date !== undefined) sprint.start_date = patch.start_date;

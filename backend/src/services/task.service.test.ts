@@ -129,7 +129,7 @@ const employeeCaller = (id?: Types.ObjectId) => ({
     role: ROLES.EMPLOYEE,
     audit: undefined,
 });
-const clientCaller = () => ({ id: new Types.ObjectId(), role: ROLES.CLIENT, audit: undefined });
+const clientCaller = (id = new Types.ObjectId()) => ({ id, role: ROLES.CLIENT, audit: undefined });
 
 const makeProject = (overrides: Record<string, unknown> = {}) => ({
     _id: new Types.ObjectId(),
@@ -1666,6 +1666,15 @@ describe('assertEmployeePatchScope', () => {
             source: 'internal',
             status: DEFAULT_TASK_STATUSES.TO_DO,
         }) as never;
+
+    it('keeps a client reporter within the report priorities (low, medium, high)', () => {
+        const me = new Types.ObjectId();
+        const report = { created_by: me, assignee_ids: [], source: 'client', status: DEFAULT_TASK_STATUSES.TO_DO } as never;
+        expect(() => svc.assertEmployeePatchScope({ priority: TASK_PRIORITIES.CRITICAL } as never, report, clientCaller(me))).toThrow(
+            /priority/i
+        );
+        expect(() => svc.assertEmployeePatchScope({ priority: TASK_PRIORITIES.HIGH } as never, report, clientCaller(me))).not.toThrow();
+    });
 
     it('lets the CREATOR change priority and due date on their own task', () => {
         // Raising a task and then needing a manager to fix a date you typed

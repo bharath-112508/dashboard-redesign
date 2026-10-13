@@ -28,6 +28,8 @@ export interface BoardIndex {
   tasks: Map<TaskId, Task>
   /** Each real sprint's member ids, for adding members. */
   sprintMemberIds: Map<string, string[]>
+  /** Each ticket's collaborator ids as stored, so people the board cannot name are kept. */
+  collaboratorIds: Map<TaskId, string[]>
 }
 
 export interface Board {
@@ -50,6 +52,7 @@ const emptyIndex = (): BoardIndex => ({
   idOfName: new Map(),
   tasks: new Map(),
   sprintMemberIds: new Map(),
+  collaboratorIds: new Map(),
 })
 
 /** The last board loaded, for writes (which project a ticket is in, which story an epic is). */
@@ -85,6 +88,7 @@ const readProject = async (project: BackendProject): Promise<ProjectData> => {
 // add one backend board endpoint (and refetch only what a command touched) before production size.
 export const loadBoard = async (session: Session | null): Promise<Board> => {
   const index = emptyIndex()
+  noteWho(session?.personId ?? '')
   if (!session) return { workspace: { statuses: DEFAULT_STATUSES, epics: [], sprints: [], devopsLinks: {} }, tasks: [], index }
   const data = await Promise.all((await liveProjects()).map(readProject))
 
@@ -126,6 +130,7 @@ export const loadBoard = async (session: Session | null): Promise<Board> => {
     const byNumber = (a: BackendTask, b: BackendTask) => (a.task_number ?? 0) - (b.task_number ?? 0)
     for (const t of list) {
       index.projectOfTask.set(t.id, project.id)
+      index.collaboratorIds.set(t.id, t.collaborator_ids)
       tasks.push(
         taskFrom(t, {
           key: `${project.code ?? 'T'}-${t.task_number ?? '?'}`,
@@ -142,12 +147,34 @@ export const loadBoard = async (session: Session | null): Promise<Board> => {
   return { workspace: { statuses, epics, sprints, devopsLinks: {} }, tasks, index }
 }
 
-let inflight: Promise<Board> | null = null
-/** One load per refetch round: the workspace and tasks queries ask at the same time. */
-const shared = (session: Session | null) => (inflight ??= loadBoard(session).finally(() => (inflight = null)))
+let inflight: { who: string; board: Promise<Board> } | null = null
+let lastWho: string | null = null
+/** One load per refetch round (the workspace and tasks queries ask at the same time), never shared between people. */
+/** Someone else signed in: nothing of the previous person's drafts or ids carries over. */
+const noteWho = (who: string) => {
+  if (who === lastWho) return
+  lastWho = who
+  drafts.clear()
+  aliases.clear()
+  creating.clear()
+}
+const shared = (session: Session | null) => {
+  const who = session?.personId ?? ''
+  noteWho(who)
+  if (inflight?.who !== who) {
+    const board = loadBoard(session).finally(() => {
+      if (inflight?.board === board) inflight = null
+    })
+    inflight = { who, board }
+  }
+  return inflight.board
+}
 
 export const fetchWorkspace = async (session: Session | null) => (await shared(session)).workspace
-export const fetchTasks = async (session: Session | null) => [...(await shared(session)).tasks, ...drafts.values()]
+export const fetchTasks = async (session: Session | null) => {
+  const { tasks } = await shared(session)
+  return session ? [...tasks, ...drafts.values()] : tasks
+}
 
 // ─── Writes ──────────────────────────────────────────────────────────────
 
@@ -188,9 +215,20 @@ export const isBoardApiCommand = (cmd: { type: string; cmds?: { type: string }[]
 
 const refuse = (message: string) => new ApiError(403, 'NOT_AVAILABLE', message)
 
-const idsOf = (names: string[]) => names.map(n => boardIndex.idOfName.get(n)).filter((x): x is string => !!x)
+/** A person's user id; someone the project does not have is refused rather than silently dropped. */
+const idOf = (name: string) => {
+  const id = boardIndex.idOfName.get(name)
+  if (!id) throw refuse(`${name} is not on this project.`)
+  return id
+}
+const idsOf = (names: string[]) => names.filter(Boolean).map(idOf)
+/** Stored ids the board shows no name for: kept when a list of people is written back. */
+const unnamed = (ids: string[] = []) => {
+  const known = new Set(boardIndex.idOfName.values())
+  return ids.filter(id => !known.has(id))
+}
 const bodyCtx = {
-  ids: (name: string) => boardIndex.idOfName.get(name),
+  ids: idOf,
   realSprintId: (id: string | null) => (id ? realSprintId(id) : null),
   storyIdOf: (epic: string) => boardIndex.storyOfEpic.get(epic) ?? (epic.startsWith('none~') ? null : epic),
 }
@@ -222,35 +260,54 @@ const createTask = async (task: Task, top: boolean): Promise<string | undefined>
   const project = (task.parent && boardIndex.projectOfTask.get(task.parent)) || projectOfEpic(task.epic) || firstProject()
   if (!project) throw refuse('There is no project to add this ticket to.')
   const pending = (async () => {
+    // A client's bug goes through the report route, the one write clients have.
+    if (task.clientBug) {
+      const prio = task.prio === 'Low' ? 'low' : task.prio === 'Medium' ? 'medium' : 'high'
+      const { id } = await api.post<{ id: string }>('/tasks/report', { project_id: project, kind: 'issue', title: task.title, description: task.desc, priority: prio })
+      return id
+    }
     const { id } = await api.post<{ id: string }>('/tasks', {
       project_id: project,
       ...taskBody(task, bodyCtx),
       ...(task.parent ? { parent_task_id: await realTaskId(task.parent) } : {}),
     })
-    if (top) await api.post(`/tasks/${id}/rank`, {})
+    // Only managers and the assignee may rank: for anyone else the ticket stays where the backend put it.
+    if (top) await api.post(`/tasks/${id}/rank`, {}).catch(err => {
+      if (!(err instanceof ApiError && err.status === 403)) throw err
+    })
     return id
   })()
   creating.set(task.id, pending)
   try {
-    return await pending
+    const id = await pending
+    // Writes before the next reload (a subtask, a blocker) need to know the new ticket.
+    boardIndex.projectOfTask.set(id, project)
+    boardIndex.tasks.set(id, { ...task, id, subs: [], deps: [] })
+    return id
   } finally {
     // Kept briefly so edits queued behind the create still find it.
-    setTimeout(() => creating.delete(task.id), 60_000)
+    setTimeout(() => {
+      if (creating.get(task.id) === pending) creating.delete(task.id)
+    }, 60_000)
   }
 }
 
 const subBody = (s: Subtask): Record<string, unknown> => ({
   ...(s.due ? { due_date: s.due } : {}),
-  ...(s.assignee ? { assignee_ids: idsOf([s.assignee]), primary_assignee_id: idsOf([s.assignee])[0] ?? null } : {}),
+  ...(s.assignee ? { assignee_ids: idsOf([s.assignee]) } : {}),
   ...(s.note ? { description: s.note } : {}),
 })
 
 /** Subtask lines are the backend's linked tasks: new lines are created, changed ones patched, removed ones deleted. */
-const saveSubs = async (parentId: string, before: Subtask[], after: Subtask[]) => {
+const saveSubs = async (parentId: string, before: Subtask[], after: Subtask[]): Promise<Subtask[]> => {
   const old = new Map(before.filter(s => s.sid).map(s => [s.sid as string, s]))
   const project = boardIndex.projectOfTask.get(parentId)
+  const saved: Subtask[] = []
+  // A line saved by an earlier write but not reloaded yet has no sid in the page: find it by title.
+  const claimed = new Set(after.map(s => s.sid).filter(Boolean))
+  const known = (s: Subtask) => [...old.values()].find(o => o.t === s.t && !claimed.has(o.sid) && claimed.add(o.sid))?.sid
   for (const s of after) {
-    const sid = s.sid ? await realTaskId(s.sid) : undefined
+    const sid = s.sid ? await realTaskId(s.sid) : known(s)
     const was = sid ? old.get(sid) : undefined
     if (sid && was) {
       const b: Record<string, unknown> = {}
@@ -264,12 +321,14 @@ const saveSubs = async (parentId: string, before: Subtask[], after: Subtask[]) =
       if ((s.note ?? '') !== (was.note ?? '')) b.description = s.note ?? ''
       if (Object.keys(b).length) await api.patch(`/tasks/${sid}`, b)
       old.delete(sid)
+      saved.push({ ...s, sid })
     } else if (!sid) {
-      await api.post('/tasks', { project_id: project, parent_task_id: parentId, title: s.t, status: s.done ? 'done' : 'to_do', ...subBody(s) })
-    }
-    // A line with a sid the board does not know yet was just created (the drawer opened it): nothing to do.
+      const { id } = await api.post<{ id: string }>('/tasks', { project_id: project, parent_task_id: parentId, title: s.t, status: s.done ? 'done' : 'to_do', ...subBody(s) })
+      saved.push({ ...s, sid: id })
+    } else saved.push({ ...s, sid }) // just created (the drawer opened it): nothing to do
   }
   for (const sid of old.keys()) await api.delete(`/tasks/${sid}`)
+  return saved
 }
 
 const saveDeps = async (id: string, before: TaskId[], after: TaskId[]) => {
@@ -290,9 +349,13 @@ const updateTask = async (appId: TaskId, patch: Partial<Task>) => {
   const id = await realTaskId(appId)
   const was = boardIndex.tasks.get(id)
   const body = taskBody(patch, bodyCtx)
-  if (Object.keys(body).length) await api.patch(`/tasks/${id}`, body)
-  if (patch.subs) await saveSubs(id, was?.subs ?? [], patch.subs)
+  if (body.collaborator_ids) body.collaborator_ids = [...(body.collaborator_ids as string[]), ...unnamed(boardIndex.collaboratorIds.get(id))]
+  // Blockers first: their routes are managers-only, so a refused change leaves the ticket as it was.
   if (patch.deps) await saveDeps(id, was?.deps ?? [], patch.deps)
+  if (Object.keys(body).length) await api.patch(`/tasks/${id}`, body)
+  const subs = patch.subs ? await saveSubs(id, was?.subs ?? [], patch.subs) : undefined
+  // What is saved now is the "before" of the next write, until the board reloads.
+  if (was) boardIndex.tasks.set(id, { ...was, ...patch, ...(subs ? { subs } : {}) })
 }
 
 const doneIndexes = (m: Record<number, boolean> = {}) =>
@@ -320,7 +383,8 @@ const updateSprint = async (appId: string, patch: Partial<Sprint>) => {
   const { state, ...rest } = patch
   if (state === 'active') await api.post(`/sprints/${id}/start`, {})
   if (state === 'done') await api.post(`/sprints/${id}/complete`, { move_unfinished_to: 'backlog' })
-  const body = { ...sprintBody(rest), ...(state === 'planned' ? { status: 'planned' } : {}) }
+  const body: Record<string, unknown> = { ...sprintBody(rest), ...(state === 'planned' ? { status: 'planned' } : {}) }
+  if (body.member_ids) body.member_ids = [...(body.member_ids as string[]), ...unnamed(boardIndex.sprintMemberIds.get(id))]
   if (Object.keys(body).length) await api.patch(`/sprints/${id}`, body)
 }
 
@@ -342,7 +406,16 @@ const epicBody = (p: Partial<Epic>): Record<string, unknown> => {
 }
 
 /** Sends one board command to the backend. Creates resolve with the backend id. */
-export const sendBoardCommand = async (cmd: BoardCommand, today: string): Promise<{ id?: string }> => {
+// ponytail: one queue for all board writes; writes are small, so order beats parallelism here.
+let queue: Promise<unknown> = Promise.resolve()
+/** Board writes go one at a time, in order, so each one sees what the previous one saved. */
+export const sendBoardCommand = (cmd: BoardCommand, today: string): Promise<{ id?: string }> => {
+  const run = queue.then(() => sendOne(cmd, today))
+  queue = run.catch(() => undefined)
+  return run
+}
+
+const sendOne = async (cmd: BoardCommand, today: string): Promise<{ id?: string }> => {
   switch (cmd.type) {
     case 'task.create':
       return { id: await createTask(cmd.task, !!cmd.top) }
@@ -395,7 +468,7 @@ export const sendBoardCommand = async (cmd: BoardCommand, today: string): Promis
       return {}
     case 'batch': {
       let last: { id?: string } = {}
-      for (const c of cmd.cmds) last = await sendBoardCommand(c as BoardCommand, today)
+      for (const c of cmd.cmds) last = await sendOne(c as BoardCommand, today)
       return last
     }
   }

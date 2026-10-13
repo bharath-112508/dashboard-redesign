@@ -410,11 +410,11 @@ export const resolveLink = async (token: string): Promise<ResolvedShareLinkPaylo
     const [sprintsRaw, storiesRaw, tasksRaw] = await Promise.all([
         Sprint.find({ project_id: link.project_id })
             // member_ids are staff ids: not for unauthenticated viewers.
-            .select('-created_by -member_ids')
+            .select('-created_by -member_ids -why -summary -goals_done')
             .sort({ start_date: 1, _id: 1 })
             .limit(SHARE_LINK_SPRINT_CAP + 1),
         Story.find({ project_id: link.project_id })
-            .select('-created_by -updated_by')
+            .select('-created_by -updated_by -risks -requirements -open_questions')
             .sort({ order: 1, _id: 1 })
             .limit(SHARE_LINK_STORY_CAP + 1),
         Task.find({ project_id: link.project_id })

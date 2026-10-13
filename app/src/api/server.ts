@@ -489,7 +489,9 @@ const sendToApi = async (send: (today: string) => Promise<{ id?: string }>, tick
     const { id } = await send(localToday())
     return id ? { apiId: id, ...(ticket ? { id } : {}) } : {}
   } catch (err) {
+    // A refusal, or a value the backend does not accept: the page shows the backend's reason.
     if (err instanceof ApiError && err.status === 403) throw new RefusedError(err.message)
+    if (err instanceof ApiError && err.status === 422) throw new RefusedError(err.fieldMessage ?? err.message)
     throw err
   }
 }

@@ -9,6 +9,7 @@ vi.mock('./client', async importOriginal => ({
 
 const { loadBoard, sendBoardCommand, isBoardApiCommand, fetchTasks, ticketAlias } = await import('./board')
 const { ApiError } = await import('./client')
+const cuser: Session = { personId: 'k1', name: 'Kari', email: 'k@x', role: 'cuser', org: 'Aurora', orgId: 'c1' }
 
 const staff: Session = { personId: 'a0', name: 'Admin', email: 'a@x', role: 'super', org: 'Viljetech' }
 const TODAY = '2026-10-13'
@@ -42,7 +43,7 @@ const ROUTES: Record<string, unknown> = {
   '/projects?limit=100&page=1': [{ id: 'p1', code: 'AFSP', name: 'P1', status: 'active', is_archived: false, start_date: '2026-09-01', end_date: null, member_ids: [], company_id: 'c1' }],
   '/projects/p1/stories?limit=100&page=1': [{ id: 'e1', project_id: 'p1', title: 'Web app' }, { id: 'e2', project_id: 'p1', title: 'Mobile' }],
   '/projects/p1/sprints?limit=100&page=1': [
-    { id: 's1', project_id: 'p1', name: 'Sprint 1', start_date: '2026-10-05', end_date: '2026-10-16', status: 'active', story_id: null, member_ids: ['u1'] },
+    { id: 's1', project_id: 'p1', name: 'Sprint 1', start_date: '2026-10-05', end_date: '2026-10-16', status: 'active', story_id: null, member_ids: ['u1', 'x9'] },
   ],
   '/projects/p1/custom-statuses': { defaults: [], custom: [] },
   '/projects/p1/members': [
@@ -50,7 +51,7 @@ const ROUTES: Record<string, unknown> = {
     { id: 'u2', full_name: 'Rahul' },
   ],
   '/tasks?project_id=p1&limit=100&page=1': [
-    bt('t1', 1, { sprint_id: 's1', depends_on_task_ids: ['t9'] }),
+    bt('t1', 1, { sprint_id: 's1', depends_on_task_ids: ['t9'], collaborator_ids: ['u2', 'x9'] }),
     bt('t2', 2, { story_id: 'e2', sprint_id: 's1' }),
     bt('t3', 3, { story_id: null }),
     bt('c1', 4, { parent_task_id: 't1', title: 'Test flow' }),
@@ -118,7 +119,6 @@ describe('tickets', () => {
       estimated_hours: 0,
       description: '',
       assignee_ids: ['u1'],
-      primary_assignee_id: 'u1',
       collaborator_ids: [],
       story_id: 'e1',
       sprint_id: 's1',
@@ -220,7 +220,7 @@ describe('tickets', () => {
 describe('sprints', () => {
   it('creates a sprint in its epic\'s project', async () => {
     post.mockResolvedValueOnce({ id: 's9' })
-    const sprint = { id: 'tmp', epic: 'e1', name: 'Sprint 2', start: '2026-10-19', end: '2026-10-30', members: ['Chary', 'Ghost'], state: 'planned' as const, goal: 'G', goals: ['A'] }
+    const sprint = { id: 'tmp', epic: 'e1', name: 'Sprint 2', start: '2026-10-19', end: '2026-10-30', members: ['Chary'], state: 'planned' as const, goal: 'G', goals: ['A'] }
     expect(await sendBoardCommand({ type: 'sprint.create', sprint }, TODAY)).toEqual({ id: 's9' })
     expect(post).toHaveBeenCalledWith('/projects/p1/sprints', {
       name: 'Sprint 2',
@@ -254,7 +254,7 @@ describe('sprints', () => {
 
   it('adds members to the ones it has', async () => {
     await sendBoardCommand({ type: 'sprint.addMembers', id: 's1~e1', names: ['Rahul', 'Chary'] }, TODAY)
-    expect(patch).toHaveBeenCalledWith('/sprints/s1', { member_ids: ['u1', 'u2'] })
+    expect(patch).toHaveBeenCalledWith('/sprints/s1', { member_ids: ['u1', 'x9', 'u2'] })
   })
 })
 
@@ -302,5 +302,75 @@ describe('batch', () => {
       TODAY,
     )
     expect(patch.mock.calls.map(c => c[0])).toEqual(['/tasks/t1', '/tasks/t2'])
+  })
+})
+
+describe('review fixes', () => {
+  it('sends a client\'s bug report to the report route, without ranking it', async () => {
+    await sendBoardCommand(
+      { type: 'task.create', top: true, task: newTask({ prio: 'Critical', desc: 'It breaks', clientBug: { reported: 'today', chat: [] } }) },
+      TODAY,
+    )
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(post).toHaveBeenCalledWith('/tasks/report', { project_id: 'p1', kind: 'issue', title: 'Fix login', description: 'It breaks', priority: 'high' })
+  })
+
+  it('keeps a new ticket when only putting it at the top is refused', async () => {
+    post.mockResolvedValueOnce({ id: 'new1' }).mockRejectedValueOnce(new ApiError(403, 'TASK_WRITE_FORBIDDEN', 'no'))
+    expect(await sendBoardCommand({ type: 'tickets.task.createTop', task: newTask() }, TODAY)).toEqual({ id: 'new1' })
+  })
+
+  it('refuses a person who is not on the project instead of clearing the field', async () => {
+    await expect(sendBoardCommand({ type: 'task.update', id: 't1', patch: { assignee: 'Ghost' } }, TODAY)).rejects.toMatchObject({ status: 403 })
+    expect(patch).not.toHaveBeenCalled()
+  })
+
+  it('keeps contributors the board cannot name when contributors change', async () => {
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { contribs: ['Chary'] } }, TODAY)
+    expect(patch).toHaveBeenCalledWith('/tasks/t1', { collaborator_ids: ['u1', 'x9'] })
+  })
+
+  it('does not create a subtask line twice when the next edit comes before the reload', async () => {
+    post.mockResolvedValueOnce({ id: 'c3' })
+    const was = [
+      { t: 'Test flow', done: false, sid: 'c1', due: '', assignee: '', note: '' },
+      { t: 'Error states', done: true, sid: 'c2', due: '', assignee: '', note: '' },
+    ]
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { subs: [...was, { t: 'A', done: false }] } }, TODAY)
+    await sendBoardCommand({ type: 'task.update', id: 't1', patch: { subs: [{ ...was[0], done: true }, was[1], { t: 'A', done: false }] } }, TODAY)
+    expect(post.mock.calls.filter(c => c[0] === '/tasks')).toHaveLength(1)
+    expect(del).not.toHaveBeenCalled()
+    expect(patch).toHaveBeenCalledWith('/tasks/c1', { status: 'done' })
+  })
+
+  it('sends one write at a time, in order', async () => {
+    let release: () => void = () => {}
+    patch.mockReturnValueOnce(new Promise<void>(r => (release = r)))
+    const first = sendBoardCommand({ type: 'task.update', id: 't1', patch: { title: 'A' } }, TODAY)
+    const second = sendBoardCommand({ type: 'task.update', id: 't2', patch: { title: 'B' } }, TODAY)
+    await new Promise(r => setTimeout(r, 0))
+    expect(patch).toHaveBeenCalledTimes(1)
+    release()
+    await Promise.all([first, second])
+    expect(patch.mock.calls.map(c => c[0])).toEqual(['/tasks/t1', '/tasks/t2'])
+  })
+
+  it('gives a subtask of a ticket made since the last load its project', async () => {
+    post.mockResolvedValueOnce({ id: 'n5' }).mockResolvedValueOnce({ id: 'c9' })
+    await sendBoardCommand({ type: 'task.create', task: newTask({ id: '5' }) }, TODAY)
+    await sendBoardCommand({ type: 'task.update', id: 'n5', patch: { subs: [{ t: 'Sub', done: false }] } }, TODAY)
+    expect(post).toHaveBeenLastCalledWith('/tasks', { project_id: 'p1', parent_task_id: 'n5', title: 'Sub', status: 'to_do' })
+  })
+
+  it('changes blockers before the ticket, so a refused blocker change saves nothing', async () => {
+    post.mockRejectedValueOnce(new ApiError(403, 'TASK_WRITE_FORBIDDEN', 'no'))
+    await expect(sendBoardCommand({ type: 'task.update', id: 't1', patch: { title: 'X', deps: ['t9', 't2'] } }, TODAY)).rejects.toMatchObject({ status: 403 })
+    expect(patch).not.toHaveBeenCalled()
+  })
+
+  it('does not hand one person\'s board or drafts to the next person', async () => {
+    await sendBoardCommand({ type: 'task.create', task: newTask({ id: '8', title: '', isNew: true }) }, TODAY)
+    expect((await fetchTasks(cuser)).some(t => t.id === '8')).toBe(false)
+    expect(await fetchTasks(null)).toEqual([])
   })
 })

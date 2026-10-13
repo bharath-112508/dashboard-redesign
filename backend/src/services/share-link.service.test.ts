@@ -539,6 +539,9 @@ describe('resolveLink', () => {
         expect(taskSelectArgs[0]).toContain('-collaborator_ids');
         expect(taskSelectArgs[0]).toContain('-created_by');
         expect(taskSelectArgs[0]).toContain('-updated_by');
+        // Redesign planning notes are for the team, not for a link's holder.
+        for (const f of ['-why', '-summary', '-goals_done']) expect(sprintSelectArgs[0]).toContain(f);
+        for (const f of ['-risks', '-requirements', '-open_questions']) expect(storySelectArgs[0]).toContain(f);
     });
 
     it('does not echo revoke_reason on the public 410 (regression — leaks client-deactivated state)', async () => {

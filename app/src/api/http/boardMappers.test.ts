@@ -258,10 +258,10 @@ describe('taskBody', () => {
     expect(taskBody({ est: '' }, ctx)).toEqual({ estimated_hours: 0 })
   })
 
-  it('maps assignee names to ids and leaves unknown names out', () => {
-    expect(taskBody({ assignees: ['Chary', 'Ghost'] }, ctx)).toEqual({ assignee_ids: ['u1'], primary_assignee_id: 'u1' })
-    expect(taskBody({ assignee: 'Rahul' }, ctx)).toEqual({ assignee_ids: ['u2'], primary_assignee_id: 'u2' })
-    expect(taskBody({ assignee: '' }, ctx)).toEqual({ assignee_ids: [], primary_assignee_id: null })
+  it('maps assignee names to ids (the backend keeps the primary assignee in step) and leaves unknown names out', () => {
+    expect(taskBody({ assignees: ['Chary', 'Ghost'] }, ctx)).toEqual({ assignee_ids: ['u1'] })
+    expect(taskBody({ assignee: 'Rahul' }, ctx)).toEqual({ assignee_ids: ['u2'] })
+    expect(taskBody({ assignee: '' }, ctx)).toEqual({ assignee_ids: [] })
   })
 
   it('maps epic and sprint to the real backend ids', () => {

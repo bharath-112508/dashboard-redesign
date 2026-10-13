@@ -75,3 +75,12 @@ describe('server.send for board commands in API mode', () => {
     await expect(server.send({ type: 'task.update', id: 't1', patch: { status: 'done' } })).rejects.toBeInstanceOf(RefusedError)
   })
 })
+
+describe('backend validation answers', () => {
+  it("are shown like refusals, with the backend's reason", async () => {
+    sendBoardCommand.mockRejectedValueOnce(new ApiError(422, 'VALIDATION_ERROR', 'Status qa is not a status of this project'))
+    const err = await server.send({ type: 'task.update', id: 't1', patch: { status: 'qa' } }).catch(e => e)
+    expect(err).toBeInstanceOf(RefusedError)
+    expect(err.message).toBe('Status qa is not a status of this project')
+  })
+})
