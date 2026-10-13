@@ -1,0 +1,653 @@
+// src/services/dashboard-analytics.service.test.ts
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { Types } from 'mongoose';
+
+import { ROLES } from '../constants/roles.js';
+import { resolveDashboardRange } from '../utils/dashboard-range.js';
+
+vi.mock('../models/attendance-record.model.js', () => ({ AttendanceRecord: { aggregate: vi.fn() } }));
+vi.mock('../models/leave-request.model.js', () => ({
+    LeaveRequest: { aggregate: vi.fn(), find: vi.fn(), countDocuments: vi.fn() },
+}));
+vi.mock('../models/leave-type.model.js', () => ({ LeaveType: { find: vi.fn() } }));
+vi.mock('../models/timesheet-entry.model.js', () => ({ TimesheetEntry: { aggregate: vi.fn() } }));
+vi.mock('../models/holiday.model.js', () => ({ Holiday: { find: vi.fn(), countDocuments: vi.fn() } }));
+vi.mock('../models/user.model.js', () => ({ User: { find: vi.fn(), countDocuments: vi.fn(), aggregate: vi.fn() } }));
+vi.mock('../models/project.model.js', () => ({
+    Project: { find: vi.fn(), countDocuments: vi.fn() },
+}));
+vi.mock('../models/task.model.js', () => ({ Task: { aggregate: vi.fn(), find: vi.fn(), countDocuments: vi.fn() } }));
+vi.mock('../models/billing-rate.model.js', () => ({ BillingRate: { find: vi.fn() } }));
+
+import { AttendanceRecord } from '../models/attendance-record.model.js';
+import { Holiday } from '../models/holiday.model.js';
+import { TimesheetEntry } from '../models/timesheet-entry.model.js';
+import { LeaveRequest } from '../models/leave-request.model.js';
+import { LeaveType } from '../models/leave-type.model.js';
+import { User } from '../models/user.model.js';
+import { Project } from '../models/project.model.js';
+import { Task } from '../models/task.model.js';
+import { BillingRate } from '../models/billing-rate.model.js';
+import {
+    computeAttendanceTrend,
+    computeHoursByProject,
+    computeUtilization,
+    computeHoursTrend,
+    computeBillableValue,
+    countWorkingDays,
+    computeTasksByStatus,
+    computeThroughput,
+    computeProjectProgress,
+    computeLeaveRequests,
+    buildAdminAnalytics,
+    buildManagerAnalytics,
+    buildEmployeeAnalytics,
+    buildClientAnalytics,
+} from './dashboard-analytics.service.js';
+
+const RANGE = {
+    key: 'month' as const,
+    label: 'This month',
+    insight_label: 'This month',
+    prev_label: 'last month',
+    from: '2026-06-01',
+    to: '2026-06-03',
+    prev_from: '2026-05-01',
+    prev_to: '2026-05-31',
+};
+
+// `today` collapses from === to. The trend window must equal the range (no
+// 7-day widening) so the dashboards' "Hours logged" / "Days present" KPIs —
+// derived by summing/counting these sections — report a single day.
+const TODAY_RANGE = {
+    key: 'today' as const,
+    label: 'Today',
+    insight_label: 'Today',
+    prev_label: 'yesterday',
+    from: '2026-06-24',
+    to: '2026-06-24',
+    prev_from: '2026-06-23',
+    prev_to: '2026-06-23',
+};
+
+// Chainable .find() stub: find().select().lean() etc resolve to `rows`.
+const queryStub = (rows: unknown) => {
+    const q: Record<string, unknown> = {};
+    for (const m of ['select', 'sort', 'limit', 'lean']) {
+        q[m] = vi.fn().mockReturnValue(q);
+    }
+    (q as { then: unknown }).then = (resolve: (v: unknown) => void) => resolve(rows);
+    return q;
+};
+
+/**
+ * Stubs every mocked model method to empty/zero results so a test
+ * only needs to override the subset it actually cares about.
+ */
+const stubEmptyModels = () => {
+    vi.mocked(AttendanceRecord.aggregate).mockResolvedValue([] as never);
+    vi.mocked(TimesheetEntry.aggregate).mockResolvedValue([] as never);
+    vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+    vi.mocked(LeaveRequest.aggregate).mockResolvedValue([] as never);
+    vi.mocked(LeaveRequest.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(LeaveType.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(User.countDocuments).mockResolvedValue(0 as never);
+    vi.mocked(User.aggregate).mockResolvedValue([] as never);
+    vi.mocked(User.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(Project.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(Project.countDocuments).mockResolvedValue(0 as never);
+    vi.mocked(Holiday.find).mockReturnValue(queryStub([]) as never);
+    vi.mocked(BillingRate.find).mockReturnValue(queryStub([]) as never);
+};
+
+beforeEach(() => {
+    vi.clearAllMocks();
+    // Default Holiday.find stub (returns no holidays) for tests that indirectly
+    // call countWorkingDays (e.g. single-user attendance branch).
+    vi.mocked(Holiday.find).mockReturnValue(queryStub([]) as never);
+});
+
+describe('computeAttendanceTrend', () => {
+    it('pivots per-day status counts into a series', async () => {
+        vi.mocked(AttendanceRecord.aggregate).mockResolvedValue([
+            { _id: { date: '2026-06-01', status: 'present' }, count: 30 },
+            { _id: { date: '2026-06-01', status: 'on_leave' }, count: 4 },
+            { _id: { date: '2026-06-02', status: 'present' }, count: 36 },
+        ] as never);
+
+        const out = await computeAttendanceTrend(null, RANGE, 40);
+        expect(out.data).toEqual([
+            { date: '2026-06-01', present: 30, on_leave: 4 },
+            { date: '2026-06-02', present: 36, on_leave: 0 },
+            { date: '2026-06-03', present: 0, on_leave: 0 },
+        ]);
+        expect(out.insight).toContain('of 40 people');
+    });
+
+    it('scopes by user ids when provided', async () => {
+        vi.mocked(AttendanceRecord.aggregate).mockResolvedValue([] as never);
+        const ids = [new Types.ObjectId()];
+        await computeAttendanceTrend(ids, RANGE, 1);
+        const pipeline = vi.mocked(AttendanceRecord.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[];
+        expect(pipeline[0]).toEqual({
+            $match: {
+                local_date: { $gte: '2026-06-01', $lte: '2026-06-03' },
+                user_id: { $in: ids },
+            },
+        });
+    });
+
+    it('today range scopes to a single day (no 7-day widening)', async () => {
+        vi.mocked(AttendanceRecord.aggregate).mockResolvedValue([
+            { _id: { date: '2026-06-24', status: 'present' }, count: 1 },
+        ] as never);
+        const out = await computeAttendanceTrend([new Types.ObjectId()], TODAY_RANGE, 1);
+        const pipeline = vi.mocked(AttendanceRecord.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[];
+        expect((pipeline[0] as { $match: { local_date: unknown } }).$match.local_date).toEqual({
+            $gte: '2026-06-24',
+            $lte: '2026-06-24',
+        });
+        // Exactly one day in the section → days_present can only ever be 0 or 1.
+        expect(out.data).toHaveLength(1);
+    });
+});
+
+describe('countWorkingDays', () => {
+    it('excludes weekends and holidays', async () => {
+        // 2026-06-01..07: Mon..Sun. Holiday on Wed 03.
+        vi.mocked(Holiday.find).mockReturnValue(queryStub([{ date: '2026-06-03' }]) as never);
+        // Mon,Tue,Thu,Fri = 4 working days
+        await expect(countWorkingDays('2026-06-01', '2026-06-07')).resolves.toBe(4);
+    });
+});
+
+describe('computeHoursByProject', () => {
+    it('sums minutes per project with names, top-share insight, delta', async () => {
+        const p1 = new Types.ObjectId();
+        const p2 = new Types.ObjectId();
+        vi.mocked(TimesheetEntry.aggregate)
+            .mockResolvedValueOnce([
+                { _id: p1, minutes: 412 * 60 },
+                { _id: p2, minutes: 290 * 60 },
+            ] as never)
+            .mockResolvedValueOnce([{ _id: null, minutes: 600 * 60 }] as never); // prev total
+        vi.mocked(Project.find).mockReturnValue(
+            queryStub([
+                { _id: p1, name: 'Platform', code: 'PLT' },
+                { _id: p2, name: 'Mobile', code: 'MOB' },
+            ]) as never
+        );
+
+        const out = await computeHoursByProject(null, RANGE);
+        expect(out.data[0]).toMatchObject({ project_name: 'Platform', minutes: 412 * 60 });
+        expect(out.insight).toContain('Platform took the most time');
+        expect(out.delta?.label).toContain('vs last month');
+    });
+});
+
+describe('computeUtilization', () => {
+    it('actual vs expected from working days x heads x 480', async () => {
+        vi.mocked(TimesheetEntry.aggregate)
+            .mockResolvedValueOnce([{ _id: null, minutes: 2 * 480 * 2 }] as never) // current
+            .mockResolvedValueOnce([{ _id: null, minutes: 480 }] as never); // prev
+        vi.mocked(Holiday.find).mockReturnValue(queryStub([]) as never);
+        // RANGE = Jun 1 (Mon) .. Jun 3 (Wed) → 3 working days; 2 heads
+        const out = await computeUtilization(null, RANGE, 2);
+        expect(out.expected_minutes).toBe(3 * 480 * 2);
+        expect(out.pct).toBe(Math.round(((2 * 480 * 2) / (3 * 480 * 2)) * 100));
+        expect(out.insight).toContain('% of expected hours');
+    });
+});
+
+describe('computeHoursTrend', () => {
+    it('one bar per day, zero-filled', async () => {
+        vi.mocked(TimesheetEntry.aggregate)
+            .mockResolvedValueOnce([{ _id: '2026-06-02', minutes: 300 }] as never)
+            .mockResolvedValueOnce([{ _id: null, minutes: 0 }] as never);
+        const uid = new Types.ObjectId();
+        const out = await computeHoursTrend([uid], RANGE);
+        expect(out.data).toEqual([
+            { date: '2026-06-01', minutes: 0 },
+            { date: '2026-06-02', minutes: 300 },
+            { date: '2026-06-03', minutes: 0 },
+        ]);
+    });
+
+    it('today range yields a single day so the Hours-logged KPI sums one day', async () => {
+        vi.mocked(TimesheetEntry.aggregate)
+            .mockResolvedValueOnce([{ _id: '2026-06-24', minutes: 240 }] as never)
+            .mockResolvedValueOnce([{ _id: null, minutes: 0 }] as never);
+        const out = await computeHoursTrend([new Types.ObjectId()], TODAY_RANGE);
+        const pipeline = vi.mocked(TimesheetEntry.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[];
+        expect((pipeline[0] as { $match: { local_date: unknown } }).$match.local_date).toEqual({
+            $gte: '2026-06-24',
+            $lte: '2026-06-24',
+        });
+        expect(out.data).toEqual([{ date: '2026-06-24', minutes: 240 }]);
+    });
+});
+
+describe('computeBillableValue', () => {
+    it('joins billable minutes to the rate effective on the entry date', async () => {
+        const u = new Types.ObjectId();
+        const p = new Types.ObjectId();
+        vi.mocked(TimesheetEntry.aggregate)
+            .mockResolvedValueOnce([{ _id: { user: u, project: p, date: '2026-06-02' }, billable: 120 }] as never)
+            .mockResolvedValueOnce([] as never); // prev window
+        vi.mocked(BillingRate.find).mockReturnValue(
+            queryStub([
+                {
+                    user_id: u,
+                    project_id: p,
+                    task_id: null,
+                    hourly_rate: 50,
+                    effective_from: '2026-01-01',
+                    effective_to: null,
+                },
+            ]) as never
+        );
+        const out = await computeBillableValue(null, RANGE);
+        expect(out.value).toBe(100); // 2h x 50
+    });
+});
+
+describe('computeTasksByStatus', () => {
+    it('groups by status with done-first ordering', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([
+            { _id: 'in_progress', count: 91 },
+            { _id: 'done', count: 128 },
+            { _id: 'todo', count: 50 },
+        ] as never);
+        const out = await computeTasksByStatus({}, RANGE);
+        expect(out.data[0]).toEqual({ status: 'done', count: 128 });
+        expect(out.total).toBe(269);
+        expect(out.insight).toContain('128 of 269');
+    });
+});
+
+describe('computeThroughput', () => {
+    // RANGE is 'month' truncated to today (from=2026-06-01, to=2026-06-03 —
+    // 3 days into the month), matching the shared dashboard range every
+    // other section uses. Tasks Completed instead reports the FULL month
+    // (1st–last day), so the window widens to all 30 days of June even
+    // though `range.to` only reaches the 3rd.
+    it('reports the full calendar month, not the to-today truncation', async () => {
+        vi.mocked(Task.aggregate)
+            .mockResolvedValueOnce([{ _id: '2026-06-02', count: 5 }] as never)
+            .mockResolvedValueOnce([{ _id: null, count: 3 }] as never);
+        const out = await computeThroughput({}, RANGE);
+
+        expect(out.data).toHaveLength(30); // June has 30 days
+        expect(out.data[0]).toEqual({ date: '2026-06-01', count: 0 });
+        expect(out.data[1]).toEqual({ date: '2026-06-02', count: 5 });
+        expect(out.data[29]).toEqual({ date: '2026-06-30', count: 0 });
+        expect(out.data.reduce((a, d) => a + d.count, 0)).toBe(5);
+        expect(out.delta?.pct).toBe(67); // 5 vs 3
+
+        // The previous-period comparison stays the full previous calendar
+        // month (unaffected here since RANGE's prev_from/prev_to already
+        // happen to be the full May window).
+        const prevMatch = (vi.mocked(Task.aggregate).mock.calls[1][0] as unknown as Array<Record<string, unknown>>)[0]
+            .$match as { completed_at: { $gte: Date; $lte: Date } };
+        expect(prevMatch.completed_at.$gte.toISOString().slice(0, 10)).toBe('2026-04-30'); // IST midnight May 1 = Apr 30 18:30 UTC
+    });
+
+    it('reports Sunday–Saturday for the week filter, not a Monday-start/to-today window', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        const weekRange = {
+            key: 'week' as const,
+            label: 'This week',
+            insight_label: 'This week',
+            prev_label: 'last week',
+            from: '2026-06-22', // Monday-start week (what the shared range uses)
+            to: '2026-06-24', // Wednesday — truncated to "today"
+            prev_from: '2026-06-15',
+            prev_to: '2026-06-21',
+        };
+        const out = await computeThroughput({}, weekRange);
+
+        // June 24, 2026 is a Wednesday → that week's Sunday is the 21st,
+        // Saturday is the 27th.
+        expect(out.data[0].date).toBe('2026-06-21');
+        expect(out.data).toHaveLength(7);
+        expect(out.data[6].date).toBe('2026-06-27');
+    });
+
+    it('reports the full quarter for the quarter filter', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        const quarterRange = {
+            key: 'quarter' as const,
+            label: 'This quarter',
+            insight_label: 'This quarter',
+            prev_label: 'last quarter',
+            from: '2026-04-01',
+            to: '2026-06-03', // truncated to today, mid-quarter
+            prev_from: '2026-01-01',
+            prev_to: '2026-03-31',
+        };
+        const out = await computeThroughput({}, quarterRange);
+
+        expect(out.data[0].date).toBe('2026-04-01');
+        expect(out.data[out.data.length - 1].date).toBe('2026-06-30');
+    });
+
+    it('leaves "today" as a single day (no widening)', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        const out = await computeThroughput({}, TODAY_RANGE);
+        expect(out.data).toEqual([{ date: '2026-06-24', count: 0 }]);
+    });
+
+    it('leaves a custom range untouched — no full-period concept to expand to', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        const customRange = {
+            key: 'custom' as const,
+            label: '10 Jun – 12 Jun 2026',
+            insight_label: 'in the selected range',
+            prev_label: 'the previous period',
+            from: '2026-06-10',
+            to: '2026-06-12',
+            prev_from: '2026-06-07',
+            prev_to: '2026-06-09',
+        };
+        const out = await computeThroughput({}, customRange);
+        expect(out.data).toEqual([
+            { date: '2026-06-10', count: 0 },
+            { date: '2026-06-11', count: 0 },
+            { date: '2026-06-12', count: 0 },
+        ]);
+    });
+
+    it('counts completions by completed_at (not updated_at) among done tasks', async () => {
+        vi.mocked(Task.aggregate).mockResolvedValue([] as never);
+        await computeThroughput({}, RANGE);
+
+        const pipeline = vi.mocked(Task.aggregate).mock.calls[0][0] as unknown as Array<Record<string, unknown>>;
+        const match = pipeline[0].$match as Record<string, unknown>;
+        expect(match.status).toBe('done');
+        // The window is anchored on the true completion time, so an edit to a
+        // long-since-done task can't re-date it into the range.
+        expect(match.completed_at).toMatchObject({ $gte: expect.any(Date), $lte: expect.any(Date) });
+        expect(match.updated_at).toBeUndefined();
+
+        // Grouping buckets by the completed_at IST day too.
+        const group = pipeline[1].$group as { _id: { $dateToString: { date: string } } };
+        expect(group._id.$dateToString.date).toBe('$completed_at');
+    });
+});
+
+describe('computeLeaveRequests', () => {
+    it('counts requests + on-leave and lists who filed and when (cancelled excluded)', async () => {
+        const u1 = new Types.ObjectId();
+        const u2 = new Types.ObjectId();
+        const r1 = new Types.ObjectId();
+        const r2 = new Types.ObjectId();
+        vi.mocked(LeaveRequest.aggregate)
+            .mockResolvedValueOnce([
+                { _id: 'approved', count: 5 },
+                { _id: 'rejected', count: 1 },
+                { _id: 'pending', count: 2 },
+                { _id: 'cancelled', count: 3 }, // withdrawn — not a request
+            ] as never)
+            .mockResolvedValueOnce([{ _id: 'approved', count: 4 }] as never); // prev → 4
+        vi.mocked(LeaveRequest.find).mockReturnValue(
+            queryStub([
+                { _id: r1, user_id: u1, created_at: new Date('2026-06-02T10:00:00Z') },
+                { _id: r2, user_id: u2, created_at: new Date('2026-06-01T04:00:00Z') },
+            ]) as never
+        );
+        vi.mocked(User.find).mockReturnValue(
+            queryStub([
+                { _id: u1, full_name: 'Kavya Reddy' },
+                { _id: u2, full_name: 'Arjun Mehta' },
+            ]) as never
+        );
+
+        const out = await computeLeaveRequests(null, RANGE);
+
+        expect(out.requests).toBe(8); // 5 + 1 + 2 (cancelled excluded)
+        expect(out.on_leave).toBe(5); // approved
+        expect(out.insight).toBe('8 leave requests this month — 5 on leave.');
+        expect(out.delta?.pct).toBe(100); // 8 vs 4
+        expect(out.recent).toEqual([
+            { id: r1.toString(), user_name: 'Kavya Reddy', applied_date: '2026-06-02' },
+            { id: r2.toString(), user_name: 'Arjun Mehta', applied_date: '2026-06-01' },
+        ]);
+
+        // Attributed by leave start_date within the range.
+        const match = (vi.mocked(LeaveRequest.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[])[0]
+            .$match as Record<string, unknown>;
+        expect(match.start_date).toEqual({ $gte: '2026-06-01', $lte: '2026-06-03' });
+    });
+
+    it('scopes to the given user ids and reads zero cleanly', async () => {
+        vi.mocked(LeaveRequest.aggregate).mockResolvedValue([] as never);
+        vi.mocked(LeaveRequest.find).mockReturnValue(queryStub([]) as never);
+        vi.mocked(User.find).mockReturnValue(queryStub([]) as never);
+        const ids = [new Types.ObjectId()];
+
+        const out = await computeLeaveRequests(ids, RANGE);
+
+        expect(out).toMatchObject({ requests: 0, on_leave: 0, recent: [] });
+        expect(out.insight).toBe('No leave requests this month.');
+        const match = (vi.mocked(LeaveRequest.aggregate).mock.calls[0][0] as unknown as Record<string, unknown>[])[0]
+            .$match as Record<string, unknown>;
+        expect(match.user_id).toEqual({ $in: ids });
+    });
+});
+
+describe('computeProjectProgress', () => {
+    it('done vs total per project', async () => {
+        const p = new Types.ObjectId();
+        vi.mocked(Project.find).mockReturnValue(
+            queryStub([{ _id: p, name: 'Platform', code: 'PLT', status: 'active', custom_task_statuses: [] }]) as never
+        );
+        vi.mocked(Task.aggregate).mockResolvedValue([
+            { _id: { project: p, status: 'done' }, count: 30 },
+            { _id: { project: p, status: 'todo' }, count: 10 },
+        ] as never);
+        const out = await computeProjectProgress([p]);
+        expect(out.data[0]).toMatchObject({ name: 'Platform', done: 30, total: 40 });
+    });
+});
+
+describe('buildAdminAnalytics — permission filtering', () => {
+    it('system.admin gets every section', async () => {
+        stubEmptyModels();
+
+        const out = await buildAdminAnalytics(['system.admin'], resolveDashboardRange('month'));
+        expect(Object.keys(out.sections)).toEqual(
+            expect.arrayContaining([
+                'kpi',
+                'attendance_trend',
+                'leave_mix',
+                'upcoming_leaves',
+                'hours_by_project',
+                'utilization',
+                'tasks_by_status',
+                'throughput',
+            ])
+        );
+        expect(out.range.key).toBe('month');
+    });
+
+    it('a caller without timesheet.read gets no hours/utilization sections', async () => {
+        stubEmptyModels();
+
+        const out = await buildAdminAnalytics(['attendance.read_team'], resolveDashboardRange('month'));
+        expect(out.sections.hours_by_project).toBeUndefined();
+        expect(out.sections.utilization).toBeUndefined();
+        expect(out.sections.attendance_trend).toBeDefined();
+    });
+
+    it('a failing section yields {error:true} without killing the payload', async () => {
+        stubEmptyModels();
+        // Override attendance to throw
+        vi.mocked(AttendanceRecord.aggregate).mockRejectedValue(new Error('boom') as never);
+
+        const out = await buildAdminAnalytics(['attendance.read_team'], resolveDashboardRange('month'));
+        expect(out.sections.attendance_trend).toEqual({ error: true });
+    });
+});
+
+// ─── Scope-isolation security invariants ─────────────────────────────────
+
+describe('buildAdminAnalytics — empty kpi is omitted', () => {
+    it('omits sections.kpi entirely when caller holds no kpi-level permissions', async () => {
+        stubEmptyModels();
+        // Only attendance.read_team — no user.read / project.read / timesheet.read / billing_rate.read.
+        const out = await buildAdminAnalytics(['attendance.read_team'], resolveDashboardRange('month'));
+        expect(out.sections.kpi).toBeUndefined();
+        expect(out.sections.attendance_trend).toBeDefined();
+    });
+});
+
+describe('buildClientAnalytics — zero-project scope', () => {
+    it('returns empty stubs and never calls Task.aggregate when client has zero projects', async () => {
+        stubEmptyModels();
+        // Project.find for client scope: needs a real promise chain so .lean().catch() works.
+        const projectFindStub = {
+            select: vi.fn().mockReturnThis(),
+            lean: vi.fn().mockResolvedValue([]),
+        };
+        vi.mocked(Project.find).mockReturnValue(projectFindStub as never);
+
+        const userId = new Types.ObjectId();
+        const companyId = new Types.ObjectId();
+        const out = await buildClientAnalytics(
+            { id: userId, role: ROLES.CLIENT, company_id: companyId, audit: undefined },
+            ['project.read', 'task.read'],
+            resolveDashboardRange('month')
+        );
+
+        // Project.find must be called with the tenant-isolation filter.
+        // A `client` is COMPANY-scoped, so this is `company_id`, not roster
+        // containment — and it comes from `buildProjectVisibilityFilter`
+        // rather than being hard-coded here.
+        expect(vi.mocked(Project.find)).toHaveBeenCalledWith({ company_id: companyId });
+
+        // Task.aggregate must NOT be called (no projects → no task query).
+        expect(vi.mocked(Task.aggregate)).not.toHaveBeenCalled();
+
+        // Sections should be present but empty/stub shapes.
+        expect(out.sections.project_progress).toBeDefined();
+        expect((out.sections.project_progress as { data: unknown[] }).data).toEqual([]);
+        expect(out.sections.tasks_by_status).toBeDefined();
+        expect((out.sections.tasks_by_status as { total: number }).total).toBe(0);
+        expect(out.sections.throughput).toBeDefined();
+        expect((out.sections.throughput as { data: unknown[] }).data).toEqual([]);
+    });
+});
+
+describe('buildEmployeeAnalytics — self-scope in aggregation pipelines', () => {
+    it('timesheet and attendance pipelines carry the self user_id scope', async () => {
+        stubEmptyModels();
+        const userId = new Types.ObjectId();
+
+        await buildEmployeeAnalytics(
+            userId,
+            ['timesheet.write', 'attendance.check_in_out', 'leave_request.write', 'task.read', 'holiday.read'],
+            resolveDashboardRange('month')
+        );
+
+        // Every TimesheetEntry.aggregate call whose first $match stage carries user_id
+        // must scope to exactly {$in: [userId]}.  We also assert at least one such
+        // scoped call exists — so removing the userMatch() spread from the service
+        // causes scopedCallCount to be 0 and the test fails.
+        let timesheetScopedCount = 0;
+        for (const call of vi.mocked(TimesheetEntry.aggregate).mock.calls) {
+            const pipeline = call[0] as unknown as Record<string, unknown>[];
+            const matchStage = pipeline[0] as { $match?: { user_id?: { $in: Types.ObjectId[] } } } | undefined;
+            if (matchStage?.$match?.user_id) {
+                timesheetScopedCount++;
+                expect(matchStage.$match.user_id).toEqual({ $in: [userId] });
+            }
+        }
+        expect(timesheetScopedCount).toBeGreaterThan(0);
+
+        // Same invariant for AttendanceRecord.aggregate.
+        let attendanceScopedCount = 0;
+        for (const call of vi.mocked(AttendanceRecord.aggregate).mock.calls) {
+            const pipeline = call[0] as unknown as Record<string, unknown>[];
+            const matchStage = pipeline[0] as { $match?: { user_id?: { $in: Types.ObjectId[] } } } | undefined;
+            if (matchStage?.$match?.user_id) {
+                attendanceScopedCount++;
+                expect(matchStage.$match.user_id).toEqual({ $in: [userId] });
+            }
+        }
+        expect(attendanceScopedCount).toBeGreaterThan(0);
+    });
+});
+
+describe('buildManagerAnalytics — scope by role', () => {
+    it('manager: org-wide — attendance aggregation has no user_id scoping', async () => {
+        stubEmptyModels();
+        const managerId = new Types.ObjectId();
+
+        await buildManagerAnalytics(
+            { id: managerId, role: 'manager', role_keys: ['manager'] },
+            ['dashboard.manager', 'attendance.read_team', 'task.read'],
+            resolveDashboardRange('month')
+        );
+
+        for (const call of vi.mocked(AttendanceRecord.aggregate).mock.calls) {
+            const pipeline = call[0] as unknown as Record<string, unknown>[];
+            const matchStage = pipeline[0] as { $match?: { user_id?: unknown } } | undefined;
+            expect(matchStage?.$match?.user_id).toBeUndefined();
+        }
+    });
+
+    it('team-lead: scoped to their project members — attendance has a user_id $in filter', async () => {
+        stubEmptyModels();
+        const leadId = new Types.ObjectId();
+        const member2 = new Types.ObjectId();
+        const projectId = new Types.ObjectId();
+        // resolveTeamLeadScope → Project.find({ member_ids }).select().lean()
+        vi.mocked(Project.find).mockReturnValue(
+            queryStub([{ _id: projectId, member_ids: [leadId, member2] }]) as never
+        );
+
+        await buildManagerAnalytics(
+            { id: leadId, role: 'team_lead', role_keys: ['team_lead'] },
+            ['dashboard.manager', 'attendance.read_team', 'task.read'],
+            resolveDashboardRange('month')
+        );
+
+        const scoped = vi
+            .mocked(AttendanceRecord.aggregate)
+            .mock.calls.map(
+                (c) =>
+                    (c[0] as unknown as Record<string, unknown>[])[0] as {
+                        $match?: { user_id?: { $in?: Types.ObjectId[] } };
+                    }
+            )
+            .filter((m) => m?.$match?.user_id);
+        expect(scoped.length).toBeGreaterThan(0);
+        for (const m of scoped) {
+            expect(m.$match!.user_id!.$in!.map(String).sort()).toEqual([leadId.toString(), member2.toString()].sort());
+        }
+    });
+});
+
+describe('buildManagerAnalytics — kpi.hours_logged safeSection isolation', () => {
+    it('a sumMinutes failure does not kill the entire kpi section', async () => {
+        stubEmptyModels();
+        const managerId = new Types.ObjectId();
+        vi.mocked(User.find).mockReturnValue(queryStub([]) as never);
+
+        // Make TimesheetEntry.aggregate throw so sumMinutes inside kpi.hours_logged fails.
+        vi.mocked(TimesheetEntry.aggregate).mockRejectedValue(new Error('db error') as never);
+
+        const out = await buildManagerAnalytics(
+            { id: managerId, role: 'manager', role_keys: ['manager'] },
+            ['dashboard.manager', 'timesheet.read'],
+            resolveDashboardRange('month')
+        );
+
+        // kpi section should still exist (team_size is always present).
+        expect(out.sections.kpi).toBeDefined();
+        const kpi = out.sections.kpi as Record<string, unknown>;
+        expect(kpi.team_size).toBeDefined();
+        // hours_logged should be the error sentinel from safeSection.
+        expect(kpi.hours_logged).toEqual({ error: true });
+    });
+});

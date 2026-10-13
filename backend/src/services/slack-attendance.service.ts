@@ -1,0 +1,84 @@
+import type { Types } from 'mongoose';
+
+import type { BreakType } from '../constants/attendance.js';
+import { ERROR_CODES } from '../constants/error-codes.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import { User } from '../models/user.model.js';
+import { callerCan } from '../utils/caller-permissions.js';
+import { endBreak, getOpenBreak, startBreak } from './attendance.service.js';
+import { resolvePermissionsForUser } from './role.service.js';
+
+export { breakTypeFromSlackStatus } from './slack-status-publish.service.js';
+
+/**
+ * May this caller check in/out or start/end a break from Slack?
+ *
+ * Keyed on `attendance.check_in_out` — the SAME permission
+ * `requirePermission` enforces on `POST /attendance/check-in|check-out|
+ * break/start|break/end` (attendance.routes.ts) — because the Slack
+ * inbound path (break buttons, check-in/out buttons, `/checkin`,
+ * `/checkout`) bypasses Express middleware entirely and `checkIn` /
+ * `checkOut` / `startBreak` / `endBreak` (attendance.service.ts) have no
+ * permission check of their own. This IS the authorization boundary for
+ * those writes, not a UI nicety.
+ *
+ * Without it, a client-side caller (client/representative — neither holds
+ * `attendance.check_in_out`, per `CLIENT_SIDE_BASE`) whose Slack email
+ * happens to match their platform account could create and mutate their
+ * own `AttendanceRecord` rows purely from Slack, a surface the web app
+ * never exposes to them at all.
+ */
+export const callerCanCheckInOut = async (userId: Types.ObjectId): Promise<boolean> => {
+    const { permissions } = await resolvePermissionsForUser(userId);
+    return callerCan(permissions, PERMISSIONS.ATTENDANCE_CHECK_IN_OUT);
+};
+
+/** Conflicts that just mean "nothing to do" (not checked in, raced another write). */
+const BENIGN_CODES: ReadonlySet<string> = new Set([
+    ERROR_CODES.NOT_CHECKED_IN,
+    ERROR_CODES.ALREADY_ON_BREAK,
+    ERROR_CODES.NOT_ON_BREAK,
+]);
+
+/**
+ * Reconcile today's break with the user's Slack status (fired from the
+ * `user_profile_changed` event). Only breaks this path started
+ * (`source: 'slack_status'`) are ever ended or switched here — a break begun
+ * from the app or a Slack button is left alone, since Slack fires this event
+ * for ANY profile edit, not only status changes.
+ *
+ * Acts only when the MAPPED status changes (`User.slack_status_break`):
+ * Slack re-sends the whole profile on every edit, so a still-"Lunch" status
+ * seen again after the break was ended in the app must not reopen it. The
+ * conditional update also makes a duplicate/retried event a no-op.
+ *
+ * Returns true when attendance changed.
+ */
+export const syncBreakFromSlackStatus = async (
+    userId: Types.ObjectId,
+    breakType: BreakType | null
+): Promise<boolean> => {
+    const { modifiedCount } = await User.updateOne(
+        { _id: userId, slack_status_break: { $ne: breakType } },
+        { $set: { slack_status_break: breakType } }
+    );
+    if (modifiedCount === 0) return false;
+    try {
+        const open = await getOpenBreak(userId);
+        const ownedBySlackStatus = open?.start.source === 'slack_status';
+        if (!breakType) {
+            if (!ownedBySlackStatus) return false;
+            await endBreak(userId, 'slack_status');
+            return true;
+        }
+        if (open) {
+            if (open.break_type === breakType || !ownedBySlackStatus) return false;
+            await endBreak(userId, 'slack_status'); // 🍔 → ☕: close lunch, open tea
+        }
+        await startBreak(userId, breakType, 'slack_status');
+        return true;
+    } catch (err: unknown) {
+        if (BENIGN_CODES.has((err as { code?: string })?.code ?? '')) return false;
+        throw err;
+    }
+};

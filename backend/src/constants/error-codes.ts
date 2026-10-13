@@ -1,0 +1,221 @@
+/**
+ * Canonical error codes used across the API.
+ * One-to-one with `API_Contract.md` §15.
+ * HTTP status is assigned by `AppError` factories / the global error handler.
+ */
+export const ERROR_CODES = {
+    // 400 — Bad Request
+    VALIDATION_ERROR: 'VALIDATION_ERROR',
+    INVALID_QR_TOKEN: 'INVALID_QR_TOKEN',
+    INVALID_MFA_CODE: 'INVALID_MFA_CODE',
+
+    // 401 — Unauthorized
+    UNAUTHENTICATED: 'UNAUTHENTICATED',
+    INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+    TOKEN_EXPIRED: 'TOKEN_EXPIRED',
+    TOKEN_REUSE_DETECTED: 'TOKEN_REUSE_DETECTED',
+
+    // 403 — Forbidden
+    FORBIDDEN: 'FORBIDDEN',
+    ACCOUNT_DEACTIVATED: 'ACCOUNT_DEACTIVATED',
+    LOCATION_NOT_ALLOWED: 'LOCATION_NOT_ALLOWED',
+    TIMESHEET_EDIT_WINDOW_EXPIRED: 'TIMESHEET_EDIT_WINDOW_EXPIRED',
+    MFA_REQUIRED: 'MFA_REQUIRED',
+    MFA_ENROLLMENT_NOT_FOUND: 'MFA_ENROLLMENT_NOT_FOUND',
+    MFA_NOT_ENABLED: 'MFA_NOT_ENABLED',
+    /** Caller may read the project but not change it — see
+     *  `project.service:assertCallerCanWrite` for the per-role scope. */
+    PROJECT_WRITE_FORBIDDEN: 'PROJECT_WRITE_FORBIDDEN',
+    /** The subject is a freelancer, who is not on payroll and has no payslip. */
+    PAYSLIP_NOT_APPLICABLE: 'PAYSLIP_NOT_APPLICABLE',
+    /** The subject is a freelancer, engaged per contract rather than employed,
+     *  so no employment letter applies to them. */
+    LETTER_NOT_APPLICABLE: 'LETTER_NOT_APPLICABLE',
+    /** The subject is a freelancer, who accrues no leave and so has no
+     *  balance to spend. Same idiom as the two payroll codes above. */
+    LEAVE_NOT_APPLICABLE: 'LEAVE_NOT_APPLICABLE',
+    STORY_WRITE_FORBIDDEN: 'STORY_WRITE_FORBIDDEN',
+    TASK_WRITE_FORBIDDEN: 'TASK_WRITE_FORBIDDEN',
+    COMMENT_EDIT_FORBIDDEN: 'COMMENT_EDIT_FORBIDDEN',
+    COMMENT_DELETE_FORBIDDEN: 'COMMENT_DELETE_FORBIDDEN',
+    ATTACHMENT_DELETE_FORBIDDEN: 'ATTACHMENT_DELETE_FORBIDDEN',
+    /** Target user's role disqualifies them for the requested action — e.g.
+     *  granting comp-off to a client (BUG-037). */
+    FORBIDDEN_ROLE_TARGET: 'FORBIDDEN_ROLE_TARGET',
+
+    // 404 — Not Found
+    RESOURCE_NOT_FOUND: 'RESOURCE_NOT_FOUND',
+    USER_NOT_FOUND: 'USER_NOT_FOUND',
+    SESSION_NOT_FOUND: 'SESSION_NOT_FOUND',
+    PROJECT_NOT_FOUND: 'PROJECT_NOT_FOUND',
+    SPRINT_NOT_FOUND: 'SPRINT_NOT_FOUND',
+    STORY_NOT_FOUND: 'STORY_NOT_FOUND',
+    TASK_NOT_FOUND: 'TASK_NOT_FOUND',
+    COMMENT_NOT_FOUND: 'COMMENT_NOT_FOUND',
+    ATTACHMENT_NOT_FOUND: 'ATTACHMENT_NOT_FOUND',
+    TIMESHEET_NOT_FOUND: 'TIMESHEET_NOT_FOUND',
+    BILLING_RATE_NOT_FOUND: 'BILLING_RATE_NOT_FOUND',
+    /** Billing Phase 2 — Cost Rates & Margin (Task 3). Cost-side twin of
+     *  `BILLING_RATE_NOT_FOUND`. */
+    COST_RATE_NOT_FOUND: 'COST_RATE_NOT_FOUND',
+    ENGAGEMENT_NOT_FOUND: 'ENGAGEMENT_NOT_FOUND',
+    INVOICE_NOT_FOUND: 'INVOICE_NOT_FOUND',
+    EXPORT_NOT_FOUND: 'EXPORT_NOT_FOUND',
+    // No AUDIT_ARCHIVE_INTEGRITY_FAILED. It existed, was thrown by nothing,
+    // and was reserved for an auto-quarantine-on-mismatch path that was never
+    // built — `verifyArchive` returns a structured result and deliberately
+    // never throws, so report-and-wait has no use for an error code. The
+    // reservation is recorded in PENDING_WORK.md, Data_Model.md
+    // (`audit_archives`), BUILD_PROGRESS.md, and `audit-archive.service.ts`;
+    // it does not need a dead constant as well. If auto-quarantine is ever
+    // built, re-add it then.
+    AUDIT_ARCHIVE_NOT_FOUND: 'AUDIT_ARCHIVE_NOT_FOUND',
+    TASK_TEMPLATE_NOT_FOUND: 'TASK_TEMPLATE_NOT_FOUND',
+    REPORT_PRESET_NOT_FOUND: 'REPORT_PRESET_NOT_FOUND',
+    REPORT_PRESET_LIMIT_EXCEEDED: 'REPORT_PRESET_LIMIT_EXCEEDED',
+    REPORT_SUBSCRIPTION_NOT_FOUND: 'REPORT_SUBSCRIPTION_NOT_FOUND',
+    REPORT_SUBSCRIPTION_LIMIT_EXCEEDED: 'REPORT_SUBSCRIPTION_LIMIT_EXCEEDED',
+    ROLE_NOT_FOUND: 'ROLE_NOT_FOUND',
+    ROLE_IS_SYSTEM: 'ROLE_IS_SYSTEM',
+    ROLE_IN_USE: 'ROLE_IN_USE',
+    ROLE_INVALID_PERMISSIONS: 'ROLE_INVALID_PERMISSIONS',
+    SHARE_LINK_NOT_FOUND: 'SHARE_LINK_NOT_FOUND',
+    CUSTOM_STATUS_NOT_FOUND: 'CUSTOM_STATUS_NOT_FOUND',
+    ATTENDANCE_RECORD_NOT_FOUND: 'ATTENDANCE_RECORD_NOT_FOUND',
+    CORRECTION_REQUEST_NOT_FOUND: 'CORRECTION_REQUEST_NOT_FOUND',
+    PAYROLL_PROFILE_NOT_FOUND: 'PAYROLL_PROFILE_NOT_FOUND',
+    SALARY_STRUCTURE_NOT_FOUND: 'SALARY_STRUCTURE_NOT_FOUND',
+    PAYSLIP_NOT_FOUND: 'PAYSLIP_NOT_FOUND',
+    LETTER_NOT_FOUND: 'LETTER_NOT_FOUND',
+
+    // 409 — Conflict
+    EMAIL_ALREADY_EXISTS: 'EMAIL_ALREADY_EXISTS',
+    /** Kept for older clients; nothing raises it since multiple admins landed. */
+    ADMIN_ALREADY_EXISTS: 'ADMIN_ALREADY_EXISTS',
+    /** Refused: the change would leave the org with no active admin. */
+    LAST_ADMIN: 'LAST_ADMIN',
+    PROJECT_CODE_TAKEN: 'PROJECT_CODE_TAKEN',
+    CUSTOM_STATUS_KEY_TAKEN: 'CUSTOM_STATUS_KEY_TAKEN',
+    ALREADY_CHECKED_IN: 'ALREADY_CHECKED_IN',
+    ALREADY_CHECKED_OUT: 'ALREADY_CHECKED_OUT',
+    NOT_CHECKED_IN: 'NOT_CHECKED_IN',
+    ALREADY_ON_BREAK: 'ALREADY_ON_BREAK',
+    NOT_ON_BREAK: 'NOT_ON_BREAK',
+    CORRECTION_REQUEST_ALREADY_PENDING: 'CORRECTION_REQUEST_ALREADY_PENDING',
+    CORRECTION_REQUEST_NOT_PENDING: 'CORRECTION_REQUEST_NOT_PENDING',
+    /** The proposed times belong to a day that already has a record for that person. */
+    CORRECTION_DATE_CONFLICT: 'CORRECTION_DATE_CONFLICT',
+    LEAVE_OVERLAP: 'LEAVE_OVERLAP',
+    INSUFFICIENT_LEAVE_BALANCE: 'INSUFFICIENT_LEAVE_BALANCE',
+    CONCURRENT_UPDATE_CONFLICT: 'CONCURRENT_UPDATE_CONFLICT',
+    DUPLICATE_RESOURCE: 'DUPLICATE_RESOURCE',
+    /** Phase 2 Backlog — a project may have at most one `active` sprint; starting
+     *  a second one is refused. */
+    SPRINT_ALREADY_ACTIVE: 'SPRINT_ALREADY_ACTIVE',
+    /** Refused to delete because dependant rows would be orphaned. (BACKEND_AUDIT.md R3) */
+    RESOURCE_HAS_DEPENDENTS: 'RESOURCE_HAS_DEPENDENTS',
+    /** Phase 1 Invoicing (Task 7) — a non-void invoice already covers this
+     *  engagement + overlapping period; caller must re-send with `confirm: true`. */
+    INVOICE_PERIOD_OVERLAP: 'INVOICE_PERIOD_OVERLAP',
+    /** Edit/delete attempted on an invoice that has left `draft` (sent/paid/void
+     *  are immutable snapshots — void, don't edit). */
+    INVOICE_NOT_DRAFT: 'INVOICE_NOT_DRAFT',
+    /** The requested invoice status move is illegal (legal: draft→sent→paid,
+     *  any-non-void→void). */
+    INVOICE_INVALID_TRANSITION: 'INVOICE_INVALID_TRANSITION',
+
+    // 410 — Gone
+    SHARE_LINK_REVOKED: 'SHARE_LINK_REVOKED',
+    SHARE_LINK_EXPIRED: 'SHARE_LINK_EXPIRED',
+
+    // 422 — Unprocessable Entity
+    PASSWORD_POLICY_VIOLATION: 'PASSWORD_POLICY_VIOLATION',
+    LEAVE_NOTICE_VIOLATION: 'LEAVE_NOTICE_VIOLATION',
+    LEAVE_BACKDATED_NOT_ALLOWED: 'LEAVE_BACKDATED_NOT_ALLOWED',
+    LEAVE_INVALID_HALF_DAY: 'LEAVE_INVALID_HALF_DAY',
+    LEAVE_NO_WORKING_DAYS: 'LEAVE_NO_WORKING_DAYS',
+    LEAVE_ALREADY_CONSUMED: 'LEAVE_ALREADY_CONSUMED',
+    ADDITIONAL_APPROVAL_REASON_REQUIRED: 'ADDITIONAL_APPROVAL_REASON_REQUIRED',
+    STORY_PROJECT_MISMATCH: 'STORY_PROJECT_MISMATCH',
+    TASK_SPRINT_PROJECT_MISMATCH: 'TASK_SPRINT_PROJECT_MISMATCH',
+    TASK_PARENT_PROJECT_MISMATCH: 'TASK_PARENT_PROJECT_MISMATCH',
+    TASK_PARENT_NOT_FOUND: 'TASK_PARENT_NOT_FOUND',
+    TASK_SUBTASK_DEPTH_EXCEEDED: 'TASK_SUBTASK_DEPTH_EXCEEDED',
+    TASK_INVALID_STATUS: 'TASK_INVALID_STATUS',
+    TASK_INVALID_ASSIGNEE: 'TASK_INVALID_ASSIGNEE',
+    TASK_INVALID_COLLABORATOR: 'TASK_INVALID_COLLABORATOR',
+    TASK_DEPENDENCY_NOT_FOUND: 'TASK_DEPENDENCY_NOT_FOUND',
+    TASK_DEPENDENCY_EXISTS: 'TASK_DEPENDENCY_EXISTS',
+    TASK_DEPENDENCY_SELF: 'TASK_DEPENDENCY_SELF',
+    TASK_DEPENDENCY_CIRCULAR: 'TASK_DEPENDENCY_CIRCULAR',
+    TASK_DEPENDENCY_PROJECT_MISMATCH: 'TASK_DEPENDENCY_PROJECT_MISMATCH',
+    MENTION_NOT_PROJECT_MEMBER: 'MENTION_NOT_PROJECT_MEMBER',
+    SPRINT_DATE_INVALID: 'SPRINT_DATE_INVALID',
+    SPRINT_PROJECT_MISMATCH: 'SPRINT_PROJECT_MISMATCH',
+    /** Phase 2 Backlog — the requested sprint lifecycle move is illegal (e.g.
+     *  starting a non-planned sprint or completing a non-active one). */
+    SPRINT_INVALID_TRANSITION: 'SPRINT_INVALID_TRANSITION',
+    PROJECT_DATE_INVALID: 'PROJECT_DATE_INVALID',
+    CUSTOM_STATUS_KEY_RESERVED: 'CUSTOM_STATUS_KEY_RESERVED',
+    INVALID_PROJECT_MEMBER_ROLE: 'INVALID_PROJECT_MEMBER_ROLE',
+    INVALID_PROJECT_CLIENT_ROLE: 'INVALID_PROJECT_CLIENT_ROLE',
+    PROJECT_MEMBER_NOT_FOUND: 'PROJECT_MEMBER_NOT_FOUND',
+    PROJECT_CLIENT_NOT_FOUND: 'PROJECT_CLIENT_NOT_FOUND',
+    FILE_TOO_LARGE: 'FILE_TOO_LARGE',
+    FILE_TYPE_NOT_ALLOWED: 'FILE_TYPE_NOT_ALLOWED',
+    ATTACHMENT_BLOB_MISSING: 'ATTACHMENT_BLOB_MISSING',
+    ATTACHMENT_BLOB_KEY_MISMATCH: 'ATTACHMENT_BLOB_KEY_MISMATCH',
+    ATTACHMENT_SIZE_MISMATCH: 'ATTACHMENT_SIZE_MISMATCH',
+    TIMESHEET_FUTURE_DATE: 'TIMESHEET_FUTURE_DATE',
+    TIMESHEET_ZERO_DURATION: 'TIMESHEET_ZERO_DURATION',
+    TIMESHEET_DURATION_TOO_LARGE: 'TIMESHEET_DURATION_TOO_LARGE',
+    TIMESHEET_TASK_REQUIRED: 'TIMESHEET_TASK_REQUIRED',
+    /** A new entry named no project. Creation only — legacy rows keep theirs empty. */
+    TIMESHEET_PROJECT_REQUIRED: 'TIMESHEET_PROJECT_REQUIRED',
+    /** One or more rows in a bulk import failed validation. The response
+     *  carries per-row reasons; nothing was written. */
+    TIMESHEET_IMPORT_INVALID: 'TIMESHEET_IMPORT_INVALID',
+    /** The data changed between preview and commit (a project archived, say),
+     *  so the previewed outcome is no longer accurate. Nothing was written. */
+    TIMESHEET_IMPORT_STALE: 'TIMESHEET_IMPORT_STALE',
+    BILLING_RATE_INVALID_RANGE: 'BILLING_RATE_INVALID_RANGE',
+    BILLING_RATE_IN_USE: 'BILLING_RATE_IN_USE',
+    /** Billing Phase 2 — Cost Rates & Margin (Task 3). Cost-side twin of
+     *  `BILLING_RATE_INVALID_RANGE` / `BILLING_RATE_IN_USE`. */
+    COST_RATE_INVALID_RANGE: 'COST_RATE_INVALID_RANGE',
+    COST_RATE_IN_USE: 'COST_RATE_IN_USE',
+    /** Phase 1 Client Engagements — one or more `project_ids` on a create/patch
+     *  don't belong to the engagement's `company_id` (Task 4). */
+    ENGAGEMENT_INVALID_SCOPE: 'ENGAGEMENT_INVALID_SCOPE',
+    /** Phase 1.1 follow-up — a PATCH sets `end_date` earlier than the
+     *  engagement's (unchanged-by-PATCH) `start_date`. */
+    ENGAGEMENT_INVALID_RANGE: 'ENGAGEMENT_INVALID_RANGE',
+    PAYROLL_NO_CURRENT_SALARY: 'PAYROLL_NO_CURRENT_SALARY',
+    /** Billing Phase 2 — `toReportingCurrency` had no matching `fx_rates` entry
+     *  for the source currency and it differs from `billing.reporting_currency`. */
+    FX_RATE_MISSING: 'FX_RATE_MISSING',
+
+    // 423 — Locked
+    ACCOUNT_LOCKED: 'ACCOUNT_LOCKED',
+
+    // 429 — Too Many Requests
+    RATE_LIMITED: 'RATE_LIMITED',
+
+    // 500 — Internal Server Error
+    INTERNAL_ERROR: 'INTERNAL_ERROR',
+    NOTIFICATION_DISPATCH_FAILED: 'NOTIFICATION_DISPATCH_FAILED',
+    SLACK_NOT_CONFIGURED: 'SLACK_NOT_CONFIGURED',
+    SLACK_DISPATCH_FAILED: 'SLACK_DISPATCH_FAILED',
+    // Phase 0 — incoming Slack webhook was rejected. Tag used for
+    // warn-level logs on signature-fail / unknown-action / permission-
+    // denied so operators can grep one code.
+    SLACK_INTERACTIVE_REJECTED: 'SLACK_INTERACTIVE_REJECTED',
+    PUSH_DISPATCH_FAILED: 'PUSH_DISPATCH_FAILED',
+    AUDIT_WRITE_FAILED: 'AUDIT_WRITE_FAILED',
+    JOB_RUN_FAILED: 'JOB_RUN_FAILED',
+
+    // 503 — Service Unavailable
+    STORAGE_NOT_CONFIGURED: 'STORAGE_NOT_CONFIGURED',
+} as const;
+
+export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];

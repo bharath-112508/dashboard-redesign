@@ -1,0 +1,219 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('./payroll/render-adapter.service.js', () => ({
+    buildLetterRenderData: vi.fn(),
+    buildJoiningRenderData: vi.fn(),
+    getCompanyBlock: vi.fn(),
+    formatRenderDate: vi.fn((v?: string) => v ?? ''),
+}));
+vi.mock('./payroll/letter-template.js', () => ({
+    renderLetterHtml: vi.fn(() => '<html>letter</html>'),
+}));
+vi.mock('./payroll/offer-letter-template.js', () => ({
+    renderOfferLetterHtml: vi.fn(() => '<html>offer</html>'),
+}));
+vi.mock('./payroll/pdf.service.js', () => ({ htmlToPdf: vi.fn(async () => Buffer.from('%PDF-1.7 fake')) }));
+vi.mock('../utils/azure-blob.js', () => ({
+    putBlob: vi.fn(async () => ({ size: 12345 })),
+    mintDownloadSas: vi.fn(() => ({ url: 'https://sas', expires_at: new Date() })),
+}));
+vi.mock('../models/letter.model.js', () => ({
+    Letter: { create: vi.fn(), find: vi.fn(), findById: vi.fn(), countDocuments: vi.fn() },
+}));
+// `resolveRender` looks the subject up to refuse letters for freelancers.
+// Defaults to a staff member so the existing cases are unaffected.
+vi.mock('../models/user.model.js', () => ({ User: { findById: vi.fn() } }));
+vi.mock('./audit.service.js', () => ({ recordAudit: vi.fn() }));
+
+import { Types } from 'mongoose';
+import { buildLetterRenderData, getCompanyBlock } from './payroll/render-adapter.service.js';
+import { renderLetterHtml } from './payroll/letter-template.js';
+import { renderOfferLetterHtml } from './payroll/offer-letter-template.js';
+import { htmlToPdf } from './payroll/pdf.service.js';
+import { putBlob } from '../utils/azure-blob.js';
+import { Letter } from '../models/letter.model.js';
+import { User } from '../models/user.model.js';
+import { recordAudit } from './audit.service.js';
+import * as service from './letter.service.js';
+
+/** The subject-lookup stub `resolveRender` performs. */
+const mockSubject = (employmentType?: string) =>
+    (User.findById as never as ReturnType<typeof vi.fn>).mockReturnValue({
+        select: () => ({
+            lean: () =>
+                Promise.resolve({
+                    internal_profile: employmentType ? { employment_type: employmentType } : {},
+                }),
+        }),
+    });
+
+describe('letter.service', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        mockSubject();
+    });
+
+    it('renders via renderLetterHtml, uploads, persists, and audits a promotion letter', async () => {
+        (buildLetterRenderData as never as ReturnType<typeof vi.fn>).mockResolvedValue({
+            type: 'promotion',
+            employeeName: 'Priya Sharma',
+            employeeNumber: 'VT10',
+        });
+        const rec = {
+            _id: new Types.ObjectId(),
+            toJSON: () => ({ id: '1', type: 'promotion', blob_key: 'k' }),
+        };
+        (Letter.create as never as ReturnType<typeof vi.fn>).mockResolvedValue(rec);
+        const caller = { id: new Types.ObjectId(), audit: { actor_id: new Types.ObjectId() } as never };
+
+        const out = await service.generateLetter(
+            {
+                type: 'promotion',
+                user_id: new Types.ObjectId().toString(),
+                effective_date: '2026-04-01',
+                new_designation: 'Staff Engineer',
+            },
+            caller
+        );
+
+        expect(buildLetterRenderData).toHaveBeenCalledOnce();
+        expect(renderLetterHtml).toHaveBeenCalledOnce();
+        expect(putBlob).toHaveBeenCalledOnce();
+        expect(Letter.create).toHaveBeenCalledOnce();
+        expect(Letter.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'promotion' }));
+        expect(recordAudit).toHaveBeenCalledOnce();
+        const auditArg = (recordAudit as unknown as ReturnType<typeof vi.fn>).mock.calls[0][1];
+        expect(auditArg.action).toBe('letter.generate');
+        expect(out.download_url).toBe('https://sas');
+    });
+
+    it('routes an offer letter to renderOfferLetterHtml using request-body fields, not buildLetterRenderData', async () => {
+        (getCompanyBlock as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            companyName: 'Vilja Tech',
+            companyAddress: ['Hyderabad'],
+            companyEmail: 'hr@viljetech.com',
+            cinNo: 'CIN',
+            iecCode: 'IEC',
+            signatoryName: 'S',
+            signatoryTitle: 'HR',
+        });
+        const rec = {
+            _id: new Types.ObjectId(),
+            toJSON: () => ({ id: '2', type: 'offer', blob_key: 'k2' }),
+        };
+        (Letter.create as never as ReturnType<typeof vi.fn>).mockResolvedValue(rec);
+        const caller = { id: new Types.ObjectId(), audit: { actor_id: new Types.ObjectId() } as never };
+
+        const out = await service.generateLetter(
+            {
+                type: 'offer',
+                user_id: new Types.ObjectId().toString(),
+                candidate_name: 'John Doe',
+                designation: 'Software Engineer',
+                ctc_breakdown: [{ label: 'Basic', amount: 500000 }],
+            },
+            caller
+        );
+
+        expect(buildLetterRenderData).not.toHaveBeenCalled();
+        expect(getCompanyBlock).toHaveBeenCalledOnce();
+        expect(renderOfferLetterHtml).toHaveBeenCalledOnce();
+        expect(Letter.create).toHaveBeenCalledWith(expect.objectContaining({ type: 'offer' }));
+        expect(recordAudit).toHaveBeenCalledOnce();
+        expect(out.download_url).toBe('https://sas');
+    });
+
+    it('previewLetter renders a promotion letter PDF without storing a blob, DB row, or audit', async () => {
+        (buildLetterRenderData as never as ReturnType<typeof vi.fn>).mockResolvedValue({
+            type: 'promotion',
+            employeeName: 'Priya Sharma',
+            employeeNumber: 'VT10',
+        });
+
+        const out = await service.previewLetter({
+            type: 'promotion',
+            user_id: new Types.ObjectId().toString(),
+            effective_date: '2026-04-01',
+            new_designation: 'Staff Engineer',
+        });
+
+        expect(buildLetterRenderData).toHaveBeenCalledOnce();
+        expect(renderLetterHtml).toHaveBeenCalledOnce();
+        expect(htmlToPdf).toHaveBeenCalledOnce();
+        expect(typeof out.pdf_base64).toBe('string');
+        expect(out.pdf_base64.length).toBeGreaterThan(0);
+        expect(out.filename).toBe('Promotion_Letter_Priya_Sharma.pdf');
+        expect(putBlob).not.toHaveBeenCalled();
+        expect(Letter.create).not.toHaveBeenCalled();
+        expect(recordAudit).not.toHaveBeenCalled();
+    });
+
+    it('previewLetter routes an offer letter to renderOfferLetterHtml without persisting anything', async () => {
+        (getCompanyBlock as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+            companyName: 'Vilja Tech',
+            companyAddress: ['Hyderabad'],
+            companyEmail: 'hr@viljetech.com',
+            cinNo: 'CIN',
+            iecCode: 'IEC',
+            signatoryName: 'S',
+            signatoryTitle: 'HR',
+        });
+
+        const out = await service.previewLetter({
+            type: 'offer',
+            user_id: new Types.ObjectId().toString(),
+            candidate_name: 'John Doe',
+            designation: 'Software Engineer',
+            ctc_breakdown: [{ label: 'Basic', amount: 500000 }],
+        });
+
+        expect(buildLetterRenderData).not.toHaveBeenCalled();
+        expect(getCompanyBlock).toHaveBeenCalledOnce();
+        expect(renderOfferLetterHtml).toHaveBeenCalledOnce();
+        expect(out.filename).toBe('Offer_Letter_John_Doe.pdf');
+        expect(putBlob).not.toHaveBeenCalled();
+        expect(Letter.create).not.toHaveBeenCalled();
+        expect(recordAudit).not.toHaveBeenCalled();
+    });
+
+    it('refuses every letter type for a freelancer', async () => {
+        // Guarded in `resolveRender`, so this holds for generate, preview and
+        // preview-html across all eight types — including `offer`, which builds
+        // its data ad-hoc and never touches the employee render adapter.
+        mockSubject('freelancer');
+        const caller = { id: new Types.ObjectId(), audit: undefined as never };
+        const userId = new Types.ObjectId().toString();
+
+        await expect(
+            service.generateLetter(
+                { type: 'promotion', user_id: userId, effective_date: '2026-04-01' } as never,
+                caller
+            )
+        ).rejects.toMatchObject({ code: 'LETTER_NOT_APPLICABLE' });
+
+        await expect(service.generateLetter({ type: 'offer', user_id: userId } as never, caller)).rejects.toMatchObject(
+            { code: 'LETTER_NOT_APPLICABLE' }
+        );
+
+        expect(Letter.create).not.toHaveBeenCalled();
+        expect(putBlob).not.toHaveBeenCalled();
+    });
+
+    it('allows a letter for a candidate with no platform account', async () => {
+        // `joining` / `offer` / `internship_offer` may name someone who has no
+        // user record yet. There is nobody to check, so it must not refuse.
+        (buildLetterRenderData as never as ReturnType<typeof vi.fn>).mockResolvedValue({ type: 'offer' });
+        (Letter.create as never as ReturnType<typeof vi.fn>).mockResolvedValue({
+            _id: new Types.ObjectId(),
+            toJSON: () => ({ id: '1', type: 'offer' }),
+        });
+
+        await expect(
+            service.generateLetter({ type: 'offer', candidate_name: 'Outside Hire' } as never, {
+                id: new Types.ObjectId(),
+                audit: undefined as never,
+            })
+        ).resolves.toBeDefined();
+        expect(User.findById).not.toHaveBeenCalled();
+    });
+});

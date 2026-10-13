@@ -1,0 +1,117 @@
+import { Router } from 'express';
+
+import * as ctrl from '../controllers/attendance.controller.js';
+import { asyncHandler } from '../utils/async-handler.js';
+import { authenticate, requirePermission } from '../middlewares/auth.middleware.js';
+import { validate } from '../middlewares/validate.middleware.js';
+import { PERMISSIONS } from '../constants/permissions.js';
+import {
+    attendanceIdParamSchema,
+    breakStartBodySchema,
+    setMyBreaksBodySchema,
+    setMyTimesBodySchema,
+    checkInBodySchema,
+    checkOutBodySchema,
+    correctionRequestIdParamSchema,
+    listAttendanceQuerySchema,
+    listCorrectionsQuerySchema,
+    myAttendanceQuerySchema,
+    patchAttendanceBodySchema,
+    qrVerifyBodySchema,
+    reviewCorrectionBodySchema,
+    submitCorrectionBodySchema,
+} from '../validators/attendance.validator.js';
+
+const router = Router();
+
+// All routes require an authenticated internal user (admin / manager /
+// employee). Clients have no attendance records and would only ever see 403s.
+// All routes require `attendance.check_in_out` (employees + above);
+// Clients don't hold this permission, mirroring legacy ATTENDANCE_INTERNAL_ROLES.
+router.use(authenticate, requirePermission(PERMISSIONS.ATTENDANCE_CHECK_IN_OUT));
+
+// ─── Employee-facing collection routes ────────────────────────────────────
+// NB: Order matters — `/me/today` must come before any `/:id` parameterised
+// route, and `/correction-requests` (collection) must come before
+// `/correction-requests/:id/...` for the Express matcher.
+
+router.post('/check-in', validate({ body: checkInBodySchema }), asyncHandler(ctrl.postCheckIn));
+
+router.post('/check-out', validate({ body: checkOutBodySchema }), asyncHandler(ctrl.postCheckOut));
+
+router.post('/break/start', validate({ body: breakStartBodySchema }), asyncHandler(ctrl.postBreakStart));
+
+router.post('/break/end', asyncHandler(ctrl.postBreakEnd));
+
+router.post('/me/breaks', validate({ body: setMyBreaksBodySchema }), asyncHandler(ctrl.putMyBreaks));
+
+router.post('/me/times', validate({ body: setMyTimesBodySchema }), asyncHandler(ctrl.putMyTimes));
+
+router.post('/qr-verify', validate({ body: qrVerifyBodySchema }), asyncHandler(ctrl.postQrVerify));
+
+router.get('/me/today', asyncHandler(ctrl.getMyToday));
+
+router.get('/me', validate({ query: myAttendanceQuerySchema }), asyncHandler(ctrl.getMy));
+
+// ─── Correction-request routes (must precede /:id) ───────────────────────
+
+// `attendance.correction_request` was catalogued and bundled into every
+// internal role but gated nothing — these two routes ran on the
+// `authenticate` baseline alone. The POST let anyone with a login file a
+// correction; the GET was worse, because `listCorrections` only narrows to
+// `user_id` for the EMPLOYEE role, so a client-side caller fell through to
+// the reviewer branch and got everyone else's requests back.
+router.post(
+    '/correction-requests',
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_REQUEST),
+    validate({ body: submitCorrectionBodySchema }),
+    asyncHandler(ctrl.postCorrection)
+);
+
+router.get(
+    '/correction-requests',
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_REQUEST),
+    validate({ query: listCorrectionsQuerySchema }),
+    asyncHandler(ctrl.getCorrections)
+);
+
+router.post(
+    '/correction-requests/:id/approve',
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_APPROVE),
+    validate({ params: correctionRequestIdParamSchema, body: reviewCorrectionBodySchema }),
+    asyncHandler(ctrl.postApproveCorrection)
+);
+
+router.post(
+    '/correction-requests/:id/reject',
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_APPROVE),
+    validate({ params: correctionRequestIdParamSchema, body: reviewCorrectionBodySchema }),
+    asyncHandler(ctrl.postRejectCorrection)
+);
+
+// M49 — owner-only withdraw verb. No reviewer permission needed; the
+// service-layer guard restricts to the request's `user_id` so the
+// `authenticate` baseline is enough.
+router.post(
+    '/correction-requests/:id/cancel',
+    validate({ params: correctionRequestIdParamSchema }),
+    asyncHandler(ctrl.postCancelCorrection)
+);
+
+// ─── Manager / admin record routes ───────────────────────────────────────
+
+router.get(
+    '/',
+    requirePermission(PERMISSIONS.ATTENDANCE_READ_TEAM),
+    validate({ query: listAttendanceQuerySchema }),
+    asyncHandler(ctrl.getList)
+);
+
+router.patch(
+    '/:id',
+    requirePermission(PERMISSIONS.ATTENDANCE_CORRECTION_APPROVE),
+    validate({ params: attendanceIdParamSchema, body: patchAttendanceBodySchema }),
+    asyncHandler(ctrl.patchOne)
+);
+
+export default router;

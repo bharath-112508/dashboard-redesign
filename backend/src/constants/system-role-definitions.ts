@@ -1,0 +1,275 @@
+import { PERMISSIONS, type Permission } from './permissions.js';
+import { SYSTEM_ROLE_KEYS, type SystemRoleKey } from './role-keys.js';
+
+/**
+ * System-role permission sets (Phase 4 Step 47).
+ *
+ * Each system role's permission list is derived from the existing
+ * pre-Step-47 route allowlists — i.e. the migration is **non-breaking
+ * by construction** for the four legacy roles. A user whose
+ * pre-migration role was 'admin' gets exactly the permissions admin-
+ * only routes required, plus the `system.admin` wildcard for any
+ * future surface added behind a permission gate.
+ *
+ * **team_lead** is new in Step 47. Its permission set is built from:
+ *   - everything an Employee gets (so the IC-level surfaces still
+ *     work for them — checking off own tasks, submitting own
+ *     leaves, etc.)
+ *   - PLUS first-line approval verbs (`leave_request.approve`,
+ *     `attendance.correction_approve`) gated to own reports
+ *     by the existing reporting-chain logic at the service layer
+ *   - PLUS read-team verbs (`leave_request.read_team`,
+ *     `attendance.read_team`, `timesheet.read`) likewise scoped to
+ *     own reports
+ *   - PLUS project-author verbs (`project.write`, `project.archive`,
+ *     `sprint.write`, `story.write`, `task_template.write`,
+ *     `share_link.write`, `project.create`-implied-by-`project.write`)
+ *     — the per-row visibility filter still gates them to projects
+ *     the team-lead is actually a member of, exactly the same way
+ *     it gates an Employee's task writes today.
+ *
+ * **NOT given to team_lead** (deliberate — these stay manager+):
+ *   - billing rate (`billing_rate.*`) — financial surface
+ *   - reports (`report.read`) — cross-team rollups
+ *   - user management (`user.write` / `user.deactivate` / `user.role_change`)
+ *   - leave-balance adjust + leave-type CRUD
+ *   - holiday / office-location writes
+ *   - settings / audit / role CRUD
+ *
+ * Adding / removing a permission to a system role is a config
+ * change here; the boot seeder reconciles on next start (additions
+ * are appended; removals require an explicit migration since they're
+ * a privilege downgrade for active users).
+ */
+
+export interface SystemRoleDefinition {
+    key: SystemRoleKey;
+    display_name: string;
+    description: string;
+    permissions: readonly Permission[];
+}
+
+// ─── Permission bundles (composed into roles below) ───────────────────────
+
+/** What every authenticated employee-or-above gets. Foundation. */
+const EMPLOYEE_BASE: readonly Permission[] = [
+    PERMISSIONS.USER_READ,
+    PERMISSIONS.PROJECT_READ,
+    PERMISSIONS.TASK_READ,
+    PERMISSIONS.TASK_WRITE,
+    PERMISSIONS.TASK_COMMENT_WRITE,
+    PERMISSIONS.TASK_ATTACHMENT_WRITE,
+    // Both `client` (company-wide project visibility) and `representative`
+    // (rostered projects only) may raise issues. The project scope each of
+    // them gets is decided by `loadProjectForCaller`, not by this bit.
+    PERMISSIONS.TASK_REPORT,
+    PERMISSIONS.TASK_TEMPLATE_READ,
+    // Anyone may start a project and staff it. `project.write` is not the
+    // org-wide edit bit it looks like: `project.service:assertCallerCanWrite`
+    // scopes an Employee's writes to projects they CREATED, and the
+    // visibility filter already scopes their reads to projects they're a
+    // member of. Without that guard this pair would be a licence to edit or
+    // delete any project by id — check it is still wired before assuming
+    // this line is safe.
+    PERMISSIONS.PROJECT_WRITE,
+    PERMISSIONS.PROJECT_MEMBERS_WRITE,
+    // Delete, same creator scope — `assertCallerCanWrite` gates this bit too,
+    // so an Employee can only delete a project they started. Safe only
+    // because `deleteProject` refuses any project with tasks, epics, sprints
+    // OR logged timesheet hours; the timesheet count is what makes it safe
+    // now that time can be logged without a task. Don't grant this without
+    // that check in place.
+    PERMISSIONS.PROJECT_ARCHIVE,
+    // A project can belong to a client company, and anyone who may start a
+    // project needs to be able to name that client — otherwise every
+    // employee-created project is forced to be internal.
+    //
+    // `company.write` grants CREATE plus RENAME-YOUR-OWN. Archiving stays
+    // admin-only: `company.service:assertCallerCanWriteCompany` lets the
+    // creator through on a name change, while `archiveCompany` and any
+    // `status` change keep the strict admin-or-own-company bar — retiring a
+    // company pulls it out of everyone's pickers, so it isn't the creator's
+    // call once other people are building on it.
+    PERMISSIONS.COMPANY_READ,
+    PERMISSIONS.COMPANY_WRITE,
+    // Plan the work on any project you're ON, not just ones you created.
+    // Deliberately a wider scope than `project.write`: `createSprint` /
+    // `createStory` go through `loadProjectForCaller`, which for an Employee
+    // means `member_ids ∋ them` — so membership is the boundary here, while
+    // editing the project shell itself stays with its creator.
+    PERMISSIONS.SPRINT_WRITE,
+    PERMISSIONS.STORY_WRITE,
+    PERMISSIONS.TIMESHEET_WRITE,
+    // M3 — `ATTENDANCE_READ_OWN`, `LEAVE_BALANCE_READ_OWN`,
+    // `LEAVE_REQUEST_READ_OWN` were dead: catalogued + assigned, but no
+    // route ever called `requirePermission(...READ_OWN)`. The matching
+    // `/me*` endpoints already owner-scope at the service layer
+    // (Attendance: `getMyAttendance`, LeaveBalance: `getMine`,
+    // LeaveRequest: `listMine`), so adding gates would be no-ops because
+    // every authenticated user held the bits. Removed from the catalog
+    // to clean up the FE Roles UI; route-layer behaviour is unchanged.
+    PERMISSIONS.ATTENDANCE_CHECK_IN_OUT,
+    PERMISSIONS.ATTENDANCE_CORRECTION_REQUEST,
+    PERMISSIONS.LEAVE_TYPE_READ,
+    PERMISSIONS.LEAVE_REQUEST_WRITE,
+    PERMISSIONS.COMP_OFF_READ,
+    PERMISSIONS.COMP_OFF_WRITE,
+    PERMISSIONS.HOLIDAY_READ,
+    PERMISSIONS.OFFICE_LOCATION_READ,
+    PERMISSIONS.SETTINGS_READ,
+    PERMISSIONS.DASHBOARD_EMPLOYEE,
+];
+
+/** Lead-of-team adds: first-line approval + team-read + project authoring. */
+const TEAM_LEAD_ADDITIONS: readonly Permission[] = [
+    PERMISSIONS.LEAVE_REQUEST_READ_TEAM,
+    PERMISSIONS.LEAVE_REQUEST_APPROVE,
+    PERMISSIONS.ATTENDANCE_READ_TEAM,
+    PERMISSIONS.ATTENDANCE_CORRECTION_APPROVE,
+    PERMISSIONS.TIMESHEET_READ,
+    // PROJECT_WRITE + PROJECT_MEMBERS_WRITE + PROJECT_ARCHIVE all moved to
+    // EMPLOYEE_BASE. Team Lead still gets them through that bundle.
+    PERMISSIONS.TASK_TEMPLATE_WRITE,
+    PERMISSIONS.SHARE_LINK_WRITE,
+    PERMISSIONS.DASHBOARD_MANAGER,
+    // BUG-039 — team leads need to see the role catalog so the Roles
+    // tab on /admin/users/:id can render. Strictly metadata read; the
+    // writes (role assignment / extras) remain admin-only via USER_WRITE
+    // and ROLE_WRITE / USER_ROLE_CHANGE.
+    PERMISSIONS.ROLE_READ,
+];
+
+/** Manager adds on top of team-lead: reports + billing + clients + audit-log read. */
+const MANAGER_ADDITIONS: readonly Permission[] = [
+    // COMPANY_READ moved to EMPLOYEE_BASE — Manager still gets it from there.
+    PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE,
+    // NO money permissions here — `billing_rate.read`, `invoice.read` and
+    // `cost_rate.read` were all bundled in and have been removed.
+    //
+    // `invoice.read` was the sharp one: `GET /engagements` and `GET /invoices`
+    // have NO row scoping of any kind, so every Manager could read every
+    // client's contracts and bills. That is a wider grant than anything else
+    // in this bundle — the other manager reads are scoped by the reporting
+    // chain or by project visibility — and it was never a deliberate decision,
+    // just the read half of a module whose write half is admin-only.
+    //
+    // Keeping the split coherent: `invoice.write` and `cost_rate.write` were
+    // already admin-only (via the `system.admin` wildcard). The money module is
+    // now admin-only end to end, which is also what the phase-1 gate says —
+    // every one of these endpoints 404s unless `BILLING_MODULES_ENABLED=true`,
+    // so no role should advertise reaching them.
+    //
+    // Re-granting is a deliberate act when the module comes back: either add
+    // them here again (having first scoped the invoice/engagement reads) or
+    // grant a custom role. The permissions themselves still exist in the
+    // catalog — only this default bundle changed.
+    PERMISSIONS.REPORT_READ,
+    PERMISSIONS.REPORT_EXPORT_WRITE,
+    PERMISSIONS.LEAVE_BALANCE_READ_TEAM,
+    PERMISSIONS.TIMESHEET_EDIT_OUT_OF_WINDOW,
+    // Maintain team employment records (internal_profile) without full
+    // user.write — name/email/role/status stay admin-only.
+    PERMISSIONS.USER_EMPLOYMENT_WRITE,
+    // Payroll & certificates (foundation) — manager-only surface. Admin
+    // already covers it via the system.admin wildcard.
+    PERMISSIONS.PAYROLL_READ,
+    PERMISSIONS.PAYROLL_WRITE,
+    PERMISSIONS.PAYSLIP_GENERATE,
+    PERMISSIONS.LETTER_GENERATE,
+];
+
+/**
+ * Shared by both client-side roles (`client` and `representative`).
+ *
+ * The two roles hold almost identical PERMISSIONS and differ almost entirely
+ * in **visibility scope**, which is service-layer, not RBAC:
+ *   - `client`         → every project of their company (`company_id` match)
+ *   - `representative` → only projects they're rostered on
+ *
+ * That split mirrors the existing `PROJECT_*_SCOPED_ROLES` pattern rather than
+ * inventing a new one. `client` adds exactly two company-level permissions on
+ * top of this base; everything else is the same.
+ */
+const CLIENT_SIDE_BASE: readonly Permission[] = [
+    PERMISSIONS.PROJECT_READ,
+    PERMISSIONS.TASK_READ,
+    PERMISSIONS.TASK_COMMENT_WRITE,
+    // Client-side users can attach files on tasks within their visible
+    // projects. Per-project visibility is enforced at the service layer.
+    PERMISSIONS.TASK_ATTACHMENT_WRITE,
+    // Both `client` (company-wide project visibility) and `representative`
+    // (rostered projects only) may raise issues. The project scope each of
+    // them gets is decided by `loadProjectForCaller`, not by this bit.
+    PERMISSIONS.TASK_REPORT,
+    // Org-wide holiday calendar + leave-type catalog (read-only) — same as
+    // the pre-Step-47 client behaviour.
+    PERMISSIONS.HOLIDAY_READ,
+    PERMISSIONS.LEAVE_TYPE_READ,
+    PERMISSIONS.SETTINGS_READ,
+    PERMISSIONS.DASHBOARD_CLIENT,
+];
+
+const dedupe = (list: readonly Permission[]): Permission[] => Array.from(new Set(list));
+
+// ─── System role definitions ──────────────────────────────────────────────
+
+export const SYSTEM_ROLE_DEFINITIONS: readonly SystemRoleDefinition[] = [
+    {
+        key: SYSTEM_ROLE_KEYS.ADMIN,
+        display_name: 'Admin',
+        description:
+            'Full platform access. The seeded super-role; satisfies every permission check via the system.admin wildcard.',
+        // Just the wildcard. The middleware short-circuits any
+        // `requirePermission(X)` for admins. Listing every individual
+        // permission here would be redundant + drift over time.
+        permissions: [PERMISSIONS.SYSTEM_ADMIN],
+    },
+    {
+        key: SYSTEM_ROLE_KEYS.MANAGER,
+        display_name: 'Manager',
+        description: 'Team management — leave approvals, project ownership, reports, billing rates.',
+        permissions: dedupe([...EMPLOYEE_BASE, ...TEAM_LEAD_ADDITIONS, ...MANAGER_ADDITIONS]),
+    },
+    {
+        key: SYSTEM_ROLE_KEYS.TEAM_LEAD,
+        display_name: 'Team Lead',
+        description:
+            'First-line approver for own reports + project author for projects they belong to. ' +
+            'Sits between Manager and Employee — no billing, no cross-team reports, no user management.',
+        permissions: dedupe([...EMPLOYEE_BASE, ...TEAM_LEAD_ADDITIONS]),
+    },
+    {
+        key: SYSTEM_ROLE_KEYS.EMPLOYEE,
+        display_name: 'Employee',
+        description: 'Own tasks, own timesheet, own attendance, own leaves.',
+        permissions: dedupe([...EMPLOYEE_BASE]),
+    },
+    {
+        key: SYSTEM_ROLE_KEYS.REPRESENTATIVE,
+        display_name: 'Representative',
+        description:
+            "A client company's project-scoped person. Sees ONLY projects they are " +
+            'assigned to (`representative_ids ∋ them`), monitors development, and ' +
+            'comments. Per-row visibility is enforced at the service layer ' +
+            '(PROJECT_REPRESENTATIVE_SCOPED_ROLES).',
+        permissions: dedupe([...CLIENT_SIDE_BASE]),
+    },
+    {
+        key: SYSTEM_ROLE_KEYS.CLIENT,
+        display_name: 'Client (Company)',
+        description:
+            'The client company itself, at the person level. Sees EVERY project of ' +
+            'their company (`company_id` match) — not just ones they are rostered on, ' +
+            'because they must be able to see a new project in order to staff it. ' +
+            'Can create representatives for their own company and assign them to their ' +
+            "own company's projects. Several people may hold this role for one company.",
+        permissions: dedupe([
+            ...CLIENT_SIDE_BASE,
+            // The two company-level powers a Representative does NOT get.
+            // Both are scoped to the caller's OWN company at the service
+            // layer — RBAC says "may do this", not "may do this anywhere".
+            PERMISSIONS.REPRESENTATIVE_WRITE,
+            PERMISSIONS.PROJECT_REPRESENTATIVES_WRITE,
+        ]),
+    },
+];
