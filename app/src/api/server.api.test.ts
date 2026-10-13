@@ -17,6 +17,11 @@ vi.mock('./http/board', () => ({
   sendBoardCommand,
   isBoardApiCommand: (c: { type: string }) => c.type.startsWith('task.'),
 }))
+const { fetchEntries, fetchWeekSubmissions } = vi.hoisted(() => ({
+  fetchEntries: vi.fn(async () => [{ id: 'x1' }]),
+  fetchWeekSubmissions: vi.fn(async () => [{ week: '2026-10-05' }]),
+}))
+vi.mock('./http/timesheet', () => ({ fetchEntries, fetchWeekSubmissions, isTimeApiCommand: () => false, sendTimeCommand: vi.fn() }))
 vi.mock('./http/config', () => ({ apiMode: true, API_URL: 'http://x/api/v1' }))
 vi.mock('./http/companies', () => ({
   fetchCompanies,
@@ -36,6 +41,11 @@ describe('server.get in API mode', () => {
     expect(await server.get('internalProjects')).toEqual([{ id: 'i1' }])
     expect(fetchCompanies).toHaveBeenCalledWith(expect.objectContaining({ personId: 'a0' }))
     expect(fetchInternalProjects).toHaveBeenCalledWith(expect.objectContaining({ personId: 'a0' }))
+  })
+
+  it('reads time entries and submitted weeks from the backend', async () => {
+    expect(await server.get('entries')).toEqual([{ id: 'x1' }])
+    expect(await server.get('weekSubmissions')).toEqual([{ week: '2026-10-05' }])
   })
 
   it('reads the workspace and tickets from the backend', async () => {

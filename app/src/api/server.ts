@@ -14,6 +14,7 @@ import { apiMode } from './http/config'
 import { fetchCompanies, fetchInternalProjects, isCompanyApiCommand, sendCompanyCommand } from './http/companies'
 import { ApiError } from './http/client'
 import { fetchTasks, fetchWorkspace, isBoardApiCommand, sendBoardCommand } from './http/board'
+import { fetchEntries, fetchWeekSubmissions } from './http/timesheet'
 
 /**
  * A mock backend. Data lives in localStorage so it survives reloads and is
@@ -513,6 +514,8 @@ export const server = {
     if (apiMode && resource === 'internalProjects') return (await fetchInternalProjects(readSession())) as Db[K]
     if (apiMode && resource === 'workspace') return (await fetchWorkspace(readSession())) as Db[K]
     if (apiMode && resource === 'tasks') return (await fetchTasks(readSession())) as Db[K]
+    if (apiMode && resource === 'entries') return (await fetchEntries(readSession())) as Db[K]
+    if (apiMode && resource === 'weekSubmissions') return (await fetchWeekSubmissions(readSession())) as Db[K]
     await sleep(LATENCY_MS)
     return exclusive(async () => clone((await current())[resource]))
   },
