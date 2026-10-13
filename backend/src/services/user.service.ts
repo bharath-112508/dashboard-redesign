@@ -365,7 +365,10 @@ export const getUser = async (id: Types.ObjectId): Promise<Record<string, unknow
     if (!user) {
         throw AppError.notFound('User not found', ERROR_CODES.USER_NOT_FOUND);
     }
-    return toPublicUser(user, await loadPhotoTtlMinutes());
+    const ids = (user.role_ids ?? []).map((r) => new Types.ObjectId(String(r)));
+    const keyOf = await roleKeysByIds(ids);
+    // Redesign: role keys, as on the list (a custom role such as `devops`).
+    return { ...toPublicUser(user, await loadPhotoTtlMinutes()), role_keys: ids.map((id) => keyOf.get(String(id))).filter((k): k is string => !!k) };
 };
 
 // ─── PATCH /users/:id ──────────────────────────────────────────────────────

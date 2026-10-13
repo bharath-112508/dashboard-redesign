@@ -888,6 +888,18 @@ describe('listUsers — role keys (redesign)', () => {
     });
 });
 
+describe('getUser — role keys (redesign)', () => {
+    it('gives the person their role keys', async () => {
+        const devopsRole = new Types.ObjectId();
+        const row = { _id: new Types.ObjectId(), role_ids: [devopsRole], toJSON() { return { id: String(this._id) } } };
+        userFindByIdMock.mockResolvedValueOnce(row);
+        settingsMock.mockResolvedValueOnce({ uploads: { sas_token_ttl_minutes: 15 } });
+        photoTtlMock.mockReturnValueOnce(15);
+        roleKeysByIdsMock.mockResolvedValueOnce(new Map([[devopsRole.toString(), 'devops']]));
+        expect(await svc.getUser(row._id)).toMatchObject({ role_keys: ['devops'] });
+    });
+});
+
 describe('listUserPhotos', () => {
     const chain = (rows: unknown[]) => ({ select: () => ({ lean: () => Promise.resolve(rows) }) });
 

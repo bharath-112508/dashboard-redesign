@@ -34,7 +34,21 @@ What comes from the backend so far:
 
 - **Phase 1c:** timesheets — My timesheet, the dashboard quick log, the Tickets timesheet, Employee timesheets, profile week cards, hours on tickets and the support plan's hours used (`src/api/http/timesheet.ts`, mappings in `timesheetMappers.ts`).
 
-DevOps and questions still show the mock data.
+- **Phase 1d:** users and people — the people directory everywhere, the Users page (add, edit, deactivate, roles, developer types, project access, photo), the Roles & permissions grid and the profile window (`src/api/http/users.ts`).
+
+DevOps, questions and leave still show the mock data.
+
+Users and people in API mode:
+
+- **Adding a user** creates the backend account with a random password and emails them a link to set their own (in safe mode the email is written to the backend log). Employee ID, job title, department, joining date and reporting manager are optional on the backend now; someone without a reporting manager shows on team screens (leave approvals, team timesheets) for admins only until one is set. A client person is added to their company like a contact.
+- **Removing a user deactivates them** (the backend keeps people, since their time and tickets point at them). Deactivated people show as Deactivated; admins see them in the list.
+- **Roles:** Super admin = backend admin, Project manager = manager (or team lead), Developer = employee, Client admin = client, Client user = representative. **DevOps engineer** = a staff member who also holds the backend's custom `devops` role (created when the backend starts). The app's separate **Admin** role has no backend equivalent and is refused. Moving someone between staff and client is refused (deactivate and add them again).
+- **Developer type** is stored on the user; the list of types and the **Roles & permissions grid** are stored on the backend (`/app-access`). The grid is display only: real access is decided by the backend's own role permissions.
+- **Project access** is project membership: picking projects adds or removes the person from those projects. "All projects" changes nothing, so a developer with "All projects" still only sees the projects they are a member of.
+- **Photos** come from the backend (initials when there is none, never a sample face). Uploading uses the backend's signed upload to Azure storage, like ticket attachments, and has not been tried against the real storage yet.
+- **Profile window:** name, phone and time zone save to the backend. A new password is set from an emailed link (the backend needs the current password to change it directly, which this window does not ask for). The four notification toggles are kept until you sign out (no backend field yet).
+- Forms now show the backend's reason when a change is refused (e.g. the last admin cannot be deactivated).
+- The test user **Redesign Test Dev** (deactivated) was made by the API checks on 13 Oct 2026.
 
 Timesheets in API mode:
 
