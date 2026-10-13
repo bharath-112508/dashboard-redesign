@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     createTaskBodySchema,
+    createTaskReportBodySchema,
     labelsSchema,
     listTasksQuerySchema,
     patchTaskBodySchema,
@@ -317,5 +318,32 @@ describe('createTaskBodySchema source', () => {
             source: 'client',
         });
         expect(r.success && 'source' in r.data).toBe(false);
+    });
+});
+
+
+// ─── Redesign: Critical/Urgent, Story type, start date ───────────────────
+
+describe('redesign task fields', () => {
+    it.each(['critical', 'urgent', 'high', 'medium', 'low'])('accepts priority %s on create and patch', (priority) => {
+        expect(createTaskBodySchema.safeParse(validCreate({ priority })).success).toBe(true);
+        expect(patchTaskBodySchema.safeParse({ priority }).success).toBe(true);
+    });
+
+    it('accepts the story issue type and keeps improvement', () => {
+        expect(createTaskBodySchema.safeParse(validCreate({ issue_type: 'story' })).success).toBe(true);
+        expect(patchTaskBodySchema.safeParse({ issue_type: 'improvement' }).success).toBe(true);
+    });
+
+    it('accepts a start date or null, and rejects other formats', () => {
+        expect(createTaskBodySchema.parse(validCreate({ start_date: '2026-10-01' })).start_date).toBe('2026-10-01');
+        expect(patchTaskBodySchema.safeParse({ start_date: null }).success).toBe(true);
+        expect(patchTaskBodySchema.safeParse({ start_date: '01/10/2026' }).success).toBe(false);
+    });
+
+    it('still lets clients report only low, medium or high', () => {
+        const base = { project_id: VALID_OID, kind: 'issue', title: 'Broken', description: '' };
+        expect(createTaskReportBodySchema.safeParse({ ...base, priority: 'high' }).success).toBe(true);
+        expect(createTaskReportBodySchema.safeParse({ ...base, priority: 'critical' }).success).toBe(false);
     });
 });

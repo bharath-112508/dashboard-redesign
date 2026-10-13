@@ -33,10 +33,17 @@ export const DEFAULT_TASK_STATUS_VALUES: readonly string[] = Object.values(DEFAU
 // ─── Priorities ──────────────────────────────────────────────────────────
 
 export const TASK_PRIORITIES = {
-    HIGH: 'high',
-    MEDIUM: 'medium',
     LOW: 'low',
+    MEDIUM: 'medium',
+    HIGH: 'high',
+    /** Redesign: above high. */
+    URGENT: 'urgent',
+    /** Redesign: the top priority. */
+    CRITICAL: 'critical',
 } as const;
+
+/** What a client may suggest when reporting: the original three, not urgent/critical (the team triages those). */
+export const TASK_REPORT_PRIORITY_VALUES = ['low', 'medium', 'high'] as const;
 
 export type TaskPriority = (typeof TASK_PRIORITIES)[keyof typeof TASK_PRIORITIES];
 
@@ -44,11 +51,10 @@ export const TASK_PRIORITY_VALUES: readonly TaskPriority[] = Object.values(TASK_
 
 // ─── Issue types ─────────────────────────────────────────────────────────
 //
-// A lightweight classification on the task (Jira "issue type"). Deliberately
-// NOT Epic/Story — those would collide with the separate `stories` entity and
-// the `parent_task_id` subtask hierarchy. Keeping three flat types (task /
-// bug / improvement) gives the Jira "typed issue" feel without touching the
-// hierarchy. Default `task`.
+// A lightweight classification on the task (Jira "issue type"). Not Epic —
+// epics are the separate `stories` entity. `story` is a ticket TYPE (the
+// redesign's Bug / Task / Story), unrelated to that entity despite the name;
+// it does not touch the `parent_task_id` subtask hierarchy. Default `task`.
 
 /**
  * What a client-side user can file from a project. Two kinds, mapped onto the
@@ -93,12 +99,16 @@ export const TASK_REPORT_IMPACT_LABEL: Record<string, string> = {
     low: 'Client: Nice to have',
     medium: 'Client: Would help a lot',
     high: 'Client: Blocked without it',
+    urgent: 'Client: Urgent',
+    critical: 'Client: Critical',
 };
 
 export const TASK_ISSUE_TYPES = {
     TASK: 'task',
     BUG: 'bug',
     IMPROVEMENT: 'improvement',
+    /** Redesign: a user-story ticket (not the `stories` entity, which the app calls an epic). */
+    STORY: 'story',
 } as const;
 
 export type TaskIssueType = (typeof TASK_ISSUE_TYPES)[keyof typeof TASK_ISSUE_TYPES];

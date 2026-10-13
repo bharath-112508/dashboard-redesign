@@ -483,6 +483,16 @@ const loadTaskAndProject = async (
 
 // ─── POST /tasks ─────────────────────────────────────────────────────────
 
+/** A ticket can't start after it is due (redesign start date). Returns the start date for chaining. */
+const assertStartNotAfterDue = (start: string | null, due: string | null): string | null => {
+    if (start && due && start > due) {
+        throw AppError.unprocessable("The start date can't be after the due date.", ERROR_CODES.VALIDATION_ERROR, {
+            errors: [{ field: 'start_date', message: "The start date can't be after the due date." }],
+        });
+    }
+    return start;
+};
+
 export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): Promise<Record<string, unknown>> => {
     // Any internal team member (admin/manager/team_lead/employee) may create a
     // task; `loadProjectForCaller` below restricts them to projects they can
@@ -582,6 +592,7 @@ export const createTask = async (input: CreateTaskBody, caller: ProjectCaller): 
         story_points: input.story_points ?? null,
         labels: input.labels ?? [],
         due_date: input.due_date ?? null,
+        start_date: assertStartNotAfterDue(input.start_date ?? null, input.due_date ?? null),
         estimated_hours: input.estimated_hours ?? 0,
         assignee_ids: assigneeIds,
         primary_assignee_id: primaryAssignee,
@@ -831,6 +842,9 @@ export const updateTask = async (
     if (patch.story_points !== undefined) task.story_points = patch.story_points;
     if (patch.labels !== undefined) task.labels = patch.labels;
     if (patch.due_date !== undefined) task.due_date = patch.due_date;
+    if (patch.start_date !== undefined) task.start_date = patch.start_date;
+    // Checked on the merged ticket: a patch may carry only one of the two dates.
+    if (patch.start_date !== undefined || patch.due_date !== undefined) assertStartNotAfterDue(task.start_date ?? null, task.due_date ?? null);
     if (patch.estimated_hours !== undefined) task.estimated_hours = patch.estimated_hours;
     if (patch.is_flagged !== undefined) task.is_flagged = patch.is_flagged;
 

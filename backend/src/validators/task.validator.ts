@@ -15,10 +15,11 @@ import {
     TASK_LIST_MAX_LIMIT,
     TASK_MAX_ASSIGNEES,
     TASK_PRIORITY_VALUES,
+    TASK_REPORT_KIND_VALUES,
+    TASK_REPORT_PRIORITY_VALUES,
     TASK_STATUS_KEY_MAX,
     TASK_STORY_POINT_VALUES,
     TASK_TITLE_MAX,
-    TASK_REPORT_KIND_VALUES,
 } from '../constants/task.js';
 
 /**
@@ -142,7 +143,7 @@ export const createTaskReportBodySchema = z
         title: z.string().trim().min(1).max(TASK_TITLE_MAX),
         description: z.string().trim().max(TASK_DESCRIPTION_MAX).default(''),
         // A suggestion the team may override during triage.
-        priority: z.enum(TASK_PRIORITY_VALUES as unknown as [string, ...string[]]).optional(),
+        priority: z.enum(TASK_REPORT_PRIORITY_VALUES).optional(),
     })
     .strict();
 
@@ -165,6 +166,8 @@ export const createTaskBodySchema = z
         labels: labelsSchema.optional(),
         // Optional: `null`/omitted = no due date.
         due_date: isoDateSchema.nullable().optional(),
+        /** Redesign: when work on the ticket starts (the timeline bar's left end). */
+        start_date: isoDateSchema.nullable().optional(),
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX).optional(),
         // At most one assignee (TASK_MAX_ASSIGNEES). `primary_assignee_id` is still
         // accepted for older clients; the service keeps the two in sync.
@@ -196,6 +199,7 @@ export const patchTaskBodySchema = z
         labels: labelsSchema,
         // `null` clears the due date.
         due_date: isoDateSchema.nullable(),
+        start_date: isoDateSchema.nullable(),
         estimated_hours: z.number().min(0).max(TASK_ESTIMATED_HOURS_MAX),
         is_flagged: z.boolean(),
         assignee_ids: z.array(objectIdSchema).max(TASK_MAX_ASSIGNEES, ONE_ASSIGNEE_MSG),

@@ -1788,3 +1788,25 @@ describe('listTasks — source filter', () => {
         expect((taskFindMock.mock.calls.at(-1)![0] as Record<string, unknown>).source).toBeUndefined();
     });
 });
+
+describe('updateTask — start date (redesign)', () => {
+    it('stores a start date on or before the due date', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, due_date: '2026-10-20', start_date: null });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await svc.updateTask(task._id, { start_date: '2026-10-14' } as never, adminCaller());
+
+        expect((task as Record<string, unknown>).start_date).toBe('2026-10-14');
+    });
+
+    it('refuses a start date after the due date (checked on the merged ticket)', async () => {
+        const project = makeProject();
+        const task = makeTask({ project_id: project._id, due_date: '2026-10-20', start_date: null });
+        taskFindByIdMock.mockResolvedValueOnce(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+
+        await expect(svc.updateTask(task._id, { start_date: '2026-10-25' } as never, adminCaller())).rejects.toMatchObject({ statusCode: 422 });
+    });
+});

@@ -213,7 +213,7 @@ export const patchProjectBodySchema = z
                         criteria: z
                             .object({
                                 issue_types: z.array(z.string().max(32)).max(10).optional(),
-                                priorities: z.array(z.string().max(16)).max(5).optional(),
+                                priorities: z.array(z.string().max(16)).max(10).optional(),
                                 labels: z.array(z.string().max(64)).max(20).optional(),
                                 story_ids: z.array(z.string().max(32)).max(50).optional(),
                                 assignee_ids: z.array(objectIdSchema).max(50).optional(),
