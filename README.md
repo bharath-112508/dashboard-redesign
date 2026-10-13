@@ -1,6 +1,13 @@
 # dashboard-redesign
 
-DevOps dashboard redesign. The front end for the Clients page is in [`app/`](app/) (see `app/README.md`). The original Claude Design handoff is in `design/project/` and `design/chats/`; its notes follow.
+DevOps dashboard redesign.
+
+| Folder | What it holds |
+| --- | --- |
+| [`app/`](app/) | The web app (see `app/README.md`) |
+| [`backend/`](backend/) | The API, imported with its history from `viljetech-platform-backend` (see `backend/README.md`). Run it with `npm run dev:redesign`: port 3101, against the Demo DB, with email, Slack, push and cron jobs off. It needs a `.env`, which is not committed. |
+| [`e2e/`](e2e/) | Playwright end-to-end tests for the app |
+| [`design/`](design/) | The original Claude Design handoff: `design/project/` and `design/chats/`. Its notes follow. |
 
 ---
 
