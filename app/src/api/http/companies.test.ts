@@ -62,6 +62,19 @@ describe('fetchCompanies', () => {
     expect(aurora.contacts).toEqual([{ personId: 'u7', name: 'Emma', role: 'CEO', email: 'e@x', projects: ['p1'], admin: true }])
   })
 
+  it('leaves out contacts who were removed (the backend deactivates them)', async () => {
+    serve({
+      '/companies?limit=100&page=1': [{ id: 'c1', name: 'Aurora Foods AB', status: 'active' }],
+      '/projects?limit=100&page=1': [],
+      '/companies/c1/representatives?limit=100&page=1': [
+        { id: 'u1', full_name: 'Gone', email: 'g@x', role: 'representative', status: 'deactivated', projects: [] },
+        { id: 'u2', full_name: 'Here', email: 'h@x', role: 'representative', status: 'active', projects: [] },
+      ],
+    })
+    const [c] = await fetchCompanies(staff)
+    expect(c.contacts.map(k => k.personId)).toEqual(['u2'])
+  })
+
   it('reads every page of a long list', async () => {
     const page1 = Array.from({ length: 100 }, (_, i) => ({ id: `c${i}`, name: `C${i}`, status: 'active' }))
     const routes: Record<string, unknown[]> = {

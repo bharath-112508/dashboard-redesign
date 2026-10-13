@@ -25,7 +25,8 @@ export type CompaniesCommand =
   | { type: 'company.archive'; id: string; archived: boolean; at: string | null }
   /** `index` null adds a contact; otherwise replaces the one at that index. */
   | { type: 'company.contact.save'; companyId: string; index: number | null; contact: CompanyContact }
-  | { type: 'company.contact.remove'; companyId: string; index: number }
+  /** `personId` identifies the contact for the backend (API mode); the mock uses `index`. */
+  | { type: 'company.contact.remove'; companyId: string; index: number; personId: PersonId | null }
   /** Sets a responsible person's role and the company projects they are on. */
   | { type: 'company.responsible.save'; companyId: string; personId: PersonId; role: CompanyRole; projects: string[] }
   /** Removes the responsibility, the role and the membership in every project of the company. */

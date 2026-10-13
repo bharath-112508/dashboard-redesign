@@ -277,7 +277,9 @@ const internalProfilePatchSchema = internalProfileCreateSchema.partial().extend(
     department: blankAsAbsent(z.string().trim().min(1).nullable()),
     date_of_joining: blankAsAbsent(dateYMD.nullable()),
 });
-const clientProfilePatchSchema = clientProfileCreateSchema.partial();
+// An update never moves a client contact to another company: that would leave them on the old
+// company's project rosters. The company is set once, when the contact is created.
+const clientProfilePatchSchema = clientProfileCreateSchema.omit({ company_id: true }).partial();
 
 export const updateUserBodySchema = z
     .object({

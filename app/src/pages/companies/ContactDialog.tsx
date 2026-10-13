@@ -74,7 +74,7 @@ export function ContactDialog({
     if (index === null) return
     setSaveError(null)
     try {
-      await send({ type: 'company.contact.remove', companyId, index })
+      await send({ type: 'company.contact.remove', companyId, index, personId: contact?.personId ?? null })
       onClose()
     } catch {
       setSaveError('The contact could not be removed. Try again.')

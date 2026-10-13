@@ -38,3 +38,19 @@ describe('client contact title', () => {
         expect(createRepresentativeBodySchema.safeParse({ ...base, title: 'x'.repeat(101) }).success).toBe(false);
     });
 });
+
+describe('company logo', () => {
+    it.each(['', 'data:image/png;base64,iVBORw0KGgo=', 'data:image/jpeg;base64,/9j/4AAQ', 'data:image/webp;base64,UklGR'])(
+        'accepts %s',
+        (logo) => {
+            expect(patchCompanyBodySchema.safeParse({ logo }).success).toBe(true);
+        }
+    );
+
+    it.each(['https://tracker.example/x.png', 'javascript:alert(1)', 'data:text/html;base64,PGgxPg==', 'data:image/png,notbase64', 'data:image/svg+xml;base64,PHN2Zz4='])(
+        'rejects %s — a logo must be an embedded image, never a link',
+        (logo) => {
+            expect(patchCompanyBodySchema.safeParse({ logo }).success).toBe(false);
+        }
+    );
+});

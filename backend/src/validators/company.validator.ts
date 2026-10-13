@@ -29,7 +29,12 @@ const companyProfileFields = {
     country: z.string().trim().max(100),
     website: z.string().trim().max(300),
     notes: z.string().max(5000),
-    logo: z.string().max(COMPANY_LOGO_MAX),
+    // An embedded raster image or '' — never a link (a remote URL would let anyone track every viewer)
+    // and never SVG. The app always uploads a resized PNG.
+    logo: z
+        .string()
+        .max(COMPANY_LOGO_MAX)
+        .regex(/^(data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*)?$/, 'The logo must be a PNG, JPEG, WebP or GIF image.'),
     responsibles: z
         .array(z.object({ user_id: objectIdSchema, role: z.enum(COMPANY_RESPONSIBLE_ROLES) }).strict())
         .max(100),

@@ -1,4 +1,5 @@
-import { api } from './client'
+import { ApiError, api } from './client'
+import { readSession } from '../session/store'
 import {
   clientProjectFrom,
   companyBody,
@@ -40,6 +41,9 @@ const liveProjects = async () => (await allPages<BackendProject>('/projects')).f
  * caller; client users may not read companies at all, so theirs is built
  * from the session.
  */
+// ponytail: one request per project (epics) and per company (contacts), and every write refetches all of it
+// (queries.ts onSettled). Fine at Demo DB size; at production size add one backend endpoint that returns
+// companies with their projects, epic summaries and contacts, and refetch only what a command touched.
 export const fetchCompanies = async (session: Session | null): Promise<Company[]> => {
   if (!session) return []
   const projects = (await liveProjects()).filter(p => p.company_id)
@@ -58,7 +62,9 @@ export const fetchCompanies = async (session: Session | null): Promise<Company[]
       )
       // Contacts: staff see every company's; a client admin only their own; a client user may not list them.
       const mayList = !clientUser && (!isClientRole(session.role) || c.id === session.orgId)
-      const contacts = mayList ? (await allPages<BackendRepresentative>(`/companies/${c.id}/representatives`)).map(contactFrom) : []
+      // Removing a contact deactivates them, so deactivated people are not contacts.
+      const people = mayList ? await allPages<BackendRepresentative>(`/companies/${c.id}/representatives`) : []
+      const contacts = people.filter(p => p.status !== 'deactivated').map(contactFrom)
       return companyFrom(c, withEpics, contacts)
     }),
   )
@@ -123,8 +129,15 @@ const passwordLength = async (): Promise<number> => {
   return p ? Math.min(Math.max(16, p.min_length), p.max_length) : 16
 }
 
+/** A refusal shaped like the backend's, raised before any write so nothing is left half-done. */
+const refuse = (message: string) => new ApiError(403, 'FORBIDDEN', message)
+
+/** Only admins may change a user's role (backend `user.role_change`). */
+const mayChangeRoles = () => readSession()?.role === 'super'
+
 /** Creates a client contact: the user, their admin role, and their projects. Returns their id. */
 const createContact = async (companyId: string, c: CompanyContact): Promise<PersonId> => {
+  if (c.admin && !mayChangeRoles()) throw refuse('Only an admin can make a contact a client admin.')
   const { id } = await api.post<{ id: string }>(`/companies/${companyId}/representatives`, {
     email: c.email,
     full_name: c.name,
@@ -138,10 +151,12 @@ const createContact = async (companyId: string, c: CompanyContact): Promise<Pers
 
 const updateContact = async (companyId: string, c: CompanyContact & { personId: PersonId }) => {
   const before = await api.get<BackendRepresentative>(`/companies/${companyId}/representatives/${c.personId}`)
+  const wasAdmin = before.role === 'client'
+  // Checked before any write. The backend cannot turn a client admin back into a regular contact yet.
+  if (wasAdmin && !c.admin) throw refuse('A client admin cannot be made a regular contact yet.')
+  if (!wasAdmin && c.admin && !mayChangeRoles()) throw refuse('Only an admin can make a contact a client admin.')
   await api.patch(`/users/${c.personId}`, { full_name: c.name, client_profile: { title: c.role } })
-  if (!!c.admin !== (before.role === 'client')) {
-    await api.post(`/users/${c.personId}/change-role`, { new_role: c.admin ? 'client' : 'representative' })
-  }
+  if (c.admin && !wasAdmin) await api.post(`/users/${c.personId}/change-role`, { new_role: 'client' })
   const had = new Set(before.projects.map(p => p.id))
   const wants = new Set(c.projects)
   for (const p of had) if (!wants.has(p)) await roster(p, 'representatives', 'remove', c.personId)
@@ -178,8 +193,9 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
         ...companyBody({ name: c.name, industry: c.industry, country: c.country, web: c.web, notes: c.notes, logo: c.logo }),
         ...roles,
       })
-      // A backend contact is a login account, so it needs an email.
-      for (const k of c.contacts) if (k.email) await createContact(id, k)
+      // A backend contact is a login account, so it needs an email. A contact that fails
+      // must not hide the company that was created: the page opens it and the contact can be added there.
+      for (const k of c.contacts) if (k.email) await createContact(id, k).catch(() => undefined)
       return { id }
     }
     case 'company.update': {
@@ -205,13 +221,11 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
       }
       return { id: await createContact(cmd.companyId, c) }
     }
-    case 'company.contact.remove': {
-      // The app's contact list is built from this same backend list, in this order.
-      const people = await allPages<BackendRepresentative>(`/companies/${cmd.companyId}/representatives`)
-      const person = people[cmd.index]
-      if (person) await api.delete(`/companies/${cmd.companyId}/representatives/${person.id}`)
+    case 'company.contact.remove':
+      // By person, never by position: removing deactivates a real account.
+      if (!cmd.personId) throw refuse('This contact cannot be removed here.')
+      await api.delete(`/companies/${cmd.companyId}/representatives/${cmd.personId}`)
       return {}
-    }
     case 'company.responsible.save':
       await setResponsible(cmd.companyId, cmd.personId, companyRoleTo(cmd.role), cmd.projects)
       return {}

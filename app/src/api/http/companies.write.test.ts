@@ -3,6 +3,8 @@ import type { ClientProject, Company, CompanyContact, InternalProject } from '..
 
 const { get, post, patch, del } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() }))
 vi.mock('./client', async importOriginal => ({ ...(await importOriginal<typeof import('./client')>()), api: { get, post, patch, delete: del } }))
+const session = vi.hoisted(() => ({ personId: 'a0', name: 'Admin', email: 'a@x', role: 'super', org: 'Viljetech' }))
+vi.mock('../session/store', () => ({ readSession: () => session }))
 
 const { sendCompanyCommand, randomPassword } = await import('./companies')
 
@@ -44,6 +46,7 @@ const backendProject = (id: string, company_id: string, member_ids: string[] = [
 const POLICY = { password_policy: { min_length: 10, max_length: 12, require_upper: true, require_lower: true, require_number: true, require_special: true } }
 
 beforeEach(() => {
+  session.role = 'super'
   for (const m of [get, post, patch, del]) m.mockReset()
   get.mockImplementation(async (path: string) => {
     if (path === '/settings/public') return POLICY
@@ -76,6 +79,13 @@ describe('company.create', () => {
     const body = post.mock.calls[1][1] as { initial_password: string }
     expect(body.initial_password.length).toBeGreaterThanOrEqual(10)
     expect(body.initial_password.length).toBeLessThanOrEqual(12)
+  })
+
+  it('still opens the new company when adding its main contact fails', async () => {
+    const { ApiError } = await import('./client')
+    post.mockResolvedValueOnce({ id: 'c1' }).mockRejectedValueOnce(new ApiError(403, 'FORBIDDEN', 'no'))
+    const r = await sendCompanyCommand({ type: 'company.create', company: company({ contacts: [contact()] }) }, TODAY)
+    expect(r).toEqual({ id: 'c1' })
   })
 
   it('skips a main contact without an email, since a backend contact needs one', async () => {
@@ -153,14 +163,33 @@ describe('company contacts', () => {
     expect(post).not.toHaveBeenCalledWith('/users/u9/change-role', expect.anything())
   })
 
-  it('removes the contact at an index, in the order the backend lists them', async () => {
-    get.mockResolvedValueOnce([
-      { id: 'u1', full_name: 'A', email: 'a@x', role: 'representative', status: 'active', projects: [] },
-      { id: 'u2', full_name: 'B', email: 'b@x', role: 'representative', status: 'active', projects: [] },
-    ])
+  it('removes the contact by their person id, never by position', async () => {
     del.mockResolvedValueOnce(undefined)
-    await sendCompanyCommand({ type: 'company.contact.remove', companyId: 'c1', index: 1 }, TODAY)
+    await sendCompanyCommand({ type: 'company.contact.remove', companyId: 'c1', index: 1, personId: 'u2' }, TODAY)
     expect(del).toHaveBeenCalledWith('/companies/c1/representatives/u2')
+    expect(get).not.toHaveBeenCalledWith(expect.stringContaining('/representatives?'))
+  })
+
+  it('refuses to remove a contact it cannot identify', async () => {
+    await expect(sendCompanyCommand({ type: 'company.contact.remove', companyId: 'c1', index: 0, personId: null }, TODAY)).rejects.toThrow()
+    expect(del).not.toHaveBeenCalled()
+  })
+
+  it('refuses to make a client admin a regular contact before changing anything (the backend cannot yet)', async () => {
+    get.mockResolvedValueOnce({ id: 'u9', full_name: 'Kari', email: 'k@x', role: 'client', status: 'active', projects: [] })
+    await expect(
+      sendCompanyCommand({ type: 'company.contact.save', companyId: 'c1', index: 0, contact: contact({ personId: 'u9', admin: false }) }, TODAY),
+    ).rejects.toMatchObject({ status: 403 })
+    expect(patch).not.toHaveBeenCalled()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('refuses a new admin contact from someone who is not an admin, before creating anyone', async () => {
+    session.role = 'pm'
+    await expect(
+      sendCompanyCommand({ type: 'company.contact.save', companyId: 'c1', index: null, contact: contact({ admin: true }) }, TODAY),
+    ).rejects.toMatchObject({ status: 403 })
+    expect(post).not.toHaveBeenCalled()
   })
 })
 

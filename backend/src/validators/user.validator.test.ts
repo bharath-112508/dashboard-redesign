@@ -402,3 +402,10 @@ describe('updateUserBodySchema — client contact title', () => {
         expect(r.success && r.data.client_profile).toEqual({ title: 'CTO' });
     });
 });
+
+describe('updateUserBodySchema — a client contact cannot be moved to another company', () => {
+    it('drops client_profile.company_id from an update', () => {
+        const r = updateUserBodySchema.safeParse({ client_profile: { company_id: '665f1c2e9b1d8a0012ab34cd', title: 'CTO' } });
+        expect(r.success && r.data.client_profile).toEqual({ title: 'CTO' });
+    });
+});

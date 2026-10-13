@@ -479,15 +479,8 @@ export const updateUser = async (input: {
     }
 
     if (patch.client_profile) {
-        // `company_id` arrives as a wire string; the schema stores an
-        // ObjectId. Coerce here rather than letting Mongoose cast, so a
-        // merge with the existing sub-doc doesn't mix the two types.
-        const patched = {
-            ...patch.client_profile,
-            ...(patch.client_profile.company_id
-                ? { company_id: new Types.ObjectId(patch.client_profile.company_id) }
-                : {}),
-        };
+        // `company_id` is not patchable (see clientProfilePatchSchema), so the existing one is kept.
+        const patched = { ...patch.client_profile };
         target.client_profile = (target.client_profile
             ? { ...target.client_profile, ...patched }
             : patched) as unknown as UserDocument['client_profile'];
