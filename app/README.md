@@ -2,14 +2,34 @@
 
 Front-end build of `design/project/Clients.dc.html` from the Claude Design handoff: the page clients use to follow their project, report bugs and answer the team's questions.
 
-React 19 + TypeScript, Vite, React Router, TanStack Query, Tailwind CSS 4, react-hook-form + Zod. Mock data only; there is no backend.
+React 19 + TypeScript, Vite, React Router, TanStack Query, Tailwind CSS 4, react-hook-form + Zod. By default it runs on mock data in the browser (mock mode); it can also run against the real backend in `../backend` (API mode).
 
 ```bash
 cd app
 npm install
-npm run dev        # http://localhost:5173
+npm run dev        # http://localhost:5173, mock mode
 npm run build      # typecheck + production build
+npm test           # unit tests (Vitest)
 ```
+
+## API mode (real backend)
+
+Start the backend in safe mode, then the app against it:
+
+```bash
+cd backend && npm run dev:redesign   # http://localhost:3101, Demo DB; no email, Slack, push or cron jobs
+cd app && npm run dev:api            # http://localhost:5200
+```
+
+Sign in with a real Demo DB account. The `VITE_API_URL` variable switches the app into API mode (`src/api/http/config.ts`).
+
+What comes from the backend so far (Phase 1a): sign-in, sign-out, the session (name, role, company) and the people directory. Every other screen still shows the mock data. Also:
+
+- The login page looks the same in both modes. In API mode its sample users are mock accounts, so picking one and signing in is refused.
+- Backend roles map to the app's roles in `src/api/http/mappers.ts`: admin → Super admin, manager and team lead → Project manager, employee → Developer, client → Client admin, representative → Client user, and a custom `devops` role → DevOps engineer.
+- Client users see only themselves in the people directory: the backend does not let client roles list users.
+- Accounts with two-step sign-in (MFA) cannot sign in yet. This must be added before go-live.
+- The access token is renewed in the background. If that fails (expired, or signed out elsewhere), the app signs out and shows the login page.
 
 ## What's on the page
 
