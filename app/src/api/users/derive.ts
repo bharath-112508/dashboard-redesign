@@ -1,4 +1,4 @@
-import type { Company, InternalProject, LeaveRequest, Person, Task, TimeEntry, Workspace } from '../types'
+import type { Company, InternalProject, LeaveRequest, Person, PersonId, Task, TimeEntry, Workspace } from '../types'
 import { addDays, isIso, plural, TODAY } from '../../lib/dates'
 import { taskKey } from '../../domain/tasks'
 import { ANNUAL_ALLOWANCE, DAY_HOURS } from './access'
@@ -108,10 +108,10 @@ export const idleHours = (employees: Person[], entries: TimeEntry[], from: strin
 
 export const leaveDays = (r: Pick<LeaveRequest, 'from' | 'to'>) => weekdaysBetween(r.from, r.to)
 
-export const annualUsed = (leave: LeaveRequest[], userId: number) =>
+export const annualUsed = (leave: LeaveRequest[], userId: PersonId) =>
   leave.filter(r => r.userId === userId && r.type === 'Annual' && r.status === 'Approved').reduce((n, r) => n + leaveDays(r), 0)
 
-export const annualPending = (leave: LeaveRequest[], userId: number) =>
+export const annualPending = (leave: LeaveRequest[], userId: PersonId) =>
   leave.filter(r => r.userId === userId && r.type === 'Annual' && r.status === 'Pending').reduce((n, r) => n + leaveDays(r), 0)
 
-export const annualLeft = (leave: LeaveRequest[], userId: number) => ANNUAL_ALLOWANCE - annualUsed(leave, userId)
+export const annualLeft = (leave: LeaveRequest[], userId: PersonId) => ANNUAL_ALLOWANCE - annualUsed(leave, userId)

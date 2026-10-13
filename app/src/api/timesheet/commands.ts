@@ -1,4 +1,4 @@
-import type { Db, TimeEntry, WeekSubmission } from '../types'
+import type { Db, PersonId, TimeEntry, WeekSubmission } from '../types'
 import type { Resource } from '../commands'
 import { projectOfTask } from './projects'
 
@@ -19,7 +19,7 @@ export type TimeCommand =
   | { type: 'time.log'; entry: TimeEntry }
   | { type: 'time.remove'; id: number }
   | { type: 'week.submit'; submission: WeekSubmission }
-  | { type: 'week.reopen'; userId: number; week: string }
+  | { type: 'week.reopen'; userId: PersonId; week: string }
 
 /** An entry before it has an id. */
 export type NewTimeEntry = Omit<TimeEntry, 'id'> & { id?: number }
@@ -52,7 +52,7 @@ export const assignTimeIds = <C extends { type: string }>(db: Db, cmd: C): C => 
   return { ...c, entry: { ...c.entry, id: next } } as unknown as C
 }
 
-const sameWeek = (s: WeekSubmission, userId: number, week: string) => s.userId === userId && s.week === week
+const sameWeek = (s: WeekSubmission, userId: PersonId, week: string) => s.userId === userId && s.week === week
 
 export const reduceTime = <C extends { type: string }>(db: Db, cmd: C): Db => {
   const c = cmd as unknown as TimeCommand

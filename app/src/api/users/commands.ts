@@ -1,4 +1,4 @@
-import type { Company, Db, InternalProject, LeaveRequest, LeaveStatus, Notification, Person, Role } from '../types'
+import type { Company, Db, InternalProject, LeaveRequest, LeaveStatus, Notification, Person, PersonId, Role } from '../types'
 import type { Resource } from '../commands'
 import { range } from '../../lib/dates'
 import { DEFAULT_PERMS, DEFAULT_DEV_TYPES } from './access'
@@ -6,8 +6,8 @@ import { DEFAULT_PERMS, DEFAULT_DEV_TYPES } from './access'
 /** Writes to people, the permission matrix, developer types and leave. The reducer runs on the cache and on the mock server. */
 export type UsersCommand =
   | { type: 'user.create'; person: Person }
-  | { type: 'user.update'; id: number; patch: Partial<Person> }
-  | { type: 'user.remove'; id: number }
+  | { type: 'user.update'; id: PersonId; patch: Partial<Person> }
+  | { type: 'user.remove'; id: PersonId }
   | { type: 'access.setPerm'; role: Role; perm: string; on: boolean }
   | { type: 'access.addDevType'; name: string }
   | { type: 'leave.create'; request: LeaveRequest }
@@ -41,14 +41,16 @@ export const touchesUsers = (cmd: { type: string }): Resource[] => {
 export const accessOf = (db: Db): Db['access'] => db.access ?? { perms: DEFAULT_PERMS, devTypes: DEFAULT_DEV_TYPES }
 
 const nextId = (ids: number[]) => Math.max(0, ...ids) + 1
+/** A free person id for the mock: one past the largest numeric id. */
+const nextPersonId = (ids: PersonId[]): PersonId => String(nextId(ids.map(Number).filter(Number.isFinite)))
 
-const withoutKey = (rec: Record<number, unknown>, id: number) => {
+const withoutKey = (rec: Record<PersonId, unknown>, id: PersonId) => {
   const copy = { ...rec }
   delete copy[id]
   return copy
 }
 
-const clearPerson = (companies: Company[], internal: InternalProject[], id: number) => ({
+const clearPerson = (companies: Company[], internal: InternalProject[], id: PersonId) => ({
   companies: companies.map(c => ({
     ...c,
     ourRoles: withoutKey(c.ourRoles, id) as Company['ourRoles'],
@@ -64,7 +66,7 @@ export const reduceUsers = (db: Db, c: { type: string }): Db => {
     case 'user.create': {
       const emailTaken = db.people.some(p => p.email.toLowerCase() === cmd.person.email.toLowerCase())
       if (emailTaken) return db
-      const id = db.people.some(p => p.id === cmd.person.id) ? nextId(db.people.map(p => p.id)) : cmd.person.id
+      const id = db.people.some(p => p.id === cmd.person.id) ? nextPersonId(db.people.map(p => p.id)) : cmd.person.id
       return { ...db, people: [...db.people, { ...cmd.person, id }] }
     }
     case 'user.update':

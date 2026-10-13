@@ -20,7 +20,7 @@ type Modal =
   | { kind: 'edit'; focus?: 'web' }
   | { kind: 'archive' }
   | { kind: 'contact'; index: number | null }
-  | { kind: 'responsible'; personId: number | null }
+  | { kind: 'responsible'; personId: string | null }
   | { kind: 'project' }
 
 type ProjectFilter = 'all' | 'ongoing' | 'done'
@@ -57,7 +57,7 @@ export function CompanyDetailPage() {
   const state = companyState(c)
   const stats = companyStats(c)
   const vtPeople = people.filter(p => p.org === 'vt' && p.active)
-  const responsible = Object.keys(c.ourRoles).map(Number)
+  const responsible = Object.keys(c.ourRoles)
   const visibleProjects = sortProjects(c.projects).filter(p => pf === 'all' || (pf === 'done' ? p.state === 'done' : p.state !== 'done'))
   const timesheetsHref = `/timesheet?company=${encodeURIComponent(c.id)}&name=${encodeURIComponent(c.name)}&projects=${encodeURIComponent(c.projects.map(p => p.id).join(','))}`
 

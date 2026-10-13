@@ -41,9 +41,9 @@ export function TimesheetsTab() {
   if (!ws) return <p className="text-[14px] text-slate">Loading time…</p>
 
   const [from, to] = RANGES.find(r => r.id === rangeKey)!.span()
-  const byId = new Map<number, Person>(people.map(p => [p.id, p]))
-  const personOk = (userId: number) =>
-    (user === 'all' || userId === Number(user)) && (role === 'all' || byId.get(userId)?.role === role)
+  const byId = new Map<string, Person>(people.map(p => [p.id, p]))
+  const personOk = (userId: string) =>
+    (user === 'all' || userId === user) && (role === 'all' || byId.get(userId)?.role === role)
 
   const inRange = entries.filter(e => e.date >= from && e.date <= to)
   const base = inRange.filter(e => personOk(e.userId) && (billable === 'all' || (billable === 'bill' ? e.bill > 0 : e.non > 0)))

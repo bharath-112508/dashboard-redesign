@@ -69,9 +69,38 @@ const isDb = (v: unknown): v is Db => {
  * Everything else is kept, so nobody loses their tickets on upgrade.
  */
 const migrate = (v: unknown): unknown => {
-  if (isObj(v) && v.version === 2) return migrate3(upgrade2(v))
-  if (isObj(v) && (v.version === 3 || v.version === DB_VERSION)) return migrate3(v)
+  if (isObj(v) && v.version === 2) return stringPersonIds(migrate3(upgrade2(v)))
+  if (isObj(v) && (v.version === 3 || v.version === 4 || v.version === DB_VERSION)) return stringPersonIds(migrate3(v))
   return v
+}
+
+/**
+ * Version 5: person ids are strings, as the backend's are. Converts every
+ * stored person reference; ids that are already strings are left alone, so it
+ * is safe to run on every load.
+ */
+export const stringPersonIds = (v: unknown): unknown => {
+  if (!isObj(v)) return v
+  const s = (x: unknown) => (typeof x === 'number' ? String(x) : x)
+  const each = (list: unknown, fn: (o: Record<string, unknown>) => Record<string, unknown>) =>
+    Array.isArray(list) ? list.map(o => (isObj(o) ? fn(o) : o)) : list
+  const withUser = (o: Record<string, unknown>) => ({ ...o, userId: s(o.userId) })
+  const withTeam = (o: Record<string, unknown>) => (Array.isArray(o.team) ? { ...o, team: o.team.map(s) } : o)
+  return {
+    ...v,
+    version: DB_VERSION,
+    people: each(v.people, p => ({ ...p, id: s(p.id) })),
+    entries: each(v.entries, withUser),
+    weekSubmissions: each(v.weekSubmissions, withUser),
+    leave: each(v.leave, withUser),
+    notifications: each(v.notifications, withUser),
+    internalProjects: each(v.internalProjects, withTeam),
+    companies: each(v.companies, c => ({
+      ...c,
+      contacts: each(c.contacts, k => ({ ...k, personId: s(k.personId) })),
+      projects: each(c.projects, withTeam),
+    })),
+  }
 }
 
 /**

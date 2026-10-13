@@ -1,5 +1,5 @@
 import type { DevopsDb } from '../devops/types'
-import type { Company, DevopsRequest, Person, Priority, Question, Role, Session, Task, TaskType, TimeEntry, Workspace } from '../types'
+import type { Company, DevopsRequest, Person, PersonId, Priority, Question, Role, Session, Task, TaskType, TimeEntry, Workspace } from '../types'
 import { activeSprint, assigneesOf, estimateHours, loggedHours, statusOf, taskKey } from '../../domain/tasks'
 import { addDays, diff, short } from '../../lib/dates'
 import { isClientRole } from '../session/access'
@@ -225,7 +225,7 @@ const datesBetween = (a: string, b: string): string[] => {
  * day hours not logged by each person in `idlePeople` on weekdays up to today;
  * the caller leaves freelancers out of that list.
  */
-const barsFor = (entries: TimeEntry[], idlePeople: { id: number }[], week: string[], today: string, withIdle: boolean): BarDay[] =>
+const barsFor = (entries: TimeEntry[], idlePeople: { id: PersonId }[], week: string[], today: string, withIdle: boolean): BarDay[] =>
   week.map((date, i): BarDay => {
     const day = entries.filter(e => e.date === date)
     let idle = 0

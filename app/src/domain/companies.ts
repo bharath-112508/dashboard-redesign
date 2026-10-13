@@ -1,4 +1,4 @@
-import type { Company } from '../api/types'
+import type { Company, PersonId } from '../api/types'
 import { isOverdue } from './projects'
 
 export type CompanyStateLabel = 'Active' | 'New' | 'No active work' | 'Archived'
@@ -22,11 +22,11 @@ export interface CompanyStats {
   /** Average progress of all projects, or null when there are none. */
   avgPct: number | null
   /** Directory ids of people on any project of the company. */
-  people: number[]
+  people: PersonId[]
 }
 
 export const companyStats = (c: Company): CompanyStats => {
-  const people = new Set<number>()
+  const people = new Set<PersonId>()
   c.projects.forEach(p => p.team.forEach(id => people.add(id)))
   return {
     active: c.projects.filter(p => p.state === 'active').length,

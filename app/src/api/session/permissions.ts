@@ -1,5 +1,5 @@
 import type { Command } from '../commands'
-import type { Db, Session, Task } from '../types'
+import type { Db, PersonId, Session, Task } from '../types'
 import { buildScope, scopeQuestions } from '../../domain/scope'
 import { isClientRole } from './access'
 
@@ -43,7 +43,7 @@ const clientRefusal = (db: Db, cmd: Command, actor: Actor): string | null => {
   }
   const ownQuestion = (id: number) => scopeQuestions(db.questions ?? [], tasks, scope).some(q => q.id === id)
   const admin = actor.role === 'cadmin'
-  const ownPerson = (id: number) => (db.people ?? []).find(p => p.id === id)?.org === actor.orgId
+  const ownPerson = (id: PersonId) => (db.people ?? []).find(p => p.id === id)?.org === actor.orgId
   const no = (what: string) => `Clients cannot ${what}.`
 
   switch (cmd.type) {

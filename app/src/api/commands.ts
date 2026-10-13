@@ -1,5 +1,5 @@
 import { nextTaskId } from '../domain/tasks'
-import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, Question, RequestComment, Sprint, Task } from './types'
+import type { ChatMessage, Db, DevopsRequest, Epic, NotifPrefs, Person, PersonId, Question, RequestComment, Sprint, Task } from './types'
 import { reduceTickets, touchesTickets, type TicketsCommand } from './tickets/commands'
 import { reduceDevops, touchesDevops, type DevopsCommand } from './devops/commands'
 import { reduceCompanies, touchesCompanies, type CompaniesCommand } from './companies/commands'
@@ -39,7 +39,7 @@ export type Command =
   | { type: 'epic.create'; epic: Epic }
   | { type: 'epic.update'; id: string; patch: Partial<Epic> }
   /** Saves the signed-in user's own details in the directory. The session is written by the caller. */
-  | { type: 'profile.update'; id: number; patch: ProfilePatch }
+  | { type: 'profile.update'; id: PersonId; patch: ProfilePatch }
   | { type: 'batch'; cmds: Command[] }
   | TicketsCommand
   | DevopsCommand

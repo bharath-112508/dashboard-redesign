@@ -112,7 +112,7 @@ function CompanyCard({ company: c, people }: { company: Company; people: Person[
   const state = companyState(c)
   const stats = companyStats(c)
   const style = STATE_STYLE[state]
-  const responsible = Object.keys(c.ourRoles).map(Number)
+  const responsible = Object.keys(c.ourRoles)
   const top = c.projects.slice(0, 3)
   const [bg] = pal(c.p)
   return (

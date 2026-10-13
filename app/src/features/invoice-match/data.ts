@@ -44,7 +44,7 @@ export const IM_PROJECT: ClientProject = {
   pct: 100,
   start: '2026-08-03',
   due: '2026-09-28',
-  team: [1, 3, 2],
+  team: ['1', '3', '2'],
   epics: [
     { id: 'im1', name: 'Matching engine', state: 'done', pct: 100, sprints: 2 },
     { id: 'im2', name: 'Review & reports', state: 'done', pct: 100, sprints: 2 },

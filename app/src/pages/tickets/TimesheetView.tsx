@@ -85,9 +85,9 @@ export function TimesheetView() {
   const rangeOk = (d: string) =>
     rangeF === 'all' || (rangeF === 'week' ? diff(TODAY, d) < 7 && diff(TODAY, d) >= 0 : d.slice(0, 7) === TODAY.slice(0, 7))
   /** The person picked in the filter, by directory id ('' for everyone). */
-  const pickedName = userF ? (people.find(p => p.id === +userF)?.name ?? '') : ''
-  const nameOf = (id: number, fallback: string) => people.find(p => p.id === id)?.name ?? fallback
-  const userOkId = (id: number) => !userF || id === +userF
+  const pickedName = userF ? (people.find(p => p.id === userF)?.name ?? '') : ''
+  const nameOf = (id: string, fallback: string) => people.find(p => p.id === id)?.name ?? fallback
+  const userOkId = (id: string) => !userF || id === userF
   const userOkName = (n: string) => !userF || n === pickedName
 
   const rows: Row[] = [
@@ -165,7 +165,7 @@ export function TimesheetView() {
   const onSave = (f: Form) => {
     const bill = +(f.bill || 0) || 0
     const non = +(f.non || 0) || 0
-    const pid = +f.user
+    const pid = f.user
     const pname = nameOf(pid, '')
     if (f.task.startsWith('r')) {
       const r = requests.find(x => x.id === +f.task.slice(1))

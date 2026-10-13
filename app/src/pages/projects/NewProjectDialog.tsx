@@ -22,7 +22,7 @@ const schema = z
     desc: z.string(),
     start: z.string(),
     due: z.string(),
-    team: z.array(z.number()),
+    team: z.array(z.string()),
   })
   .superRefine((v, ctx) => {
     if (v.kind === 'client' && !v.companyId) ctx.addIssue({ code: 'custom', path: ['companyId'], message: 'Choose a company' })
@@ -76,7 +76,7 @@ export function NewProjectDialog({
   const team = form.watch('team')
   const message = saveError ?? errors.name?.message ?? errors.companyId?.message ?? errors.area?.message ?? ''
 
-  const toggleTeam = (id: number) => {
+  const toggleTeam = (id: string) => {
     const cur = form.getValues('team')
     form.setValue('team', cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id], { shouldDirty: true })
   }

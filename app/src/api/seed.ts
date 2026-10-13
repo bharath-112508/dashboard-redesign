@@ -1,6 +1,6 @@
 import { addDays, TODAY } from '../lib/dates'
 import { createDevopsSeed } from './devops/seed'
-import type { Activity, ChatMessage, Db, Epic, Sprint, Task, TimeEntry } from './types'
+import type { Activity, ChatMessage, Db, Epic, PersonId, Sprint, Task, TimeEntry } from './types'
 import { PEOPLE_SEED } from './people/seed'
 import { COMPANIES_SEED } from './companies/seed'
 import { INTERNAL_PROJECTS_SEED } from './projects/seed'
@@ -189,7 +189,7 @@ const buildTasks = (sprints: Sprint[]): Task[] => {
 }
 
 /** The directory id of a person, by display name (seed data only). */
-export const personIdByName = (name: string): number => PEOPLE_SEED.find(p => p.name === name)?.id ?? 0
+export const personIdByName = (name: string): PersonId => PEOPLE_SEED.find(p => p.name === name)?.id ?? ''
 
 const ENTRIES: TimeEntry[] = (
   [
@@ -244,7 +244,7 @@ const ALL_ENTRIES: TimeEntry[] = [
   })),
 ]
 
-export const DB_VERSION = 4
+export const DB_VERSION = 5
 
 export const createSeed = (): Db => {
   const sprints = buildSprints()

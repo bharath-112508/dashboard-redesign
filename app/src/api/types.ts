@@ -130,7 +130,7 @@ export interface Task {
 export interface TimeEntry {
   id: number
   date: string
-  userId: number
+  userId: PersonId
   user: string
   type: string
   /** Ticket id, or null for a text entry (then `area` is set). */
@@ -150,7 +150,7 @@ export interface TimeEntry {
 
 /** A week (Monday's ISO date) that a person has submitted. Present means locked. */
 export interface WeekSubmission {
-  userId: number
+  userId: PersonId
   /** Monday of the week, 'YYYY-MM-DD'. */
   week: string
   /** Display time of the submit, e.g. '12 Oct 2026, 14:05'. */
@@ -174,8 +174,11 @@ export interface NotifPrefs {
  * A person in the directory. This is the one record for a person's name,
  * role, colour and photo; everything else refers to people by `id`.
  */
+/** A person's id: the backend's user id. */
+export type PersonId = string
+
 export interface Person {
-  id: number
+  id: PersonId
   name: string
   email: string
   /** 'vt' for Viljetech staff, otherwise the id of the client company. */
@@ -202,7 +205,7 @@ export interface Person {
 
 /** The signed-in user. Stored per browser in localStorage under `vt.session`. */
 export interface Session {
-  personId: number
+  personId: PersonId
   name: string
   email: string
   role: Role
@@ -220,7 +223,7 @@ export type CompanyRole = 'Super admin' | 'Admin' | 'Developer' | 'Viewer'
 
 export interface CompanyContact {
   /** The directory person this contact is, when there is one. */
-  personId: number | null
+  personId: PersonId | null
   name: string
   role: string
   email: string
@@ -255,7 +258,7 @@ export interface ClientProject {
   due: string
   start?: string
   /** Directory person ids. */
-  team: number[]
+  team: PersonId[]
   epics: EpicSummary[]
   /** Support agreement, for projects in Maintenance. */
   sup?: SupportPlan
@@ -275,7 +278,7 @@ export interface Company {
   contacts: CompanyContact[]
   projects: ClientProject[]
   /** Company role per directory person id. */
-  ourRoles: Record<number, CompanyRole>
+  ourRoles: Record<PersonId, CompanyRole>
   archived: boolean
   archivedAt: string | null
 }
@@ -290,7 +293,7 @@ export interface InternalProject {
   start?: string
   due: string
   /** Directory person ids. */
-  team: number[]
+  team: PersonId[]
 }
 
 export interface Question {
@@ -392,7 +395,7 @@ export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected'
 export interface LeaveRequest {
   id: number
   /** Directory person id. */
-  userId: number
+  userId: PersonId
   type: LeaveType
   /** ISO dates, both inclusive. */
   from: string
@@ -406,7 +409,7 @@ export interface LeaveRequest {
 /** A note recorded for one person, such as the outcome of their leave request. */
 export interface Notification {
   id: number
-  userId: number
+  userId: PersonId
   kind: 'leave'
   text: string
   when: string

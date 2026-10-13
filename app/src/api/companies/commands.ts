@@ -1,4 +1,4 @@
-import type { ClientProject, Company, CompanyContact, CompanyRole, Db, ProjectState } from '../types'
+import type { ClientProject, Company, CompanyContact, CompanyRole, Db, PersonId, ProjectState } from '../types'
 import type { Resource } from '../commands'
 
 /**
@@ -27,9 +27,9 @@ export type CompaniesCommand =
   | { type: 'company.contact.save'; companyId: string; index: number | null; contact: CompanyContact }
   | { type: 'company.contact.remove'; companyId: string; index: number }
   /** Sets a responsible person's role and the company projects they are on. */
-  | { type: 'company.responsible.save'; companyId: string; personId: number; role: CompanyRole; projects: string[] }
+  | { type: 'company.responsible.save'; companyId: string; personId: PersonId; role: CompanyRole; projects: string[] }
   /** Removes the responsibility, the role and the membership in every project of the company. */
-  | { type: 'company.responsible.remove'; companyId: string; personId: number }
+  | { type: 'company.responsible.remove'; companyId: string; personId: PersonId }
   | { type: 'company.project.create'; companyId: string; project: ClientProject }
   /** Moves a client project between Planned, Active, On hold, Maintenance and Completed. Internal projects use project.internal.setState. */
   | { type: 'project.client.setState'; companyId: string; id: string; state: ProjectState }

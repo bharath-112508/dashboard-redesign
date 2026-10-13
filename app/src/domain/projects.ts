@@ -1,4 +1,4 @@
-import type { Company, CompanyRole, InternalProject, ProjectRef, ProjectState, SupportPlan } from '../api/types'
+import type { Company, CompanyRole, InternalProject, PersonId, ProjectRef, ProjectState, SupportPlan } from '../api/types'
 import { TODAY, diff, short } from '../lib/dates'
 
 export const STATE_LABEL: Record<ProjectState, string> = { planned: 'Planned', active: 'Active', hold: 'On hold', maint: 'Maintenance', done: 'Completed' }
@@ -29,7 +29,7 @@ export interface ProjectItem {
   pct: number
   start: string
   due: string
-  team: number[]
+  team: PersonId[]
   kind: 'client' | 'internal'
   companyId: string | null
   /** The client company's name, or '' for internal projects. */

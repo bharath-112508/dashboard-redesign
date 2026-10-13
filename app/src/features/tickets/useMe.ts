@@ -6,7 +6,7 @@ import { person as greyPerson, type Person as Avatar } from '../../lib/theme'
 
 /** The signed-in person: directory id and display name. */
 export interface Me {
-  id: number
+  id: string
   name: string
 }
 
@@ -18,7 +18,7 @@ export interface Me {
 export const useMe = (): Me => {
   const session = useSession()
   const people = usePeople().data ?? []
-  const id = session?.personId ?? 0
+  const id = session?.personId ?? ''
   return { id, name: people.find(p => p.id === id)?.name ?? session?.name ?? '' }
 }
 

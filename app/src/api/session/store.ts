@@ -13,7 +13,7 @@ const CHANGED = 'vt-session-changed'
 const isSession = (v: unknown): v is Session => {
   if (!v || typeof v !== 'object') return false
   const s = v as Record<string, unknown>
-  return typeof s.personId === 'number' && typeof s.name === 'string' && typeof s.role === 'string' && s.role in ROLE_LABEL
+  return typeof s.personId === 'string' && s.personId !== '' && typeof s.name === 'string' && typeof s.role === 'string' && s.role in ROLE_LABEL
 }
 
 const readRaw = (): string | null => {

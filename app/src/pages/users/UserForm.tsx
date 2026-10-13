@@ -48,7 +48,8 @@ interface Values {
   active: boolean
 }
 
-const nextPersonId = (people: Person[]) => Math.max(0, ...people.map(p => p.id)) + 1
+/** A free person id for the mock: one past the largest numeric id. */
+const nextPersonId = (people: Person[]) => String(Math.max(0, ...people.map(p => Number(p.id)).filter(Number.isFinite)) + 1)
 
 /** Add or edit a person. A new person is always Invited: nothing is sent and they cannot sign in until an admin activates them. */
 export function UserForm({ person, scope, session, people, companies, internal, devTypes, onClose }: Props) {
@@ -184,7 +185,7 @@ export function UserForm({ person, scope, session, people, companies, internal, 
           person: {
             ...shared,
             id,
-            colour: isClient ? CLIENT_PERSON_COLOUR : NEW_PERSON_COLOURS[id % NEW_PERSON_COLOURS.length],
+            colour: isClient ? CLIENT_PERSON_COLOUR : NEW_PERSON_COLOURS[Number(id) % NEW_PERSON_COLOURS.length],
             active: false,
             invited: true,
             last: 'Invited',

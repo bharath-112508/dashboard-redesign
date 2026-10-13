@@ -52,7 +52,7 @@ export function ProfilePage({ base }: Props) {
   if (!people || !entries || !tasks || !ws) return <p className="px-7 py-10 text-[14px] text-slate">Loading…</p>
 
   const backHref = base === 'users' ? '/users' : '/employee-timesheets?tab=users'
-  const person = people.find(p => p.id === Number(id))
+  const person = people.find(p => p.id === id)
   if (!person) {
     return (
       <main className="px-7 pb-14 pt-6">
@@ -144,7 +144,7 @@ function WeekCard({
   tasks,
   ws,
 }: {
-  personId: number
+  personId: string
   person: Person
   entries: TimeEntry[]
   tasks: Task[]

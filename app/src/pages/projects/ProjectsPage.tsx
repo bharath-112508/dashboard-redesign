@@ -222,9 +222,9 @@ export function ProjectsPage() {
   )
 }
 
-function ProjectCard({ item: p, people, onMove }: { item: ProjectItem; people: { id: number; name: string; colour: string }[]; onMove: (state: ProjectState) => void }) {
+function ProjectCard({ item: p, people, onMove }: { item: ProjectItem; people: { id: string; name: string; colour: string }[]; onMove: (state: ProjectState) => void }) {
   const due = dueLabel(p.due, p.state, p.sup)
-  const team = p.team.map(id => people.find(x => x.id === id)).filter((x): x is { id: number; name: string; colour: string } => !!x)
+  const team = p.team.map(id => people.find(x => x.id === id)).filter((x): x is { id: string; name: string; colour: string } => !!x)
   return (
     <article
       draggable
@@ -285,7 +285,7 @@ function ProjectCard({ item: p, people, onMove }: { item: ProjectItem; people: {
   )
 }
 
-function ProjectList({ items, people }: { items: ProjectItem[]; people: { id: number; name: string; colour: string }[] }) {
+function ProjectList({ items, people }: { items: ProjectItem[]; people: { id: string; name: string; colour: string }[] }) {
   if (items.length === 0) return null
   return (
     <div className="mt-5 overflow-x-auto rounded-2xl border-[1.5px] border-line bg-white">
@@ -322,7 +322,7 @@ function ProjectList({ items, people }: { items: ProjectItem[]; people: { id: nu
                   <div className="flex -space-x-1.5">
                     {p.team
                       .map(id => people.find(x => x.id === id))
-                      .filter((x): x is { id: number; name: string; colour: string } => !!x)
+                      .filter((x): x is { id: string; name: string; colour: string } => !!x)
                       .map(t => (
                         <PersonDot key={t.id} name={t.name} colour={t.colour} size={22} />
                       ))}

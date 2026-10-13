@@ -29,16 +29,16 @@ export function ResponsibleDialog({
   /** Active Viljetech people, the only ones who can be added. */
   people: Person[]
   /** The person being edited, or null when adding. */
-  personId: number | null
+  personId: string | null
   onClose: () => void
 }) {
   const send = useSendAsync()
-  const [picked, setPicked] = useState<number | null>(personId)
+  const [picked, setPicked] = useState<string | null>(personId)
   const [pickError, setPickError] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const current = personId !== null ? people.find(p => p.id === personId) : undefined
   const editing = personId !== null
-  const taken = (id: number) => !editing && company.ourRoles[id] !== undefined
+  const taken = (id: string) => !editing && company.ourRoles[id] !== undefined
 
   const form = useForm<Form>({
     resolver: zodResolver(schema),

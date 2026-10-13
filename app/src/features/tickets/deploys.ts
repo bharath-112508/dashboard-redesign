@@ -54,19 +54,19 @@ const mark = (kind: keyof Marks, id: string, v: string) => {
 
 export const useDeployState = () => useSyncExternalStore(subscribe, () => state)
 
-const markId = (me: number, key: string) => me + ':' + key
+const markId = (me: string, key: string) => me + ':' + key
 
 /** The newest release, or null when the project has none. */
 export const latestRelease = (p?: DvProject | null): DvRelease | null => p?.deploys?.rel[0] ?? null
 
 /** True when the newest release of the project is one this person hasn't seen yet. */
-export const isUnseen = (marks: Marks, me: number, p?: DvProject | null) => {
+export const isUnseen = (marks: Marks, me: string, p?: DvProject | null) => {
   const r = latestRelease(p)
   return !!r && !!p && marks.seen[markId(me, p.key)] !== r.v
 }
 
 /** True when the toast for the newest release hasn't been shown to this person yet. */
-export const needsToast = (marks: Marks, me: number, p?: DvProject | null) => {
+export const needsToast = (marks: Marks, me: string, p?: DvProject | null) => {
   const r = latestRelease(p)
   return !!r && !!p && r.st === 'Live' && isUnseen(marks, me, p) && marks.toasted[markId(me, p.key)] !== r.v
 }
@@ -75,12 +75,12 @@ export const deploys = {
   setPanel: (open: boolean, tab?: 'status' | 'req') => emit({ panel: { open, tab: tab ?? state.panel.tab } }),
   setTab: (tab: 'status' | 'req') => emit({ panel: { ...state.panel, tab } }),
   /** Marks the project's newest release as seen and hides its toast. */
-  seen: (me: number, p?: DvProject | null) => {
+  seen: (me: string, p?: DvProject | null) => {
     const r = latestRelease(p)
     if (p && r && state.marks.seen[markId(me, p.key)] !== r.v) mark('seen', markId(me, p.key), r.v)
     if (state.toast) emit({ toast: null })
   },
-  showToast: (me: number, p: DvProject) => {
+  showToast: (me: string, p: DvProject) => {
     const r = latestRelease(p)
     if (!r) return
     mark('toasted', markId(me, p.key), r.v)
