@@ -61,13 +61,20 @@ export const liveProjects = async () => (await allPages<BackendProject>('/projec
 // ponytail: one request per project (epics) and per company (contacts), refetched after any write that touches
 // companies (queries.ts refetchKeysAfter). Fine at Demo DB size; at production size add one backend endpoint that
 // returns companies with their projects, epic summaries and contacts.
+/** GET /board/companies: each company project's epics and each listable company's contacts. */
+type CompanyDetails = { stories: Record<string, BackendStory[]>; contacts: Record<string, BackendRepresentative[]> }
+
 export const fetchCompanies = async (session: Session | null): Promise<Company[]> => {
   if (!session) return []
   const clientUser = session.role === 'cuser'
   // Every company project's epics and every listable company's contacts come in one request.
   const [all, details, companies] = await Promise.all([
     liveProjects(),
-    api.get<{ stories: Record<string, BackendStory[]>; contacts: Record<string, BackendRepresentative[]> }>('/board/companies'),
+    // If the details can't be read, companies are shown without epics and contacts rather than not at all.
+    api.get<CompanyDetails>('/board/companies').catch((err): CompanyDetails => {
+      console.warn('Could not read company details', err)
+      return { stories: {}, contacts: {} }
+    }),
     clientUser
       ? Promise.resolve<BackendCompany[]>(session.orgId ? [{ id: session.orgId, name: session.org, status: 'active' }] : [])
       : allPages<BackendCompany>('/companies'),

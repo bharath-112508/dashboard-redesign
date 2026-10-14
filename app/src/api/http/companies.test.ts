@@ -121,6 +121,15 @@ describe('fetchCompanies', () => {
     expect(await fetchCompanies(staff)).toHaveLength(101)
   })
 
+  it('shows the companies without epics and contacts when their details cannot be read', async () => {
+    get.mockImplementation(async (path: string) => {
+      if (path === '/board/companies') throw new Error('down')
+      return ({ '/companies?limit=100&page=1': [{ id: 'c1', name: 'Aurora Foods AB', status: 'active' }], '/projects?limit=100&page=1': [project('p1', 'c1')] } as Record<string, unknown>)[path]
+    })
+    const companies = await fetchCompanies(staff)
+    expect(companies.map(c => [c.id, c.projects.map(p => [p.id, p.epics.length]), c.contacts.length])).toEqual([['c1', [['p1', 0]], 0]])
+  })
+
   it("lists a client admin's contacts only for their own company", async () => {
     serve({
       '/companies?limit=100&page=1': [{ id: 'c1', name: 'Aurora Foods AB', status: 'active' }],

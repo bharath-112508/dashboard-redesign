@@ -234,6 +234,21 @@ export const authenticate = async (req: Request, _res: Response, next: NextFunct
 };
 
 /**
+ * Whether the caller holds any one of these permissions (the rule `requirePermission`
+ * applies), for a handler that decides part of its answer by permission.
+ */
+export const holdsPermission = (user: BaseJWTPayload, ...permissions: Permission[]): boolean => {
+    const held = user.permissions ?? [];
+    // Wildcard fast-path. The seeded Admin role's sole permission
+    // is `system.admin`; we accept it via either the resolved
+    // permission set OR the legacy `role: 'admin'` claim so a
+    // pre-Step-47 admin token still works during the migration
+    // window.
+    if (held.includes(PERMISSIONS.SYSTEM_ADMIN) || isCallerAdmin(user)) return true;
+    return permissions.some((perm) => held.includes(perm));
+};
+
+/**
  * Step 47 — RBAC permission gate.
  *
  * Replaces `authorize(...)` for role-based gates. Caller is allowed
@@ -256,21 +271,6 @@ export const authenticate = async (req: Request, _res: Response, next: NextFunct
  * everyone with any non-empty perms). Throw at module-load via the
  * factory rather than per-request to surface the typo immediately.
  */
-/**
- * Whether the caller holds any one of these permissions (the rule `requirePermission`
- * applies), for a handler that decides part of its answer by permission.
- */
-export const holdsPermission = (user: BaseJWTPayload, ...permissions: Permission[]): boolean => {
-    const held = user.permissions ?? [];
-    // Wildcard fast-path. The seeded Admin role's sole permission
-    // is `system.admin`; we accept it via either the resolved
-    // permission set OR the legacy `role: 'admin'` claim so a
-    // pre-Step-47 admin token still works during the migration
-    // window.
-    if (held.includes(PERMISSIONS.SYSTEM_ADMIN) || isCallerAdmin(user)) return true;
-    return permissions.some((perm) => held.includes(perm));
-};
-
 export const requirePermission = (...requiredPermissions: Permission[]) => {
     if (requiredPermissions.length === 0) {
         throw new Error('requirePermission() called with no permissions — at least one required');

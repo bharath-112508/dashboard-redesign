@@ -30,8 +30,8 @@ const everyPage = async <T>(read: (page: number) => Promise<{ data: T[] }>): Pro
     }
 };
 
-/** A few at a time, so a large workspace does not open hundreds of queries at once. */
-const inBatches = async <T, R>(items: T[], fn: (item: T) => Promise<R>, size = 10): Promise<R[]> => {
+/** A few at a time (each project reads five lists), so one load uses a small share of the connection pool. */
+const inBatches = async <T, R>(items: T[], fn: (item: T) => Promise<R>, size = 4): Promise<R[]> => {
     const out: R[] = [];
     for (let i = 0; i < items.length; i += size) out.push(...(await Promise.all(items.slice(i, i + size).map(fn))));
     return out;

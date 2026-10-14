@@ -128,8 +128,16 @@ export const projectsToSave = (picked: string[], allowed: string[], listLoaded: 
  * Whether the user form offers "All projects". In API mode it is only true for the roles the
  * backend shows every project to (super admin, a new project manager, who is created as a
  * manager) or every company project to (client admin); anyone else sees only the projects
- * they are added to. `current`: the person's projects as the list shows them.
+ * they are added to. `current`, `currentRole`: the person as the list shows them.
  */
-export const offersAllProjects = (role: Role, api: boolean, current?: Person['projects']) =>
-  // An existing project manager may be a team lead on the server, who sees only their projects.
-  !api || role === 'super' || role === 'cadmin' || (role === 'pm' && (current === undefined || current === 'all'))
+export const offersAllProjects = (role: Role, api: boolean, current?: Person['projects'], currentRole?: Role) =>
+  // Someone already a project manager may be a team lead on the server, who sees only their
+  // projects; anyone made a project manager becomes a manager, who sees them all.
+  !api || role === 'super' || role === 'cadmin' || (role === 'pm' && (currentRole !== 'pm' || current === 'all'))
+
+/**
+ * What the form saves: 'all', or the projects ticked. When "All projects" no longer applies
+ * (e.g. a manager made a developer) and nothing is ticked, 'all' keeps their projects as they are.
+ */
+export const accessToSave = (access: 'all' | 'pick', picked: string[], offersAll: boolean): 'all' | 'pick' =>
+  access === 'all' && (offersAll || picked.length === 0) ? 'all' : 'pick'
