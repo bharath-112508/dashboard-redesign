@@ -18,6 +18,7 @@ import sprintRoutes, { customStatusRouter } from './sprint.routes.js';
 import storyRoutes from './story.routes.js';
 import appAccessRoutes from './app-access.routes.js';
 import devopsRoutes from './devops.routes.js';
+import invoicematchRoutes from './invoicematch.routes.js';
 import { devopsRequestRoutes, questionRoutes } from './client-question.routes.js';
 import taskRoutes from './task.routes.js';
 import { commentsRouter, taskCommentsNestedRouter } from './task-comment.routes.js';
@@ -66,6 +67,7 @@ appRoutes.use('/app-access', appAccessRoutes);
 appRoutes.use('/devops', devopsRoutes);
 appRoutes.use('/questions', questionRoutes);
 appRoutes.use('/devops-requests', devopsRequestRoutes);
+appRoutes.use('/invoicematch', invoicematchRoutes);
 // Single-office setup: the directory is gated off and the office's geofence
 // lives on `SystemSettings.attendance.geofence` instead. Attendance check-in
 // is unaffected — see `requireOfficeLocations`.
