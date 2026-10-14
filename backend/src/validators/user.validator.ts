@@ -255,7 +255,8 @@ const internalProfilePatchSchema = internalProfileCreateSchema.partial().extend(
 });
 // An update never moves a client contact to another company: that would leave them on the old
 // company's project rosters. The company is set once, when the contact is created.
-const clientProfilePatchSchema = clientProfileCreateSchema.omit({ company_id: true }).partial();
+// Strict: a company_id is refused, not dropped (someone cannot be moved between companies).
+const clientProfilePatchSchema = clientProfileCreateSchema.omit({ company_id: true }).partial().strict();
 
 export const updateUserBodySchema = z
     .object({

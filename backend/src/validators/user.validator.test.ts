@@ -391,10 +391,6 @@ describe('updateUserBodySchema — client contact title', () => {
 });
 
 describe('updateUserBodySchema — a client contact cannot be moved to another company', () => {
-    it('drops client_profile.company_id from an update', () => {
-        const r = updateUserBodySchema.safeParse({ client_profile: { company_id: '665f1c2e9b1d8a0012ab34cd', title: 'CTO' } });
-        expect(r.success && r.data.client_profile).toEqual({ title: 'CTO' });
-    });
 });
 
 describe('updateUserBodySchema — email', () => {
@@ -417,5 +413,12 @@ describe('developer type (redesign)', () => {
     it('can be cleared', () => {
         const u = updateUserBodySchema.safeParse({ internal_profile: { dev_type: null } });
         expect(u.success).toBe(true);
+    });
+});
+
+describe('updateUserBodySchema — client_profile', () => {
+    it("refuses a company_id instead of silently ignoring it (a person can't be moved between companies)", () => {
+        expect(updateUserBodySchema.safeParse({ client_profile: { title: 'CTO' } }).success).toBe(true);
+        expect(updateUserBodySchema.safeParse({ client_profile: { company_id: 'a'.repeat(24) } }).success).toBe(false);
     });
 });
