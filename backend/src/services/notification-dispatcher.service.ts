@@ -437,19 +437,20 @@ export interface LeaveDispatchInput {
 export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<void> => {
     const context = 'notify.leave_submitted';
     try {
-        const [requester, reviewers] = await Promise.all([
+        const [requester, allReviewers] = await Promise.all([
             findUserById(input.requester_id),
             // Route to the employee's reporting manager (fallback: admins),
             // instead of pinging every manager/admin.
-            findRequestReviewersFor(input.requester_id).then((list) =>
-                input.filed_by ? list.filter((r) => !input.filed_by!.equals(r._id)) : list
-            ),
+            findRequestReviewersFor(input.requester_id),
         ]);
+        // Whoever filed it on someone's behalf may not decide it, so they are not asked to. If they were the
+        // only reviewer, no one is messaged directly, but the leaves channel still hears about it.
+        const reviewers = input.filed_by ? allReviewers.filter((r) => !input.filed_by!.equals(r._id)) : allReviewers;
         if (!requester) {
             logger.warn({ context, requester_id: input.requester_id.toString() }, 'requester missing — skipping');
             return;
         }
-        if (reviewers.length === 0) {
+        if (allReviewers.length === 0) {
             logger.info({ context }, 'No active reviewers — leave submission notification skipped');
             return;
         }

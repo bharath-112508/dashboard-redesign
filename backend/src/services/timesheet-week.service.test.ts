@@ -89,6 +89,14 @@ describe('reopenWeek', () => {
         expect(deleteOneMock).toHaveBeenCalledWith({ user_id: me, week_start: '2026-10-12' });
     });
 
+    it("lets an admin whose admin role comes from extra roles reopen anyone's week", async () => {
+        const other = new Types.ObjectId();
+        deleteOneMock.mockResolvedValueOnce(row(other, '2026-10-12'));
+        const multi = { id: new Types.ObjectId(), role: ROLES.EMPLOYEE, role_keys: [ROLES.EMPLOYEE, ROLES.ADMIN], audit: undefined } as never;
+        await svc.reopenWeek('2026-10-12', other.toString(), multi);
+        expect(deleteOneMock).toHaveBeenCalledWith({ user_id: other, week_start: '2026-10-12' });
+    });
+
     it('lets a manager reopen a team member\'s week', async () => {
         const other = new Types.ObjectId();
         teamMock.mockResolvedValueOnce([other]);

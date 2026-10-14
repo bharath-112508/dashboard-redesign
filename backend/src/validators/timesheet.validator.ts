@@ -263,9 +263,15 @@ export type TimesheetImportBody = z.infer<typeof timesheetImportBodySchema>;
 
 // ─── Redesign: submitted weeks (/timesheets/weeks) ───────────────────────
 
-export const weekPathSchema = z.object({ week: isoDateSchema });
+/** A real calendar day: '2026-13-01' or '2026-02-31' is refused, not rolled into another month. */
+const realDateSchema = isoDateSchema.refine((d) => {
+    const t = new Date(`${d}T00:00:00Z`);
+    return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === d;
+}, 'Must be a real date');
+
+export const weekPathSchema = z.object({ week: realDateSchema });
 export const listWeeksQuerySchema = z
-    .object({ from_date: isoDateSchema.optional(), to_date: isoDateSchema.optional(), user_id: objectIdSchema.optional() })
+    .object({ from_date: realDateSchema.optional(), to_date: realDateSchema.optional(), user_id: objectIdSchema.optional() })
     .strict();
 export const reopenWeekQuerySchema = z.object({ user_id: objectIdSchema.optional() }).strict();
 export type ListWeeksQuery = z.infer<typeof listWeeksQuerySchema>;

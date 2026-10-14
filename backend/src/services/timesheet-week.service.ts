@@ -3,6 +3,7 @@ import { TimesheetWeek, type TimesheetWeekDocument } from '../models/timesheet-w
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
 import { ROLES } from '../constants/roles.js';
+import { isAdminLike } from '../utils/role-check.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { recordAudit } from './audit.service.js';
 import { scopedUserIdFilter, teamScopeIdsOf } from './reporting-scope.service.js';
@@ -26,8 +27,11 @@ const toPublic = (doc: TimesheetWeekDocument) => ({
     submitted_at: doc.submitted_at,
 });
 
+/** Whether the caller holds a role, through the legacy `role` cache or any of their role keys (multi-role users). */
+const holds = (caller: ProjectCaller, role: string) => caller.role === role || (caller.role_keys ?? []).includes(role);
+
 /** Team reviewers (the same roles that read the team timesheet). */
-const isReviewer = (role: string) => role === ROLES.ADMIN || role === ROLES.MANAGER || role === ROLES.TEAM_LEAD;
+const isReviewer = (caller: ProjectCaller) => isAdminLike(caller) || holds(caller, ROLES.MANAGER) || holds(caller, ROLES.TEAM_LEAD);
 
 /**
  * Refuses a change to time in a week that is submitted (409).
@@ -56,7 +60,7 @@ export const listWeeks = async (
     caller: ProjectCaller
 ): Promise<ReturnType<typeof toPublic>[]> => {
     const filter: Record<string, unknown> = {};
-    if (isReviewer(caller.role)) {
+    if (isReviewer(caller)) {
         const scoped = await scopedUserIdFilter(caller, query.user_id);
         if (scoped !== undefined) filter.user_id = scoped;
     } else {
@@ -99,8 +103,8 @@ export const reopenWeek = async (week: string, userId: string | undefined, calle
     assertMonday(week);
     const target = userId ? new Types.ObjectId(userId) : caller.id;
     // Someone else's week: an admin for anyone, a manager for their own team (as they read it).
-    if (!target.equals(caller.id) && caller.role !== ROLES.ADMIN) {
-        const team = caller.role === ROLES.MANAGER ? await teamScopeIdsOf(caller.id) : [];
+    if (!target.equals(caller.id) && !isAdminLike(caller)) {
+        const team = holds(caller, ROLES.MANAGER) ? await teamScopeIdsOf(caller.id) : [];
         if (!team.some((id) => id.equals(target))) throw AppError.forbidden('Only a manager of their team can reopen someone else\'s week');
     }
     const removed = await TimesheetWeek.findOneAndDelete({ user_id: target, week_start: week });

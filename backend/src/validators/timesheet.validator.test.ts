@@ -137,3 +137,13 @@ describe('patchTimesheetBodySchema — notes', () => {
         expect(parsed.success).toBe(false);
     });
 });
+
+describe('week routes take real dates only', () => {
+    it('refuses an impossible date instead of failing or rolling it into the next month', async () => {
+        const { weekPathSchema, listWeeksQuerySchema } = await import('./timesheet.validator.js');
+        expect(weekPathSchema.safeParse({ week: '2026-10-12' }).success).toBe(true);
+        expect(weekPathSchema.safeParse({ week: '2026-13-01' }).success).toBe(false);
+        expect(weekPathSchema.safeParse({ week: '2026-02-31' }).success).toBe(false);
+        expect(listWeeksQuerySchema.safeParse({ from_date: '2026-02-30' }).success).toBe(false);
+    });
+});

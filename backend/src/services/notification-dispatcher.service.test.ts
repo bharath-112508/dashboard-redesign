@@ -691,6 +691,25 @@ describe('Slack integration', () => {
         expect(postSlackMessageMock).not.toHaveBeenCalled();
     });
 
+    it('still posts to the leaves channel when the filer is the only reviewer (redesign)', async () => {
+        getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
+        userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
+        userFindMock.mockReturnValue(queryReturning([adminWithSlack]));
+
+        await dispatcher.notifyLeaveSubmitted({
+            request_id: requestId,
+            requester_id: requesterId,
+            leave_type_label: 'Casual Leave',
+            start_date: '2026-04-22',
+            end_date: '2026-04-22',
+            total_days: 1,
+            filed_by: adminWithSlack._id,
+        });
+
+        expect(postOrUpdateSlackMessageMock).toHaveBeenCalledTimes(1);
+        expect(postSlackMessageMock).not.toHaveBeenCalled();
+    });
+
     it('fires ONE channel broadcast (Block Kit) + ONE per-recipient DM when fully configured', async () => {
         getOrInitSettingsMock.mockResolvedValue(enabledSlackSettings);
         userFindByIdMock.mockReturnValue(queryReturning(requesterWithSlack));
