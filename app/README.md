@@ -54,6 +54,7 @@ DevOps, questions and requests in API mode:
 - **Files** in questions stay inside the record (no blob upload yet), so a message's files must fit the backend's 1 MB request limit.
 - **Request time logs** (Timesheet page) are stored on the request, not as timesheet entries, as in the design.
 - A question raised from Tickets with only a sprint belongs to that sprint's project.
+- The test records **OPS-101** (Aurora Foods Supply Portal), **Q-1** and **REQ-1**, all titled "API check…", were made by the hands-on check on 14 Oct 2026 and kept as sample data.
 
 Leave in API mode:
 
