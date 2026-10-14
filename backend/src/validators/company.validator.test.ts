@@ -5,21 +5,22 @@ import { createCompanyBodySchema, createRepresentativeBodySchema, patchCompanyBo
 const USER_ID = '665f1c2e9b1d8a0012ab34cd';
 
 describe('company profile fields', () => {
-    it('accepts the profile fields and staff on a company on create and patch', () => {
+    it('accepts the profile fields on create and patch', () => {
         const body = {
             industry: 'Retail',
             country: 'Sweden',
             website: 'https://aurora.example',
             notes: 'Prefers email.',
             logo: 'data:image/png;base64,AAAA',
-            responsibles: [{ user_id: USER_ID, role: 'developer' }],
         };
         expect(createCompanyBodySchema.safeParse({ name: 'Aurora', ...body }).success).toBe(true);
         expect(patchCompanyBodySchema.safeParse(body).success).toBe(true);
     });
 
-    it('rejects an unknown staff role', () => {
-        expect(patchCompanyBodySchema.safeParse({ responsibles: [{ user_id: USER_ID, role: 'owner' }] }).success).toBe(false);
+    it('does not take the whole staff list (people are set one at a time, checked, via /responsibles)', () => {
+        const responsibles = [{ user_id: USER_ID, role: 'developer' }];
+        expect(createCompanyBodySchema.safeParse({ name: 'Aurora', responsibles }).success).toBe(false);
+        expect(patchCompanyBodySchema.safeParse({ responsibles }).success).toBe(false);
     });
 
     it('rejects a logo larger than 200 KB', () => {

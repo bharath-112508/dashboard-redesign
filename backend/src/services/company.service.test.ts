@@ -1092,33 +1092,22 @@ describe('restoreRepresentative', () => {
 // ─── Redesign profile fields ─────────────────────────────────────────────
 
 describe('company profile fields (redesign)', () => {
-    it('createCompany stores the profile and the staff on the company', async () => {
-        const userId = new Types.ObjectId().toString();
+    it('createCompany stores the profile on the company', async () => {
         companyCreateMock.mockResolvedValueOnce(makeCompany());
 
-        await svc.createCompany(
-            { name: 'Aurora', industry: 'Retail', country: 'Sweden', responsibles: [{ user_id: userId, role: 'developer' }] },
-            adminCaller()
-        );
+        await svc.createCompany({ name: 'Aurora', industry: 'Retail', country: 'Sweden' }, adminCaller());
 
-        expect(companyCreateMock).toHaveBeenCalledWith(
-            expect.objectContaining({ name: 'Aurora', industry: 'Retail', country: 'Sweden', responsibles: [{ user_id: userId, role: 'developer' }] })
-        );
+        expect(companyCreateMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'Aurora', industry: 'Retail', country: 'Sweden' }));
     });
+
 
     it('patchCompany copies each profile field that is present and leaves the rest', async () => {
         const doc = makeCompany({ industry: 'Old', notes: 'keep me', responsibles: [] });
         companyFindByIdMock.mockResolvedValueOnce(doc);
-        const userId = new Types.ObjectId().toString();
 
-        await svc.patchCompany(
-            companyId,
-            { industry: 'Retail', website: 'https://a.example', logo: '', responsibles: [{ user_id: userId, role: 'viewer' }] },
-            adminCaller()
-        );
+        await svc.patchCompany(companyId, { industry: 'Retail', website: 'https://a.example', logo: '' }, adminCaller());
 
         expect(doc).toMatchObject({ industry: 'Retail', website: 'https://a.example', logo: '', notes: 'keep me' });
-        expect((doc as Record<string, unknown>).responsibles).toEqual([{ user_id: userId, role: 'viewer' }]);
         expect(doc.save).toHaveBeenCalled();
     });
 
@@ -1300,7 +1289,20 @@ describe('archive / restore and the company contacts', () => {
         expect(filter).toMatchObject({ 'client_profile.company_id': companyId, status: 'active' });
         expect(deactivateUserMock.mock.calls.map((c) => String((c[0] as { target_id: unknown }).target_id))).toEqual([String(kari), String(nina)]);
         expect(deactivateUserMock).toHaveBeenCalledWith(expect.objectContaining({ reason: 'company_archived', caller_id: caller.id }));
-        expect(userUpdateManyMock).toHaveBeenCalledWith({ _id: { $in: [kari, nina] } }, { $set: { deactivated_by_company_archive: true } });
+        expect(userUpdateManyMock).toHaveBeenCalledWith({ _id: { $in: [kari] } }, { $set: { deactivated_by_company_archive: true } });
+        expect(userUpdateManyMock).toHaveBeenCalledWith({ _id: { $in: [nina] } }, { $set: { deactivated_by_company_archive: true } });
+    });
+
+    it('if a deactivation fails partway, the ones done are marked (restore brings them back) and the archive is audited', async () => {
+        companyFindByIdMock.mockResolvedValueOnce(makeCompany());
+        userFindMock.mockReturnValueOnce(idsChain([kari, nina]));
+        deactivateUserMock.mockResolvedValueOnce({ id: 'x', status: 'deactivated' }).mockRejectedValueOnce(new Error('db blip'));
+        const caller = { ...adminCaller(), audit: { actor_id: new Types.ObjectId() } } as never;
+
+        await expect(svc.archiveCompany(companyId, caller)).rejects.toThrow('db blip');
+
+        expect(userUpdateManyMock).toHaveBeenCalledWith({ _id: { $in: [kari] } }, { $set: { deactivated_by_company_archive: true } });
+        expect(recordAuditMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'company.archive' }));
     });
 
     it('archiving through PATCH status does the same', async () => {

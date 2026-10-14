@@ -229,13 +229,11 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
   switch (cmd.type) {
     case 'company.create': {
       const c = cmd.company
-      const roles = Object.keys(c.ourRoles).length
-        ? { responsibles: Object.entries(c.ourRoles).map(([user_id, r]) => ({ user_id, role: companyRoleTo(r) })) }
-        : {}
       const { id } = await api.post<{ id: string }>('/companies', {
         ...companyBody({ name: c.name, industry: c.industry, country: c.country, web: c.web, notes: c.notes, logo: c.logo }),
-        ...roles,
       })
+      // Viljetech staff are set one at a time through the route that checks each is active staff.
+      for (const [person, r] of Object.entries(c.ourRoles)) await api.post(`/companies/${id}/responsibles`, { user_id: person, role: companyRoleTo(r) })
       // A backend contact is a login account, so it needs an email. A contact that fails
       // must not hide the company that was created: the page opens it, says which contact failed, and it can be added there.
       const failed: string[] = []

@@ -248,7 +248,7 @@ export const getCompany = async (id: Types.ObjectId, caller: CompanyCaller): Pro
 // ─── PATCH /companies/:id ────────────────────────────────────────────────
 
 /** The redesign's company profile fields, copied as given when present in a patch. */
-const PROFILE_KEYS = ['industry', 'country', 'website', 'notes', 'logo', 'responsibles'] as const;
+const PROFILE_KEYS = ['industry', 'country', 'website', 'notes', 'logo'] as const;
 
 export const patchCompany = async (
     id: Types.ObjectId,
@@ -319,10 +319,12 @@ const suspendCompanyContacts = async (companyId: Types.ObjectId, caller: Company
         .lean<{ _id: Types.ObjectId }[]>();
     // A client archiving their own company keeps their own sign-in (deactivateUser refuses self anyway).
     const ids = rows.map((r) => r._id).filter((id) => !id.equals(caller.id));
+    // Each contact is marked before it is switched off: if one fails partway, the ones already
+    // switched off are known, and restoring the company brings them back.
     for (const id of ids) {
+        await markArchived([id], true);
         await deactivateUser({ target_id: id, caller_id: caller.id, reason: 'company_archived', audit: caller.audit });
     }
-    await markArchived(ids, true);
 };
 
 const resumeCompanyContacts = async (companyId: Types.ObjectId, caller: CompanyCaller): Promise<void> => {
@@ -351,8 +353,7 @@ export const archiveCompany = async (id: Types.ObjectId, caller: CompanyCaller):
     doc.status = 'archived';
     doc.archived_at = new Date();
     await doc.save();
-    await suspendCompanyContacts(doc._id, caller);
-
+    // Audited before the contacts are switched off, so the archive is recorded even if that stops partway.
     if (caller.audit) {
         await recordAudit(caller.audit, {
             action: AUDIT_ACTIONS.COMPANY_ARCHIVE,
@@ -361,6 +362,7 @@ export const archiveCompany = async (id: Types.ObjectId, caller: CompanyCaller):
             after: { status: 'archived' },
         });
     }
+    await suspendCompanyContacts(doc._id, caller);
     return toPublicFor(doc, caller);
 };
 

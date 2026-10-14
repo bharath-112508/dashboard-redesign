@@ -90,6 +90,14 @@ describe('company.create', () => {
     expect(r).toEqual({ id: 'c1', notice: 'The company was created, but Kari Berg could not be added as a contact: Email already exists. Add them on the company page.' })
   })
 
+  it("sets the company's Viljetech staff one at a time (the checked route), not in the create body", async () => {
+    post.mockResolvedValueOnce({ id: 'c1' }).mockResolvedValue({})
+    get.mockResolvedValue([])
+    await sendCompanyCommand({ type: 'company.create', company: company({ ourRoles: { u1: 'Developer' } as never }) }, TODAY)
+    expect(post.mock.calls[0][1]).not.toHaveProperty('responsibles')
+    expect(post).toHaveBeenCalledWith('/companies/c1/responsibles', { user_id: 'u1', role: 'developer' })
+  })
+
   it('skips a main contact without an email, since a backend contact needs one', async () => {
     post.mockResolvedValueOnce({ id: 'c1' })
     await sendCompanyCommand({ type: 'company.create', company: company({ contacts: [contact({ email: '' })] }) }, TODAY)

@@ -35,9 +35,8 @@ const companyProfileFields = {
         .string()
         .max(COMPANY_LOGO_MAX)
         .regex(/^(data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+=*)?$/, 'The logo must be a PNG, JPEG, WebP or GIF image.'),
-    responsibles: z
-        .array(z.object({ user_id: objectIdSchema, role: z.enum(COMPANY_RESPONSIBLE_ROLES) }).strict())
-        .max(100),
+    // `responsibles` is not here: people are set one at a time through /companies/:id/responsibles,
+    // which checks each is active staff and cannot lose a concurrent change.
 };
 
 export const createCompanyBodySchema = z
@@ -45,7 +44,7 @@ export const createCompanyBodySchema = z
         name: z.string().trim().min(1, 'Company name is required').max(COMPANY_NAME_MAX),
         ...companyProfileFields,
     })
-    .partial({ industry: true, country: true, website: true, notes: true, logo: true, responsibles: true })
+    .partial({ industry: true, country: true, website: true, notes: true, logo: true })
     .strict();
 
 export type CreateCompanyBody = z.infer<typeof createCompanyBodySchema>;
