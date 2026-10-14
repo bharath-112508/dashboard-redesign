@@ -33,6 +33,14 @@ describe('realtimeEmit', () => {
         run('POST', '/attendance/check-in', 200);
         expect(publishMock).toHaveBeenCalledWith(['attendance']);
     });
+    it('company changes publish companies (redesign)', () => {
+        run('PATCH', '/companies/abc123', 200);
+        expect(publishMock).toHaveBeenCalledWith(['companies']);
+    });
+    it('the permission grid publishes roles (redesign)', () => {
+        run('PUT', '/app-access', 200);
+        expect(publishMock).toHaveBeenCalledWith(['roles']);
+    });
     it('does not publish for GET', () => {
         run('GET', '/leaves', 200);
         expect(publishMock).not.toHaveBeenCalled();

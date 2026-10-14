@@ -8,6 +8,9 @@ import { isBoardApiCommand } from './http/board'
 import { isTimeApiCommand } from './http/timesheet'
 import { isUserApiCommand } from './http/users'
 import { isLeaveApiCommand } from './http/leave'
+import { startLiveUpdates } from './http/live'
+import { api } from './http/client'
+import { readTokens } from './http/tokens'
 import { fetchTicketDetails, isBackendId } from './http/ticketDetails'
 import { ApiError } from './http/client'
 import { refusal } from './session/permissions'
@@ -130,10 +133,24 @@ export const useSend = () => useCommandMutation().mutate
  */
 export const useSendAsync = () => useCommandMutation().mutateAsync
 
-/** Refetches everything when another tab changes the data. */
+/**
+ * Refetches everything when another tab changes the data, and in API mode
+ * refetches what other people changed (the backend's live change stream).
+ */
 export const useLiveSync = () => {
   const qc = useQueryClient()
   useEffect(() => server.subscribe(() => qc.invalidateQueries()), [qc])
+  useEffect(() => {
+    if (!apiMode) return
+    return startLiveUpdates(keys => keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })), {
+      fetchFn: (url, init) => fetch(url, init),
+      token: () => readTokens()?.access ?? null,
+      // A call through the API client renews an expired access token.
+      refreshToken: () => api.get('/auth/me'),
+      wait: ms => new Promise(r => setTimeout(r, ms)),
+      batchMs: 300,
+    })
+  }, [qc])
 }
 
 export const useWeekSubmissions = () =>
