@@ -44,7 +44,7 @@ export const budgetsFrom = (companies: Company[], tasks: Task[], entries: TimeEn
 }
 
 const isCompOff = (r: LeaveRequest) => /comp/i.test(r.type)
-const nameOf = (people: Person[], id: string) => people.find(p => p.id === id)?.name ?? 'Someone'
+const nameOf = (people: Person[], r: LeaveRequest) => people.find(p => p.id === r.userId)?.name ?? r.name ?? 'Someone'
 /** Pending requests, earliest first, without the viewer's own (they cannot decide those). */
 const pendingOf = (leave: LeaveRequest[], me?: string) =>
   leave.filter(r => r.status === 'Pending' && r.userId !== me).sort((a, b) => a.from.localeCompare(b.from))
@@ -72,13 +72,13 @@ const backOn = (to: string) => {
 export const leaveRows = (leave: LeaveRequest[], people: Person[], today: string, me?: string): StaticListRow[] => {
   const off = leave
     .filter(r => r.status === 'Approved' && r.from <= today && today <= r.to && !isWorking(r))
-    .map((r): StaticListRow => ({ tag: 'Off today', tone: 'grey', title: nameOf(people, r.userId), meta: `${r.type} · back ${dayLabel(backOn(r.to))}` }))
+    .map((r): StaticListRow => ({ tag: 'Off today', tone: 'grey', title: nameOf(people, r), meta: `${r.type} · back ${dayLabel(backOn(r.to))}` }))
   const pending = pendingToShow(leave, today, me).map((r): StaticListRow => {
     const n = leaveDays(r)
     return {
       tag: 'Pending',
       tone: 'amber',
-      title: `${nameOf(people, r.userId)} · ${n} ${n === 1 ? 'day' : 'days'}`,
+      title: `${nameOf(people, r)} · ${n} ${n <= 1 ? 'day' : 'days'}`,
       meta: `${r.type} · ${range(r.from, r.to)}`,
       right: 'Approve',
       rightTone: 'ink',
@@ -101,8 +101,8 @@ export const approvalRows = (leave: LeaveRequest[], people: Person[], today: str
     return {
       tag: isCompOff(r) ? 'Comp-off' : 'Leave',
       tone: isCompOff(r) ? 'blue' : 'amber',
-      title: `${nameOf(people, r.userId)} · ${r.type}`,
-      meta: `${range(r.from, r.to)} · ${n} ${n === 1 ? 'day' : 'days'}`,
+      title: `${nameOf(people, r)} · ${r.type}`,
+      meta: `${range(r.from, r.to)} · ${n} ${n <= 1 ? 'day' : 'days'}`,
       right: 'Review',
       rightTone: 'ink',
     }

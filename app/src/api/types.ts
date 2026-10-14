@@ -412,6 +412,10 @@ export interface LeaveRequest {
   status: LeaveStatus
   decidedBy?: string
   decidedWhen?: string
+  /** API mode: the backend's day count (half days, holidays and weekends left out). */
+  days?: number
+  /** API mode: the person's name as the backend gives it, for someone not in the directory. */
+  name?: string
 }
 
 /** A note recorded for one person, such as the outcome of their leave request. */

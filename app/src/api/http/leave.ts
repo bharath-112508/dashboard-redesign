@@ -15,6 +15,7 @@ type BackendLeave = {
   reason: string
   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
   acted_at?: string | null
+  total_days?: number
 }
 type BackendLeaveType = { id: string; code: string; name: string; is_unlimited: boolean; is_earned: boolean; is_active?: boolean }
 type BackendBalance = {
@@ -44,6 +45,8 @@ const leaveFrom = (r: BackendLeave): LeaveRequest => ({
   reason: r.reason,
   status: STATUS[r.status],
   ...(r.acted_at ? { decidedWhen: localDay(r.acted_at) } : {}),
+  ...(r.total_days != null ? { days: r.total_days } : {}),
+  ...(r.user?.full_name ? { name: r.user.full_name } : {}),
 })
 
 /**

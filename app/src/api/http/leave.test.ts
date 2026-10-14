@@ -54,6 +54,12 @@ describe('fetchLeave', () => {
     expect(get.mock.calls.map(c => c[0])).toEqual(['/leaves?limit=100&page=1', '/leaves?user_id=m1&limit=100&page=1'])
   })
 
+  it("keeps the backend's day count (half days) and the person's name", async () => {
+    get.mockResolvedValueOnce([req('r1', { total_days: 0.5 })])
+    const [r] = await fetchLeave(dev)
+    expect(r).toMatchObject({ days: 0.5, name: 'Rahul' })
+  })
+
   it('reads a developer\'s own requests once', async () => {
     get.mockResolvedValueOnce([req('r1', { status: 'approved', acted_at: '2026-10-12T10:00:00.000Z' })])
     const [r] = await fetchLeave(dev)

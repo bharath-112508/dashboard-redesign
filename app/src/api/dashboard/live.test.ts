@@ -79,6 +79,12 @@ describe('leave figures', () => {
     expect(pendingCounts(mine, 'u1')).toEqual({ leave: 1, compoff: 0, oldestLeave: '2026-10-21' })
   })
 
+  it("counts half days as the backend does and names someone missing from the directory by the request's name", () => {
+    const half = { ...req('h', 'u9', 'Casual Leave', '2026-10-20', '2026-10-20', 'Pending'), days: 0.5, name: 'Kari Berg' }
+    expect(leaveRows([half], people, '2026-10-14')[0].title).toBe('Kari Berg · 0.5 day')
+    expect(approvalRows([{ ...half, days: 1.5 }], people, '2026-10-14')[0]).toMatchObject({ title: 'Kari Berg · Casual Leave', meta: '20 Oct – 20 Oct · 1.5 days' })
+  })
+
   it('counts pending leave and comp-off apart, and lists them for approval', () => {
     expect(pendingCounts(leave)).toEqual({ leave: 1, compoff: 1, oldestLeave: '2026-10-20' })
     expect(approvalRows(leave, people, '2026-10-14').map(r => [r.tag, r.title])).toEqual([

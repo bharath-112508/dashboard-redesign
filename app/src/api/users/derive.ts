@@ -106,7 +106,8 @@ export const idleHours = (employees: Person[], entries: TimeEntry[], from: strin
 
 // ---- leave
 
-export const leaveDays = (r: Pick<LeaveRequest, 'from' | 'to'>) => weekdaysBetween(r.from, r.to)
+/** Days a request takes: the backend's count when there is one (it knows half days), else the weekdays in it. */
+export const leaveDays = (r: Pick<LeaveRequest, 'from' | 'to' | 'days'>) => r.days ?? weekdaysBetween(r.from, r.to)
 
 export const annualUsed = (leave: LeaveRequest[], userId: PersonId) =>
   leave.filter(r => r.userId === userId && r.type === 'Annual' && r.status === 'Approved').reduce((n, r) => n + leaveDays(r), 0)
