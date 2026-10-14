@@ -174,7 +174,6 @@ const refuse = (message: string) => new ApiError(403, 'FORBIDDEN', message)
 /** Only admins may change a user's role (backend `user.role_change`). */
 const mayChangeRoles = () => readSession()?.role === 'super'
 
-/** Creates a client contact: the user, their admin role, and their projects. Returns their id. */
 /**
  * The steps after a person is created. Each is tried and the person is kept either way
  * (adding them again would only be refused as a taken email); the notice names what did not save.
@@ -185,6 +184,10 @@ export const finishSteps = async (who: string, steps: [string, false | (() => Pr
   return failed.length ? `${who} was added, but ${failed.join(' and ')} did not save. Edit them to try again.` : undefined
 }
 
+/**
+ * Creates a client contact: the user, then their admin role and their projects.
+ * Returns their id, and a notice naming any later step that did not save.
+ */
 export const createContact = async (companyId: string, c: CompanyContact): Promise<{ id: PersonId; notice?: string }> => {
   if (c.admin && !mayChangeRoles()) throw refuse('Only an admin can make a contact a client admin.')
   const { id } = await api.post<{ id: string }>(`/companies/${companyId}/representatives`, {

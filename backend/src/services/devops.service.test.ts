@@ -156,3 +156,11 @@ describe('settings', () => {
         expect(doc.devops_settings).toEqual({ ladder: [] });
     });
 });
+
+describe('applyLocks', () => {
+    it('leaves the pinned dev dates alone on an edit that does not touch dev dates', () => {
+        const cur = { dev: 'Build', devDues: { Build: '2026-11-01' } };
+        expect(svc.applyLocks(cur, { prio: 'High' }, { lockDevDue: true })).toEqual({ prio: 'High' });
+        expect(svc.applyLocks(cur, { devDue: '2027-01-01' }, { lockDevDue: true })).toEqual({ devDue: '2026-11-01', devDues: { Build: '2026-11-01' } });
+    });
+});

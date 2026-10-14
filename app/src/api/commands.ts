@@ -32,7 +32,8 @@ export type Command =
   | { type: 'question.update'; id: number; patch: Partial<Question> }
   | { type: 'request.create'; request: DevopsRequest }
   /** Updates a request; `log` adds a line to its history. */
-  | { type: 'request.update'; id: number; patch: Partial<DevopsRequest>; log?: { by: string; text: string } }
+  /** `addLog`: the hour entry this change adds (the end of `patch.logs`); API mode sends only it. */
+  | { type: 'request.update'; id: number; patch: Partial<DevopsRequest>; log?: { by: string; text: string }; addLog?: NonNullable<DevopsRequest['logs']>[number] }
   | { type: 'sprint.create'; sprint: Sprint }
   | { type: 'sprint.update'; id: string; patch: Partial<Sprint> }
   | { type: 'sprint.addMembers'; id: string; names: string[] }

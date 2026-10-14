@@ -4,7 +4,7 @@ import { DevopsRequest, type DevopsRequestDocument } from '../models/devops-requ
 import { DevopsItem } from '../models/devops-item.model.js';
 import { Sprint } from '../models/sprint.model.js';
 import { Task } from '../models/task.model.js';
-import { isClientCaller, nameOf, visibleProjectIds } from './devops.service.js';
+import { canRunDevops, isClientCaller, nameOf, visibleProjectIds } from './devops.service.js';
 import { recordAudit } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { AppError } from '../utils/app-error.js';
@@ -94,8 +94,9 @@ export const createQuestion = async (body: Data & { number: number; title: strin
         ? await Sprint.findById(sprintId).select('project_id').lean<{ project_id: Types.ObjectId } | null>()
         : null;
     const project_id = task?.project_id ?? (await projectOfKey(body.devops_key as string | undefined)) ?? sprint?.project_id ?? null;
-    // Its client will read it, so it may only go on a project the caller can open.
-    if (project_id) await loadProjectForCaller(project_id, caller);
+    // Its client will read it, so it may only go on a project the caller can open
+    // (DevOps and admins run the DevOps board, which shows every project's items).
+    if (project_id && !canRunDevops(caller)) await loadProjectForCaller(project_id, caller);
     const by = await nameOf(caller.id);
     const doc = await createOrConflict(() =>
         ClientQuestion.create({ ...body, task_id: task ? (body.task_id as string) : null, project_id, by, by_id: caller.id, messages: [] } as Partial<ClientQuestionDocument>)
@@ -123,12 +124,16 @@ export const MAX_QUESTION_PHOTOS = 20;
 /** Adds photos to the question (only the new ones are sent, so each request stays small). */
 export const addPhotos = async (number: number, files: unknown[], caller: ProjectCaller) => {
     teamOnly(caller, 'add photos to a question');
-    const d = await loadQuestion(number, caller);
-    if ((d.photos ?? []).length + files.length > MAX_QUESTION_PHOTOS) {
-        throw AppError.unprocessable(`A question can have at most ${MAX_QUESTION_PHOTOS} photos.`, ERROR_CODES.VALIDATION_ERROR);
-    }
-    d.photos = [...(d.photos ?? []), ...files];
-    await d.save();
+    await loadQuestion(number, caller);
+    const tooMany = () => AppError.unprocessable(`A question can have at most ${MAX_QUESTION_PHOTOS} photos.`, ERROR_CODES.VALIDATION_ERROR);
+    if (files.length > MAX_QUESTION_PHOTOS) throw tooMany();
+    // One atomic append, only while there is room, so photos two people add at once both stay.
+    const d = await ClientQuestion.findOneAndUpdate(
+        { number, [`photos.${MAX_QUESTION_PHOTOS - files.length}`]: { $exists: false } },
+        { $push: { photos: { $each: files } } },
+        { new: true }
+    );
+    if (!d) throw tooMany();
     await audit(caller, AUDIT_ACTIONS.CLIENT_QUESTION_UPDATE, AUDIT_TARGET_KINDS.CLIENT_QUESTION, d._id, { number, change: 'photos', count: files.length });
     return toPublicQuestion(d);
 };
@@ -136,23 +141,28 @@ export const addPhotos = async (number: number, files: unknown[], caller: Projec
 /** A request keeps its newest this many history lines, and holds at most this many hour entries. */
 const MAX_HISTORY = 500;
 const MAX_REQUEST_LOGS = 2000;
+const tooManyLogs = () => AppError.unprocessable(`A request can hold at most ${MAX_REQUEST_LOGS} hour entries.`, ERROR_CODES.VALIDATION_ERROR);
 
 /** A question chat or a request thread holds at most this many entries (each is stored inside its document). */
 const MAX_THREAD = 1000;
 const full = () => AppError.unprocessable(`This conversation has reached ${MAX_THREAD} messages. Start a new one.`, ERROR_CODES.VALIDATION_ERROR);
 
 export const addMessage = async (number: number, body: { text: string; files: unknown[] }, caller: ProjectCaller) => {
-    const d = await loadQuestion(number, caller);
-    if (d.messages.length >= MAX_THREAD) throw full();
-    d.messages.push({
+    await loadQuestion(number, caller);
+    const message = {
         who: await nameOf(caller.id),
         by_id: caller.id,
         side: isClientCaller(caller) ? 'client' : 'team',
         text: body.text,
         files: body.files,
         when: new Date(),
-    });
-    await d.save();
+    };
+    const d = await ClientQuestion.findOneAndUpdate(
+        { number, [`messages.${MAX_THREAD - 1}`]: { $exists: false } },
+        { $push: { messages: { $each: [message] } } },
+        { new: true }
+    );
+    if (!d) throw full();
     await audit(caller, AUDIT_ACTIONS.CLIENT_QUESTION_UPDATE, AUDIT_TARGET_KINDS.CLIENT_QUESTION, d._id, { number, change: 'message', index: d.messages.length - 1 });
     return toPublicQuestion(d);
 };
@@ -162,11 +172,15 @@ export const editMessage = async (number: number, index: number, text: string, c
     const msg = d.messages[index];
     if (!msg) throw AppError.notFound('That message does not exist.');
     if (!caller.id.equals(msg.by_id)) throw AppError.forbidden('You can only edit your own messages.');
-    msg.text = text;
-    d.markModified('messages');
-    await d.save();
-    await audit(caller, AUDIT_ACTIONS.CLIENT_QUESTION_UPDATE, AUDIT_TARGET_KINDS.CLIENT_QUESTION, d._id, { number, change: 'message_edit', index });
-    return toPublicQuestion(d);
+    // Only that message's text, so a message posted meanwhile is kept (messages are only ever appended).
+    const saved = await ClientQuestion.findOneAndUpdate(
+        { number, [`messages.${index}.by_id`]: caller.id },
+        { $set: { [`messages.${index}.text`]: text } },
+        { new: true }
+    );
+    if (!saved) throw AppError.notFound('That message does not exist.');
+    await audit(caller, AUDIT_ACTIONS.CLIENT_QUESTION_UPDATE, AUDIT_TARGET_KINDS.CLIENT_QUESTION, saved._id, { number, change: 'message_edit', index });
+    return toPublicQuestion(saved);
 };
 
 // ─── DevOps requests ────────────────────────────────────────────────────
@@ -243,27 +257,41 @@ export const updateRequest = async (
     caller: ProjectCaller
 ) => {
     teamOnly(caller, 'change DevOps requests');
-    const d = await loadRequest(number);
-    if (body.logs_if_count !== undefined && (d.logs ?? []).length !== body.logs_if_count) {
-        throw AppError.conflict('Someone else just changed the hours on this request. Try again.');
+    const add = body.add_logs ?? [];
+    if (add.length && 'logs' in body.patch) throw AppError.unprocessable('Send new hours or the whole list, not both.', ERROR_CODES.VALIDATION_ERROR);
+    if (add.length > MAX_REQUEST_LOGS) throw tooManyLogs();
+    await loadRequest(number);
+    // One atomic update: the conditions (the list the removal was made from, room for new
+    // hours) are checked by the same write, so a change made meanwhile is never overwritten.
+    const filter: Data = { number };
+    if (body.logs_if_count !== undefined) filter.logs = { $size: body.logs_if_count };
+    if (add.length) filter[`logs.${MAX_REQUEST_LOGS - add.length}`] = { $exists: false };
+    const $push: Data = {};
+    if (add.length) $push.logs = { $each: add };
+    if (body.log) $push.history = { $each: [{ by: await nameOf(caller.id), text: body.log.text, when: new Date() }], $position: 0, $slice: MAX_HISTORY };
+    const d = await DevopsRequest.findOneAndUpdate(
+        filter,
+        { ...(Object.keys(body.patch).length ? { $set: body.patch } : {}), ...(Object.keys($push).length ? { $push } : {}) },
+        { new: true }
+    );
+    if (!d) {
+        if (body.logs_if_count !== undefined) throw AppError.conflict('Someone else just changed the hours on this request. Try again.');
+        throw tooManyLogs();
     }
-    if ((d.logs ?? []).length + (body.add_logs?.length ?? 0) > MAX_REQUEST_LOGS) {
-        throw AppError.unprocessable(`A request can hold at most ${MAX_REQUEST_LOGS} hour entries.`, ERROR_CODES.VALIDATION_ERROR);
-    }
-    Object.assign(d, body.patch);
-    if (body.add_logs?.length) d.logs = [...(d.logs ?? []), ...body.add_logs];
-    if (body.log) d.history = [{ by: await nameOf(caller.id), text: body.log.text, when: new Date() }, ...d.history].slice(0, MAX_HISTORY);
-    await d.save();
     await audit(caller, AUDIT_ACTIONS.DEVOPS_REQUEST_UPDATE, AUDIT_TARGET_KINDS.DEVOPS_REQUEST, d._id, { number, fields: Object.keys(body.patch) });
     return toPublicRequest(d);
 };
 
 export const addRequestComment = async (number: number, body: { text: string; side: 'tickets' | 'devops' }, caller: ProjectCaller) => {
     teamOnly(caller, 'reply on DevOps requests');
-    const d = await loadRequest(number);
-    if (d.comments.length >= MAX_THREAD) throw full();
-    d.comments.push({ by: await nameOf(caller.id), by_id: caller.id, text: body.text, when: new Date(), side: body.side });
-    await d.save();
+    await loadRequest(number);
+    const comment = { by: await nameOf(caller.id), by_id: caller.id, text: body.text, when: new Date(), side: body.side };
+    const d = await DevopsRequest.findOneAndUpdate(
+        { number, [`comments.${MAX_THREAD - 1}`]: { $exists: false } },
+        { $push: { comments: { $each: [comment] } } },
+        { new: true }
+    );
+    if (!d) throw full();
     await audit(caller, AUDIT_ACTIONS.DEVOPS_REQUEST_UPDATE, AUDIT_TARGET_KINDS.DEVOPS_REQUEST, d._id, { number, change: 'comment', side: body.side });
     return toPublicRequest(d);
 };

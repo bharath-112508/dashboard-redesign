@@ -97,7 +97,8 @@ export const createItem = async (body: { key: string; project_id: string; data: 
 export const applyLocks = (cur: Data, patch: Data, rules: { lockInitial?: boolean; lockDevDue?: boolean }): Data => {
     const out: Data = { ...patch };
     if (rules.lockInitial && cur.initDue && 'initDue' in out) out.initDue = cur.initDue;
-    if (rules.lockDevDue) {
+    // Only an edit of the dev phase or its dates writes them (a stale copy would undo a pin made meanwhile).
+    if (rules.lockDevDue && ('dev' in out || 'devDue' in out || 'devDues' in out)) {
         const fixed = (cur.devDues ?? {}) as Record<string, string>;
         if (Object.keys(fixed).length || out.devDues) out.devDues = { ...((out.devDues as object) ?? {}), ...fixed };
         const phase = (out.dev ?? cur.dev) as string | undefined;

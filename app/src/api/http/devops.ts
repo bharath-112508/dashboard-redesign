@@ -324,11 +324,11 @@ export const sendDevopsCommand = async (cmd: DevopsApiCommand, session: Session 
       return {}
     }
     case 'request.update': {
-      // Hours: new entries (no stored `at`) are added to what the server has, so two
-      // people logging at once both land. A list with none is a removal (the app
-      // removes one entry at a time); the server refuses it if the list has changed since.
+      // Hours: a new entry (`addLog`) is added to what the server has, so two people
+      // logging at once both land. A list without one is a removal (the app removes one
+      // entry at a time); the server refuses it if the list has changed since.
       const { logs, ...rest } = cmd.patch
-      const added = (logs ?? []).filter(l => !('at' in l))
+      const added = cmd.addLog ? [cmd.addLog] : []
       const patch = datesIn(pick(added.length || !logs ? rest : cmd.patch, REQUEST_FIELDS), now)
       await api.patch(`/devops-requests/${cmd.id}`, {
         patch,

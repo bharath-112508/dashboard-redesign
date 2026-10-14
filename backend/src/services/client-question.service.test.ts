@@ -5,9 +5,11 @@ const m = vi.hoisted(() => ({
     qFind: vi.fn(),
     qFindOne: vi.fn(),
     qCreate: vi.fn(),
+    qUpdate: vi.fn(),
     rFind: vi.fn(),
     rFindOne: vi.fn(),
     rCreate: vi.fn(),
+    rUpdate: vi.fn(),
     taskFindById: vi.fn(),
     sprintFindById: vi.fn(),
     itemFindOne: vi.fn(),
@@ -17,8 +19,8 @@ const m = vi.hoisted(() => ({
     loadProject: vi.fn(),
 }));
 
-vi.mock('../models/client-question.model.js', () => ({ ClientQuestion: { find: m.qFind, findOne: m.qFindOne, create: m.qCreate } }));
-vi.mock('../models/devops-request.model.js', () => ({ DevopsRequest: { find: m.rFind, findOne: m.rFindOne, create: m.rCreate } }));
+vi.mock('../models/client-question.model.js', () => ({ ClientQuestion: { find: m.qFind, findOne: m.qFindOne, create: m.qCreate, findOneAndUpdate: m.qUpdate } }));
+vi.mock('../models/devops-request.model.js', () => ({ DevopsRequest: { find: m.rFind, findOne: m.rFindOne, create: m.rCreate, findOneAndUpdate: m.rUpdate } }));
 vi.mock('../models/task.model.js', () => ({ Task: { findById: m.taskFindById } }));
 vi.mock('../models/sprint.model.js', () => ({ Sprint: { findById: m.sprintFindById } }));
 vi.mock('../models/devops-item.model.js', () => ({ DevopsItem: { findOne: m.itemFindOne } }));
@@ -26,6 +28,7 @@ vi.mock('./devops.service.js', () => ({
     visibleProjectIds: m.visible,
     nameOf: m.nameOf,
     isClientCaller: (c: { role: string }) => c.role === 'client' || c.role === 'representative',
+    canRunDevops: (c: { role: string; role_keys?: string[] }) => c.role === 'admin' || (c.role_keys ?? []).includes('devops'),
 }));
 
 vi.mock('./audit.service.js', () => ({ recordAudit: m.audit }));
@@ -42,10 +45,40 @@ const doc = <T extends object>(v: T) => {
     return d;
 };
 
+/** A Mongo-like findOneAndUpdate over the in-memory doc: the filter's conditions, then $set and $push. */
+type Doc = Record<string, unknown>;
+const at = (d: Doc, path: string): unknown => path.split('.').reduce<unknown>((o, k) => (o == null ? undefined : (o as Doc)[k]), d);
+const put = (d: Doc, path: string, v: unknown) => {
+    const keys = path.split('.');
+    const last = keys.pop()!;
+    (keys.reduce<unknown>((o, k) => (o as Doc)[k], d) as Doc)[last] = v;
+};
+const applyUpdate = (d: Doc | null, filter: Doc, update: { $set?: Doc; $push?: Record<string, { $each: unknown[]; $position?: number; $slice?: number }> }) => {
+    if (!d) return null;
+    for (const [k, want] of Object.entries(filter)) {
+        if (k === 'number') continue;
+        const v = at(d, k);
+        const w = want as { $size?: number; $exists?: boolean; equals?: unknown };
+        if (w && typeof w === 'object' && '$size' in w) { if (((v as unknown[]) ?? []).length !== w.$size) return null; }
+        else if (w && typeof w === 'object' && '$exists' in w) { if ((v !== undefined) !== w.$exists) return null; }
+        else if (!(v instanceof Types.ObjectId ? v.equals(want as Types.ObjectId) : v === want)) return null;
+    }
+    for (const [k, v] of Object.entries(update.$set ?? {})) put(d, k, v);
+    for (const [k, p] of Object.entries(update.$push ?? {})) {
+        const cur = (at(d, k) as unknown[]) ?? [];
+        const next = p.$position === 0 ? [...p.$each, ...cur] : [...cur, ...p.$each];
+        put(d, k, p.$slice ? next.slice(0, p.$slice) : next);
+    }
+    return d;
+};
+
 beforeEach(() => {
     vi.resetAllMocks();
     m.nameOf.mockResolvedValue('Arjun');
     m.visible.mockResolvedValue(null);
+    // Writes are single atomic updates on the stored doc (whatever findOne gives), never a read-then-save.
+    m.qUpdate.mockImplementation(async (f: Doc, u: never) => applyUpdate((await m.qFindOne()) as Doc, f, u));
+    m.rUpdate.mockImplementation(async (f: Doc, u: never) => applyUpdate((await m.rFindOne()) as Doc, f, u));
 });
 
 describe('questions', () => {
@@ -109,6 +142,9 @@ describe('questions', () => {
         q.messages[0].by_id = (me as { id: Types.ObjectId }).id;
         await svc.editMessage(1, 0, 'b', me);
         expect(q.messages[0].text).toBe('b');
+        // Only that message's text is written, so one posted meanwhile is kept.
+        expect(m.qUpdate.mock.calls.at(-1)?.[1]).toEqual({ $set: { 'messages.0.text': 'b' } });
+        expect(q.save).not.toHaveBeenCalled();
     });
 
     it('lets a client only mark solved or reopen', async () => {
@@ -155,6 +191,7 @@ describe('audit trail', () => {
             ['client_question.update', 'photos'],
             ['devops_request.update', 'comment'],
         ]);
+        expect(q.save).not.toHaveBeenCalled();
     });
 });
 
@@ -168,6 +205,24 @@ describe('request hours', () => {
         expect(r.logs).toHaveLength(2);
         await svc.updateRequest(3, { patch: { logs: [{ h: 2, by: 'Arjun' }] }, logs_if_count: 2 }, staff());
         expect(r.logs).toEqual([{ h: 2, by: 'Arjun' }]);
+        expect(r.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a removal when hours were logged after the server was read (the check is part of the write)', async () => {
+        const r = doc({ number: 3, comments: [], history: [] as unknown[], logs: [{ h: 1 }] as unknown[] });
+        m.rFindOne.mockResolvedValue(r);
+        // Someone logs between this request's read and its write.
+        m.rUpdate.mockImplementationOnce(async (f: Doc, u: never) => {
+            (r.logs as unknown[]).push({ h: 5 });
+            return applyUpdate(r as unknown as Doc, f, u);
+        });
+        await expect(svc.updateRequest(3, { patch: { logs: [] }, logs_if_count: 1 }, staff())).rejects.toMatchObject({ statusCode: 409 });
+        expect(r.logs).toEqual([{ h: 1 }, { h: 5 }]);
+    });
+
+    it('refuses new hours and a whole list in one change', async () => {
+        m.rFindOne.mockResolvedValue(doc({ number: 3, comments: [], history: [], logs: [] }));
+        await expect(svc.updateRequest(3, { patch: { logs: [] }, add_logs: [{ h: 1 }] }, staff())).rejects.toMatchObject({ statusCode: 422 });
     });
 });
 
@@ -190,6 +245,16 @@ describe('limits', () => {
 });
 
 describe('question project', () => {
+    it('lets DevOps engineers and admins start one on any DevOps item', async () => {
+        m.qFindOne.mockReturnValue(lean(null));
+        m.qCreate.mockImplementation(async (v: object) => doc(v));
+        m.itemFindOne.mockReturnValue(lean({ project_id: new Types.ObjectId() }));
+        m.loadProject.mockRejectedValue(Object.assign(new Error('Project not found'), { statusCode: 404 }));
+        const devops = { id: new Types.ObjectId(), role: 'employee', role_keys: ['employee', 'devops'] } as never;
+        await svc.createQuestion({ number: 8, title: 'DNS', devops_key: 'OPS-1' }, devops);
+        expect(m.qCreate).toHaveBeenCalled();
+    });
+
     it("refuses a ticket on a project the caller cannot open", async () => {
         m.qFindOne.mockReturnValue(lean(null));
         m.taskFindById.mockReturnValue(lean({ project_id: new Types.ObjectId() }));

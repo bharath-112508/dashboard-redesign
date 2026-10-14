@@ -169,12 +169,10 @@ export function TimesheetView() {
     const pname = nameOf(pid, '')
     if (f.task.startsWith('r')) {
       const r = requests.find(x => x.id === +f.task.slice(1))
-      if (r)
-        send({
-          type: 'request.update',
-          id: r.id,
-          patch: { logs: [...(r.logs || []), { h: bill + non, by: pname, when: 'just now', date: f.date || TODAY, notes: f.notes.trim() }] },
-        })
+      if (r) {
+        const entry = { h: bill + non, by: pname, when: 'just now', date: f.date || TODAY, notes: f.notes.trim() }
+        send({ type: 'request.update', id: r.id, patch: { logs: [...(r.logs || []), entry] }, addLog: entry })
+      }
     } else {
       send(
         logTime({

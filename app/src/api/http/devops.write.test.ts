@@ -140,7 +140,14 @@ describe('DevOps requests', () => {
       raised: '2026-10-14',
     })
     await sendDevopsCommand(
-      { type: 'request.update', id: 4, patch: { status: 'Done', seenT: 1, statusSeen: 'Done', logs: [{ h: 2, by: 'Arjun', when: 'just now', date: '2026-10-14' }] }, log: { by: 'Arjun', text: 'Status changed to Done' } },
+      {
+        type: 'request.update',
+        id: 4,
+        // An earlier entry still waiting for the refetch has no `at` either; only `addLog` is new.
+        patch: { status: 'Done', seenT: 1, statusSeen: 'Done', logs: [{ h: 1, by: 'Arjun', when: 'just now' }, { h: 2, by: 'Arjun', when: 'just now', date: '2026-10-14' }] },
+        addLog: { h: 2, by: 'Arjun', when: 'just now', date: '2026-10-14' },
+        log: { by: 'Arjun', text: 'Status changed to Done' },
+      },
       me,
       NOW,
     )
@@ -151,10 +158,11 @@ describe('DevOps requests', () => {
     })
     // A removal sends the list left, with the length it was made from (one more).
     const saved = { h: 1, by: 'Raj', when: '2d ago', at: '2026-10-12T09:00:00.000Z', shown: '2d ago', date: '2026-10-12' }
-    await sendDevopsCommand({ type: 'request.update', id: 4, patch: { logs: [saved] } }, me, NOW)
+    const pending = { h: 3, by: 'Raj', when: 'just now' }
+    await sendDevopsCommand({ type: 'request.update', id: 4, patch: { logs: [saved, pending] } }, me, NOW)
     expect(patch).toHaveBeenLastCalledWith('/devops-requests/4', {
-      patch: { logs: [{ h: 1, by: 'Raj', when: '2026-10-12T09:00:00.000Z', date: '2026-10-12' }] },
-      logs_if_count: 2,
+      patch: { logs: [{ h: 1, by: 'Raj', when: '2026-10-12T09:00:00.000Z', date: '2026-10-12' }, { h: 3, by: 'Raj', when: '2026-10-14T12:00:00.000Z' }] },
+      logs_if_count: 3,
     })
     await sendDevopsCommand({ type: 'request.comment', id: 4, comment: { by: 'Arjun', text: 'Ready', when: 'just now', side: 'devops' } }, me, NOW)
     expect(post).toHaveBeenCalledWith('/devops-requests/4/comments', { text: 'Ready', side: 'devops' })
