@@ -18,6 +18,7 @@ import {
   estimateHours,
   fileExt,
   fileSize,
+  findTicket,
   loggedHours,
   rh,
   sprintsOf,
@@ -62,7 +63,7 @@ export function TicketDrawer({ id }: { id: TaskId }) {
   const [railHide, setRailHide] = useState<boolean | null>(null)
   // API mode: a draft ticket that got its title now lives under its backend id.
   const alias = ticketAlias(id)
-  const found = tasks.find(t => t.id === id) ?? (alias ? tasks.find(t => t.id === alias) : undefined)
+  const found = findTicket(tasks, id, alias)
   // API mode: comments, history and attachments are read for the open ticket only.
   const details = useTicketDetails(found?.id ?? id).data
   const raw0 = found && details ? { ...found, acts: details.acts, atts: details.atts } : found
