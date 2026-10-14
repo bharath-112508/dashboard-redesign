@@ -24,6 +24,10 @@ export const REALTIME_TOPICS = {
     ROLES: 'roles',
     /** Redesign: client companies, their contacts and staff. */
     COMPANIES: 'companies',
+    /** Redesign: the DevOps board, questions to clients, DevOps requests. */
+    DEVOPS: 'devops',
+    QUESTIONS: 'questions',
+    DEVOPS_REQUESTS: 'devops-requests',
 } as const;
 
 export type RealtimeTopic = (typeof REALTIME_TOPICS)[keyof typeof REALTIME_TOPICS];
@@ -62,6 +66,9 @@ export const PATH_TOPIC_MAP: Record<string, RealtimeTopic> = {
     companies: REALTIME_TOPICS.COMPANIES,
     // Redesign: the app's permission grid and developer types.
     'app-access': REALTIME_TOPICS.ROLES,
+    devops: REALTIME_TOPICS.DEVOPS,
+    questions: REALTIME_TOPICS.QUESTIONS,
+    'devops-requests': REALTIME_TOPICS.DEVOPS_REQUESTS,
 };
 
 /**

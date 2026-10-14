@@ -41,6 +41,12 @@ describe('realtimeEmit', () => {
         run('PUT', '/app-access', 200);
         expect(publishMock).toHaveBeenCalledWith(['roles']);
     });
+    it('the DevOps board, questions and requests publish their own topics (redesign)', () => {
+        run('PATCH', '/devops/items/OPS-1', 200);
+        run('POST', '/questions/3/messages', 201);
+        run('POST', '/devops-requests', 201);
+        expect(publishMock.mock.calls).toEqual([[['devops']], [['questions']], [['devops-requests']]]);
+    });
     it('does not publish for GET', () => {
         run('GET', '/leaves', 200);
         expect(publishMock).not.toHaveBeenCalled();

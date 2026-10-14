@@ -248,6 +248,14 @@ export const AUDIT_ACTIONS = {
     TIMESHEET_DELETE: 'timesheet.delete',
     TIMESHEET_WEEK_SUBMIT: 'timesheet.week_submit',
     TIMESHEET_WEEK_REOPEN: 'timesheet.week_reopen',
+    /** Redesign: DevOps board items and settings, questions to clients, DevOps requests. */
+    DEVOPS_ITEM_CREATE: 'devops_item.create',
+    DEVOPS_ITEM_UPDATE: 'devops_item.update',
+    DEVOPS_SETTINGS_UPDATE: 'devops_settings.update',
+    CLIENT_QUESTION_CREATE: 'client_question.create',
+    CLIENT_QUESTION_UPDATE: 'client_question.update',
+    DEVOPS_REQUEST_CREATE: 'devops_request.create',
+    DEVOPS_REQUEST_UPDATE: 'devops_request.update',
     /** ONE row per bulk import, carrying the count and date range — not one
      *  row per entry. The entries are already individually traceable. */
     TIMESHEET_IMPORT: 'timesheet.import',
@@ -415,6 +423,9 @@ export const AUDIT_TARGET_KINDS = {
     ATTACHMENT: 'task_attachment',
     TIMESHEET_ENTRY: 'timesheet_entry',
     TIMESHEET_WEEK: 'timesheet_week',
+    DEVOPS_ITEM: 'devops_item',
+    CLIENT_QUESTION: 'client_question',
+    DEVOPS_REQUEST: 'devops_request',
     BILLING_RATE: 'billing_rate',
     COST_RATE: 'cost_rate',
     ENGAGEMENT: 'engagement',
