@@ -40,8 +40,10 @@ export function ProfilePage({ base }: Props) {
   const entries = useEntries().data
   const tasks = useTasks().data
   const ws = useWorkspace().data
-  const companies = useCompanies().data ?? []
-  const internal = useInternalProjects().data ?? []
+  const companiesQ = useCompanies()
+  const internalQ = useInternalProjects()
+  const companies = companiesQ.data ?? []
+  const internal = internalQ.data ?? []
   const leave = useLeave().data ?? []
   const notes = useNotifications().data ?? []
   const access = useAccess().data
@@ -129,6 +131,7 @@ export function ProfilePage({ base }: Props) {
           people={people}
           companies={companies}
           internal={internal}
+          projectsLoaded={companiesQ.isSuccess && internalQ.isSuccess}
           devTypes={access?.devTypes ?? []}
           onClose={() => setEditing(false)}
         />

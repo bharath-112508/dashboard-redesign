@@ -116,3 +116,10 @@ export const annualPending = (leave: LeaveRequest[], userId: PersonId) =>
   leave.filter(r => r.userId === userId && r.type === 'Annual' && r.status === 'Pending').reduce((n, r) => n + leaveDays(r), 0)
 
 export const annualLeft = (leave: LeaveRequest[], userId: PersonId) => ANNUAL_ALLOWANCE - annualUsed(leave, userId)
+
+/**
+ * The projects a user form saves: the picks that are in the project list. While that
+ * list is still loading every pick is kept, so saving early never removes project access.
+ */
+export const projectsToSave = (picked: string[], allowed: string[], listLoaded: boolean): string[] =>
+  listLoaded ? picked.filter(id => allowed.includes(id)) : picked

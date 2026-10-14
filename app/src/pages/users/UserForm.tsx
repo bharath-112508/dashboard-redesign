@@ -8,7 +8,7 @@ import { useSendAsync } from '../../api/queries'
 import { ROLE_LABEL } from '../../api/session/access'
 import { writeSession } from '../../api/session/store'
 import type { Company, InternalProject, Person, Role, Session } from '../../api/types'
-import { projectPool, isClientPerson } from '../../api/users/derive'
+import { projectPool, projectsToSave, isClientPerson } from '../../api/users/derive'
 import {
   CLIENT_PERSON_COLOUR,
   EMAIL_RE,
@@ -30,6 +30,8 @@ interface Props {
   people: Person[]
   companies: Company[]
   internal: InternalProject[]
+  /** Whether `companies` and `internal` have loaded; until then saving keeps the person's projects as they are. */
+  projectsLoaded?: boolean
   devTypes: string[]
   onClose: () => void
 }
@@ -54,7 +56,7 @@ interface Values {
 const nextPersonId = (people: Person[]) => String(Math.max(0, ...people.map(p => Number(p.id)).filter(Number.isFinite)) + 1)
 
 /** Add or edit a person. A new person is always Invited: nothing is sent and they cannot sign in until an admin activates them. */
-export function UserForm({ person, scope, session, people, companies, internal, devTypes, onClose }: Props) {
+export function UserForm({ person, scope, session, people, companies, internal, projectsLoaded = true, devTypes, onClose }: Props) {
   const send = useSendAsync()
   const show = useToast()
   const isNew = !person
@@ -167,7 +169,7 @@ export function UserForm({ person, scope, session, people, companies, internal, 
     const isClient = isClientRoleKey(values.role as Role)
     const org = isClient ? values.company : 'vt'
     const allowed = projectPool(companies, internal, isClient ? values.company : undefined).map(p => p.id)
-    const projects: 'all' | string[] = values.access === 'all' ? 'all' : values.projects.filter(id => allowed.includes(id))
+    const projects: 'all' | string[] = values.access === 'all' ? 'all' : projectsToSave(values.projects, allowed, projectsLoaded)
     const role = values.role as Role
     const shared = {
       name: values.name.trim(),

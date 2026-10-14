@@ -24,8 +24,10 @@ interface Props {
 /** The user table with search, role and company filters, and the pending invites group. */
 export function UsersTab({ scope, canEdit, profileBase, session }: Props) {
   const people = usePeople().data
-  const companies = useCompanies().data ?? []
-  const internal = useInternalProjects().data ?? []
+  const companiesQ = useCompanies()
+  const internalQ = useInternalProjects()
+  const companies = companiesQ.data ?? []
+  const internal = internalQ.data ?? []
   const access = useAccess().data
   const [q, setQ] = useState('')
   const [role, setRole] = useState<'all' | Role>('all')
@@ -177,6 +179,7 @@ export function UsersTab({ scope, canEdit, profileBase, session }: Props) {
           people={people}
           companies={companies}
           internal={internal}
+          projectsLoaded={companiesQ.isSuccess && internalQ.isSuccess}
           devTypes={access?.devTypes ?? []}
           onClose={() => setEditing(null)}
         />
