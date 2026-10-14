@@ -4,7 +4,11 @@ import type { Company, Person, Session } from '../types'
 /** The shared demo password. Passwords set from a profile replace it for that person. */
 export const DEMO_PASSWORD = 'demo'
 
-export type SignInResult = { ok: true; session: Session } | { ok: false; field: 'email' | 'password'; message: string }
+export type SignInResult =
+  | { ok: true; session: Session }
+  | { ok: false; field: 'email' | 'password'; message: string }
+  /** API mode: the account uses two-step sign-in; `mfa` is the session token for the code step. */
+  | { ok: false; mfa: string }
 
 /** SHA-256 of a string, as lowercase hex. Needs a secure context (https or localhost). */
 export const sha256 = async (text: string): Promise<string> => {

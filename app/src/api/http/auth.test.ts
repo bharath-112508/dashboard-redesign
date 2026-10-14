@@ -13,7 +13,7 @@ vi.mock('./client', async importOriginal => ({
 }))
 vi.mock('./tokens', () => ({ writeTokens, clearTokens, readTokens: () => ({ access: 'a', refresh: 'r' }) }))
 
-const { apiSignIn, apiSignOut, apiForgotPassword, apiResetPassword } = await import('./auth')
+const { apiSignIn, apiSignOut, apiForgotPassword, apiResetPassword, apiVerifyMfa } = await import('./auth')
 
 const me = {
   id: 'u1',
@@ -55,13 +55,9 @@ describe('apiSignIn', () => {
     })
   })
 
-  it('refuses accounts with two-step sign-in for now, without storing tokens', async () => {
+  it('asks for the two-step code when the account uses it, without storing tokens yet', async () => {
     post.mockResolvedValue({ mfa_required: true, mfa_session_token: 't' })
-    expect(await apiSignIn('a@viljetech.com', 'pw')).toEqual({
-      ok: false,
-      field: 'password',
-      message: 'This account uses two-step sign-in, which the new app does not support yet.',
-    })
+    expect(await apiSignIn('a@viljetech.com', 'pw')).toEqual({ ok: false, mfa: 't' })
     expect(writeTokens).not.toHaveBeenCalled()
   })
 
@@ -181,5 +177,27 @@ describe('apiResetPassword', () => {
       new ApiError(400, 'VALIDATION_ERROR', 'Validation failed', { errors: [{ field: 'new_password', message: 'Password must contain a number.' }] }),
     )
     expect(await apiResetPassword('tok'.repeat(15), 'Abcdefghij!', 'Abcdefghij!')).toEqual({ ok: false, message: 'Password must contain a number.' })
+  })
+})
+
+describe('apiVerifyMfa', () => {
+  it('signs in with the code and keeps the tokens', async () => {
+    post.mockReset()
+    get.mockReset()
+    post.mockResolvedValue({ access_token: 'A', refresh_token: 'R' })
+    get.mockResolvedValue(me)
+    const out = await apiVerifyMfa('t', ' 123456 ', false)
+    expect(post).toHaveBeenCalledWith('/auth/mfa/verify', { mfa_session_token: 't', code: '123456', is_backup_code: false })
+    expect(writeTokens).toHaveBeenCalledWith({ access: 'A', refresh: 'R' })
+    expect(out).toMatchObject({ ok: true })
+  })
+
+  it('says when the code is wrong, and when the step took too long', async () => {
+    post.mockReset()
+    post.mockRejectedValueOnce(new ApiError(400, 'INVALID_MFA_CODE', 'Invalid MFA code'))
+    expect(await apiVerifyMfa('t', '000000', false)).toEqual({ ok: false, field: 'code', message: 'That code is not right. Try the newest code from your app.' })
+    post.mockRejectedValueOnce(new ApiError(401, 'TOKEN_EXPIRED', 'MFA session expired, please login again'))
+    expect(await apiVerifyMfa('t', '000000', false)).toEqual({ ok: false, field: 'expired', message: 'That took too long. Sign in again.' })
+    expect(await apiVerifyMfa('t', '12', false)).toEqual({ ok: false, field: 'code', message: 'Enter the 6-digit code from your app.' })
   })
 })

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -8,11 +9,12 @@ import { findPersonByEmail } from '../../api/people/directory'
 import { apiSignIn } from '../../api/http/auth'
 import { apiMode, demoAccounts } from '../../api/http/config'
 import { DEMO_DB_ACCOUNTS } from '../../api/http/sampleAccounts'
+import { MfaStep } from './MfaStep'
 import { server } from '../../api/server'
 import { ROLE_LABEL } from '../../api/session/access'
 import { DEMO_PASSWORD, signIn } from '../../api/session/signIn'
 import { startSession, useSession } from '../../api/session/store'
-import type { Role } from '../../api/types'
+import type { Role, Session } from '../../api/types'
 import { initials } from '../../lib/media'
 
 /** The sample users, one per user type, in the order the prototype lists them. */
@@ -79,18 +81,26 @@ export function LoginPage() {
     return signIn(v.email, v.password, dir, orgs)
   }
 
-  const onSubmit = form.handleSubmit(async v => {
-    const result = apiMode ? await apiSignIn(v.email, v.password) : await mockSignIn(v)
-    if (!result.ok) {
-      form.setError(result.field, { type: 'manual', message: result.message })
-      return
-    }
+  // API mode: the account uses two-step sign-in, and this is the token for the code step.
+  const [mfa, setMfa] = useState<string | null>(null)
+
+  const finish = async (s: Session) => {
     // Nothing read for someone else (or before signing in) may show for this person.
     if (apiMode) qc.clear()
-    startSession(result.session)
+    startSession(s)
     // The directory depends on who is signed in, so load it again (mock mode keeps the rest).
     if (!apiMode) await qc.invalidateQueries({ queryKey: qk.people })
     navigate('/dashboard', { replace: true })
+  }
+
+  const onSubmit = form.handleSubmit(async v => {
+    const result = apiMode ? await apiSignIn(v.email, v.password) : await mockSignIn(v)
+    if (!result.ok) {
+      if ('mfa' in result) return setMfa(result.mfa)
+      form.setError(result.field, { type: 'manual', message: result.message })
+      return
+    }
+    await finish(result.session)
   })
 
   const pick = (addr: string) => {
@@ -154,40 +164,44 @@ export function LoginPage() {
           <h1 className="mb-0 mt-[22px] text-[26px] font-extrabold tracking-[-0.02em]">Sign in</h1>
           <div className="mt-1 text-[14px] text-ink-2">Team members and clients use the same sign-in.</div>
 
-          <form onSubmit={onSubmit} noValidate>
-            <label className="mt-5 block">
-              <span className="mb-1.5 block text-[12px] font-bold text-ink-2">Email</span>
-              <input
-                type="email"
-                autoComplete="username"
-                placeholder="name@company.com"
-                className={`${input} h-11 text-[14px] ${errors.email ? 'border-[#D9534F]' : 'border-line'}`}
-                {...form.register('email', { onChange: () => form.clearErrors() })}
-              />
-            </label>
-            <label className="mt-3 block">
-              <span className="mb-1.5 block text-[12px] font-bold text-ink-2">Password</span>
-              <input
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••"
-                className={`${input} h-11 border-line text-[14px]`}
-                {...form.register('password', { onChange: () => form.clearErrors() })}
-              />
-            </label>
-            {message && (
-              <div role="alert" className="mt-2.5 text-[13px] font-semibold text-[#C0392B]">
-                {message}
-              </div>
-            )}
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="mt-[18px] h-11 w-full rounded-[10px] bg-blue text-[14.5px] font-bold text-white hover:bg-blue-600 disabled:opacity-60"
-            >
-              Sign in
-            </button>
-          </form>
+          {mfa ? (
+            <MfaStep token={mfa} onDone={s => void finish(s)} onBack={() => setMfa(null)} />
+          ) : (
+            <form onSubmit={onSubmit} noValidate>
+              <label className="mt-5 block">
+                <span className="mb-1.5 block text-[12px] font-bold text-ink-2">Email</span>
+                <input
+                  type="email"
+                  autoComplete="username"
+                  placeholder="name@company.com"
+                  className={`${input} h-11 text-[14px] ${errors.email ? 'border-[#D9534F]' : 'border-line'}`}
+                  {...form.register('email', { onChange: () => form.clearErrors() })}
+                />
+              </label>
+              <label className="mt-3 block">
+                <span className="mb-1.5 block text-[12px] font-bold text-ink-2">Password</span>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  className={`${input} h-11 border-line text-[14px]`}
+                  {...form.register('password', { onChange: () => form.clearErrors() })}
+                />
+              </label>
+              {message && (
+                <div role="alert" className="mt-2.5 text-[13px] font-semibold text-[#C0392B]">
+                  {message}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="mt-[18px] h-11 w-full rounded-[10px] bg-blue text-[14.5px] font-bold text-white hover:bg-blue-600 disabled:opacity-60"
+              >
+                Sign in
+              </button>
+            </form>
+          )}
           <div className="mt-3 text-[12.5px] text-muted">
             {apiMode ? (
               <>
