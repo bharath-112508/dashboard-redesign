@@ -37,7 +37,8 @@ import { fetchLeave, fetchLeaveNotices, isLeaveApiCommand, sendLeaveCommand } fr
  */
 
 /** What a write did: the mock's numeric id for a new item, or (API mode) the backend's id. */
-export type SendResult = { id?: TaskId; apiId?: string }
+/** `notice`: the write was saved, with something the person should know (e.g. a contact that could not be added). */
+export type SendResult = { id?: TaskId; apiId?: string; notice?: string }
 
 /** Thrown by `server.send` when the signed-in person's role may not run the command (see session/permissions.ts). */
 export class RefusedError extends Error {
@@ -513,10 +514,10 @@ const localToday = () => {
  * the pages already show. A new ticket's backend id is also its `id`, so the
  * ticket window moves from the temporary id to the real one.
  */
-const sendToApi = async (send: (today: string) => Promise<{ id?: string }>, ticket = false, conflicts = false): Promise<SendResult> => {
+const sendToApi = async (send: (today: string) => Promise<{ id?: string; notice?: string }>, ticket = false, conflicts = false): Promise<SendResult> => {
   try {
-    const { id } = await send(localToday())
-    return id ? { apiId: id, ...(ticket ? { id } : {}) } : {}
+    const { id, notice } = await send(localToday())
+    return { ...(id ? { apiId: id, ...(ticket ? { id } : {}) } : {}), ...(notice ? { notice } : {}) }
   } catch (err) {
     // A refusal, or a value the backend does not accept: the page shows the backend's reason.
     if (err instanceof ApiError && err.status === 403) throw new RefusedError(err.message, err.code === 'SAVED_WITH_NOTICE')

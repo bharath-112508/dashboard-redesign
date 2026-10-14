@@ -10,6 +10,7 @@ import { mainContactProblem } from '../../domain/companies'
 import { apiMode } from '../../api/http/config'
 import { Dialog, btnPrimary, btnSecondary, errorCls, fieldCls, labelCls } from '../../components/Dialog'
 import { LogoField } from './LogoField'
+import { useToast } from '../shell/toast'
 
 /** A website is a domain, with an optional path, after any http(s):// is removed. */
 const isWebsite = (v: string) => !v || /^([a-z0-9-]+\.)+[a-z]{2,}(\/\S*)?$/i.test(normalizeWebsite(v))
@@ -43,6 +44,7 @@ export function CompanyFormModal({
   onClose: () => void
 }) {
   const navigate = useNavigate()
+  const show = useToast()
   const send = useSendAsync()
   const companies = useCompanies().data ?? []
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -103,6 +105,7 @@ export function CompanyFormModal({
         onClose()
         // API mode: open the id the backend gave the company.
         navigate(`/companies/${result?.apiId ?? id}`)
+        if (result?.notice) show(result.notice)
         return
       }
       if (!company) return

@@ -83,11 +83,11 @@ describe('company.create', () => {
     expect(body.initial_password.length).toBeLessThanOrEqual(12)
   })
 
-  it('still opens the new company when adding its main contact fails', async () => {
+  it('still opens the new company when adding its main contact fails, and says which contact and why', async () => {
     const { ApiError } = await import('./client')
-    post.mockResolvedValueOnce({ id: 'c1' }).mockRejectedValueOnce(new ApiError(403, 'FORBIDDEN', 'no'))
+    post.mockResolvedValueOnce({ id: 'c1' }).mockRejectedValueOnce(new ApiError(409, 'EMAIL_ALREADY_EXISTS', 'Email already exists'))
     const r = await sendCompanyCommand({ type: 'company.create', company: company({ contacts: [contact()] }) }, TODAY)
-    expect(r).toEqual({ id: 'c1' })
+    expect(r).toEqual({ id: 'c1', notice: 'The company was created, but Kari Berg could not be added as a contact: Email already exists. Add them on the company page.' })
   })
 
   it('skips a main contact without an email, since a backend contact needs one', async () => {

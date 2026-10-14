@@ -225,7 +225,7 @@ const setResponsible = async (companyId: string, person: PersonId, role: string 
  * backend's id for a create, so the page can open what it just made.
  * A refusal from the backend rejects with its ApiError.
  */
-export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string): Promise<{ id?: string }> => {
+export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string): Promise<{ id?: string; notice?: string }> => {
   switch (cmd.type) {
     case 'company.create': {
       const c = cmd.company
@@ -237,9 +237,11 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
         ...roles,
       })
       // A backend contact is a login account, so it needs an email. A contact that fails
-      // must not hide the company that was created: the page opens it and the contact can be added there.
-      for (const k of c.contacts) if (k.email) await createContact(id, k).catch(() => undefined)
-      return { id }
+      // must not hide the company that was created: the page opens it, says which contact failed, and it can be added there.
+      const failed: string[] = []
+      for (const k of c.contacts)
+        if (k.email) await createContact(id, k).catch((err: unknown) => failed.push(`${k.name || k.email} could not be added as a contact: ${err instanceof Error ? err.message : 'unknown error'}`))
+      return failed.length ? { id, notice: `The company was created, but ${failed.join('; ')}. Add them on the company page.` } : { id }
     }
     case 'company.update': {
       const body = companyBody(cmd.patch)
