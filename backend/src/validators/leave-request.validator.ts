@@ -46,6 +46,8 @@ export const applyLeaveBodySchema = z
         is_half_day: z.boolean().default(false),
         half_day_slot: z.enum([HALF_DAY_SLOTS.FIRST_HALF, HALF_DAY_SLOTS.SECOND_HALF]).nullable().optional(),
         reason: z.string().trim().min(1).max(REASON_MAX),
+        /** Redesign: apply for this person (an admin, or a manager for a direct report). */
+        user_id: objectIdSchema.optional(),
         attachment_url: z.string().url().nullable().optional(),
     })
     .superRefine((data, ctx) => {

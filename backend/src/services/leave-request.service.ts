@@ -131,9 +131,18 @@ const ensureCanReviewRequest = (
     if (!callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_APPROVE)) {
         throw AppError.forbidden('Only managers or admins can review leave requests');
     }
-    if (caller.id.equals(req.user_id)) {
+    // Redesign (the user's call, 13 Oct 2026): an admin may review their own request; others may not.
+    if (caller.id.equals(req.user_id) && !callerCan(permissions, PERMISSIONS.SYSTEM_ADMIN)) {
         throw AppError.forbidden('You cannot review your own leave request');
     }
+};
+
+/** Redesign: an admin may apply leave for anyone; a manager or team lead for their direct reports. */
+const assertCanApplyFor = async (applicantId: Types.ObjectId, caller: { id: Types.ObjectId }): Promise<void> => {
+    const permissions = await permissionsOf(caller.id);
+    if (callerCan(permissions, PERMISSIONS.SYSTEM_ADMIN)) return;
+    if (callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_APPROVE) && (await isDirectReportOf(applicantId, caller.id))) return;
+    throw AppError.forbidden('You can only apply leave for yourself or your direct reports');
 };
 
 /**
@@ -528,7 +537,10 @@ export const applyLeave = async (
     body: ApplyLeaveBody,
     caller: { id: Types.ObjectId; role: RoleType; audit?: AuditContext }
 ): Promise<Record<string, unknown>> => {
-    await assertOnLeaveScheme(caller.id);
+    // Redesign: the request may be for someone else (see assertCanApplyFor).
+    const applicantId = body.user_id ? new Types.ObjectId(body.user_id) : caller.id;
+    if (!applicantId.equals(caller.id)) await assertCanApplyFor(applicantId, caller);
+    await assertOnLeaveScheme(applicantId);
     const ctx = await loadApplyContext(body.start_date, body.end_date);
     const requestedType = ctx.typesById.get(body.leave_type_id);
     if (!requestedType) {
@@ -559,7 +571,7 @@ export const applyLeave = async (
     const [slMonthUsed, availableMap] = await Promise.all([
         sl
             ? buildSlMonthUsedMap({
-                  user_id: caller.id,
+                  user_id: applicantId,
                   sl_type_id: sl._id,
                   yearsTouched,
                   workingDays: ctx.workingDays,
@@ -570,7 +582,7 @@ export const applyLeave = async (
               })
             : Promise.resolve(new Map()),
         loadAvailableMap({
-            user_id: caller.id,
+            user_id: applicantId,
             years: yearsTouched,
             types: ctx.activeTypes,
         }),
@@ -605,20 +617,20 @@ export const applyLeave = async (
 
     // Overlap (after we know we have real segments) -----------------------
     await assertNoOverlap({
-        user_id: caller.id,
+        user_id: applicantId,
         start_date: body.start_date,
         end_date: body.end_date,
     });
 
     // Resolve to ObjectIds + reserve balances atomically ------------------
     const segments = resolveSegments(engine, ctx.typesByCode);
-    await reserveBalances({ user_id: caller.id, segments, requestedType, allowNegative: false });
+    await reserveBalances({ user_id: applicantId, segments, requestedType, allowNegative: false });
 
     // Persist the request.
     let created: LeaveRequestDocument;
     try {
         created = await LeaveRequest.create({
-            user_id: caller.id,
+            user_id: applicantId,
             requested_leave_type_id: requestedType._id,
             start_date: body.start_date,
             end_date: body.end_date,
@@ -637,7 +649,7 @@ export const applyLeave = async (
         });
     } catch (err) {
         // Rollback reservations if the LeaveRequest insert fails for any reason.
-        await releaseReservations({ user_id: caller.id, segments });
+        await releaseReservations({ user_id: applicantId, segments });
         throw err;
     }
 
@@ -656,14 +668,14 @@ export const applyLeave = async (
     // double-insert outcome was not.
     try {
         await assertNoOverlap({
-            user_id: caller.id,
+            user_id: applicantId,
             start_date: body.start_date,
             end_date: body.end_date,
             excludeId: created._id,
         });
     } catch (err) {
         await LeaveRequest.deleteOne({ _id: created._id });
-        await releaseReservations({ user_id: caller.id, segments });
+        await releaseReservations({ user_id: applicantId, segments });
         throw err;
     }
 
@@ -697,7 +709,7 @@ export const applyLeave = async (
     // returns 2xx (API_Contract §15.500).
     await notifyLeaveSubmitted({
         request_id: created._id,
-        requester_id: caller.id,
+        requester_id: applicantId,
         leave_type_label: leaveTypeLabel(requestedType),
         leave_type_code: requestedType?.code,
         leave_type_name: requestedType?.name,

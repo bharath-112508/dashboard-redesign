@@ -326,6 +326,8 @@ describe('approveLeave', () => {
     it('rejects an employee trying to approve their own leave', async () => {
         const r = baseRequest();
         const selfReviewer = { id: r.user_id, role: ROLES.MANAGER };
+        // A non-admin reviewer (admins may approve their own leave since the redesign).
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: ['leave_request.approve'] } as never);
         leaveRequestFindByIdMock.mockResolvedValueOnce(r);
 
         await expect(svc.approveLeave(r._id, { approver_remarks: '' }, selfReviewer)).rejects.toMatchObject({
@@ -975,5 +977,69 @@ describe('listLeaves — reviewer approvals queue', () => {
         await svc.listLeaves({ page: 1, limit: 50 } as never, { id: employeeId, role: ROLES.EMPLOYEE });
 
         expect(filter.user_id).toEqual(employeeId);
+    });
+});
+
+// ─── Redesign: applying on someone's behalf, admin self-approval ─────────
+
+describe('applyLeave on behalf of someone (redesign)', () => {
+    const applicant = new Types.ObjectId();
+    const body = {
+        leave_type_id: new Types.ObjectId().toString(),
+        start_date: '2026-12-10',
+        end_date: '2026-12-10',
+        reason: 'Family',
+        user_id: applicant.toString(),
+    };
+    /** The applicant is a freelancer, so a call that gets past the guard stops at the scheme check (422). */
+    const stubApplicant = (managerId: Types.ObjectId | null) =>
+        userFindByIdMock.mockReturnValue({
+            select: () => ({ lean: () => Promise.resolve({ internal_profile: { employment_type: 'freelancer', reporting_manager_id: managerId } }) }),
+        });
+
+    it('lets an admin apply for anyone (the request is the applicant\'s)', async () => {
+        stubApplicant(null);
+        const admin = { id: new Types.ObjectId(), role: ROLES.ADMIN };
+        await expect(svc.applyLeave(body as never, admin)).rejects.toMatchObject({ code: ERROR_CODES.LEAVE_NOT_APPLICABLE });
+        expect(userFindByIdMock).toHaveBeenCalledWith(applicant);
+    });
+
+    it('lets a manager apply for a direct report', async () => {
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: ['leave_request.approve'] } as never);
+        stubApplicant(manager.id);
+        await expect(svc.applyLeave(body as never, manager)).rejects.toMatchObject({ code: ERROR_CODES.LEAVE_NOT_APPLICABLE });
+    });
+
+    it('refuses a manager applying for someone who is not their report', async () => {
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: ['leave_request.approve'] } as never);
+        stubApplicant(new Types.ObjectId());
+        await expect(svc.applyLeave(body as never, manager)).rejects.toMatchObject({ statusCode: 403 });
+    });
+
+    it('refuses an employee applying for someone else', async () => {
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: [] } as never);
+        await expect(svc.applyLeave(body as never, { id: new Types.ObjectId(), role: ROLES.EMPLOYEE })).rejects.toMatchObject({ statusCode: 403 });
+    });
+});
+
+describe('admins may approve their own leave (redesign, the user\'s call)', () => {
+    it('an admin passes the guard for their own request', async () => {
+        const admin = { id: new Types.ObjectId(), role: ROLES.ADMIN };
+        const r = baseRequest({ user_id: admin.id });
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        leaveRequestFindOneAndUpdateMock.mockResolvedValueOnce(null); // race → proves auth passed
+        await expect(svc.approveLeave(r._id, { approver_remarks: '' }, admin)).rejects.toMatchObject({
+            code: ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING,
+        });
+    });
+
+    it('a manager still cannot review their own request', async () => {
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: ['leave_request.approve'] } as never);
+        const r = baseRequest({ user_id: manager.id });
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        await expect(svc.approveLeave(r._id, { approver_remarks: '' }, manager)).rejects.toMatchObject({ statusCode: 403 });
     });
 });
