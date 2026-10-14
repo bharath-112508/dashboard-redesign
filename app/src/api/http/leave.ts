@@ -1,7 +1,7 @@
 import { ApiError, api } from './client'
 import { allPages } from './companies'
 import { isClientRole } from '../session/access'
-import { range } from '../../lib/dates'
+import { fmt, range } from '../../lib/dates'
 import type { LeaveRequest, LeaveStatus, Notification, PersonId, Session } from '../types'
 import type { UsersCommand } from '../users/commands'
 
@@ -68,8 +68,9 @@ export const fetchLeaveNotices = async (session: Session | null): Promise<Notifi
       id: i + 1,
       userId: r.userId,
       kind: 'leave' as const,
-      text: `Your ${r.type} leave, ${range(r.from, r.to)}, was ${r.status === 'Approved' ? 'approved' : 'rejected'}.`,
-      when: r.decidedWhen ?? '',
+      // "Your Annual leave" in the design; a backend name already ends in "Leave".
+      text: `Your ${/leave$/i.test(r.type) ? r.type : `${r.type} leave`}, ${range(r.from, r.to)}, was ${r.status === 'Approved' ? 'approved' : 'rejected'}.`,
+      when: r.decidedWhen ? fmt(r.decidedWhen) : '',
     }))
 
 /** What the leave section shows: the types to pick from and the main type's balance. */

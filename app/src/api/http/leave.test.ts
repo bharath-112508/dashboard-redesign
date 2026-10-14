@@ -64,7 +64,7 @@ describe('fetchLeaveNotices', () => {
   it('builds the notices from decided requests, as the design words them', async () => {
     get.mockResolvedValueOnce([req('r1', { status: 'approved', acted_at: '2026-10-12T10:00:00.000Z' }), req('r2')])
     const notes = await fetchLeaveNotices(dev)
-    expect(notes).toEqual([expect.objectContaining({ userId: 'u1', kind: 'leave', text: 'Your Casual Leave leave, 2 Nov – 3 Nov, was approved.' })])
+    expect(notes).toEqual([expect.objectContaining({ userId: 'u1', kind: 'leave', text: 'Your Casual Leave, 2 Nov – 3 Nov, was approved.', when: '12 Oct 2026' })])
   })
 })
 

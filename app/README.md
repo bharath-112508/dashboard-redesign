@@ -36,7 +36,17 @@ What comes from the backend so far:
 
 - **Phase 1d:** users and people — the people directory everywhere, the Users page (add, edit, deactivate, roles, developer types, project access, photo), the Roles & permissions grid and the profile window (`src/api/http/users.ts`).
 
-DevOps, questions and leave still show the mock data.
+- **Phase 1e:** leave on the profile page — requests, balance, notices; adding, approving and rejecting (`src/api/http/leave.ts`, `src/api/users/leaveBook.ts`).
+
+DevOps and questions still show the mock data.
+
+Leave in API mode:
+
+- **Types are the backend's** (e.g. Casual Leave, Sick/Personal Leave, Work From Home, Compensatory Off), with its rules (pro-rata, monthly caps, holidays and weekends not counted). The three boxes show the main type's balance (Casual Leave): days left, used and pending.
+- **Add leave** applies for the person whose profile is open: an admin for anyone, a manager or team lead for a direct report (new on the backend). The backend needs a reason; an empty one sends the type's name. Overlapping leave or too little balance is refused with the backend's reason.
+- **Approve / Reject:** admins may approve their own leave (the backend allows it for admins only); managers decide for their direct reports. Rejecting sends the remarks "Rejected by <name>", which the backend requires.
+- **Notifications** on the profile are built from the person's decided requests (the backend lets only the owner read their own notifications). Cancelled requests are not shown.
+- Approving or rejecting changes real balances and writes in-app notifications on the backend; in safe mode no email, Slack or push is sent.
 
 Users and people in API mode:
 
