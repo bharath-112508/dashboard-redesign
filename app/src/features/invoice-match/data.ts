@@ -1,5 +1,6 @@
 import type { Activity, ClientProject, Company, Epic, Sprint, Task } from '../../api/types'
 import { addDays, MON } from '../../lib/dates'
+import { apiMode } from '../../api/http/config'
 
 /**
  * InvoiceMatch: Daco's accounts-payable app, a project Viljetech delivered.
@@ -104,11 +105,33 @@ export const imTasks = (firstId: number): Task[] =>
   }))
 
 /** The board shows the InvoiceMatch project when every picked epic is one of its epics. */
-export const isImSelection = (epSel: string[]) => epSel.length > 0 && epSel.every(id => IM_EPIC_IDS.includes(id))
+export const isImSelection = (epSel: string[], ids: string[] = IM_EPIC_IDS) => epSel.length > 0 && epSel.every(id => ids.includes(id))
+
+/**
+ * Whether a project is the InvoiceMatch project: Daco's fixed project in mock mode;
+ * in API mode, a real project named InvoiceMatch (under Aurora Foods on the Demo DB).
+ */
+export const isImProject = (p: Pick<ClientProject, 'id' | 'name'>) => p.id === IM_PROJECT_ID || (apiMode && p.name === IM_NAME)
 
 /** Whether a client company has the InvoiceMatch project (read from its projects in the Companies data). */
-export const hasInvoiceMatch = (company: Pick<Company, 'projects'> | undefined) =>
-  !!company && company.projects.some(p => p.id === IM_PROJECT_ID)
+export const hasInvoiceMatch = (company: Pick<Company, 'projects'> | undefined) => !!company && company.projects.some(isImProject)
+
+/** The first company with the InvoiceMatch project, and that project. */
+export const imProjectOf = (companies: Company[] | undefined) => {
+  for (const company of companies ?? []) {
+    const project = company.projects.find(isImProject)
+    if (project) return { company, project }
+  }
+  return null
+}
+
+/** The project's epics (mock: the fixed ones; API mode without the project: none). */
+export const imEpicIds = (p: Pick<ClientProject, 'epics'> | null | undefined): string[] =>
+  p?.epics.length ? p.epics.map(e => e.id) : apiMode ? [] : IM_EPIC_IDS
+
+/** The epic that bugs reported from the live app go to: "Review & reports", else the last one. */
+export const imBugEpic = (p: Pick<ClientProject, 'epics'> | null | undefined): string =>
+  p?.epics.find(e => e.name === 'Review & reports')?.id ?? p?.epics.at(-1)?.id ?? IM_BUG_EPIC
 
 // ---------- the live app's data
 

@@ -14,6 +14,7 @@ import { apiMode } from './http/config'
 import { fetchCompanies, fetchInternalProjects, isCompanyApiCommand, sendCompanyCommand } from './http/companies'
 import { ApiError } from './http/client'
 import { fetchTasks, isBoardApiCommand, sendBoardCommand } from './http/board'
+import { fetchInvoiceMatch, isInvoiceMatchApiCommand, sendInvoiceMatchCommand } from './http/invoicematch'
 import { fetchDevops, fetchLinkedWorkspace, fetchQuestions, fetchRequests, isDevopsApiCommand, sendDevopsCommand } from './http/devops'
 import { fetchEntries, fetchWeekSubmissions, isTimeApiCommand, sendTimeCommand } from './http/timesheet'
 import { fetchAccessApi, fetchPeopleApi, isUserApiCommand, sendUserCommand } from './http/users'
@@ -540,6 +541,7 @@ export const server = {
     if (apiMode && resource === 'requests') return (await fetchRequests(readSession())) as Db[K]
     // Team members are real client users in API mode, so they are listed with the company's contacts.
     if (apiMode && resource === 'clientTeam') return [] as unknown as Db[K]
+    if (apiMode && resource === 'invoiceMatch') return (await fetchInvoiceMatch(readSession())) as Db[K]
     if (apiMode && resource === 'tasks') return (await fetchTasks(readSession())) as Db[K]
     if (apiMode && resource === 'entries') return (await fetchEntries(readSession())) as Db[K]
     if (apiMode && resource === 'people') return (await fetchPeopleApi(readSession())) as Db[K]
@@ -562,6 +564,7 @@ export const server = {
     if (apiMode && isLeaveApiCommand(cmd)) return sendToApi(() => sendLeaveCommand(cmd, readSession()), false, true)
     // A conflict here is a new id someone else just took.
     if (apiMode && isDevopsApiCommand(cmd)) return sendToApi(() => sendDevopsCommand(cmd, readSession()), false, true)
+    if (apiMode && isInvoiceMatchApiCommand(cmd)) return sendToApi(() => sendInvoiceMatchCommand(cmd))
     await sleep(LATENCY_MS)
     return exclusive(() =>
       acrossTabs(async () => {

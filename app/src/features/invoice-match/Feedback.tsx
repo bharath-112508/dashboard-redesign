@@ -1,10 +1,10 @@
 import { useEffect, useImperativeHandle, useRef, useState, type PointerEvent as ReactPointerEvent, type Ref, type RefObject } from 'react'
-import { useSendAsync, useTasks } from '../../api/queries'
+import { useCompanies, useSendAsync, useTasks } from '../../api/queries'
 import type { Attachment, ClientPriority } from '../../api/types'
 import { fileSize, nextTaskId, taskKey } from '../../domain/tasks'
 import { MON, TODAY, todayLabel } from '../../lib/dates'
 import { blobToDataUrl, captureElement, startRecording, type Rect } from './capture'
-import { IM_BUG_EPIC } from './data'
+import { imBugEpic, imProjectOf } from './data'
 
 export type FeedbackApi = { start: (snip: boolean) => void }
 
@@ -83,6 +83,8 @@ export function Feedback({
   const timer = useRef<ReturnType<typeof setInterval>>(undefined)
   const sendAsync = useSendAsync()
   const tasks = useTasks().data ?? []
+  // Bugs go to the project's "Review & reports" epic.
+  const bugEpic = imBugEpic(imProjectOf(useCompanies().data)?.project)
 
   const start = (snip: boolean) =>
     setFb(s => (s && s.mode !== 'done' ? { ...s, mode: snip ? 'snip' : 'panel', a: null, b: null } : fresh(snip ? 'snip' : 'panel')))
@@ -231,7 +233,7 @@ export function Feedback({
           atts,
           subs: [],
           deps: [],
-          epic: IM_BUG_EPIC,
+          epic: bugEpic,
           sprint: null,
           start: TODAY,
           time: {},
