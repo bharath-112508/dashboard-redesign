@@ -555,7 +555,8 @@ export const server = {
 
   /** Applies a command and resolves with what it did (the id of a new task, for example). */
   async send(cmd: Command): Promise<SendResult> {
-    if (apiMode && isCompanyApiCommand(cmd)) return sendToApi(today => sendCompanyCommand(cmd, today))
+    // A taken email on Add member is a refusal with the backend's reason; other company conflicts pass through.
+    if (apiMode && isCompanyApiCommand(cmd)) return sendToApi(today => sendCompanyCommand(cmd, today), false, cmd.type === 'clientTeam.add')
     if (apiMode && isBoardApiCommand(cmd))
       return sendToApi(today => sendBoardCommand(cmd, today), cmd.type === 'task.create' || cmd.type === 'tickets.task.createTop')
     if (apiMode && isTimeApiCommand(cmd)) return sendToApi(() => sendTimeCommand(cmd, readSession()))

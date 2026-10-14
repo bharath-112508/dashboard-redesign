@@ -9,7 +9,7 @@ import * as svc from '../services/invoicematch.service.js';
 
 /** Redesign: decisions in the InvoiceMatch live-app demo; the service decides who may see the project. */
 const params = z.object({ projectId: z.string().regex(/^[a-f0-9]{24}$/i) });
-const withNo = params.extend({ no: z.string().trim().min(1).max(40) });
+const withNo = params.extend({ no: z.string().regex(/^INV-\d{1,10}$/) });
 
 const router = Router();
 router.use(authenticate);

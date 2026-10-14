@@ -4,7 +4,7 @@ import { useSession } from '../../api/session/store'
 import { Icon, PATHS } from '../../components/ui'
 import { useIsClient } from '../../state/access'
 import { clientsPath, useUi } from '../../state/ui'
-import { hasInvoiceMatch, IM_BASE, IM_LIVE, IM_NAME, imEpicIds, isImProject } from './data'
+import { IM_BASE, IM_LIVE, IM_NAME, imEpicIds, imProjectOf } from './data'
 import { InvoiceMatchApp, type ImPage } from './InvoiceMatchApp'
 
 /**
@@ -29,9 +29,10 @@ export function LiveAppPage() {
         </div>
       </main>
     )
-  const company = isClient ? companies.find(c => c.id === session?.orgId) : companies.find(c => hasInvoiceMatch(c))
-  if (!company || !hasInvoiceMatch(company)) return <Navigate to="/clients" replace />
-  const project = company.projects.find(isImProject)!
+  // The same project the decisions are saved on (smallest id if several are named InvoiceMatch).
+  const found = imProjectOf(isClient ? companies.filter(c => c.id === session?.orgId) : companies)
+  if (!found) return <Navigate to="/clients" replace />
+  const { company, project } = found
 
   const page: ImPage = seg === 'reports' ? 'reports' : seg === 'invoices' || seg === 'review' ? 'review' : 'inbox'
   const sel = seg === 'invoices' && arg ? decodeURIComponent(arg) : null

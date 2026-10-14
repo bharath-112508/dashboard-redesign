@@ -28,4 +28,16 @@ describe('the InvoiceMatch project', () => {
     expect(imBugEpic(real)).toBe('s2')
     expect(imEpicIds(undefined)).toEqual([])
   })
+
+  it('picks the same project as the decisions do when two are named InvoiceMatch: the smallest id', () => {
+    mode.apiMode = true
+    const a = project({ id: 'p7' })
+    const b = project({ id: 'p3' })
+    expect(imProjectOf([company('c1', [a]), company('c2', [b])])?.project.id).toBe('p3')
+  })
+
+  it('files a bug in the project\'s "No epic" group when it has no epics yet (never another project)', () => {
+    mode.apiMode = true
+    expect(imBugEpic(project({ id: 'p9', epics: [] }))).toBe('none~p9')
+  })
 })

@@ -61,6 +61,19 @@ describe('InvoiceMatch decisions', () => {
         await expect(svc.decide(String(P), 'INV-1', { st: 'approved', note: '' }, client())).resolves.toBeTruthy();
     });
 
+    it('keeps the first decision when two land at once (unique index), instead of failing', async () => {
+        m.upsert
+            .mockReturnValueOnce({ lean: async () => Promise.reject(Object.assign(new Error('dup'), { code: 11000 })) })
+            .mockReturnValueOnce(lean({ no: 'INV-1', st: 'hold', note: '', by: 'Emma Lindqvist' }));
+        await expect(svc.decide(String(P), 'INV-1', { st: 'hold', note: '' }, staff())).resolves.toMatchObject({ st: 'hold' });
+        expect(m.upsert).toHaveBeenLastCalledWith({ project_id: P, no: 'INV-1' }, expect.anything(), expect.objectContaining({ upsert: false }));
+    });
+
+    it('refuses an archived InvoiceMatch project', async () => {
+        m.projectFindById.mockReturnValue(lean({ _id: P, name: 'InvoiceMatch', is_archived: true }));
+        await expect(svc.listDecisions(String(P), staff())).rejects.toMatchObject({ statusCode: 404 });
+    });
+
     it('refuses a project that is not InvoiceMatch', async () => {
         m.projectFindById.mockReturnValue(lean({ _id: P, name: 'Intranet' }));
         await expect(svc.listDecisions(String(P), staff())).rejects.toMatchObject({ statusCode: 404 });

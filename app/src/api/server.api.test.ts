@@ -64,7 +64,7 @@ vi.mock('./http/companies', () => ({
   fetchCompanies,
   fetchInternalProjects,
   sendCompanyCommand,
-  isCompanyApiCommand: (c: { type: string }) => c.type.startsWith('company.') || c.type.startsWith('project.'),
+  isCompanyApiCommand: (c: { type: string }) => c.type.startsWith('company.') || c.type.startsWith('project.') || c.type === 'clientTeam.add',
   allPages: vi.fn(),
 }))
 vi.mock('./session/store', () => ({ readSession: () => ({ personId: 'a0', name: 'A', email: 'a@x', role: 'super', org: 'Viljetech' }) }))
@@ -117,6 +117,11 @@ describe('server.send in API mode', () => {
   it('turns a 403 from the backend into the refusal the pages already handle', async () => {
     sendCompanyCommand.mockRejectedValueOnce(new ApiError(403, 'FORBIDDEN', 'You may not archive this company.'))
     await expect(server.send({ type: 'company.archive', id: 'c1', archived: true, at: null })).rejects.toBeInstanceOf(RefusedError)
+  })
+
+  it("shows a taken email on Add member as the backend's refusal", async () => {
+    sendCompanyCommand.mockRejectedValueOnce(new ApiError(409, 'DUPLICATE_RESOURCE', 'That email is already in use.'))
+    await expect(server.send({ type: 'clientTeam.add', member: { id: 'ct-1', companyId: 'c1', name: 'A', email: 'a@x' } })).rejects.toBeInstanceOf(RefusedError)
   })
 
   it('passes other backend errors through unchanged', async () => {

@@ -19,10 +19,10 @@ type Decision = { no: string; st: 'approved' | 'hold' | 'rejected'; note: string
 /** The project id, if it is an InvoiceMatch project the caller may see; otherwise not found. */
 const loadProject = async (projectId: string, caller: ProjectCaller): Promise<Types.ObjectId> => {
     const p = Types.ObjectId.isValid(projectId)
-        ? await Project.findById(projectId).select('_id name').lean<{ _id: Types.ObjectId; name: string } | null>()
+        ? await Project.findById(projectId).select('_id name is_archived').lean<{ _id: Types.ObjectId; name: string; is_archived?: boolean } | null>()
         : null;
     const ids = p ? await visibleProjectIds(caller) : null;
-    if (!p || p.name !== IM_NAME || (ids && !ids.some((id) => id.equals(p._id)))) throw AppError.notFound('That live app does not exist.');
+    if (!p || p.name !== IM_NAME || p.is_archived || (ids && !ids.some((id) => id.equals(p._id)))) throw AppError.notFound('That live app does not exist.');
     return p._id;
 };
 
@@ -46,11 +46,13 @@ export const listDecisions = async (projectId: string, caller: ProjectCaller): P
 
 export const decide = async (projectId: string, no: string, body: { st: Decision['st']; note: string }, caller: ProjectCaller) => {
     const project_id = await loadProject(projectId, caller);
-    const row = await InvoicematchDecision.findOneAndUpdate(
-        { project_id, no },
-        { $set: { st: body.st, note: body.note, by: await nameOf(caller.id), by_id: caller.id } },
-        { upsert: true, new: true }
-    ).lean<Decision>();
+    const set = { $set: { st: body.st, note: body.note, by: await nameOf(caller.id), by_id: caller.id } };
+    const save = (upsert: boolean) => InvoicematchDecision.findOneAndUpdate({ project_id, no }, set, { upsert, new: true }).lean<Decision>();
+    // Two first decisions at once: the unique index refuses the second insert, which then updates the row the first made.
+    const row = await save(true).catch((err: { code?: number }) => {
+        if (err.code === 11000) return save(false);
+        throw err;
+    });
     await audit(caller, project_id, { no, st: body.st });
     return toPublic(row!);
 };

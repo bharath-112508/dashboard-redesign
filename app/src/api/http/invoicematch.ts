@@ -9,8 +9,15 @@ import type { Session } from '../types'
  * with the decisions saved on the backend for the project named InvoiceMatch.
  */
 
-/** The InvoiceMatch project the signed-in person can see (the backend scopes the list). */
-const imProjectId = async () => (await liveProjects()).find(p => p.name === IM_NAME)?.id ?? null
+/**
+ * The InvoiceMatch client project the signed-in person can see (the backend scopes the list).
+ * If several are named InvoiceMatch, the smallest id: the same rule as the page (imProjectOf).
+ */
+const imProjectId = async () =>
+  (await liveProjects())
+    .filter(p => p.name === IM_NAME && p.company_id)
+    .map(p => p.id)
+    .sort()[0] ?? null
 
 export const fetchInvoiceMatch = async (session: Session | null): Promise<InvoiceMatchDb> => {
   const id = session ? await imProjectId() : null

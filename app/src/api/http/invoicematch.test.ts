@@ -10,7 +10,9 @@ const { INVOICES_SEED } = await import('../../features/invoice-match/data')
 const emma: Session = { personId: 'k1', name: 'Emma', email: 'e@x', role: 'cadmin', org: 'Aurora', orgId: 'c1' }
 const PROJECTS = [
   { id: 'p1', name: 'Supply Portal', company_id: 'c1', is_archived: false },
+  { id: 'pz', name: 'InvoiceMatch', company_id: 'c2', is_archived: false },
   { id: 'p9', name: 'InvoiceMatch', company_id: 'c1', is_archived: false },
+  { id: 'p0', name: 'InvoiceMatch', company_id: null, is_archived: false },
 ]
 
 beforeEach(() => {

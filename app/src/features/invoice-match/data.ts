@@ -116,13 +116,16 @@ export const isImProject = (p: Pick<ClientProject, 'id' | 'name'>) => p.id === I
 /** Whether a client company has the InvoiceMatch project (read from its projects in the Companies data). */
 export const hasInvoiceMatch = (company: Pick<Company, 'projects'> | undefined) => !!company && company.projects.some(isImProject)
 
-/** The first company with the InvoiceMatch project, and that project. */
+/**
+ * The company with the InvoiceMatch project, and that project. If several are named
+ * InvoiceMatch, the smallest id wins, the same rule the live app's decisions use
+ * (api/http/invoicematch.ts), so the page and its decisions are always one project.
+ */
 export const imProjectOf = (companies: Company[] | undefined) => {
-  for (const company of companies ?? []) {
-    const project = company.projects.find(isImProject)
-    if (project) return { company, project }
-  }
-  return null
+  let found: { company: Company; project: ClientProject } | null = null
+  for (const company of companies ?? [])
+    for (const project of company.projects) if (isImProject(project) && (!found || project.id < found.project.id)) found = { company, project }
+  return found
 }
 
 /**
@@ -133,8 +136,11 @@ export const imEpicIds = (p: Pick<ClientProject, 'id' | 'epics'> | null | undefi
   !p ? (apiMode ? [] : IM_EPIC_IDS) : apiMode ? [...p.epics.map(e => e.id), `none~${p.id}`] : p.epics.length ? p.epics.map(e => e.id) : IM_EPIC_IDS
 
 /** The epic that bugs reported from the live app go to: "Review & reports", else the last one. */
-export const imBugEpic = (p: Pick<ClientProject, 'epics'> | null | undefined): string =>
-  p?.epics.find(e => e.name === 'Review & reports')?.id ?? p?.epics.at(-1)?.id ?? IM_BUG_EPIC
+export const imBugEpic = (p: Pick<ClientProject, 'id' | 'epics'> | null | undefined): string =>
+  p?.epics.find(e => e.name === 'Review & reports')?.id ??
+  p?.epics.at(-1)?.id ??
+  // API mode, no epics yet: the project's own "No epic" group, so the bug stays on this project.
+  (apiMode && p ? `none~${p.id}` : IM_BUG_EPIC)
 
 // ---------- the live app's data
 
