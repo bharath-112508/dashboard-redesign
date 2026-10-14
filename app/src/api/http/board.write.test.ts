@@ -216,6 +216,17 @@ describe('tickets', () => {
     ).rejects.toMatchObject({ status: 403, message: "Files can't be sent in this chat yet. Add them to the bug as attachments." })
   })
 
+  it('refuses to assign by a name two people share, instead of picking one of them', async () => {
+    get.mockImplementation(async (path: string) =>
+      path === '/projects/p1/members' ? [{ id: 'u1', full_name: 'Chary' }, { id: 'u2', full_name: 'Rahul' }, { id: 'u7', full_name: 'Rahul' }] : ROUTES[path],
+    )
+    await loadBoard(staff)
+    await expect(sendBoardCommand({ type: 'task.update', id: 't2', patch: { assignee: 'Rahul' } }, TODAY)).rejects.toMatchObject({
+      message: 'Two people on these projects are called Rahul. Give one of them a different name in Users, then try again.',
+    })
+    expect(patch).not.toHaveBeenCalled()
+  })
+
   it('passes a backend refusal on', async () => {
     patch.mockRejectedValueOnce(new ApiError(403, 'TASK_WRITE_FORBIDDEN', 'You may only update: status'))
     await expect(sendBoardCommand({ type: 'task.update', id: 't2', patch: { status: 'done' } }, TODAY)).rejects.toMatchObject({ status: 403 })

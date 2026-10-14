@@ -25,6 +25,8 @@ export interface BoardIndex {
   storyOfEpic: Map<string, string | null>
   /** Person name → user id, for writes that name people. */
   idOfName: Map<string, string>
+  /** Names two or more people share: writing by name would pick the wrong one. */
+  sharedNames: Set<string>
   /** The tickets as loaded, to tell what a write changes (subtasks, blockers). */
   tasks: Map<TaskId, Task>
   /** Each real sprint's member ids, for adding members. */
@@ -53,6 +55,7 @@ const emptyIndex = (): BoardIndex => ({
   projectOfTask: new Map(),
   storyOfEpic: new Map(),
   idOfName: new Map(),
+  sharedNames: new Set(),
   tasks: new Map(),
   sprintMemberIds: new Map(),
   collaboratorIds: new Map(),
@@ -103,7 +106,11 @@ export const loadBoard = async (session: Session | null): Promise<Board> => {
   const nameOf = new Map<string, string>()
   for (const d of data) for (const m of d.members) nameOf.set(m.id, m.full_name)
   const names = (id: string) => nameOf.get(id) ?? ''
-  for (const [id, name] of nameOf) index.idOfName.set(name, id)
+  for (const [id, name] of nameOf) {
+    const other = index.idOfName.get(name)
+    if (other && other !== id) index.sharedNames.add(name)
+    index.idOfName.set(name, id)
+  }
 
   const statuses = [...DEFAULT_STATUSES]
   const epics: Epic[] = []
@@ -227,6 +234,7 @@ const refuse = (message: string) => new ApiError(403, 'NOT_AVAILABLE', message)
 
 /** A person's user id; someone the project does not have is refused rather than silently dropped. */
 const idOf = (name: string) => {
+  if (boardIndex.sharedNames.has(name)) throw refuse(`Two people on these projects are called ${name}. Give one of them a different name in Users, then try again.`)
   const id = boardIndex.idOfName.get(name)
   if (!id) throw refuse(`${name} is not on this project.`)
   return id
