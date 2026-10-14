@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compareTaskIds, findTicket, ticketIdFromParam } from './tasks'
+import { bugReporter, compareTaskIds, findTicket, ticketIdFromParam } from './tasks'
 import type { Task } from '../api/types'
 
 describe('ticketIdFromParam', () => {
@@ -45,5 +45,14 @@ describe('withDetails', () => {
     expect(out.clientBug?.chat.map(m => m.text)).toEqual(['hi', 'sending…'])
     expect(withDetails(bug, undefined)).toBe(bug)
     expect(withDetails(undefined, details as never)).toBeUndefined()
+  })
+})
+
+describe('bugReporter', () => {
+  const h = (who: string, what: string) => ({ kind: 'history' as const, who, what, when: '' })
+  it('names who reported the bug, or (from the backend) who created it, else "Client"', () => {
+    expect(bugReporter([h('Maria', 'reported this bug')])).toBe('Maria')
+    expect(bugReporter([h('Arjun', 'moved it to Review'), h('Kari Berg', 'created the task')])).toBe('Kari Berg')
+    expect(bugReporter([])).toBe('Client')
   })
 })

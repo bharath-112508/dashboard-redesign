@@ -9,7 +9,7 @@ import { usePage } from '../../state/page'
 import { useOverlay } from '../../state/ui'
 import { useTicketDetails } from '../../api/queries'
 import { useActorName, useActorSend, useScopedQuestions, useScopedTasks, useScopedWorkspace } from '../../state/access'
-import { statusOf, taskKey, fileExt, withDetails } from '../../domain/tasks'
+import { bugReporter, statusOf, taskKey, fileExt, withDetails } from '../../domain/tasks'
 import { answerShownFirst, clientQuestionState, threadOf } from '../../domain/questions'
 import { EscapeHoldContext, useEscapeHold, type EscapeHold } from './escapeHold'
 
@@ -194,8 +194,7 @@ function BugConversation({ bug, close }: { bug: Task; close: () => void }) {
     i,
   }))
   const update = (patch: Partial<Task>, log: string) => send({ type: 'task.update', id: bug.id, patch, log })
-  // The client who reported it (the first history line), so the window names them.
-  const reporter = bug.acts.find(a => a.what?.startsWith('reported this bug'))?.who || 'Client'
+  const reporter = bugReporter(bug.acts)
 
   const m: Model = {
     kind: 'Bug report',

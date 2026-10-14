@@ -86,6 +86,10 @@ export const ticketIdFromParam = (v: string | null | undefined): TaskId | null =
   return /^[a-z0-9~.-]+$/i.test(v.trim()) ? v.trim() : null
 }
 
+/** Who raised a client bug: the mock's first history line, or (API mode) whoever created it. */
+export const bugReporter = (acts: Task['acts']) =>
+  (acts.find(a => a.what?.startsWith('reported this bug')) ?? acts.find(a => a.what === 'created the task'))?.who || 'Client'
+
 /**
  * API mode: a ticket with what the backend reads for the open ticket only: comments and history,
  * attachments, and a client bug's chat (its comments). Messages still being sent stay after the chat.
