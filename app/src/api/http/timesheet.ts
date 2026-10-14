@@ -10,10 +10,13 @@ import type { Session, TimeEntry, WeekSubmission } from '../types'
 const pad = (n: number) => String(n).padStart(2, '0')
 const isoDay = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 
-/** Time is read from the first day of the previous month: this month's and last month's weeks. */
-// ponytail: older time is not loaded; add a from-date to the history view if people need to look further back.
-export const rangeStart = (now = new Date()) => {
-  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+/**
+ * Time is read from the first day of `months` months back (default: this month's and last
+ * month's weeks). A person's own time goes back a year; the team's, much more, two months.
+ */
+// ponytail: team time older than last month is not loaded; add a from-date to those views if needed.
+export const rangeStart = (now = new Date(), months = 1) => {
+  const first = new Date(now.getFullYear(), now.getMonth() - months, 1)
   // Back to its Monday, so a week that straddles the month is loaded whole.
   first.setDate(first.getDate() - ((first.getDay() + 6) % 7))
   return isoDay(first)
@@ -41,7 +44,7 @@ export const fetchEntries = async (session: Session | null): Promise<TimeEntry[]
   const from = rangeStart()
   const [projects, mine, team] = await Promise.all([
     liveProjects(),
-    allPages<BackendEntry>(`/timesheets/me?from_date=${from}`),
+    allPages<BackendEntry>(`/timesheets/me?from_date=${rangeStart(new Date(), 12)}`),
     readsTeam(session) ? allPages<BackendEntry>(`/timesheets?from_date=${from}`) : Promise.resolve([]),
   ])
   const kind = new Map(projects.map(p => [p.id, p.company_id ? 'c' : 'i']))
@@ -62,7 +65,7 @@ type BackendWeek = { id: string; user_id: string; week_start: string; submitted_
 /** Submitted weeks: the person's own, or their team's for a manager or admin. */
 export const fetchWeekSubmissions = async (session: Session | null): Promise<WeekSubmission[]> => {
   if (!session || isClientRole(session.role)) return []
-  const rows = await api.get<BackendWeek[]>(`/timesheets/weeks?from_date=${rangeStart()}`)
+  const rows = await api.get<BackendWeek[]>(`/timesheets/weeks?from_date=${rangeStart(new Date(), 12)}`)
   return rows.map(w => {
     const d = new Date(w.submitted_at)
     return { userId: w.user_id, week: w.week_start, when: `${fmt(isoDay(d))}, ${pad(d.getHours())}:${pad(d.getMinutes())}` }

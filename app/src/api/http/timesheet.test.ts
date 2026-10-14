@@ -30,7 +30,9 @@ const entry = (id: string, user_id: string, extra: Record<string, unknown> = {})
   ...extra,
 })
 
-const FROM = '2026-08-31'
+// From today's date, as the code reads it.
+const FROM = rangeStart()
+const MINE_FROM = rangeStart(new Date(), 12)
 
 beforeEach(() => {
   get.mockReset()
@@ -45,6 +47,7 @@ describe('rangeStart', () => {
   it('is the Monday on or before the first day of the previous month, so a straddling week is whole', () => {
     expect(rangeStart(new Date('2026-10-13T12:00:00'))).toBe('2026-08-31')
     expect(rangeStart(new Date('2026-07-20T12:00:00'))).toBe('2026-06-01')
+    expect(rangeStart(new Date('2026-10-13T12:00:00'), 12)).toBe('2025-09-29')
   })
 })
 
@@ -52,7 +55,8 @@ describe('fetchEntries', () => {
   it('reads only a developer\'s own entries', async () => {
     get.mockImplementation(async (path: string) => (path.startsWith('/timesheets/me') ? [entry('x1', 'u1')] : Promise.reject(new Error(path))))
     const out = await fetchEntries(dev)
-    expect(get.mock.calls.map(c => c[0])).toEqual([`/timesheets/me?from_date=${FROM}&limit=100&page=1`])
+    // A person's own time goes back a year; the team's (much more) two months.
+    expect(get.mock.calls.map(c => c[0])).toEqual([`/timesheets/me?from_date=${MINE_FROM}&limit=100&page=1`])
     expect(out).toEqual([
       expect.objectContaining({ id: 'x1', userId: 'u1', user: 'Chary', task: 't1', epic: 'e1', project: 'c:p1', notes: '', bill: 1 }),
     ])
@@ -93,7 +97,7 @@ describe('fetchWeekSubmissions', () => {
   it('maps submitted weeks', async () => {
     get.mockResolvedValueOnce([{ id: 'w1', user_id: 'u1', week_start: '2026-10-05', submitted_at: '2026-10-09T12:05:00.000Z' }])
     const [w] = await fetchWeekSubmissions(dev)
-    expect(get).toHaveBeenCalledWith(`/timesheets/weeks?from_date=${FROM}`)
+    expect(get).toHaveBeenCalledWith(`/timesheets/weeks?from_date=${MINE_FROM}`)
     expect(w).toMatchObject({ userId: 'u1', week: '2026-10-05' })
     expect(w.when).toMatch(/^09 Oct 2026, \d{2}:\d{2}$/)
   })
