@@ -18,10 +18,11 @@ const file = z.object({ name: z.string().max(200), size: z.string().max(20), url
 const files = z.array(file).max(5);
 const num = z.object({ number: z.coerce.number().int().positive() });
 const short = z.string().trim().max(200);
+const title = z.string().trim().min(1).max(1000);
 const long = z.string().max(10_000);
 
 const questionFields = {
-    title: z.string().trim().min(1).max(200),
+    title,
     text: long,
     photos: files,
     qtype: short,
@@ -78,6 +79,11 @@ questionRoutes.patch(
     '/:number',
     validate({ params: num, body: z.object(questionFields).partial().strict() }),
     call((req) => svc.updateQuestion(Number(req.params.number), req.body, projectCallerFrom(req)))
+);
+questionRoutes.post(
+    '/:number/photos',
+    validate({ params: num, body: z.object({ files: files.min(1) }).strict() }),
+    call((req) => svc.addPhotos(Number(req.params.number), req.body.files, projectCallerFrom(req)), 'created')
 );
 questionRoutes.post(
     '/:number/messages',

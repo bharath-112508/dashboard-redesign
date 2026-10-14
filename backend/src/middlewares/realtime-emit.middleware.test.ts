@@ -45,7 +45,8 @@ describe('realtimeEmit', () => {
         run('PATCH', '/devops/items/OPS-1', 200);
         run('POST', '/questions/3/messages', 201);
         run('POST', '/devops-requests', 201);
-        expect(publishMock.mock.calls).toEqual([[['devops']], [['questions']], [['devops-requests']]]);
+        run('POST', '/devops-requests/4/comments', 201);
+        expect(publishMock.mock.calls).toEqual([[['devops']], [['questions']], [['devops-requests']], [['devops-requests']]]);
     });
     it('does not publish for GET', () => {
         run('GET', '/leaves', 200);

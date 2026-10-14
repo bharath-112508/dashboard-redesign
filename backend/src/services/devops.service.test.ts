@@ -74,6 +74,14 @@ describe('createItem', () => {
         await expect(svc.createItem(body(p), staff('employee', ['devops']))).rejects.toMatchObject({ statusCode: 409 });
     });
 
+    it('refuses a key taken at the same moment (unique index)', async () => {
+        const p = new Types.ObjectId();
+        projectFindById.mockReturnValue(lean({ _id: p }));
+        itemFindOne.mockReturnValue(lean(null));
+        itemCreate.mockRejectedValue(Object.assign(new Error('dup'), { code: 11000 }));
+        await expect(svc.createItem(body(p), staff('employee', ['devops']))).rejects.toMatchObject({ statusCode: 409 });
+    });
+
     it('saves the item for DevOps', async () => {
         const p = new Types.ObjectId();
         projectFindById.mockReturnValue(lean({ _id: p }));

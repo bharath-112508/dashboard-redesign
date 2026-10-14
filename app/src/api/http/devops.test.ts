@@ -20,17 +20,21 @@ describe('dates', () => {
   it('shows stored times as "ago", keeping the stored value to send back', () => {
     const out = datesOut({ logs: [{ text: 'x', when: '2026-10-14T11:55:00.000Z' }], notes: { 1: { when: 'Edited 2026-10-12T12:00:00.000Z' } }, rel: { when: '2026-10-09T13:12' } }, NOW)
     expect(out).toEqual({
-      logs: [{ text: 'x', when: '5m ago', at: '2026-10-14T11:55:00.000Z' }],
-      notes: { 1: { when: 'Edited 2d ago', at: 'Edited 2026-10-12T12:00:00.000Z' } },
+      logs: [{ text: 'x', when: '5m ago', at: '2026-10-14T11:55:00.000Z', shown: '5m ago' }],
+      notes: { 1: { when: 'Edited 2d ago', at: 'Edited 2026-10-12T12:00:00.000Z', shown: 'Edited 2d ago' } },
       // A release time is a date the page formats itself: left alone.
       rel: { when: '2026-10-09T13:12' },
     })
   })
 
   it('stores "just now" as the time, and anything shown back as what was stored', () => {
-    expect(datesIn({ pnotes: [{ when: 'Edited just now', at: '2026-10-01T00:00:00.000Z' }, { when: '3d ago', at: '2026-10-11T12:00:00.000Z' }] }, NOW)).toEqual({
+    expect(datesIn({ pnotes: [{ when: 'Edited just now', at: '2026-10-01T00:00:00.000Z', shown: '13d ago' }, { when: '3d ago', at: '2026-10-11T12:00:00.000Z', shown: '3d ago' }] }, NOW)).toEqual({
       pnotes: [{ when: 'Edited 2026-10-14T12:00:00.000Z' }, { when: '2026-10-11T12:00:00.000Z' }],
     })
+    // Shown as "just now" because it was under a minute old when read: sent back as stored, not re-stamped.
+    const shown = datesOut({ pnotes: [{ when: '2026-10-14T11:59:30.000Z' }] }, NOW)
+    expect(shown.pnotes[0].when).toBe('just now')
+    expect(datesIn(shown, new Date('2026-10-14T13:00:00.000Z'))).toEqual({ pnotes: [{ when: '2026-10-14T11:59:30.000Z' }] })
     expect(datesIn({ notes: { 0: { text: 'n', when: 'Just now' } } }, NOW)).toEqual({ notes: { 0: { text: 'n', when: '2026-10-14T12:00:00.000Z' } } })
   })
 })
@@ -80,7 +84,7 @@ describe('fetchQuestions', () => {
         task_id: null,
         devops_key: 'OPS-1',
         sprint: null,
-        photos: [],
+        photos: [{ name: 'a.png', size: '1 KB', url: 'data:a', img: true }],
         qtype: 'Access',
         qprio: 'High',
         from_devops: true,
@@ -106,6 +110,7 @@ describe('fetchQuestions', () => {
       answerIdx: 1,
       answeredWhen: '1h ago',
     })
+    expect(q.photos).toEqual([{ name: 'a.png', size: '1 KB', url: 'data:a', img: true, saved: true }])
     expect(q.comments?.[0]).toEqual({ who: 'Arjun', side: 'team', text: 'Any news?', files: [], when: '2h ago' })
   })
 })

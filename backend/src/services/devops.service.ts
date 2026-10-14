@@ -78,6 +78,9 @@ export const createItem = async (body: { key: string; project_id: string; data: 
         data: body.data,
         created_by: caller.id,
         updated_by: caller.id,
+    }).catch((err: { code?: number }) => {
+        // Two people took the same key at once: the unique index refuses the second.
+        throw err.code === 11000 ? AppError.conflict('Someone else just added one with that key. Try again.') : err;
     });
     await audit(caller, AUDIT_ACTIONS.DEVOPS_ITEM_CREATE, AUDIT_TARGET_KINDS.DEVOPS_ITEM, doc._id, { key: body.key });
     return toPublicItem(doc);

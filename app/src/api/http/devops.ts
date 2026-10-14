@@ -68,16 +68,22 @@ const walk = (v: unknown, at: (o: Record<string, unknown>) => Record<string, unk
   return typeof o.when === 'string' ? at(o) : o
 }
 
-/** Shows every stored `when` as "5m ago" and keeps the stored value in `at`, to send back unchanged. */
+/** Shows every stored `when` as "5m ago", keeping the stored value (`at`) and what was shown (`shown`) to send back unchanged. */
 export const datesOut = <T>(v: T, now = new Date()): T =>
   walk(v, o => {
     const m = STORED.exec(o.when as string)
-    return m ? { ...o, when: m[1] + ago(m[2], now), at: o.when } : o
+    if (!m) return o
+    const when = m[1] + ago(m[2], now)
+    return { ...o, when, at: o.when, shown: when }
   }) as T
 
-/** The reverse: "just now" (after a word or not) becomes the time; a `when` shown from `at` goes back as stored. */
+/**
+ * The reverse: a `when` still as it was shown goes back as stored (even a stored
+ * time shown as "just now"); a new or changed "just now" becomes the time.
+ */
 export const datesIn = <T>(v: T, now = new Date()): T =>
-  walk(v, ({ at, ...o }) => {
+  walk(v, ({ at, shown, ...o }) => {
+    if (typeof at === 'string' && o.when === shown) return { ...o, when: at }
     const m = /^(.*?)just now$/i.exec(o.when as string)
     if (m) return { ...o, when: m[1] + now.toISOString() }
     return typeof at === 'string' ? { ...o, when: at } : o
@@ -132,7 +138,8 @@ const questionFrom = (q: BackendQuestion, now: Date): Question => {
     answer: i < 0 ? '' : comments[i].text || 'Sent files',
     ...answer,
     comments,
-    photos: q.photos ?? [],
+    // Marked, so adding a photo sends only the new ones.
+    photos: (q.photos ?? []).map(p => ({ ...p, saved: true })),
     solved: q.solved,
     qtype: q.qtype,
     qprio: q.qprio,
@@ -216,7 +223,7 @@ export const isDevopsApiCommand = (cmd: { type: string; cmds?: { type: string }[
 const pick = (patch: object, names: Record<string, string>) =>
   Object.fromEntries(Object.entries(patch).flatMap(([k, v]) => (k in names && v !== undefined ? [[names[k], v]] : [])))
 
-const QUESTION_FIELDS = { title: 'title', text: 'text', photos: 'photos', qtype: 'qtype', qprio: 'qprio', sprint: 'sprint', solved: 'solved', seenT: 'seen_t' }
+const QUESTION_FIELDS = { title: 'title', text: 'text', qtype: 'qtype', qprio: 'qprio', sprint: 'sprint', solved: 'solved', seenT: 'seen_t' }
 const REQUEST_FIELDS = {
   type: 'type',
   prio: 'prio',
@@ -285,7 +292,10 @@ export const sendDevopsCommand = async (cmd: DevopsApiCommand, session: Session 
       return {}
     }
     case 'question.update': {
-      const body = pick(cmd.patch, QUESTION_FIELDS)
+      const { photos, ...rest } = cmd.patch
+      const added = (photos ?? []).filter(p => !(p as { saved?: boolean }).saved)
+      if (added.length) await api.post(`/questions/${cmd.id}/photos`, { files: added })
+      const body = pick(rest, QUESTION_FIELDS)
       if (Object.keys(body).length) await api.patch(`/questions/${cmd.id}`, body)
       return {}
     }

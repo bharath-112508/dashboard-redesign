@@ -113,6 +113,20 @@ describe('questions', () => {
     });
 });
 
+describe('question photos', () => {
+    const img = (n: number) => ({ name: `p${n}.png`, size: '1 KB', url: 'data:image/png;base64,AA', img: true });
+
+    it('appends only the new photos, up to 20 a question, for the team', async () => {
+        const q = doc({ number: 1, project_id: null, photos: [img(1)] as unknown[] });
+        m.qFindOne.mockResolvedValue(q);
+        await svc.addPhotos(1, [img(2)], staff());
+        expect(q.photos).toEqual([img(1), img(2)]);
+        q.photos = Array.from({ length: 20 }, (_, i) => img(i));
+        await expect(svc.addPhotos(1, [img(21)], staff())).rejects.toMatchObject({ statusCode: 422 });
+        await expect(svc.addPhotos(1, [img(2)], client())).rejects.toMatchObject({ statusCode: 403 });
+    });
+});
+
 describe('DevOps requests', () => {
     it('are raised by the team, on the DevOps item\'s project', async () => {
         await expect(svc.createRequest({ number: 1, devops_key: 'OPS-1', text: 'x' }, client())).rejects.toMatchObject({ statusCode: 403 });

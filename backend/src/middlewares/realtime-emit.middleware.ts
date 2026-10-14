@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 
-import { NESTED_PATH_TOPIC_MAP, PATH_TOPIC_MAP } from '../constants/realtime.js';
+import { NESTED_PATH_TOPIC_MAP, PATH_TOPIC_MAP, REALTIME_TOPICS } from '../constants/realtime.js';
 import { publish } from '../services/realtime.service.js';
 import logger from '../utils/logger.js';
 
@@ -24,7 +24,8 @@ export const realtimeEmit = (req: Request, res: Response, next: NextFunction): v
         const topic = segments[0] ? PATH_TOPIC_MAP[segments[0]] : undefined;
         if (topic) {
             // A nested sub-resource (`/tasks/:id/comments`) adds its own topic.
-            const nested = segments[2] ? NESTED_PATH_TOPIC_MAP[segments[2]] : undefined;
+            // Only under tasks: a DevOps request's comments are not task comments.
+            const nested = segments[2] && topic === REALTIME_TOPICS.TASKS ? NESTED_PATH_TOPIC_MAP[segments[2]] : undefined;
             const topics = nested && nested !== topic ? [topic, nested] : [topic];
             res.on('finish', () => {
                 try {

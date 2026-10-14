@@ -99,6 +99,14 @@ describe('questions', () => {
     })
   })
 
+  it('adds only the new photos (the ones read back are already stored)', async () => {
+    const old = { name: 'a.png', size: '1 KB', url: 'data:a', img: true, saved: true }
+    const added = { name: 'b.png', size: '1 KB', url: 'data:b', img: true }
+    await sendDevopsCommand({ type: 'question.update', id: 7, patch: { photos: [old, added] as never } }, me, NOW)
+    expect(post).toHaveBeenCalledWith('/questions/7/photos', { files: [added] })
+    expect(patch).not.toHaveBeenCalled()
+  })
+
   it('sends messages, edits, solved and seen', async () => {
     await sendDevopsCommand({ type: 'question.message', id: 7, message: { who: 'x', side: 'team', text: 'Hi', when: 'just now', files: [] } }, me, NOW)
     expect(post).toHaveBeenCalledWith('/questions/7/messages', { text: 'Hi', files: [] })

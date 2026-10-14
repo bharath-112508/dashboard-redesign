@@ -14,7 +14,7 @@ import * as svc from '../services/devops.service.js';
 const objectId = z.string().regex(/^[a-f0-9]{24}$/i);
 const key = z.string().regex(/^OPS-\d{1,6}$/);
 const data = z.record(z.string(), z.unknown());
-const log = z.object({ type: z.string().max(40), text: z.string().max(2000), detail: z.string().max(2000).optional() }).strict();
+const log = z.object({ type: z.string().max(40), text: z.string().max(20_000), detail: z.string().max(20_000).optional() }).strict();
 
 const router = Router();
 router.use(authenticate);

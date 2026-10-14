@@ -8,6 +8,7 @@ import { isClientCaller, nameOf, visibleProjectIds } from './devops.service.js';
 import { recordAudit } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { AppError } from '../utils/app-error.js';
+import { ERROR_CODES } from '../constants/error-codes.js';
 import type { ProjectCaller } from './project.service.js';
 
 /**
@@ -106,6 +107,21 @@ export const updateQuestion = async (number: number, patch: Data, caller: Projec
     Object.assign(d, patch);
     await d.save();
     await audit(caller, AUDIT_ACTIONS.CLIENT_QUESTION_UPDATE, AUDIT_TARGET_KINDS.CLIENT_QUESTION, d._id, { number, fields: Object.keys(patch) });
+    return toPublicQuestion(d);
+};
+
+/** At most this many photos on one question: they are stored inside it until blob uploads are switched on. */
+export const MAX_QUESTION_PHOTOS = 20;
+
+/** Adds photos to the question (only the new ones are sent, so each request stays small). */
+export const addPhotos = async (number: number, files: unknown[], caller: ProjectCaller) => {
+    teamOnly(caller, 'add photos to a question');
+    const d = await loadQuestion(number, caller);
+    if ((d.photos ?? []).length + files.length > MAX_QUESTION_PHOTOS) {
+        throw AppError.unprocessable(`A question can have at most ${MAX_QUESTION_PHOTOS} photos.`, ERROR_CODES.VALIDATION_ERROR);
+    }
+    d.photos = [...(d.photos ?? []), ...files];
+    await d.save();
     return toPublicQuestion(d);
 };
 
