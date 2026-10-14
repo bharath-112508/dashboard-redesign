@@ -23,6 +23,7 @@ describe('queryKeysFor', () => {
     expect(queryKeysFor(['leaves'])).toEqual(['leave', 'notifications', 'leaveBook'])
     expect(queryKeysFor(['users', 'roles'])).toEqual(['people', 'companies', 'access'])
     expect(queryKeysFor(['sprints'])).toEqual(['workspace', 'tasks'])
+    expect(queryKeysFor(['devops', 'questions', 'devops-requests'])).toEqual(['devops', 'workspace', 'questions', 'requests'])
     expect(queryKeysFor(['something-new'])).toEqual([])
   })
 })

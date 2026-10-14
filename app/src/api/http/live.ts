@@ -36,6 +36,10 @@ const KEYS_OF: Record<string, string[]> = {
   roles: ['access'],
   settings: ['access'],
   companies: ['companies', 'people'],
+  // DevOps items also link epics to them (workspace.devopsLinks).
+  devops: ['devops', 'workspace'],
+  questions: ['questions'],
+  'devops-requests': ['requests'],
 }
 
 export const queryKeysFor = (topics: string[]): string[] => [...new Set(topics.flatMap(t => KEYS_OF[t] ?? []))]

@@ -17,6 +17,17 @@ vi.mock('./http/board', () => ({
   sendBoardCommand,
   isBoardApiCommand: (c: { type: string }) => c.type.startsWith('task.'),
 }))
+const { fetchDevops, fetchQuestions, fetchRequests } = vi.hoisted(() => ({
+  fetchDevops: vi.fn(async () => ({ projects: [{ key: 'OPS-1' }], settings: {} })),
+  fetchQuestions: vi.fn(async () => [{ id: 3 }]),
+  fetchRequests: vi.fn(async () => [{ id: 2 }]),
+}))
+vi.mock('./http/devops', () => ({
+  fetchLinkedWorkspace: () => fetchWorkspace(),
+  fetchDevops,
+  fetchQuestions,
+  fetchRequests,
+}))
 const { fetchEntries, fetchWeekSubmissions, sendTimeCommand } = vi.hoisted(() => ({
   sendTimeCommand: vi.fn(async (): Promise<{ id?: string }> => ({ id: 'x9' })),
   fetchEntries: vi.fn(async () => [{ id: 'x1' }]),
@@ -70,6 +81,12 @@ describe('server.get in API mode', () => {
     expect((await server.get('workspace')).epics).toEqual([{ id: 'e1' }])
     expect(await server.get('tasks')).toEqual([{ id: 't1' }])
     expect(fetchTasks).toHaveBeenCalledWith(expect.objectContaining({ personId: 'a0' }))
+  })
+
+  it('reads the DevOps board, questions and requests from the backend', async () => {
+    expect((await server.get('devops')).projects).toEqual([{ key: 'OPS-1' }])
+    expect(await server.get('questions')).toEqual([{ id: 3 }])
+    expect(await server.get('requests')).toEqual([{ id: 2 }])
   })
 })
 

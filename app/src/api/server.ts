@@ -13,7 +13,8 @@ import { readSession } from './session/store'
 import { apiMode } from './http/config'
 import { fetchCompanies, fetchInternalProjects, isCompanyApiCommand, sendCompanyCommand } from './http/companies'
 import { ApiError } from './http/client'
-import { fetchTasks, fetchWorkspace, isBoardApiCommand, sendBoardCommand } from './http/board'
+import { fetchTasks, isBoardApiCommand, sendBoardCommand } from './http/board'
+import { fetchDevops, fetchLinkedWorkspace, fetchQuestions, fetchRequests } from './http/devops'
 import { fetchEntries, fetchWeekSubmissions, isTimeApiCommand, sendTimeCommand } from './http/timesheet'
 import { fetchAccessApi, fetchPeopleApi, isUserApiCommand, sendUserCommand } from './http/users'
 import { fetchLeave, fetchLeaveNotices, isLeaveApiCommand, sendLeaveCommand } from './http/leave'
@@ -533,7 +534,10 @@ export const server = {
     // API mode: these resources come from the backend; everything else is still the mock.
     if (apiMode && resource === 'companies') return (await fetchCompanies(readSession())) as Db[K]
     if (apiMode && resource === 'internalProjects') return (await fetchInternalProjects(readSession())) as Db[K]
-    if (apiMode && resource === 'workspace') return (await fetchWorkspace(readSession())) as Db[K]
+    if (apiMode && resource === 'workspace') return (await fetchLinkedWorkspace(readSession())) as Db[K]
+    if (apiMode && resource === 'devops') return (await fetchDevops(readSession())) as Db[K]
+    if (apiMode && resource === 'questions') return (await fetchQuestions(readSession())) as Db[K]
+    if (apiMode && resource === 'requests') return (await fetchRequests(readSession())) as Db[K]
     if (apiMode && resource === 'tasks') return (await fetchTasks(readSession())) as Db[K]
     if (apiMode && resource === 'entries') return (await fetchEntries(readSession())) as Db[K]
     if (apiMode && resource === 'people') return (await fetchPeopleApi(readSession())) as Db[K]
