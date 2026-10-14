@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 
-const { itemFind, itemFindOne, itemCreate, projectFind, projectFindById, userFindById, settingsMock } = vi.hoisted(() => ({
+const { itemFind, itemFindOne, itemFindOneAndUpdate, itemCreate, projectFind, projectFindById, userFindById, settingsMock } = vi.hoisted(() => ({
     itemFind: vi.fn(),
     itemFindOne: vi.fn(),
+    itemFindOneAndUpdate: vi.fn(),
     itemCreate: vi.fn(),
     projectFind: vi.fn(),
     projectFindById: vi.fn(),
@@ -11,7 +12,7 @@ const { itemFind, itemFindOne, itemCreate, projectFind, projectFindById, userFin
     settingsMock: vi.fn(),
 }));
 
-vi.mock('../models/devops-item.model.js', () => ({ DevopsItem: { find: itemFind, findOne: itemFindOne, create: itemCreate } }));
+vi.mock('../models/devops-item.model.js', () => ({ DevopsItem: { find: itemFind, findOne: itemFindOne, findOneAndUpdate: itemFindOneAndUpdate, create: itemCreate } }));
 vi.mock('../models/project.model.js', () => ({ Project: { find: projectFind, findById: projectFindById } }));
 vi.mock('../models/user.model.js', () => ({ User: { findById: userFindById } }));
 vi.mock('./settings.service.js', () => ({ getOrInitSettings: settingsMock }));
@@ -119,11 +120,24 @@ describe('updateItem', () => {
         const d = item({ initDue: '2026-11-30', dev: 'Build', devDues: { Build: '2026-11-01' }, logs: [{ type: 'Note', text: 'old', by: 'X', when: 'w' }] });
         itemFindOne.mockResolvedValue(d);
         settingsMock.mockResolvedValue(settingsDoc({ rules: { lockInitial: true, lockDevDue: true } }));
+        itemFindOneAndUpdate.mockResolvedValue(d);
         await svc.updateItem('OPS-7', { patch: { initDue: '2027-01-01', devDue: '2027-02-02', prio: 'High' }, log: { type: 'Field change', text: 'Priority changed to High' } }, staff('admin'));
-        expect(d.data).toMatchObject({ initDue: '2026-11-30', devDue: '2026-11-01', prio: 'High', updatedBy: 'Arjun' });
-        expect((d.data as { logs: unknown[] }).logs[0]).toMatchObject({ type: 'Field change', text: 'Priority changed to High', by: 'Arjun' });
-        expect((d.data as { logs: unknown[] }).logs).toHaveLength(2);
-        expect(d.save).toHaveBeenCalled();
+        // Only the changed fields are set, and the entry is added to the stored activity, so a
+        // change someone else saves at the same moment is not undone.
+        const [filter, update] = itemFindOneAndUpdate.mock.calls[0];
+        expect(filter).toEqual({ key: 'OPS-7' });
+        expect(update.$set).toMatchObject({ 'data.initDue': '2026-11-30', 'data.devDue': '2026-11-01', 'data.prio': 'High', 'data.updatedBy': 'Arjun' });
+        expect(Object.keys(update.$set).some((k) => k === 'data' || k === 'data.logs')).toBe(false);
+        expect(update.$push['data.logs'].$position).toBe(0);
+        expect(update.$push['data.logs'].$each[0]).toMatchObject({ type: 'Field change', text: 'Priority changed to High', by: 'Arjun' });
+        expect(d.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a field name that is not a plain name', async () => {
+        itemFindOne.mockResolvedValue(item({}));
+        settingsMock.mockResolvedValue(settingsDoc());
+        await expect(svc.updateItem('OPS-7', { patch: { 'a.b': 1 } }, staff('admin'))).rejects.toMatchObject({ statusCode: 422 });
+        expect(itemFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it('is refused for a client', async () => {

@@ -7,6 +7,7 @@ import { recordAudit } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { CLIENT_SIDE_ROLES, ROLES } from '../constants/roles.js';
 import { AppError } from '../utils/app-error.js';
+import { ERROR_CODES } from '../constants/error-codes.js';
 import { isAdminLike } from '../utils/role-check.js';
 import type { ProjectCaller } from './project.service.js';
 
@@ -122,20 +123,23 @@ export const updateItem = async (
     if (!doc) throw AppError.notFound('That DevOps item does not exist.');
     // The key and the linked project are fixed once the item exists.
     const { key: _k, project: _p, logs: _l, updatedBy: _u, ...patch } = body.patch;
+    const bad = Object.keys(patch).find((k) => !/^[A-Za-z][A-Za-z0-9_]*$/.test(k));
+    if (bad) throw AppError.unprocessable(`"${bad}" is not a field name.`, ERROR_CODES.VALIDATION_ERROR);
     const by = await nameOf(caller.id);
-    const cur = doc.data ?? {};
-    const logs = (cur.logs as unknown[]) ?? [];
-    doc.data = {
-        ...cur,
-        ...applyLocks(cur, patch, await rulesOf()),
-        updatedBy: by,
-        logs: body.log ? [{ ...body.log, by, when: new Date().toISOString() }, ...logs] : logs,
-    };
-    doc.updated_by = caller.id;
-    doc.markModified('data');
-    await doc.save();
+    // Only the changed fields are set and the entry is added to the stored activity, so a
+    // change someone else saves at the same moment is kept (a list field is still replaced whole).
+    const fields = applyLocks(doc.data ?? {}, patch, await rulesOf());
+    const saved = await DevopsItem.findOneAndUpdate(
+        { key },
+        {
+            $set: { ...Object.fromEntries(Object.entries(fields).map(([k, v]) => [`data.${k}`, v])), 'data.updatedBy': by, updated_by: caller.id },
+            ...(body.log ? { $push: { 'data.logs': { $each: [{ ...body.log, by, when: new Date().toISOString() }], $position: 0 } } } : {}),
+        },
+        { new: true }
+    );
+    if (!saved) throw AppError.notFound('That DevOps item does not exist.');
     await audit(caller, AUDIT_ACTIONS.DEVOPS_ITEM_UPDATE, AUDIT_TARGET_KINDS.DEVOPS_ITEM, doc._id, { key, fields: Object.keys(patch) });
-    return toPublicItem(doc);
+    return toPublicItem(saved);
 };
 
 // ─── Settings ───────────────────────────────────────────────────────────
