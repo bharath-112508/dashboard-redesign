@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
+import { useToast } from '../pages/shell/toast'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { reduce, touches, type Command, type Resource } from './commands'
 import { RefusedError, server } from './server'
@@ -114,18 +115,51 @@ const useCommandMutation = () => {
     onError: (_err, _cmd, ctx) => {
       if (ctx) Object.entries(ctx.prev).forEach(([k, v]) => qc.setQueryData([k], v))
     },
-    onSettled: () => {
+    onSettled: (_data, _err, cmd) => {
+      refetchKeysAfter(cmd).forEach(k => refetchAfterWrites.add(k))
       // Refetching while later writes are still in flight would briefly undo
-      // them, so only the last write to finish refetches (everything it and
-      // the earlier skipped writes touched).
+      // them, so only the last write to finish refetches what it and the
+      // earlier skipped writes touched.
       if (qc.isMutating() > 1) return
-      return Promise.all([...RESOURCES, 'ticketDetails', 'leaveBook'].map(k => qc.invalidateQueries({ queryKey: [k] })))
+      const keys = [...refetchAfterWrites]
+      refetchAfterWrites.clear()
+      return Promise.all(keys.map(k => qc.invalidateQueries({ queryKey: [k] })))
     },
   })
 }
 
-/** Fire and forget: the write is applied optimistically and errors roll back. */
-export const useSend = () => useCommandMutation().mutate
+/** Data that changes when another kind of data does (on the backend or in what the pages derive). */
+const RELATED: Partial<Record<string, string[]>> = {
+  tasks: ['ticketDetails', 'companies'],
+  workspace: ['tasks', 'companies'],
+  entries: ['projectHours', 'companies'],
+  weekSubmissions: ['entries'],
+  leave: ['leaveBook', 'notifications'],
+  people: ['companies'],
+  companies: ['people', 'internalProjects', 'workspace', 'tasks'],
+  internalProjects: ['workspace', 'tasks'],
+  devops: ['workspace'],
+  clientTeam: ['companies'],
+}
+
+/** What to refetch after a write: what it touched and what depends on that (not every resource: at production size that is hundreds of requests). */
+export const refetchKeysAfter = (cmd: Command): string[] => {
+  const touched = touches(cmd) as string[]
+  return [...new Set([...touched, ...touched.flatMap(k => RELATED[k] ?? [])])]
+}
+
+/** Keys of writes that settled while others were still in flight, refetched by the last one. */
+const refetchAfterWrites = new Set<string>()
+
+/** What a failed write tells the person: the backend's reason for a refusal, else a plain message. */
+export const writeErrorMessage = (err: unknown) => (err instanceof RefusedError ? err.message : 'That change could not be saved. Try again.')
+
+/** Fire and forget: the write is applied optimistically; an error rolls it back and says why. */
+export const useSend = () => {
+  const { mutate } = useCommandMutation()
+  const show = useToast()
+  return useCallback((cmd: Command) => mutate(cmd, { onError: err => show(writeErrorMessage(err)) }), [mutate, show])
+}
 
 /**
  * Like useSend, but resolves once the server has applied the command and the

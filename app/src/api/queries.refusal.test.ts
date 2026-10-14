@@ -51,3 +51,23 @@ describe('refuseBeforeSending (API mode)', () => {
     expect(() => refuseBeforeSending(qc, { type: 'company.archive', id: 'c1', archived: true, at: null })).not.toThrow()
   })
 })
+
+describe('writeErrorMessage', () => {
+  it("shows a refusal's reason, and a plain message for anything else", async () => {
+    const { writeErrorMessage } = await import('./queries')
+    const { ApiError } = await import('./http/client')
+    expect(writeErrorMessage(new RefusedError('Only DevOps and admins change DevOps items.'))).toBe('Only DevOps and admins change DevOps items.')
+    expect(writeErrorMessage(new ApiError(400, 'VALIDATION_ERROR', 'Validation failed'))).toBe('That change could not be saved. Try again.')
+    expect(writeErrorMessage(new TypeError('Failed to fetch'))).toBe('That change could not be saved. Try again.')
+  })
+})
+
+describe('refetchKeysAfter', () => {
+  it('refetches what a write touched and what depends on it, not everything', async () => {
+    const { refetchKeysAfter } = await import('./queries')
+    expect(refetchKeysAfter({ type: 'task.delete', id: '1' }).sort()).toEqual(['companies', 'tasks', 'ticketDetails'].sort())
+    const leave = refetchKeysAfter({ type: 'leave.decide', id: 'r1', status: 'Approved', by: 'A', when: '2026-10-14' })
+    expect(leave).toEqual(expect.arrayContaining(['leave', 'leaveBook', 'notifications']))
+    expect(leave).not.toContain('tasks')
+  })
+})
