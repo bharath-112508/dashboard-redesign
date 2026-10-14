@@ -80,7 +80,8 @@ export function LeaveSection({ person, leave, notes, canEdit, session }: Props) 
         request: { id, userId: person.id, type: v.type, from: v.from, to: v.to, reason: v.reason, status: 'Pending' },
       })
       show('Leave requested. It stays pending until it is approved.')
-      reset()
+      // Keep the type picked for the next request (the backend's types arrive after the first render).
+      reset({ type: book.main, from: TODAY, to: TODAY, reason: '' })
       setAdding(false)
     } catch (err) {
       setError(err instanceof RefusedError ? err.message : 'The request could not be saved. Try again.')

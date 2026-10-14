@@ -24,7 +24,7 @@ import {
     type LeaveRequestStatus,
 } from '../constants/leave.js';
 import { EMPLOYMENT_TYPES } from '../constants/user-statuses.js';
-import { ROLES, type RoleType } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES, ROLES, type RoleType } from '../constants/roles.js';
 import { directReportIdsOf, isDirectReportOf } from './reporting-scope.service.js';
 import { consumeCompOffLots, refundConsumedLots, resyncCompOff } from './comp-off.service.js';
 import { getOrInitSettings } from './settings.service.js';
@@ -139,10 +139,17 @@ const ensureCanReviewRequest = (
 
 /** Redesign: an admin may apply leave for anyone; a manager or team lead for their direct reports. */
 const assertCanApplyFor = async (applicantId: Types.ObjectId, caller: { id: Types.ObjectId }): Promise<void> => {
+    // Permission first, so a caller who may not apply for others learns nothing about the person.
     const permissions = await permissionsOf(caller.id);
-    if (callerCan(permissions, PERMISSIONS.SYSTEM_ADMIN)) return;
-    if (callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_APPROVE) && (await isDirectReportOf(applicantId, caller.id))) return;
-    throw AppError.forbidden('You can only apply leave for yourself or your direct reports');
+    const allowed =
+        callerCan(permissions, PERMISSIONS.SYSTEM_ADMIN) ||
+        (callerCan(permissions, PERMISSIONS.LEAVE_REQUEST_APPROVE) && (await isDirectReportOf(applicantId, caller.id)));
+    if (!allowed) throw AppError.forbidden('You can only apply leave for yourself or your direct reports');
+    // Only an active staff member is on the leave scheme.
+    const applicant = await User.findById(applicantId).select('role status').lean<{ role: RoleType; status: string } | null>();
+    if (!applicant || applicant.status !== 'active' || CLIENT_SIDE_ROLES.includes(applicant.role)) {
+        throw AppError.unprocessable('Leave can be applied only for an active staff member', ERROR_CODES.VALIDATION_ERROR);
+    }
 };
 
 /**
@@ -375,6 +382,10 @@ export const previewSplit = async (
     requires_additional_approval: boolean;
     warnings: { code: string; message: string }[];
 }> => {
+    // The preview is always the caller's own; a user_id (allowed on apply) is refused, not silently ignored.
+    if ((body as { user_id?: string }).user_id) {
+        throw AppError.unprocessable('A preview is for your own leave only', ERROR_CODES.VALIDATION_ERROR);
+    }
     await assertOnLeaveScheme(caller.id);
     const ctx = await loadApplyContext(body.start_date, body.end_date);
     const requestedType = ctx.typesById.get(body.leave_type_id);

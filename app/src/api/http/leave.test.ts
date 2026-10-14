@@ -47,6 +47,13 @@ describe('fetchLeave', () => {
     ])
   })
 
+  it('reads a manager\'s own requests too (the backend\'s manager list is their reports only)', async () => {
+    const pm: Session = { ...dev, personId: 'm1', role: 'pm' }
+    get.mockResolvedValue([])
+    await fetchLeave(pm)
+    expect(get.mock.calls.map(c => c[0])).toEqual(['/leaves?limit=100&page=1', '/leaves?user_id=m1&limit=100&page=1'])
+  })
+
   it('reads a developer\'s own requests once', async () => {
     get.mockResolvedValueOnce([req('r1', { status: 'approved', acted_at: '2026-10-12T10:00:00.000Z' })])
     const [r] = await fetchLeave(dev)
@@ -79,7 +86,7 @@ describe('fetchLeaveBook', () => {
         ]
       throw new Error(path)
     })
-    expect(await fetchLeaveBook('u1', dev)).toEqual({ types: ['Casual Leave', 'Sick Leave', 'Work From Home'], main: 'Casual Leave', allowance: 17, used: 3, pending: 1, left: 13 })
+    expect(await fetchLeaveBook('u1', dev)).toEqual({ types: ['Casual Leave', 'Sick Leave', 'Work From Home'], main: 'Casual Leave', allowance: 17, used: 3, pending: 1, left: 14 })
   })
 
   it('reads another person\'s balance through the team route', async () => {

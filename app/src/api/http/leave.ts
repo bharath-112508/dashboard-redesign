@@ -16,7 +16,7 @@ type BackendLeave = {
   status: 'pending' | 'approved' | 'rejected' | 'cancelled'
   acted_at?: string | null
 }
-type BackendLeaveType = { id: string; code: string; name: string; is_unlimited: boolean; is_earned: boolean }
+type BackendLeaveType = { id: string; code: string; name: string; is_unlimited: boolean; is_earned: boolean; is_active?: boolean }
 type BackendBalance = {
   leave_type: BackendLeaveType
   allocated: number
@@ -25,6 +25,12 @@ type BackendBalance = {
   used: number
   pending: number
   available: number
+}
+
+/** The calendar day of a timestamp where the person is. */
+const localDay = (iso: string) => {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 const STATUS: Record<string, LeaveStatus> = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' }
@@ -37,7 +43,7 @@ const leaveFrom = (r: BackendLeave): LeaveRequest => ({
   to: r.end_date,
   reason: r.reason,
   status: STATUS[r.status],
-  ...(r.acted_at ? { decidedWhen: r.acted_at.slice(0, 10) } : {}),
+  ...(r.acted_at ? { decidedWhen: localDay(r.acted_at) } : {}),
 })
 
 /**
@@ -50,7 +56,8 @@ export const fetchLeave = async (session: Session | null): Promise<LeaveRequest[
   if (!session || isClientRole(session.role)) return []
   const [list, own] = await Promise.all([
     allPages<BackendLeave>('/leaves'),
-    session.role === 'super' ? allPages<BackendLeave>(`/leaves?user_id=${session.personId}`) : Promise.resolve([]),
+    // The backend's admin and manager lists leave out the reviewer's own requests.
+    session.role === 'super' || session.role === 'pm' ? allPages<BackendLeave>(`/leaves?user_id=${session.personId}`) : Promise.resolve([]),
   ])
   const byId = new Map([...list, ...own].map(r => [r.id, r]))
   return [...byId.values()].filter(r => r.status !== 'cancelled').map(leaveFrom)
@@ -93,7 +100,7 @@ export const fetchLeaveBook = async (personId: PersonId, session: Session | null
   const rows = await api.get<BackendBalance[]>(
     personId === session?.personId ? `/leave-balances/me?year=${year}` : `/leave-balances?user_id=${personId}&year=${year}`,
   )
-  const limited = (t: BackendLeaveType) => !t.is_unlimited && !t.is_earned
+  const limited = (t: BackendLeaveType) => t.is_active !== false && t.is_unlimited === false && t.is_earned === false
   const row = rows.find(r => r.leave_type.code === 'CL') ?? rows.find(r => limited(r.leave_type))
   const main = row?.leave_type.name ?? types.find(limited)?.name ?? ''
   return {
@@ -102,7 +109,9 @@ export const fetchLeaveBook = async (personId: PersonId, session: Session | null
     allowance: row ? row.allocated + row.carried_forward + row.adjusted : 0,
     used: row?.used ?? 0,
     pending: row?.pending ?? 0,
-    left: row?.available ?? 0,
+    // As in the design, "left" is the allowance minus what was used: pending days are already reserved
+    // in the backend's `available`, and counting them twice would block approving them.
+    left: row ? row.available + row.pending : 0,
   }
 }
 

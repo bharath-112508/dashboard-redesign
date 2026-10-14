@@ -30,4 +30,4 @@ export const useLeaveBook = (leave: LeaveRequest[], personId: PersonId): LeaveBo
 }
 
 /** "Annual leave", "Casual Leave": the main type as a leave label. */
-export const leaveLabel = (main: string) => (/leave$/i.test(main) ? main : `${main} leave`)
+export const leaveLabel = (main: string) => (!main ? 'Leave' : /leave$/i.test(main) ? main : `${main} leave`)

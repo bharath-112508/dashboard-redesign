@@ -994,7 +994,7 @@ describe('applyLeave on behalf of someone (redesign)', () => {
     /** The applicant is a freelancer, so a call that gets past the guard stops at the scheme check (422). */
     const stubApplicant = (managerId: Types.ObjectId | null) =>
         userFindByIdMock.mockReturnValue({
-            select: () => ({ lean: () => Promise.resolve({ internal_profile: { employment_type: 'freelancer', reporting_manager_id: managerId } }) }),
+            select: () => ({ lean: () => Promise.resolve({ role: 'employee', status: 'active', internal_profile: { employment_type: 'freelancer', reporting_manager_id: managerId } }) }),
         });
 
     it('lets an admin apply for anyone (the request is the applicant\'s)', async () => {
@@ -1021,6 +1021,31 @@ describe('applyLeave on behalf of someone (redesign)', () => {
     it('refuses an employee applying for someone else', async () => {
         vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: [] } as never);
         await expect(svc.applyLeave(body as never, { id: new Types.ObjectId(), role: ROLES.EMPLOYEE })).rejects.toMatchObject({ statusCode: 403 });
+    });
+});
+
+describe('applying on behalf refuses people outside the leave scheme (redesign)', () => {
+    const body = (user: Types.ObjectId) => ({ leave_type_id: new Types.ObjectId().toString(), start_date: '2026-12-10', end_date: '2026-12-10', reason: 'x', user_id: user.toString() });
+    const admin = { id: new Types.ObjectId(), role: ROLES.ADMIN };
+
+    it('refuses a client person', async () => {
+        userFindByIdMock.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ role: 'representative', status: 'active' }) }) });
+        await expect(svc.applyLeave(body(new Types.ObjectId()) as never, admin)).rejects.toMatchObject({ statusCode: 422 });
+    });
+
+    it('refuses someone who does not exist or is deactivated', async () => {
+        userFindByIdMock.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+        await expect(svc.applyLeave(body(new Types.ObjectId()) as never, admin)).rejects.toMatchObject({ statusCode: 422 });
+        userFindByIdMock.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ role: 'employee', status: 'deactivated' }) }) });
+        await expect(svc.applyLeave(body(new Types.ObjectId()) as never, admin)).rejects.toMatchObject({ statusCode: 422 });
+    });
+});
+
+describe('previewSplit is for yourself only (redesign)', () => {
+    it('refuses a user_id rather than ignoring it', async () => {
+        await expect(
+            svc.previewSplit({ leave_type_id: new Types.ObjectId().toString(), start_date: '2026-12-10', end_date: '2026-12-10', reason: 'x', user_id: new Types.ObjectId().toString() } as never, { id: new Types.ObjectId() })
+        ).rejects.toMatchObject({ statusCode: 422 });
     });
 });
 
