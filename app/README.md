@@ -129,6 +129,7 @@ Companies and projects in API mode:
 
 Also:
 
+- **Bug chat:** a client bug's conversation is the ticket's comments: the client writes from the bug window, the team from the drawer's Client chat tab, and the backend says which side each author is on. Files can't be sent in the chat yet (add them to the bug as attachments). A client sees their own bug reports: their view includes each project's "No epic" group, where the backend files them.
 - **Two-step sign-in:** for an account with MFA, the sign-in card asks for the 6-digit code from the authenticator app (or a backup code) after the password (`/auth/mfa/verify`). Enrolling in MFA is not in the redesign; if the backend requires MFA for admins, an admin must enroll elsewhere first.
 - The account list is shown only in builds made with `VITE_DEMO_ACCOUNTS=true` (`npm run dev:api` sets it); a production build shows the sign-in form alone.
 - In API mode the login page lists **Demo DB accounts**, one per user type (`src/api/http/sampleAccounts.ts`). Picking one fills in its email; type its password. Two types have no backend account yet and are shown greyed out with the reason: **Admin** (the backend's admins sign in as Super admin) and **DevOps engineer** (no DevOps role in the backend yet). Mock mode keeps the sample users and the `demo` password.

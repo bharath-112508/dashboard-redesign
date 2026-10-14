@@ -15,7 +15,8 @@ export interface ClientScope {
 /** The scope of a client user: the epics of the projects their company has. */
 export const buildScope = (orgId: string | undefined, companies: Company[], ws: Workspace | undefined): ClientScope => {
   const company = companies.find(c => c.id === orgId)
-  const owned = new Set((company?.projects ?? []).flatMap(p => p.epics.map(e => e.id)))
+  // Also each project's "No epic" group (API mode): the backend files a client's own bug reports there.
+  const owned = new Set((company?.projects ?? []).flatMap(p => [...p.epics.map(e => e.id), `none~${p.id}`]))
   const epicIds = (ws?.epics ?? []).map(e => e.id).filter(id => owned.has(id))
   const devopsKeys = [...new Set(epicIds.map(id => ws?.devopsLinks[id]).filter((k): k is string => !!k))]
   return { companyId: company?.id ?? null, epicIds, devopsKeys }

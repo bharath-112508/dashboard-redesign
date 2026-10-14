@@ -208,6 +208,14 @@ describe('tickets', () => {
     expect(post).toHaveBeenCalledWith('/tasks/t1/comments', { body: 'Looks good' })
   })
 
+  it("sends a message in a client bug's chat as a comment, and refuses files there for now", async () => {
+    await sendBoardCommand({ type: 'bug.message', id: 't1', message: { who: 'Emma', side: 'client', text: 'Still happens', when: 'just now', files: [] } }, TODAY)
+    expect(post).toHaveBeenCalledWith('/tasks/t1/comments', { body: 'Still happens' })
+    await expect(
+      sendBoardCommand({ type: 'bug.message', id: 't1', message: { who: 'Emma', side: 'client', text: 'see', when: 'just now', files: [{ name: 'a.png', size: '1 KB', url: 'data:', img: true }] } }, TODAY),
+    ).rejects.toMatchObject({ status: 403, message: "Files can't be sent in this chat yet. Add them to the bug as attachments." })
+  })
+
   it('passes a backend refusal on', async () => {
     patch.mockRejectedValueOnce(new ApiError(403, 'TASK_WRITE_FORBIDDEN', 'You may only update: status'))
     await expect(sendBoardCommand({ type: 'task.update', id: 't2', patch: { status: 'done' } }, TODAY)).rejects.toMatchObject({ status: 403 })

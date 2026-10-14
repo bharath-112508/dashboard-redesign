@@ -1,6 +1,6 @@
 import { diff, TODAY } from '../lib/dates'
 import { pal, person as greyPerson, type Person } from '../lib/theme'
-import type { Sprint, Status, Task, TaskId, TimeEntry } from '../api/types'
+import type { ChatMessage, Sprint, Status, Task, TaskId, TimeEntry } from '../api/types'
 
 /**
  * Orders ids by creation: number-like ids as numbers (9 before 10), backend
@@ -85,3 +85,20 @@ export const ticketIdFromParam = (v: string | null | undefined): TaskId | null =
   // A backend id, as the link carries it.
   return /^[a-z0-9~.-]+$/i.test(v.trim()) ? v.trim() : null
 }
+
+/**
+ * API mode: a ticket with what the backend reads for the open ticket only: comments and history,
+ * attachments, and a client bug's chat (its comments). Messages still being sent stay after the chat.
+ */
+export const withDetails = (
+  task: Task | undefined,
+  details: { acts: Task['acts']; atts: Task['atts']; chat: ChatMessage[] } | undefined,
+): Task | undefined =>
+  task && details
+    ? {
+        ...task,
+        acts: details.acts,
+        atts: details.atts,
+        ...(task.clientBug ? { clientBug: { ...task.clientBug, chat: [...details.chat, ...task.clientBug.chat] } } : {}),
+      }
+    : task

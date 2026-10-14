@@ -4,9 +4,9 @@ import { boardIndex } from './board'
 import { prioFrom, statusIdFrom, typeFrom } from './boardMappers'
 import { fileSize } from '../../domain/tasks'
 import { fmt } from '../../lib/dates'
-import type { Activity, Attachment } from '../types'
+import type { Activity, Attachment, ChatMessage } from '../types'
 
-type Person = { full_name?: string | null } | null | undefined
+type Person = { full_name?: string | null; client?: boolean } | null | undefined
 type BackendComment = { id: string; body: string; author?: Person; created_at: string }
 type BackendActivity = { id?: string; activity_type: string; from_value?: unknown; to_value?: unknown; actor?: Person; created_at?: string }
 type BackendAttachment = { id: string; file_name: string; file_size: number; created_at: string }
@@ -94,9 +94,9 @@ const nameOf = (p: Person) => p?.full_name || 'Someone'
  * first and only its first page (100 rows) is read.
  */
 // ponytail: history is capped at its newest 100 rows; page it if older lines are ever needed.
-export const fetchTicketDetails = async (taskId: string, now = new Date()): Promise<{ acts: Activity[]; atts: Attachment[] }> => {
+export const fetchTicketDetails = async (taskId: string, now = new Date()): Promise<{ acts: Activity[]; atts: Attachment[]; chat: ChatMessage[] }> => {
   // A draft or a ticket still being created has no backend id yet.
-  if (!isBackendId(taskId)) return { acts: [], atts: [] }
+  if (!isBackendId(taskId)) return { acts: [], atts: [], chat: [] }
   const at = `/tasks/${taskId}`
   const [comments, activity, files] = await Promise.all([
     allPages<BackendComment>(`${at}/comments`),
@@ -113,5 +113,7 @@ export const fetchTicketDetails = async (taskId: string, now = new Date()): Prom
   return {
     acts: dated.sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0)).map(d => d.act),
     atts: files.map(f => ({ id: f.id, name: f.file_name, size: fileSize(f.file_size), date: fmt(localDate(f.created_at)) })),
+    // A client bug's chat: its comments, oldest first, the client's on their side.
+    chat: comments.map(c => ({ who: nameOf(c.author), side: c.author?.client ? 'client' : 'team', text: c.body, when: ago(c.created_at, now), files: [] })),
   }
 }

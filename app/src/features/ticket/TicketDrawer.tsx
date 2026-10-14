@@ -19,6 +19,7 @@ import {
   fileExt,
   fileSize,
   findTicket,
+  withDetails,
   loggedHours,
   rh,
   sprintsOf,
@@ -66,7 +67,7 @@ export function TicketDrawer({ id }: { id: TaskId }) {
   const found = findTicket(tasks, id, alias)
   // API mode: comments, history and attachments are read for the open ticket only.
   const details = useTicketDetails(found?.id ?? id).data
-  const raw0 = found && details ? { ...found, acts: details.acts, atts: details.atts } : found
+  const raw0 = withDetails(found, details)
   useEffect(() => {
     if (alias && raw0?.id === alias) overlay.open('ticket', alias, { replace: true })
   }, [alias, raw0?.id])

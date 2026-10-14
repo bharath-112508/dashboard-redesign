@@ -6,7 +6,7 @@ import type { ProjectDocument } from '../models/project.model.js';
 import { User } from '../models/user.model.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
-import { ROLES } from '../constants/roles.js';
+import { CLIENT_SIDE_ROLES, ROLES } from '../constants/roles.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { TASK_ACTIVITY_TYPES } from '../constants/task-activity.js';
 import { recordAudit } from './audit.service.js';
@@ -62,14 +62,18 @@ const toPublic = (doc: TaskCommentDocument): Record<string, unknown> => doc.toJS
 interface AuthorDisplay {
     id: string;
     full_name: string | null;
+    /** Redesign: the author is client-side, so a client bug's chat can show who said what. */
+    client?: boolean;
 }
 
 const loadAuthorDisplays = async (ids: Types.ObjectId[]): Promise<Map<string, AuthorDisplay>> => {
     if (ids.length === 0) return new Map();
     const rows = await User.find({ _id: { $in: ids } })
-        .select('_id full_name')
-        .lean<{ _id: Types.ObjectId; full_name: string }[]>();
-    return new Map(rows.map((r) => [r._id.toString(), { id: r._id.toString(), full_name: r.full_name }]));
+        .select('_id full_name role')
+        .lean<{ _id: Types.ObjectId; full_name: string; role?: string }[]>();
+    return new Map(
+        rows.map((r) => [r._id.toString(), { id: r._id.toString(), full_name: r.full_name, client: (CLIENT_SIDE_ROLES as string[]).includes(r.role ?? '') }])
+    );
 };
 
 /**

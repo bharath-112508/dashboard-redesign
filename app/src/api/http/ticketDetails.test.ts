@@ -66,8 +66,24 @@ describe('fetchTicketDetails', () => {
     expect(d.atts).toEqual([{ id: 'f1', name: 'spec.pdf', size: '12 KB', date: '11 Oct 2026' }])
   })
 
+  it("reads the comments as a client bug's chat, oldest first, the client on their side", async () => {
+    get.mockImplementation(async (path: string) => {
+      if (path.startsWith(`/tasks/${ID}/comments`))
+        return [
+          { id: 'c1', body: 'It crashes', author: { id: 'k1', full_name: 'Emma', client: true }, created_at: '2026-10-12T10:00:00.000Z' },
+          { id: 'c2', body: 'Which version?', author: { id: 'u1', full_name: 'Rahul', client: false }, created_at: '2026-10-12T11:00:00.000Z' },
+        ]
+      return []
+    })
+    const d = await fetchTicketDetails(ID, NOW)
+    expect(d.chat).toEqual([
+      { who: 'Emma', side: 'client', text: 'It crashes', when: '1d ago', files: [] },
+      { who: 'Rahul', side: 'team', text: 'Which version?', when: '1d ago', files: [] },
+    ])
+  })
+
   it('asks nothing for a ticket the backend does not have yet', async () => {
-    expect(await fetchTicketDetails('3', NOW)).toEqual({ acts: [], atts: [] })
+    expect(await fetchTicketDetails('3', NOW)).toEqual({ acts: [], atts: [], chat: [] })
     expect(get).not.toHaveBeenCalled()
   })
 

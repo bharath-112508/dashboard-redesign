@@ -189,6 +189,7 @@ const BOARD_COMMANDS = new Set([
   'task.update',
   'task.delete',
   'task.comment',
+  'bug.message',
   'sprint.create',
   'sprint.update',
   'sprint.addMembers',
@@ -205,6 +206,7 @@ type BoardCommand = Extract<
       | 'task.update'
       | 'task.delete'
       | 'task.comment'
+      | 'bug.message'
       | 'sprint.create'
       | 'sprint.update'
       | 'sprint.addMembers'
@@ -480,6 +482,12 @@ const sendOne = async (cmd: BoardCommand, today: string): Promise<{ id?: string 
       return {}
     case 'task.comment':
       await api.post(`/tasks/${await realTaskId(cmd.id)}/comments`, { body: cmd.text })
+      return {}
+    // A client bug's chat is its comments (the backend lets clients comment on their own bugs).
+    case 'bug.message':
+      // ponytail: comments carry text only; files in the chat need attachment uploads wired in here.
+      if (cmd.message.files?.length) throw refuse("Files can't be sent in this chat yet. Add them to the bug as attachments.")
+      await api.post(`/tasks/${await realTaskId(cmd.id)}/comments`, { body: cmd.message.text })
       return {}
     case 'sprint.create': {
       const { sprint } = cmd

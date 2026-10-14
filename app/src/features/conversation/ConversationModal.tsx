@@ -7,8 +7,9 @@ import { questionTags } from '../../lib/theme'
 import { initials } from '../../lib/media'
 import { usePage } from '../../state/page'
 import { useOverlay } from '../../state/ui'
+import { useTicketDetails } from '../../api/queries'
 import { useActorName, useActorSend, useScopedQuestions, useScopedTasks, useScopedWorkspace } from '../../state/access'
-import { statusOf, taskKey, fileExt } from '../../domain/tasks'
+import { statusOf, taskKey, fileExt, withDetails } from '../../domain/tasks'
 import { answerShownFirst, clientQuestionState, threadOf } from '../../domain/questions'
 import { EscapeHoldContext, useEscapeHold, type EscapeHold } from './escapeHold'
 
@@ -69,7 +70,9 @@ export function ConversationModal({ bugId, questionId }: { bugId?: TaskId; quest
     return () => window.removeEventListener('keydown', h)
   })
 
-  const bug = bugId != null ? tasks.find(t => t.id === bugId && t.clientBug) : undefined
+  // API mode: the bug's chat is its comments, read for the open bug.
+  const bugDetails = useTicketDetails(bugId != null ? String(bugId) : '').data
+  const bug = withDetails(bugId != null ? tasks.find(t => t.id === bugId && t.clientBug) : undefined, bugDetails)
   const q = questionId != null ? questions.find(x => x.id === questionId) : undefined
   let body: ReactNode = null
   if (bug) body = <BugConversation bug={bug} close={close} />

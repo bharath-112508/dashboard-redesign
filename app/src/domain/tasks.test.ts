@@ -34,3 +34,16 @@ describe('findTicket', () => {
     expect(findTicket(tasks, 'NOPE-1')).toBeUndefined()
   })
 })
+
+describe('withDetails', () => {
+  it("puts the backend's comments, history, attachments and bug chat on a ticket; unsent chat messages stay after them", async () => {
+    const { withDetails } = await import('./tasks')
+    const bug = { id: 't1', acts: [], atts: [], clientBug: { reported: 'x', chat: [{ who: 'Emma', side: 'client', text: 'sending…', when: 'just now', files: [] }] } } as unknown as Task
+    const details = { acts: [{ kind: 'comment', who: 'Rahul', text: 'hi', when: '1h ago' }], atts: [], chat: [{ who: 'Rahul', side: 'team', text: 'hi', when: '1h ago', files: [] }] }
+    const out = withDetails(bug, details as never)!
+    expect(out.acts).toEqual(details.acts)
+    expect(out.clientBug?.chat.map(m => m.text)).toEqual(['hi', 'sending…'])
+    expect(withDetails(bug, undefined)).toBe(bug)
+    expect(withDetails(undefined, details as never)).toBeUndefined()
+  })
+})

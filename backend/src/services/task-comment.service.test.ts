@@ -579,6 +579,33 @@ describe('listComments', () => {
         expect(commentFindMock).toHaveBeenCalledWith(expect.objectContaining({ task_id: task._id, deleted_at: null }));
     });
 
+    it("says whether each author is on the client side, so a client bug's chat can tell the client from the team", async () => {
+        const { User } = await import('../models/user.model.js');
+        const project = makeProject();
+        const task = makeTaskRow(project._id);
+        stubTaskLookup(task);
+        loadProjectForCallerMock.mockResolvedValueOnce(project);
+        const client = new Types.ObjectId();
+        const staffer = new Types.ObjectId();
+        stubFindForList([makeComment({ author_id: client }), makeComment({ author_id: staffer })]);
+        const spy = vi.spyOn(User, 'find').mockReturnValueOnce({
+            select: () => ({
+                lean: async () => [
+                    { _id: client, full_name: 'Emma', role: ROLES.CLIENT },
+                    { _id: staffer, full_name: 'Rahul', role: ROLES.EMPLOYEE },
+                ],
+            }),
+        } as never);
+
+        const out = await svc.listComments(task._id, { page: 1, limit: 20, include_deleted: false }, employeeCaller());
+
+        expect((out.data as { author: unknown }[]).map((r) => r.author)).toEqual([
+            { id: client.toString(), full_name: 'Emma', client: true },
+            { id: staffer.toString(), full_name: 'Rahul', client: false },
+        ]);
+        spy.mockRestore();
+    });
+
     it('honours include_deleted when caller is admin', async () => {
         const project = makeProject();
         const task = makeTaskRow(project._id);
