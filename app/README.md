@@ -44,6 +44,11 @@ What comes from the backend so far:
 
 - **Phase 1g:** the client portal's team (Add member).
 
+- **Phase 1h:** the Dashboard's last sample figures (`src/api/dashboard/live.ts`). In API mode:
+  - **Budget vs hours used:** per client project, the budget is the sum of its tickets' estimates (there is no "hours sold" field) and used is the time logged on it; projects without estimates are left out, the most used first, four at most.
+  - **Leave & attendance** (super admin) and **Approvals** (admin): who is off today, then pending requests, upcoming first and then the latest overdue ones, five at most. The admin's **Pending leave** and **Pending comp-off** count the pending requests (comp-off = a type named "Comp…").
+  - Mock mode keeps the design's sample figures (`src/api/dashboard/static.ts`).
+
 Client team in API mode:
 
 - **Add member** (client admin, "Your team") creates a real client user on their company, invited by email to set a password and added to all the company's live projects. Members are real people, so they show as company contacts; removing someone is done in Users.

@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import { useCompanies, useDevops, useEntries, useInternalProjects, useQuestions, useRequests, useTasks, useWorkspace } from '../../api/queries'
+import { useCompanies, useDevops, useEntries, useInternalProjects, useLeave, useQuestions, useRequests, useTasks, useWorkspace } from '../../api/queries'
+import { apiMode } from '../../api/http/config'
 import { usePeople } from '../../api/people/directory'
 import { buildDashboard, type Dashboard } from '../../api/dashboard/model'
 import { todayIso } from '../../api/dashboard/time'
@@ -19,6 +20,7 @@ export const useDashboard = (me: Session) => {
   const devops = useDevops()
   const requests = useRequests()
   const internal = useInternalProjects()
+  const leave = useLeave()
 
   const ready =
     people.data !== undefined &&
@@ -29,7 +31,8 @@ export const useDashboard = (me: Session) => {
     workspace.data !== undefined &&
     devops.data !== undefined &&
     requests.data !== undefined &&
-    internal.data !== undefined
+    internal.data !== undefined &&
+    leave.data !== undefined
 
   const model: Dashboard | null = useMemo(() => {
     if (!ready) return null
@@ -43,12 +46,14 @@ export const useDashboard = (me: Session) => {
         workspace: workspace.data!,
         devops: devops.data!,
         requests: requests.data ?? [],
+        leave: leave.data ?? [],
+        live: apiMode,
       },
       me,
       todayIso(),
     )
     // Each store is replaced as a whole when it changes, so its reference is the dependency.
-  }, [ready, me, people.data, companies.data, tasks.data, entries.data, questions.data, workspace.data, devops.data, requests.data])
+  }, [ready, me, people.data, companies.data, tasks.data, entries.data, questions.data, workspace.data, devops.data, requests.data, leave.data])
 
   return {
     ready,

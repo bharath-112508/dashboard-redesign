@@ -1,9 +1,10 @@
 import type { DevopsDb } from '../devops/types'
-import type { Company, DevopsRequest, Person, PersonId, Priority, Question, Role, Session, Task, TaskId, TaskType, TimeEntry, Workspace } from '../types'
+import type { Company, DevopsRequest, LeaveRequest, Person, PersonId, Priority, Question, Role, Session, Task, TaskId, TaskType, TimeEntry, Workspace } from '../types'
 import { activeSprint, assigneesOf, compareTaskIds, estimateHours, loggedHours, statusOf, taskKey } from '../../domain/tasks'
 import { addDays, diff, short } from '../../lib/dates'
 import { isClientRole } from '../session/access'
 import { APPROVALS, BUDGETS, LEAVE_ATTENDANCE, type StaticListRow } from './static'
+import { approvalRows, budgetsFrom, leaveRows, pendingCounts } from './live'
 import { DAY_HOURS, WEEK_HOURS, dayLabel, dayMonth, dueLabel, hm, isWeekday, longDate, monthToDate, pctOf, weekOf, weekdaysIn } from './time'
 
 /**
@@ -191,6 +192,9 @@ export interface DashboardData {
   workspace: Workspace
   devops: DevopsDb
   requests: DevopsRequest[]
+  /** API mode: leave requests, and `live` to compute the figures that are fixed samples in mock mode (./static.ts). */
+  leave?: LeaveRequest[]
+  live?: boolean
 }
 
 const SCOPE: Partial<Record<Role, string>> = {
@@ -388,7 +392,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
     body: {
       kind: 'prog',
       empty: 'No budgets yet',
-      rows: BUDGETS.map((b, i): ProgRow => {
+      rows: (d.live ? budgetsFrom(d.companies, d.tasks, d.entries) : BUDGETS).map((b, i): ProgRow => {
         const over = b.hours > b.sold
         return {
           id: `b-${i}`,
@@ -553,7 +557,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
           link: 'Users',
           href: ROUTE.users,
           icon: 'cal',
-          body: { kind: 'list', empty: 'Nothing waiting for you', rows: staticRows(LEAVE_ATTENDANCE, ROUTE.users) },
+          body: { kind: 'list', empty: 'Nothing waiting for you', rows: staticRows(d.live ? leaveRows(d.leave ?? [], d.people, today) : LEAVE_ATTENDANCE, ROUTE.users) },
         },
       ],
     }
@@ -563,10 +567,15 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
     const idle = countable.reduce((a, p) => a + idleOf(teamWeek.filter(e => e.userId === p.id), week, today), 0)
     const weekCap = countable.length * WEEK_HOURS
     const epics = new Set(overdueTasks.map(t => epicName(t.epic)))
+    const pend = d.live ? pendingCounts(d.leave ?? []) : null
     return {
       kpis: [
-        kpi('leave', 'Pending leave', '3', '', 'Oldest from 6 Oct', '#E2B23C', ROUTE.users),
-        kpi('compoff', 'Pending comp-off', '2', '', 'Weekend releases', '#E2B23C', ROUTE.users),
+        pend
+          ? kpi('leave', 'Pending leave', String(pend.leave), '', pend.oldestLeave ? `Oldest from ${short(pend.oldestLeave)}` : 'None waiting', '#E2B23C', ROUTE.users)
+          : kpi('leave', 'Pending leave', '3', '', 'Oldest from 6 Oct', '#E2B23C', ROUTE.users),
+        pend
+          ? kpi('compoff', 'Pending comp-off', String(pend.compoff), '', pend.compoff ? 'Waiting for a decision' : 'None waiting', '#E2B23C', ROUTE.users)
+          : kpi('compoff', 'Pending comp-off', '2', '', 'Weekend releases', '#E2B23C', ROUTE.users),
         kpi('idle', 'Team idle this week', hm(idle), '', `${pctOf(idle, weekCap)}% of ${weekCap}h`, '#D9534F', ROUTE.employee),
         kpi('overdue', 'Overdue tickets', String(overdueTasks.length), '', `Across ${epics.size} epics`, '#C0392B', ROUTE.tickets, { valueColor: '#C0392B', drawer: 'overdue' }),
       ],
@@ -578,7 +587,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
           link: 'Users',
           href: ROUTE.users,
           icon: 'cal',
-          body: { kind: 'list', empty: 'Nothing waiting for you', rows: staticRows(APPROVALS, ROUTE.users) },
+          body: { kind: 'list', empty: 'Nothing waiting for you', rows: staticRows(d.live ? approvalRows(d.leave ?? [], d.people, today) : APPROVALS, ROUTE.users) },
         },
         hoursByEmployee(),
         overdueWidget(),
