@@ -48,10 +48,6 @@ describe('realtimeEmit', () => {
         run('POST', '/devops-requests/4/comments', 201);
         expect(publishMock.mock.calls).toEqual([[['devops']], [['questions']], [['devops-requests']], [['devops-requests']]]);
     });
-    it('InvoiceMatch decisions publish invoicematch (redesign)', () => {
-        run('PUT', '/invoicematch/abc/decisions/INV-1', 200);
-        expect(publishMock).toHaveBeenCalledWith(['invoicematch']);
-    });
     it('does not publish for GET', () => {
         run('GET', '/leaves', 200);
         expect(publishMock).not.toHaveBeenCalled();

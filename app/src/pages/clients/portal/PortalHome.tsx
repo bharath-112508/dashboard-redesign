@@ -8,7 +8,7 @@ import { clientsPath, useUi } from '../../../state/ui'
 import { useSession } from '../../../api/session/store'
 import { TeamPanel } from './TeamPanel'
 import { LiveProjectCard } from '../../../features/invoice-match/LiveProjectCard'
-import { isImProject } from '../../../features/invoice-match/data'
+import { IM_PROJECT_ID } from '../../../features/invoice-match/data'
 
 const PROJECT_STATE: Record<ProjectState, [string, string, string]> = {
   active: ['Active', '#1F3FAF', '#DCE5FA'],
@@ -121,7 +121,7 @@ export function PortalHome() {
             )}
             {projects.map(p => {
               // v5: Daco's delivered InvoiceMatch project has its own card, with its live app.
-              if (isImProject(p)) return <LiveProjectCard key={p.id} project={p} onOpen={() => openProject(p)} />
+              if (p.id === IM_PROJECT_ID) return <LiveProjectCard key={p.id} project={p} onOpen={() => openProject(p)} />
               const [label, ink, soft] = PROJECT_STATE[p.state]
               const ms = nextMilestone(p, wsQ.data)
               return (

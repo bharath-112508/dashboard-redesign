@@ -40,7 +40,6 @@ const KEYS_OF: Record<string, string[]> = {
   devops: ['devops', 'workspace'],
   questions: ['questions'],
   'devops-requests': ['requests'],
-  invoicematch: ['invoiceMatch'],
 }
 
 export const queryKeysFor = (topics: string[]): string[] => [...new Set(topics.flatMap(t => KEYS_OF[t] ?? []))]

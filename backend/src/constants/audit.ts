@@ -256,7 +256,6 @@ export const AUDIT_ACTIONS = {
     CLIENT_QUESTION_UPDATE: 'client_question.update',
     DEVOPS_REQUEST_CREATE: 'devops_request.create',
     DEVOPS_REQUEST_UPDATE: 'devops_request.update',
-    INVOICEMATCH_DECIDE: 'invoicematch.decide',
     /** ONE row per bulk import, carrying the count and date range — not one
      *  row per entry. The entries are already individually traceable. */
     TIMESHEET_IMPORT: 'timesheet.import',
@@ -427,7 +426,6 @@ export const AUDIT_TARGET_KINDS = {
     DEVOPS_ITEM: 'devops_item',
     CLIENT_QUESTION: 'client_question',
     DEVOPS_REQUEST: 'devops_request',
-    INVOICEMATCH_DECISION: 'invoicematch_decision',
     BILLING_RATE: 'billing_rate',
     COST_RATE: 'cost_rate',
     ENGAGEMENT: 'engagement',

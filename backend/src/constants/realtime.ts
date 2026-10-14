@@ -28,8 +28,6 @@ export const REALTIME_TOPICS = {
     DEVOPS: 'devops',
     QUESTIONS: 'questions',
     DEVOPS_REQUESTS: 'devops-requests',
-    /** Redesign: decisions in the InvoiceMatch live-app demo. */
-    INVOICEMATCH: 'invoicematch',
 } as const;
 
 export type RealtimeTopic = (typeof REALTIME_TOPICS)[keyof typeof REALTIME_TOPICS];
@@ -71,7 +69,6 @@ export const PATH_TOPIC_MAP: Record<string, RealtimeTopic> = {
     devops: REALTIME_TOPICS.DEVOPS,
     questions: REALTIME_TOPICS.QUESTIONS,
     'devops-requests': REALTIME_TOPICS.DEVOPS_REQUESTS,
-    invoicematch: REALTIME_TOPICS.INVOICEMATCH,
 };
 
 /**

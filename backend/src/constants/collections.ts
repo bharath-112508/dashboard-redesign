@@ -53,7 +53,6 @@ export const COLLECTIONS = {
     DEVOPS_ITEMS: 'devops_items',
     CLIENT_QUESTIONS: 'client_questions',
     DEVOPS_REQUESTS: 'devops_requests',
-    INVOICEMATCH_DECISIONS: 'invoicematch_decisions',
     BILLING_RATES: 'billing_rates',
 
     // Invoicing (client engagements + invoices)

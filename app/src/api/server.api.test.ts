@@ -24,15 +24,6 @@ const { fetchDevops, fetchQuestions, fetchRequests, sendDevopsCommand } = vi.hoi
   fetchRequests: vi.fn(async () => [{ id: 2 }]),
   sendDevopsCommand: vi.fn(async (): Promise<{ id?: string }> => ({})),
 }))
-const { fetchInvoiceMatch, sendInvoiceMatchCommand } = vi.hoisted(() => ({
-  fetchInvoiceMatch: vi.fn(async () => ({ invoices: [{ no: 'INV-1' }] })),
-  sendInvoiceMatchCommand: vi.fn(async (): Promise<{ id?: string }> => ({})),
-}))
-vi.mock('./http/invoicematch', () => ({
-  fetchInvoiceMatch,
-  sendInvoiceMatchCommand,
-  isInvoiceMatchApiCommand: (c: { type: string }) => c.type === 'invoiceMatch.decide',
-}))
 vi.mock('./http/devops', () => ({
   fetchLinkedWorkspace: () => fetchWorkspace(),
   fetchDevops,
@@ -101,9 +92,6 @@ describe('server.get in API mode', () => {
     expect(await server.get('questions')).toEqual([{ id: 3 }])
     expect(await server.get('requests')).toEqual([{ id: 2 }])
     expect(await server.get('clientTeam')).toEqual([])
-    expect((await server.get('invoiceMatch')).invoices).toEqual([{ no: 'INV-1' }])
-    await server.send({ type: 'invoiceMatch.decide', no: 'INV-1', decision: null })
-    expect(sendInvoiceMatchCommand).toHaveBeenCalled()
   })
 })
 

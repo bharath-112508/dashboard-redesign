@@ -24,7 +24,6 @@ describe('queryKeysFor', () => {
     expect(queryKeysFor(['users', 'roles'])).toEqual(['people', 'companies', 'access'])
     expect(queryKeysFor(['sprints'])).toEqual(['workspace', 'tasks'])
     expect(queryKeysFor(['devops', 'questions', 'devops-requests'])).toEqual(['devops', 'workspace', 'questions', 'requests'])
-    expect(queryKeysFor(['invoicematch'])).toEqual(['invoiceMatch'])
     expect(queryKeysFor(['something-new'])).toEqual([])
   })
 })

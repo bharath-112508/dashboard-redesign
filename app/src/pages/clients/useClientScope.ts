@@ -6,7 +6,7 @@ import { buildScope, type ClientScope } from '../../domain/scope'
 import { useScopedWorkspace } from '../../state/access'
 import { useProjectParam, useUi } from '../../state/ui'
 import type { ClientProject, Company } from '../../api/types'
-import { hasInvoiceMatch, imEpicIds, imProjectOf, isImProject, isImSelection } from '../../features/invoice-match/data'
+import { hasInvoiceMatch, IM_EPIC_IDS, IM_PROJECT_ID, isImSelection } from '../../features/invoice-match/data'
 
 /** The scope for the signed-in client, or null for team roles. */
 export function useClientScope(): ClientScope | null {
@@ -54,17 +54,9 @@ export function useProjectScope(): { im: boolean; scope: ClientScope | null } {
   const { id } = useProjectParam()
   const epSel = useUi().epSel
   const allowed = !session || !isClientRole(session.role) || hasInvoiceMatch(companies?.find(c => c.id === session.orgId))
-  const found = imProjectOf(companies)
-  const ids = useStableIds(imEpicIds(open && isImProject(open.project) ? open.project : found?.project))
-  const im = open ? isImProject(open.project) : !id && allowed && isImSelection(epSel, ids)
-  const companyId = open?.company.id ?? found?.company.id ?? null
-  return useMemo(() => ({ im, scope: im ? { companyId, epicIds: ids, devopsKeys: [] } : base }), [im, base, companyId, ids])
-}
-
-/** The same array while the ids are the same, so memos that depend on it do not rerun every render. */
-const useStableIds = (ids: string[]) => {
-  const key = ids.join('|')
-  return useMemo(() => (key ? key.split('|') : []), [key])
+  const im = open ? open.project.id === IM_PROJECT_ID : !id && allowed && isImSelection(epSel)
+  const companyId = open?.company.id ?? companies?.find(c => hasInvoiceMatch(c))?.id ?? null
+  return useMemo(() => ({ im, scope: im ? { companyId, epicIds: IM_EPIC_IDS, devopsKeys: [] } : base }), [im, base, companyId])
 }
 
 /** Set by ClientsLayout: true while the InvoiceMatch project is open. */
@@ -78,10 +70,11 @@ export const useImMode = () => useContext(ImModeContext)
 export function useProjectWorkspace() {
   const ws = useScopedWorkspace()
   const im = useImMode()
-  const ids = useStableIds(imEpicIds(imProjectOf(useCompanies().data)?.project))
   return useMemo(
     () =>
-      ws && !im ? { ...ws, epics: ws.epics.filter(e => !ids.includes(e.id)), sprints: ws.sprints.filter(s => !ids.includes(s.epic)) } : ws,
-    [ws, im, ids],
+      ws && !im
+        ? { ...ws, epics: ws.epics.filter(e => !IM_EPIC_IDS.includes(e.id)), sprints: ws.sprints.filter(s => !IM_EPIC_IDS.includes(s.epic)) }
+        : ws,
+    [ws, im],
   )
 }

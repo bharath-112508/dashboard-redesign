@@ -4,7 +4,7 @@ import { useSession } from '../../api/session/store'
 import { Icon, PATHS } from '../../components/ui'
 import { useIsClient } from '../../state/access'
 import { clientsPath, useUi } from '../../state/ui'
-import { IM_BASE, IM_LIVE, IM_NAME, imEpicIds, imProjectOf } from './data'
+import { hasInvoiceMatch, IM_BASE, IM_EPIC_IDS, IM_LIVE, IM_NAME, IM_PROJECT_ID } from './data'
 import { InvoiceMatchApp, type ImPage } from './InvoiceMatchApp'
 
 /**
@@ -29,18 +29,16 @@ export function LiveAppPage() {
         </div>
       </main>
     )
-  // The same project the decisions are saved on (smallest id if several are named InvoiceMatch).
-  const found = imProjectOf(isClient ? companies.filter(c => c.id === session?.orgId) : companies)
-  if (!found) return <Navigate to="/clients" replace />
-  const { company, project } = found
+  const company = isClient ? companies.find(c => c.id === session?.orgId) : companies.find(c => hasInvoiceMatch(c))
+  if (!hasInvoiceMatch(company)) return <Navigate to="/clients" replace />
 
   const page: ImPage = seg === 'reports' ? 'reports' : seg === 'invoices' || seg === 'review' ? 'review' : 'inbox'
   const sel = seg === 'invoices' && arg ? decodeURIComponent(arg) : null
   const go = (p: ImPage, no?: string | null) =>
     navigate(IM_BASE + '/' + (p === 'review' ? (no ? 'invoices/' + encodeURIComponent(no) : 'review') : p))
   const backToProject = () => {
-    ui.setEpics(imEpicIds(project))
-    navigate(clientsPath('board', project.id))
+    ui.setEpics(IM_EPIC_IDS)
+    navigate(clientsPath('board', IM_PROJECT_ID))
   }
 
   return (

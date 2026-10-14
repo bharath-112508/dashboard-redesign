@@ -42,15 +42,13 @@ What comes from the backend so far:
 
 - **Phase 1f:** the DevOps board (items and settings), questions to clients and DevOps requests (`src/api/http/devops.ts`).
 
-- **Phase 1g:** the client portal's team and the InvoiceMatch live app (`src/api/http/invoicematch.ts`, `features/invoice-match/data.ts`).
+- **Phase 1g:** the client portal's team (Add member).
 
-Client team and InvoiceMatch in API mode:
+Client team in API mode:
 
 - **Add member** (client admin, "Your team") creates a real client user on their company, invited by email to set a password and added to all the company's live projects. Members are real people, so they show as company contacts; removing someone is done in Users.
-- **InvoiceMatch** is the Demo DB project named **InvoiceMatch** under Aurora Foods AB (epics "Matching engine" and "Review & reports", made on 14 Oct 2026). The app finds it by name; in mock mode it stays Daco's fixed demo. The 10 invoices are the app's fixed sample; approve / hold / reject decisions are saved on the backend (new collection `invoicematch_decisions`, `/invoicematch/:projectId/decisions`), for the team and the company's clients.
-- **Feedback** from the live app becomes a real client bug on that project. The backend files a client's report without an epic, so the project's "No epic" group is part of the InvoiceMatch view, and the confirmation shows the backend's key (e.g. INV-1).
-- The live app's own labels (invoicematch.daco.no, "Daco · Accounts payable", the uptime and version) are the design's fixed demo text.
-- Test data from the hands-on check: decision on INV-20417, bug INV-1, client user **API Check Member** (apicheck.member@aurorafoods.example).
+- **InvoiceMatch** (the live-app demo) is mock mode only, as decided on 14 Oct 2026; it is not shown in API mode. The Demo DB project made to try it under Aurora Foods (InvoiceMatch, with bug INV-1) is archived.
+- Test data from the hands-on check: client user **API Check Member** (apicheck.member@aurorafoods.example).
 
 DevOps, questions and requests in API mode:
 
