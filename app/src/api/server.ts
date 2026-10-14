@@ -16,6 +16,7 @@ import { ApiError } from './http/client'
 import { fetchTasks, fetchWorkspace, isBoardApiCommand, sendBoardCommand } from './http/board'
 import { fetchEntries, fetchWeekSubmissions, isTimeApiCommand, sendTimeCommand } from './http/timesheet'
 import { fetchAccessApi, fetchPeopleApi, isUserApiCommand, sendUserCommand } from './http/users'
+import { fetchLeave, fetchLeaveNotices, isLeaveApiCommand, sendLeaveCommand } from './http/leave'
 
 /**
  * A mock backend. Data lives in localStorage so it survives reloads and is
@@ -537,6 +538,8 @@ export const server = {
     if (apiMode && resource === 'entries') return (await fetchEntries(readSession())) as Db[K]
     if (apiMode && resource === 'people') return (await fetchPeopleApi(readSession())) as Db[K]
     if (apiMode && resource === 'access') return (await fetchAccessApi()) as Db[K]
+    if (apiMode && resource === 'leave') return (await fetchLeave(readSession())) as Db[K]
+    if (apiMode && resource === 'notifications') return (await fetchLeaveNotices(readSession())) as Db[K]
     if (apiMode && resource === 'weekSubmissions') return (await fetchWeekSubmissions(readSession())) as Db[K]
     await sleep(LATENCY_MS)
     return exclusive(async () => clone((await current())[resource]))
@@ -549,6 +552,8 @@ export const server = {
       return sendToApi(today => sendBoardCommand(cmd, today), cmd.type === 'task.create' || cmd.type === 'tickets.task.createTop')
     if (apiMode && isTimeApiCommand(cmd)) return sendToApi(() => sendTimeCommand(cmd, readSession()))
     if (apiMode && isUserApiCommand(cmd)) return sendToApi(() => sendUserCommand(cmd), false, true)
+    // A conflict here is an overlap or too little balance: shown with the backend's reason.
+    if (apiMode && isLeaveApiCommand(cmd)) return sendToApi(() => sendLeaveCommand(cmd, readSession()), false, true)
     await sleep(LATENCY_MS)
     return exclusive(() =>
       acrossTabs(async () => {

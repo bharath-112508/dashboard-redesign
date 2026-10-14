@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import { RefusedError } from '../../api/server'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSendAsync } from '../../api/queries'
-import type { LeaveRequest, LeaveStatus, LeaveType, Notification, Person, Session } from '../../api/types'
-import { ANNUAL_ALLOWANCE, LEAVE_TYPES } from '../../api/users/access'
-import { annualLeft, annualPending, annualUsed, leaveDays } from '../../api/users/derive'
+import type { LeaveRequest, LeaveStatus, Notification, Person, Session } from '../../api/types'
+import { leaveDays } from '../../api/users/derive'
+import { leaveLabel, useLeaveBook } from '../../api/users/leaveBook'
 import { range, TODAY } from '../../lib/dates'
 import { useToast } from '../shell/toast'
 import { btnGhost, btnPrimary, btnSmall, card, field, label } from './ui'
@@ -18,7 +19,7 @@ const STATUS_CLASS: Record<LeaveStatus, string> = {
 
 const schema = z
   .object({
-    type: z.enum(LEAVE_TYPES as [LeaveType, ...LeaveType[]]),
+    type: z.string().min(1, 'Pick a type'),
     from: z.string().min(1, 'Pick a start date'),
     to: z.string().min(1, 'Pick an end date'),
     reason: z.string().trim(),
@@ -40,26 +41,33 @@ export function LeaveSection({ person, leave, notes, canEdit, session }: Props) 
   const show = useToast()
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { register, handleSubmit, reset, formState } = useForm<Form>({
+  // Types and the main type's balance: the design's in mock mode, the backend's in API mode.
+  const book = useLeaveBook(leave, person.id)
+  const { register, handleSubmit, reset, formState, getValues, setValue } = useForm<Form>({
     resolver: zodResolver(schema),
-    defaultValues: { type: 'Annual', from: TODAY, to: TODAY, reason: '' },
+    defaultValues: { type: book.main, from: TODAY, to: TODAY, reason: '' },
   })
+  // The backend's types arrive after the first render.
+  useEffect(() => {
+    if (book.main && !getValues('type')) setValue('type', book.main)
+  }, [book.main])
 
   const mine = leave.filter(r => r.userId === person.id).sort((a, b) => b.from.localeCompare(a.from))
-  const used = annualUsed(leave, person.id)
-  const pend = annualPending(leave, person.id)
-  const left = annualLeft(leave, person.id)
+  const used = book.used
+  const pend = book.pending
+  const left = book.left
+  const mainLabel = leaveLabel(book.main)
 
   const decide = async (r: LeaveRequest, status: Exclude<LeaveStatus, 'Pending'>) => {
     setError(null)
-    if (status === 'Approved' && r.type === 'Annual' && leaveDays(r) > left) {
-      return setError(`Only ${left} days of annual leave are left for ${person.name}.`)
+    if (status === 'Approved' && r.type === book.main && leaveDays(r) > left) {
+      return setError(`Only ${left} days of ${mainLabel.toLowerCase()} are left for ${person.name}.`)
     }
     try {
       await send({ type: 'leave.decide', id: r.id, status, by: session.name, when: TODAY })
       show(status === 'Approved' ? `Approved leave for ${person.name}. A notice was recorded.` : `Rejected leave for ${person.name}.`)
-    } catch {
-      setError('The decision could not be saved. Try again.')
+    } catch (err) {
+      setError(err instanceof RefusedError ? err.message : 'The decision could not be saved. Try again.')
     }
   }
 
@@ -74,8 +82,8 @@ export function LeaveSection({ person, leave, notes, canEdit, session }: Props) 
       show('Leave requested. It stays pending until it is approved.')
       reset()
       setAdding(false)
-    } catch {
-      setError('The request could not be saved. Try again.')
+    } catch (err) {
+      setError(err instanceof RefusedError ? err.message : 'The request could not be saved. Try again.')
     }
   })
 
@@ -91,8 +99,8 @@ export function LeaveSection({ person, leave, notes, canEdit, session }: Props) 
       </div>
 
       <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
-        <Box big={`${left} days left`} small={`Annual leave, ${ANNUAL_ALLOWANCE} a year`} />
-        <Box big={`${used} used`} small="Approved annual leave" />
+        <Box big={`${left} days left`} small={`${mainLabel}, ${book.allowance} a year`} />
+        <Box big={`${used} used`} small={`Approved ${mainLabel.toLowerCase()}`} />
         <Box big={`${pend} pending`} small="Waiting for a decision" />
       </div>
 
@@ -101,7 +109,7 @@ export function LeaveSection({ person, leave, notes, canEdit, session }: Props) 
           <label>
             <span className={label}>Type</span>
             <select className={field} {...register('type')}>
-              {LEAVE_TYPES.map(t => (
+              {book.types.map(t => (
                 <option key={t} value={t}>
                   {t}
                 </option>
@@ -143,7 +151,7 @@ export function LeaveSection({ person, leave, notes, canEdit, session }: Props) 
           <ul className="mt-2 divide-y divide-line-3">
             {mine.map(r => {
               const days = leaveDays(r)
-              const tooMany = r.type === 'Annual' && days > left
+              const tooMany = r.type === book.main && days > left
               return (
                 <li key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3 text-[13.5px]">
                   <div className="min-w-[160px] flex-1">
@@ -162,7 +170,7 @@ export function LeaveSection({ person, leave, notes, canEdit, session }: Props) 
                         type="button"
                         className={btnSmall}
                         disabled={tooMany}
-                        title={tooMany ? `Only ${left} days of annual leave are left` : undefined}
+                        title={tooMany ? `Only ${left} days of ${mainLabel.toLowerCase()} are left` : undefined}
                         onClick={() => decide(r, 'Approved')}
                       >
                         Approve

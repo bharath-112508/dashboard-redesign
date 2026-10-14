@@ -29,6 +29,12 @@ const { fetchPeopleApi, fetchAccessApi } = vi.hoisted(() => ({
 }))
 const sendUserCommand = vi.hoisted(() => vi.fn())
 vi.mock('./http/users', () => ({ fetchPeopleApi, fetchAccessApi, isUserApiCommand: (c: { type: string }) => c.type.startsWith('user.') || c.type === 'profile.update', sendUserCommand }))
+const { fetchLeave, fetchLeaveNotices, sendLeaveCommand } = vi.hoisted(() => ({
+  fetchLeave: vi.fn(async () => [{ id: 'r1' }]),
+  fetchLeaveNotices: vi.fn(async () => [{ id: 1 }]),
+  sendLeaveCommand: vi.fn(),
+}))
+vi.mock('./http/leave', () => ({ fetchLeave, fetchLeaveNotices, sendLeaveCommand, isLeaveApiCommand: (c: { type: string }) => c.type.startsWith('leave.') }))
 vi.mock('./http/config', () => ({ apiMode: true, API_URL: 'http://x/api/v1' }))
 vi.mock('./http/companies', () => ({
   fetchCompanies,
@@ -135,5 +141,19 @@ describe('user command refusals', () => {
     const err = await server.send({ type: 'profile.update', id: 'a0', patch: { pwHash: 'x' } }).catch(e => e)
     expect(err).toBeInstanceOf(RefusedError)
     expect(err.saved).toBe(true)
+  })
+})
+
+describe('leave in API mode', () => {
+  it('reads leave and its notices from the backend', async () => {
+    expect(await server.get('leave')).toEqual([{ id: 'r1' }])
+    expect(await server.get('notifications')).toEqual([{ id: 1 }])
+  })
+
+  it('shows an overlap or too little balance with its reason', async () => {
+    sendLeaveCommand.mockRejectedValueOnce(new ApiError(409, 'LEAVE_OVERLAP', 'You already have leave on these days.'))
+    const err = await server.send({ type: 'leave.decide', id: 'r1', status: 'Approved', by: 'A', when: '2026-10-14' }).catch(e => e)
+    expect(err).toBeInstanceOf(RefusedError)
+    expect(err.message).toBe('You already have leave on these days.')
   })
 })

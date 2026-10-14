@@ -7,6 +7,7 @@ import { isCompanyApiCommand } from './http/companies'
 import { isBoardApiCommand } from './http/board'
 import { isTimeApiCommand } from './http/timesheet'
 import { isUserApiCommand } from './http/users'
+import { isLeaveApiCommand } from './http/leave'
 import { fetchTicketDetails, isBackendId } from './http/ticketDetails'
 import { ApiError } from './http/client'
 import { refusal } from './session/permissions'
@@ -81,7 +82,7 @@ const cachedDb = (qc: QueryClient, needed: Resource[]): Db | null => {
  */
 export const refuseBeforeSending = (qc: QueryClient, cmd: Command) => {
   // Company, project and board commands are judged by the backend: the mock's rules differ there.
-  if (!apiMode || isCompanyApiCommand(cmd) || isBoardApiCommand(cmd) || isTimeApiCommand(cmd) || isUserApiCommand(cmd)) return
+  if (!apiMode || isCompanyApiCommand(cmd) || isBoardApiCommand(cmd) || isTimeApiCommand(cmd) || isUserApiCommand(cmd) || isLeaveApiCommand(cmd)) return
   const db = cachedDb(qc, touches(cmd))
   const why = db && refusal(db, cmd, readSession())
   if (why) throw new RefusedError(why)
@@ -114,7 +115,7 @@ const useCommandMutation = () => {
       // them, so only the last write to finish refetches (everything it and
       // the earlier skipped writes touched).
       if (qc.isMutating() > 1) return
-      return Promise.all([...RESOURCES, 'ticketDetails'].map(k => qc.invalidateQueries({ queryKey: [k] })))
+      return Promise.all([...RESOURCES, 'ticketDetails', 'leaveBook'].map(k => qc.invalidateQueries({ queryKey: [k] })))
     },
   })
 }
