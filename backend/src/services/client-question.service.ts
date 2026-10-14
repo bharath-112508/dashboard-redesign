@@ -152,6 +152,9 @@ export const editMessage = async (number: number, index: number, text: string, c
 
 // ─── DevOps requests ────────────────────────────────────────────────────
 
+/** A client sees a request without the team's comments, history and hour logs. */
+const forClient = <T extends { comments: unknown[]; history: unknown[]; logs: unknown[] }>(r: T): T => ({ ...r, comments: [], history: [], logs: [] });
+
 const toPublicRequest = (d: DevopsRequestDocument) => ({
     number: d.number,
     devops_key: d.devops_key,
@@ -188,7 +191,7 @@ export const listRequests = async (caller: ProjectCaller) => {
     const rows = await DevopsRequest.find(ids ? { project_id: { $in: ids } } : {})
         .sort({ number: -1 })
         .lean<DevopsRequestDocument[]>();
-    return rows.map(toPublicRequest);
+    return rows.map((r) => (ids ? forClient(toPublicRequest(r)) : toPublicRequest(r)));
 };
 
 export const createRequest = async (body: Data & { number: number; devops_key: string; text: string }, caller: ProjectCaller) => {

@@ -60,6 +60,21 @@ describe('listItems', () => {
     });
 });
 
+describe('what a client sees of a DevOps item', () => {
+    it('only the status side: no notes, activity, owners or internal plans', async () => {
+        const c = new Types.ObjectId();
+        const p = new Types.ObjectId();
+        projectFind.mockReturnValue(lean([{ _id: p }]));
+        const data = { name: 'Portal', project: { kind: 'client', id: String(p) }, infra: 'Waiting', phase: 'Setup', deploy: 'Live', initDue: '2026-11-30', logs: [{ text: 'internal' }], pnotes: [{ text: 'secret' }], owner: 'Vivek', notes: { 1: { text: 'x' } } };
+        itemFind.mockReturnValue({ sort: () => lean([{ key: 'OPS-1', project_id: p, data, updated_at: new Date() }]) });
+        const [item] = await svc.listItems(client(c));
+        expect(item.data).toEqual({ name: 'Portal', project: { kind: 'client', id: String(p) }, infra: 'Waiting', phase: 'Setup', deploy: 'Live', initDue: '2026-11-30' });
+        itemFind.mockReturnValue({ sort: () => lean([{ key: 'OPS-1', project_id: p, data, updated_at: new Date() }]) });
+        const [forStaff] = await svc.listItems(staff());
+        expect(forStaff.data).toEqual(data);
+    });
+});
+
 describe('createItem', () => {
     const body = (p: Types.ObjectId) => ({ key: 'OPS-7', project_id: String(p), data: { name: 'Intranet', infra: 'Not started' } });
 

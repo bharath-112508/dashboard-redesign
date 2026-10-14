@@ -44,12 +44,18 @@ export const nameOf = async (id: Types.ObjectId): Promise<string> => {
     return u?.full_name ?? 'Someone';
 };
 
-export const toPublicItem = (d: Pick<DevopsItemDocument, 'key' | 'project_id' | 'data' | 'updated_at'>) => ({
-    key: d.key,
-    project_id: String(d.project_id),
-    data: d.data ?? {},
-    updated_at: d.updated_at,
-});
+/** The fields of an item a client may see: its status side, not the team's notes, activity, owners or plans. */
+const CLIENT_ITEM_FIELDS = ['name', 'project', 'kind', 'infra', 'infraNote', 'phase', 'deploy', 'depType', 'initDue', 'latestDue', 'added', 'deploys'];
+
+export const toPublicItem = (d: Pick<DevopsItemDocument, 'key' | 'project_id' | 'data' | 'updated_at'>, forClient = false) => {
+    const data = d.data ?? {};
+    return {
+        key: d.key,
+        project_id: String(d.project_id),
+        data: forClient ? Object.fromEntries(CLIENT_ITEM_FIELDS.filter((k) => k in data).map((k) => [k, data[k]])) : data,
+        updated_at: d.updated_at,
+    };
+};
 
 const audit = async (caller: ProjectCaller, action: string, kind: string, id: Types.ObjectId, after: unknown) => {
     if (caller.audit) await recordAudit(caller.audit, { action, target: { kind, id }, after } as never);
@@ -62,7 +68,7 @@ export const listItems = async (caller: ProjectCaller) => {
     const rows = await DevopsItem.find(ids ? { project_id: { $in: ids } } : {})
         .sort({ created_at: -1 })
         .lean<DevopsItemDocument[]>();
-    return rows.map(toPublicItem);
+    return rows.map((r) => toPublicItem(r, ids !== null));
 };
 
 export const createItem = async (body: { key: string; project_id: string; data: Data }, caller: ProjectCaller) => {

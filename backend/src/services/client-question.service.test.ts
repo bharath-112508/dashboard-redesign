@@ -138,6 +138,15 @@ describe('DevOps requests', () => {
         expect(m.rCreate).toHaveBeenCalledWith(expect.objectContaining({ number: 1, project_id: p, by: 'Arjun', status: 'Open' }));
     });
 
+    it("gives a client a request without the team's comments, history and hour logs", async () => {
+        const p = new Types.ObjectId();
+        m.visible.mockResolvedValue([p]);
+        const row = { number: 1, devops_key: 'OPS-1', project_id: p, text: 'Need staging', status: 'Open', comments: [{ by: 'Arjun', text: 'internal', when: new Date(), side: 'devops' }], history: [{ by: 'A', text: 't', when: new Date() }], logs: [{ h: 2 }] };
+        m.rFind.mockReturnValue({ sort: () => lean([row]) });
+        const [r] = await svc.listRequests(client());
+        expect(r).toMatchObject({ number: 1, text: 'Need staging', status: 'Open', comments: [], history: [], logs: [] });
+    });
+
     it('logs a change under the caller and adds comments with their name', async () => {
         const r = doc({ number: 1, project_id: null, status: 'Open', history: [] as { by: string; text: string }[], comments: [] as { by: string; side: string }[] });
         m.rFindOne.mockResolvedValue(r);
