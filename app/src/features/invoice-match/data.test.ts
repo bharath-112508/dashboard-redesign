@@ -24,7 +24,7 @@ describe('the InvoiceMatch project', () => {
     const found = imProjectOf([company('c0', [project({ id: 'p1', name: 'Other' })]), company('c1', [real])])
     expect(found?.company.id).toBe('c1')
     expect(found?.project.id).toBe('p9')
-    expect(imEpicIds(real)).toEqual(['s1', 's2'])
+    expect(imEpicIds(real)).toEqual(['s1', 's2', 'none~p9'])
     expect(imBugEpic(real)).toBe('s2')
     expect(imEpicIds(undefined)).toEqual([])
   })

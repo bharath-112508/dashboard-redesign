@@ -125,9 +125,12 @@ export const imProjectOf = (companies: Company[] | undefined) => {
   return null
 }
 
-/** The project's epics (mock: the fixed ones; API mode without the project: none). */
-export const imEpicIds = (p: Pick<ClientProject, 'epics'> | null | undefined): string[] =>
-  p?.epics.length ? p.epics.map(e => e.id) : apiMode ? [] : IM_EPIC_IDS
+/**
+ * The project's epics (mock: the fixed ones; API mode without the project: none).
+ * In API mode also its "No epic" group: the backend files a client's bug report without an epic.
+ */
+export const imEpicIds = (p: Pick<ClientProject, 'id' | 'epics'> | null | undefined): string[] =>
+  !p ? (apiMode ? [] : IM_EPIC_IDS) : apiMode ? [...p.epics.map(e => e.id), `none~${p.id}`] : p.epics.length ? p.epics.map(e => e.id) : IM_EPIC_IDS
 
 /** The epic that bugs reported from the live app go to: "Review & reports", else the last one. */
 export const imBugEpic = (p: Pick<ClientProject, 'epics'> | null | undefined): string =>

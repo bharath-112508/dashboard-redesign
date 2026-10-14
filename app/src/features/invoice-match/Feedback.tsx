@@ -5,6 +5,7 @@ import { fileSize, nextTaskId, taskKey } from '../../domain/tasks'
 import { MON, TODAY, todayLabel } from '../../lib/dates'
 import { blobToDataUrl, captureElement, startRecording, type Rect } from './capture'
 import { imBugEpic, imProjectOf } from './data'
+import { apiMode } from '../../api/http/config'
 
 export type FeedbackApi = { start: (snip: boolean) => void }
 
@@ -31,7 +32,8 @@ interface Fb {
   /** Drag start and end while snipping, relative to the app. */
   a?: { x: number; y: number } | null
   b?: { x: number; y: number } | null
-  doneKey?: string
+  /** The new bug's id; its key is read from the ticket list (in API mode the backend numbers it). */
+  doneId?: string
   sending?: boolean
 }
 
@@ -85,6 +87,9 @@ export function Feedback({
   const tasks = useTasks().data ?? []
   // Bugs go to the project's "Review & reports" epic.
   const bugEpic = imBugEpic(imProjectOf(useCompanies().data)?.project)
+  // The new bug's key once the ticket list has it (API mode: the backend's key, e.g. IM-3).
+  const doneTask = fb?.doneId != null ? tasks.find(t => t.id === fb.doneId) : undefined
+  const doneKey = fb?.doneId == null ? '' : doneTask ? taskKey(doneTask) : apiMode ? '' : taskKey({ id: fb.doneId })
 
   const start = (snip: boolean) =>
     setFb(s => (s && s.mode !== 'done' ? { ...s, mode: snip ? 'snip' : 'panel', a: null, b: null } : fresh(snip ? 'snip' : 'panel')))
@@ -241,7 +246,7 @@ export function Feedback({
           clientBug: { reported: ds, chat: [] },
         },
       })
-      set({ mode: 'done', sending: false, doneKey: res.id != null ? taskKey({ id: res.id }) : '' })
+      set({ mode: 'done', sending: false, doneId: res.id != null ? String(res.id) : undefined })
     } catch {
       set({ sending: false, failed: true, failMsg: 'Your feedback could not be sent. Try again.' })
     }
@@ -513,7 +518,7 @@ export function Feedback({
                 <div className="mt-1 text-[13px] leading-[1.45] text-[#4B5563]">It is on the InvoiceMatch board under Bugs. You will see updates there.</div>
                 <div className="mt-3 inline-flex items-center gap-2 rounded-[10px] bg-[#F3F6FB] px-3 py-2 text-[13px]">
                   <span data-testid="im-done-key" className="font-extrabold text-[#1D4ED8]">
-                    {fb.doneKey}
+                    {doneKey}
                   </span>
                   <span className="max-w-[220px] truncate text-[#111827]">{fb.title}</span>
                 </div>
