@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { qk, useCompanies } from '../../api/queries'
 import { findPersonByEmail } from '../../api/people/directory'
 import { apiSignIn } from '../../api/http/auth'
-import { apiMode } from '../../api/http/config'
+import { apiMode, demoAccounts } from '../../api/http/config'
 import { DEMO_DB_ACCOUNTS } from '../../api/http/sampleAccounts'
 import { server } from '../../api/server'
 import { ROLE_LABEL } from '../../api/session/access'
@@ -189,7 +189,7 @@ export function LoginPage() {
           <div className="mt-3 text-[12.5px] text-muted">
             {apiMode ? (
               <>
-                Signing in to the Demo DB. Pick an account on the right to fill in its email, then enter its password.{' '}
+                {demoAccounts && 'Signing in to the Demo DB. Pick an account on the right to fill in its email, then enter its password. '}
                 <Link to="/forgot-password" className="font-bold text-blue-ink">
                   Forgot password?
                 </Link>
@@ -202,60 +202,69 @@ export function LoginPage() {
           </div>
         </section>
 
-        <section className="overflow-hidden rounded-[20px] bg-white shadow-[0_0_0_1.5px_#D6DEE8]">
-          <div className="border-b-[1.5px] border-line-3 px-5 py-4">
-            <div className="text-[15px] font-bold">{apiMode ? 'Demo DB accounts' : 'Sample users'}</div>
-            <div className="text-[12.5px] text-muted">{apiMode ? 'One per user type, and the types the backend does not have yet' : 'One per user type'}</div>
-          </div>
-          {rows.map(r => {
-            const addr = r.email
-            if (!addr) {
-              // A role the backend has no account for yet: shown, not selectable.
+        {/* The account list: the sample users in mock mode; the Demo DB accounts only in a demo API build. */}
+        {(!apiMode || demoAccounts) && (
+          <section className="overflow-hidden rounded-[20px] bg-white shadow-[0_0_0_1.5px_#D6DEE8]">
+            <div className="border-b-[1.5px] border-line-3 px-5 py-4">
+              <div className="text-[15px] font-bold">{apiMode ? 'Demo DB accounts' : 'Sample users'}</div>
+              <div className="text-[12.5px] text-muted">
+                {apiMode ? 'One per user type, and the types the backend does not have yet' : 'One per user type'}
+              </div>
+            </div>
+            {rows.map(r => {
+              const addr = r.email
+              if (!addr) {
+                // A role the backend has no account for yet: shown, not selectable.
+                return (
+                  <div key={r.key} className="flex items-center gap-3 border-t-[1.5px] border-[#EEF3FB] px-5 py-3 opacity-60">
+                    <span className="grid size-[34px] flex-none place-items-center rounded-lg bg-line text-[12px] font-bold text-muted">
+                      –
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px] font-bold">{r.name}</div>
+                      <div className="text-[12.5px] text-muted">{r.sub}</div>
+                    </div>
+                    <span className="inline-flex h-[22px] flex-none items-center whitespace-nowrap rounded-md bg-canvas px-2 text-[11.5px] font-bold text-muted">
+                      Not in backend
+                    </span>
+                  </div>
+                )
+              }
+              const on = email.trim().toLowerCase() === addr
+              const [chipBg, chipInk] = CHIP[r.role]
               return (
-                <div key={r.key} className="flex items-center gap-3 border-t-[1.5px] border-[#EEF3FB] px-5 py-3 opacity-60">
-                  <span className="grid size-[34px] flex-none place-items-center rounded-lg bg-line text-[12px] font-bold text-muted">–</span>
+                <div
+                  key={r.key}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => pick(addr)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      pick(addr)
+                    }
+                  }}
+                  className={`flex cursor-pointer items-center gap-3 border-t-[1.5px] border-[#EEF3FB] px-5 py-3 ${on ? 'bg-[#F2F6FE]' : 'hover:bg-canvas'}`}
+                >
+                  <span className="grid size-[34px] flex-none place-items-center rounded-lg bg-ink text-[12px] font-bold text-white">
+                    {initials(r.name)}
+                  </span>
                   <div className="min-w-0 flex-1">
                     <div className="text-[14px] font-bold">{r.name}</div>
-                    <div className="text-[12.5px] text-muted">{r.sub}</div>
+                    <div className="truncate text-[12.5px] text-muted">{r.sub}</div>
                   </div>
-                  <span className="inline-flex h-[22px] flex-none items-center whitespace-nowrap rounded-md bg-canvas px-2 text-[11.5px] font-bold text-muted">
-                    Not in backend
+                  <span
+                    className="inline-flex h-[22px] flex-none items-center gap-1.5 whitespace-nowrap rounded-md pl-[7px] pr-2 text-[11.5px] font-bold"
+                    style={{ background: chipBg, color: chipInk }}
+                  >
+                    <span className="size-1.5 rounded-full" style={{ background: chipInk }} />
+                    {ROLE_LABEL[r.role]}
                   </span>
                 </div>
               )
-            }
-            const on = email.trim().toLowerCase() === addr
-            const [chipBg, chipInk] = CHIP[r.role]
-            return (
-              <div
-                key={r.key}
-                role="button"
-                tabIndex={0}
-                onClick={() => pick(addr)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    pick(addr)
-                  }
-                }}
-                className={`flex cursor-pointer items-center gap-3 border-t-[1.5px] border-[#EEF3FB] px-5 py-3 ${on ? 'bg-[#F2F6FE]' : 'hover:bg-canvas'}`}
-              >
-                <span className="grid size-[34px] flex-none place-items-center rounded-lg bg-ink text-[12px] font-bold text-white">{initials(r.name)}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-bold">{r.name}</div>
-                  <div className="truncate text-[12.5px] text-muted">{r.sub}</div>
-                </div>
-                <span
-                  className="inline-flex h-[22px] flex-none items-center gap-1.5 whitespace-nowrap rounded-md pl-[7px] pr-2 text-[11.5px] font-bold"
-                  style={{ background: chipBg, color: chipInk }}
-                >
-                  <span className="size-1.5 rounded-full" style={{ background: chipInk }} />
-                  {ROLE_LABEL[r.role]}
-                </span>
-              </div>
-            )
-          })}
-        </section>
+            })}
+          </section>
+        )}
       </div>
     </div>
   )

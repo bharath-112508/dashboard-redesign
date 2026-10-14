@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "dev:api": "VITE_API_URL=http://localhost:3101/api/v1 vite --port 5200 --strictPort"
+    "dev:api": "VITE_API_URL=http://localhost:3101/api/v1 VITE_DEMO_ACCOUNTS=true vite --port 5200 --strictPort"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

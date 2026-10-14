@@ -129,6 +129,7 @@ Companies and projects in API mode:
 
 Also:
 
+- The account list is shown only in builds made with `VITE_DEMO_ACCOUNTS=true` (`npm run dev:api` sets it); a production build shows the sign-in form alone.
 - In API mode the login page lists **Demo DB accounts**, one per user type (`src/api/http/sampleAccounts.ts`). Picking one fills in its email; type its password. Two types have no backend account yet and are shown greyed out with the reason: **Admin** (the backend's admins sign in as Super admin) and **DevOps engineer** (no DevOps role in the backend yet). Mock mode keeps the sample users and the `demo` password.
 - Backend roles map to the app's roles in `src/api/http/mappers.ts`: admin → Super admin, manager and team lead → Project manager, employee → Developer, client → Client admin, representative → Client user, and a custom `devops` role → DevOps engineer.
 - Client users see only themselves in the people directory: the backend does not let client roles list users.
