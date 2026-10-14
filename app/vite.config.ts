@@ -28,5 +28,5 @@ const csp = (apiUrl: string | undefined): Plugin => {
 }
 
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), tailwindcss(), csp(loadEnv(mode, process.cwd(), 'VITE_').VITE_API_URL)],
+  plugins: [react(), tailwindcss(), csp(loadEnv(mode, '.', 'VITE_').VITE_API_URL)],
 }))
