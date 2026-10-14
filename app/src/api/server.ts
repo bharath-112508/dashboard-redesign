@@ -538,6 +538,8 @@ export const server = {
     if (apiMode && resource === 'devops') return (await fetchDevops(readSession())) as Db[K]
     if (apiMode && resource === 'questions') return (await fetchQuestions(readSession())) as Db[K]
     if (apiMode && resource === 'requests') return (await fetchRequests(readSession())) as Db[K]
+    // Team members are real client users in API mode, so they are listed with the company's contacts.
+    if (apiMode && resource === 'clientTeam') return [] as unknown as Db[K]
     if (apiMode && resource === 'tasks') return (await fetchTasks(readSession())) as Db[K]
     if (apiMode && resource === 'entries') return (await fetchEntries(readSession())) as Db[K]
     if (apiMode && resource === 'people') return (await fetchPeopleApi(readSession())) as Db[K]

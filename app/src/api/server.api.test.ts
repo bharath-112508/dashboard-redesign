@@ -91,6 +91,7 @@ describe('server.get in API mode', () => {
     expect((await server.get('devops')).projects).toEqual([{ key: 'OPS-1' }])
     expect(await server.get('questions')).toEqual([{ id: 3 }])
     expect(await server.get('requests')).toEqual([{ id: 2 }])
+    expect(await server.get('clientTeam')).toEqual([])
   })
 })
 

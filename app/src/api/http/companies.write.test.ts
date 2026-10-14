@@ -311,3 +311,24 @@ describe('randomPassword', () => {
     expect(randomPassword(12)).not.toBe(a)
   })
 })
+
+describe('client team (portal "Add member")', () => {
+  it('adds a real client user on every live project of the company, invited by email', async () => {
+    get.mockImplementation(async (path: string) =>
+      path.startsWith('/projects')
+        ? [
+            { id: 'p1', company_id: 'c1', is_archived: false },
+            { id: 'p2', company_id: 'c1', is_archived: true },
+            { id: 'p3', company_id: 'c2', is_archived: false },
+          ]
+        : {},
+    )
+    post.mockResolvedValueOnce({ id: 'u9' }).mockResolvedValue({})
+    await sendCompanyCommand({ type: 'clientTeam.add', member: { id: 'ct-1', companyId: 'c1', name: 'Anna L', email: 'anna@x.se', title: 'Buyer' } }, TODAY)
+    expect(post.mock.calls[0]).toEqual([
+      '/companies/c1/representatives',
+      expect.objectContaining({ email: 'anna@x.se', full_name: 'Anna L', title: 'Buyer', send_invite: true }),
+    ])
+    expect(post.mock.calls.slice(1).map(c => c[0])).toEqual(['/projects/p1/representatives'])
+  })
+})

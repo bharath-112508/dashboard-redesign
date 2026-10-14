@@ -18,6 +18,7 @@ import {
 import { isClientRole } from '../session/access'
 import type { CompaniesCommand } from '../companies/commands'
 import type { ProjectsCommand } from '../projects/commands'
+import type { ClientsCommand } from '../clients/commands'
 import type { Company, CompanyContact, InternalProject, PersonId, Session } from '../types'
 
 const PAGE = 100
@@ -98,7 +99,7 @@ export const fetchInternalProjects = async (session: Session | null): Promise<In
 // ─── Writes ──────────────────────────────────────────────────────────────
 
 /** The commands this adapter sends to the backend in API mode. */
-export type CompanyApiCommand = CompaniesCommand | ProjectsCommand
+export type CompanyApiCommand = CompaniesCommand | ProjectsCommand | Extract<ClientsCommand, { type: 'clientTeam.add' }>
 
 const COMMAND_TYPES = new Set<string>([
   'company.create',
@@ -112,6 +113,7 @@ const COMMAND_TYPES = new Set<string>([
   'project.client.setState',
   'project.internal.create',
   'project.internal.setState',
+  'clientTeam.add',
 ])
 
 export const isCompanyApiCommand = (cmd: { type: string }): cmd is CompanyApiCommand => COMMAND_TYPES.has(cmd.type)
@@ -258,6 +260,12 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
         return {}
       }
       return { id: await createContact(cmd.companyId, c) }
+    }
+    case 'clientTeam.add': {
+      // A member is a real client user who can sign in, on every live project of their company.
+      const m = cmd.member
+      const projects = (await liveProjects()).filter(p => p.company_id === m.companyId).map(p => p.id)
+      return { id: await createContact(m.companyId, { personId: null, name: m.name, role: m.title ?? '', email: m.email, projects }) }
     }
     case 'company.contact.remove':
       // By person, never by position: removing deactivates a real account.
