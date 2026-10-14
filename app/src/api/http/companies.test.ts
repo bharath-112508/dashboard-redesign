@@ -21,9 +21,16 @@ const project = (id: string, company_id: string | null, extra: Record<string, un
   ...extra,
 })
 
-/** Answers each path from a table; unknown paths fail the test. */
+/**
+ * Answers each path from a table; unknown paths fail the test. `GET /board/companies` is built
+ * from the table's epic and contact reads, as the backend builds it from the same routes' services.
+ */
 const serve = (routes: Record<string, unknown[]>) =>
   get.mockImplementation(async (path: string) => {
+    if (path === '/board/companies') {
+      const pick = (re: RegExp) => Object.fromEntries(Object.entries(routes).flatMap(([k, v]) => (re.exec(k) ? [[re.exec(k)![1], v]] : [])))
+      return { stories: pick(/^\/projects\/([^/]+)\/stories\?limit=100&page=1$/), contacts: pick(/^\/companies\/([^/]+)\/representatives\?limit=100&page=1$/) }
+    }
     if (!(path in routes)) throw new Error(`unexpected call ${path}`)
     return routes[path]
   })
@@ -131,7 +138,7 @@ describe('fetchCompanies', () => {
 
     const companies = await fetchCompanies({ personId: 'u8', name: 'Lars', email: 'l@x', role: 'cuser', org: 'Aurora Foods AB', orgId: 'c1' })
 
-    expect(get.mock.calls.map(c => c[0])).toEqual(['/projects?limit=100&page=1', '/projects/p1/stories?limit=100&page=1'])
+    expect(get.mock.calls.map(c => c[0]).sort()).toEqual(['/board/companies', '/projects?limit=100&page=1'])
     expect(companies).toHaveLength(1)
     expect(companies[0]).toMatchObject({ id: 'c1', name: 'Aurora Foods AB', contacts: [], archived: false })
     expect(companies[0].projects.map(p => p.id)).toEqual(['p1'])

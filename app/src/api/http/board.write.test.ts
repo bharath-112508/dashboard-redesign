@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { boardFromRoutes } from './boardRoutes.testkit'
 import type { Session, Task } from '../types'
 
 const { get, post, patch, del } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() }))
@@ -85,6 +86,7 @@ const newTask = (over: Partial<Task> = {}): Task => ({
 beforeEach(async () => {
   for (const m of [get, post, patch, del]) m.mockReset()
   get.mockImplementation(async (path: string) => {
+    if (path === '/board') return boardFromRoutes(ROUTES)
     if (!(path in ROUTES)) throw new Error(`unexpected call ${path}`)
     return ROUTES[path]
   })
@@ -217,9 +219,8 @@ describe('tickets', () => {
   })
 
   it('refuses to assign by a name two people share, instead of picking one of them', async () => {
-    get.mockImplementation(async (path: string) =>
-      path === '/projects/p1/members' ? [{ id: 'u1', full_name: 'Chary' }, { id: 'u2', full_name: 'Rahul' }, { id: 'u7', full_name: 'Rahul' }] : ROUTES[path],
-    )
+    const twoRahuls: Record<string, unknown> = { ...ROUTES, '/projects/p1/members': [{ id: 'u1', full_name: 'Chary' }, { id: 'u2', full_name: 'Rahul' }, { id: 'u7', full_name: 'Rahul' }] }
+    get.mockImplementation(async (path: string) => (path === '/board' ? boardFromRoutes(twoRahuls) : twoRahuls[path]))
     await loadBoard(staff)
     await expect(sendBoardCommand({ type: 'task.update', id: 't2', patch: { assignee: 'Rahul' } }, TODAY)).rejects.toMatchObject({
       message: 'Two people on these projects are called Rahul. Give one of them a different name in Users, then try again.',

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { boardFromRoutes } from './boardRoutes.testkit'
 import type { Session } from '../types'
 
 const { get } = vi.hoisted(() => ({ get: vi.fn() }))
@@ -65,9 +66,13 @@ const sprint = (id: string, extra: Record<string, unknown> = {}) => ({
 
 const NO_STATUSES = { defaults: [], custom: [] }
 
-/** Answers each path from a table; unknown paths fail the test. */
+/**
+ * Answers each path from a table; unknown paths fail the test. `GET /board` is built from the
+ * table's per-project reads, as the backend builds it from the same routes' services.
+ */
 const serve = (routes: Record<string, unknown>) =>
   get.mockImplementation(async (path: string) => {
+    if (path === '/board') return boardFromRoutes(routes)
     if (!(path in routes)) throw new Error(`unexpected call ${path}`)
     return routes[path]
   })
@@ -85,17 +90,6 @@ const p1Routes = (tasks: unknown[], sprints: unknown[] = [], extra: Record<strin
 describe('loadBoard', () => {
   beforeEach(() => {
     get.mockReset()
-  })
-
-  it("leaves out a project whose reads fail (e.g. archived meanwhile) instead of failing the whole board", async () => {
-    serve({
-      ...p1Routes([task('t1', 1)]),
-      '/projects?limit=100&page=1': [project('p1', 'AFSP'), project('p2', 'GONE')],
-      // p2's reads are not served: they fail.
-    })
-    const { tasks, workspace } = await loadBoard(staff)
-    expect(tasks.map(t => t.id)).toEqual(['t1'])
-    expect(workspace.epics.length).toBeGreaterThan(0)
   })
 
   it('gives the default statuses, then each custom one', async () => {
@@ -161,11 +155,11 @@ describe('loadBoard', () => {
     expect(tasks.find(t => t.id === 'c1')).toMatchObject({ parent: 't1', subKey: 'AFSP-8' })
   })
 
-  it('reads only the projects the backend lists for a client user, and nothing staff-only', async () => {
+  it('reads the whole board in one request (the backend scopes it to the person), and nothing staff-only', async () => {
     const cuser: Session = { personId: 'k1', name: 'Kari', email: 'k@x', role: 'cuser', org: 'Daco', orgId: 'c1' }
     serve(p1Routes([task('t1', 1)]))
     await loadBoard(cuser)
-    for (const [path] of get.mock.calls) expect(path).toMatch(/^\/(projects(\?|\/p1\/)|tasks\?project_id=p1&)/)
+    expect(get.mock.calls.map(c => c[0])).toEqual(['/board'])
   })
 
   it('leaves archived projects out', async () => {
@@ -197,6 +191,6 @@ describe('fetchWorkspace and fetchTasks', () => {
     serve(p1Routes([task('t1', 1)]))
     await fetchWorkspace(staff)
     await fetchTasks(staff)
-    expect(get.mock.calls.filter(c => c[0] === '/projects?limit=100&page=1').length).toBe(2)
+    expect(get.mock.calls.filter(c => c[0] === '/board').length).toBe(2)
   })
 })

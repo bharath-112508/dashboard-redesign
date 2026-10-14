@@ -1,6 +1,5 @@
 import { ApiError, api } from './client'
 import { entryBody } from './timesheetMappers'
-import { allPages, liveProjects } from './companies'
 import type { BackendProject } from './companyMappers'
 import {
   epicFrom,
@@ -74,33 +73,21 @@ type ProjectData = {
   tasks: BackendTask[]
 }
 
-const readProject = async (project: BackendProject): Promise<ProjectData> => {
-  const at = `/projects/${project.id}`
-  const [stories, sprints, statuses, members, tasks] = await Promise.all([
-    allPages<BackendStory>(`${at}/stories`),
-    allPages<BackendSprint>(`${at}/sprints`),
-    api.get<BackendStatuses>(`${at}/custom-statuses`),
-    api.get<{ id: string; full_name: string }[]>(`${at}/members`),
-    allPages<BackendTask>(`/tasks?project_id=${project.id}`),
-  ])
-  return { project, stories, sprints, statuses, members, tasks }
-}
 
 /**
  * Every epic, sprint and ticket the signed-in person may see, from the
  * projects the backend lists for them. Workspace and tasks come from the same
  * read, so they always agree.
  */
-// ponytail: five requests per project and a full reload after every write; fine at Demo DB size,
-// add one backend board endpoint (and refetch only what a command touched) before production size.
+// ponytail: one request, but the whole board is reloaded after every write; refetch only what a
+// command touched if a board ever grows large enough for that to be slow.
 export const loadBoard = async (session: Session | null): Promise<Board> => {
   const index = emptyIndex()
   noteWho(session?.personId ?? '')
   if (!session) return { workspace: { statuses: DEFAULT_STATUSES, epics: [], sprints: [], devopsLinks: {} }, tasks: [], index }
-  // A project whose reads fail (archived meanwhile, or refused) is left out rather than failing the whole board.
-  const read = await Promise.allSettled((await liveProjects()).map(readProject))
-  read.forEach(r => r.status === 'rejected' && console.warn('Could not read a project for the board', r.reason))
-  const data = read.flatMap(r => (r.status === 'fulfilled' ? [r.value] : []))
+  // Every live project with its epics, sprints, statuses, members and tickets, in one request
+  // (the backend leaves out a project it cannot read rather than failing the whole board).
+  const data = await api.get<ProjectData[]>('/board')
 
   // People are named in the app: names of every project's members.
   const nameOf = new Map<string, string>()
