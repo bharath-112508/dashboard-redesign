@@ -415,6 +415,8 @@ const resolveActorName = async (actor: ActorRef, fallback = 'a user'): Promise<s
 export interface LeaveDispatchInput {
     request_id: Types.ObjectId;
     requester_id: Types.ObjectId;
+    /** Redesign: who filed it, when that was someone else; they are not notified as a reviewer. */
+    filed_by?: Types.ObjectId;
     /** "SL — Sick Leave". Still used for the notification preview text. */
     leave_type_label: string;
     /** Type code + name, split out for the Slack message: the code picks the
@@ -439,7 +441,9 @@ export const notifyLeaveSubmitted = async (input: LeaveDispatchInput): Promise<v
             findUserById(input.requester_id),
             // Route to the employee's reporting manager (fallback: admins),
             // instead of pinging every manager/admin.
-            findRequestReviewersFor(input.requester_id),
+            findRequestReviewersFor(input.requester_id).then((list) =>
+                input.filed_by ? list.filter((r) => !input.filed_by!.equals(r._id)) : list
+            ),
         ]);
         if (!requester) {
             logger.warn({ context, requester_id: input.requester_id.toString() }, 'requester missing — skipping');

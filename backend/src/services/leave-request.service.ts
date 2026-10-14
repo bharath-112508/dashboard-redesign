@@ -159,15 +159,17 @@ const assertCanApplyFor = async (applicantId: Types.ObjectId, caller: { id: Type
  */
 const assertCanReviewScoped = async (
     req: LeaveRequestDocument,
-    caller: { id: Types.ObjectId; role: RoleType }
+    caller: { id: Types.ObjectId; role: RoleType },
+    /** Approve or reject (not cancel): the person who filed it may not decide it. */
+    deciding = false
 ): Promise<void> => {
     const permissions = await permissionsOf(caller.id);
     ensureCanReviewRequest(req, caller, permissions);
     // `system.admin` rather than `role === 'admin'` — same staleness applies
     // to the scoping bypass as to the gate above.
     if (callerCan(permissions, PERMISSIONS.SYSTEM_ADMIN)) return;
-    // Redesign: a manager who filed a report's leave does not also decide it.
-    if (req.applied_by && caller.id.equals(req.applied_by)) {
+    // Redesign: a manager who filed a report's leave does not also decide it (they may still cancel it).
+    if (deciding && req.applied_by && caller.id.equals(req.applied_by)) {
         throw AppError.forbidden('You filed this request, so someone else must decide it');
     }
     if (!(await isDirectReportOf(req.user_id, caller.id))) {
@@ -737,6 +739,8 @@ export const applyLeave = async (
     await notifyLeaveSubmitted({
         request_id: created._id,
         requester_id: applicantId,
+        // Redesign: whoever filed it for someone else is not asked to decide it.
+        ...(applicantId.equals(caller.id) ? {} : { filed_by: caller.id }),
         leave_type_label: leaveTypeLabel(requestedType),
         leave_type_code: requestedType?.code,
         leave_type_name: requestedType?.name,
@@ -1015,7 +1019,7 @@ export const approveLeave = async (
 ): Promise<Record<string, unknown>> => {
     const existing = await LeaveRequest.findById(id);
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
-    await assertCanReviewScoped(existing, caller);
+    await assertCanReviewScoped(existing, caller, true);
 
     if (
         existing.requires_additional_approval &&
@@ -1159,7 +1163,7 @@ export const rejectLeave = async (
 ): Promise<Record<string, unknown>> => {
     const existing = await LeaveRequest.findById(id);
     if (!existing) throw AppError.notFound('Leave request not found', ERROR_CODES.RESOURCE_NOT_FOUND);
-    await assertCanReviewScoped(existing, caller);
+    await assertCanReviewScoped(existing, caller, true);
 
     // C2 — status transition + `pending → 0` refunds are atomic. Pre-C2
     // the PENDING→REJECTED flip and the per-segment refund were

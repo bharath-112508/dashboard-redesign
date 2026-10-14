@@ -5,7 +5,7 @@ type Event = { event: string; data: string }
 
 /** Complete events in `buffer`, and the incomplete tail to keep for the next chunk. */
 export const parseEvents = (buffer: string): { events: Event[]; rest: string } => {
-  const blocks = buffer.split('\n\n')
+  const blocks = buffer.replace(/\r\n?/g, '\n').split('\n\n')
   const rest = blocks.pop() ?? ''
   const events: Event[] = []
   for (const block of blocks) {
@@ -26,12 +26,13 @@ const KEYS_OF: Record<string, string[]> = {
   tasks: ['tasks', 'ticketDetails', 'entries'],
   'task-comments': ['ticketDetails'],
   projects: ['workspace', 'tasks', 'companies', 'internalProjects', 'people'],
-  sprints: ['workspace', 'tasks', 'companies'],
+  sprints: ['workspace', 'tasks'],
   stories: ['workspace', 'tasks', 'companies'],
   timesheets: ['entries', 'weekSubmissions', 'companies'],
   leaves: ['leave', 'notifications', 'leaveBook'],
   'leave-balances': ['leaveBook'],
-  users: ['people'],
+  // Client contacts are users too, shown on the Companies pages.
+  users: ['people', 'companies'],
   roles: ['access'],
   settings: ['access'],
   companies: ['companies', 'people'],
@@ -39,15 +40,25 @@ const KEYS_OF: Record<string, string[]> = {
 
 export const queryKeysFor = (topics: string[]): string[] => [...new Set(topics.flatMap(t => KEYS_OF[t] ?? []))]
 
+/** Every key a change can touch: refreshed after a reconnect, since what changed meanwhile sent no event. */
+const ALL_KEYS = [...new Set(Object.values(KEYS_OF).flat())]
+
+/** Keys whose read is heavy (companies fans out per project and company): refreshed less often. */
+const HEAVY = new Set(['companies'])
+
 interface Deps {
   fetchFn: typeof fetch
   /** The current access token, or null when signed out. */
   token: () => string | null
+  /** Who is signed in; the stream is reopened when this changes (not on every token renewal). */
+  who: () => string | null
   /** Renews the access token (a call through the API client does it). */
   refreshToken: () => Promise<unknown>
   wait: (ms: number) => Promise<void>
   /** Changes arriving within this window are refreshed together. */
   batchMs: number
+  /** The window for heavy keys (default: batchMs). */
+  heavyBatchMs?: number
 }
 
 /**
@@ -59,22 +70,24 @@ interface Deps {
 export const startLiveUpdates = (onKeys: (keys: string[]) => void, deps: Deps): (() => void) => {
   let stopped = false
   let controller: AbortController | null = null
-  let pending = new Set<string>()
-  let timer: ReturnType<typeof setTimeout> | null = null
-
-  const flush = () => {
-    timer = null
-    const keys = [...pending]
-    pending = new Set()
-    if (keys.length) onKeys(keys)
-  }
+  const batch = (ms: number) => ({ keys: new Set<string>(), timer: null as ReturnType<typeof setTimeout> | null, ms })
+  const batches = [batch(deps.batchMs), batch(deps.heavyBatchMs ?? deps.batchMs)]
   const queue = (keys: string[]) => {
-    keys.forEach(k => pending.add(k))
-    if (!timer) timer = setTimeout(flush, deps.batchMs)
+    for (const k of keys) {
+      const b = batches[HEAVY.has(k) ? 1 : 0]
+      b.keys.add(k)
+      b.timer ??= setTimeout(() => {
+        b.timer = null
+        const out = [...b.keys]
+        b.keys = new Set()
+        if (out.length) onKeys(out)
+      }, b.ms)
+    }
   }
 
   const run = async () => {
     let backoff = 1000
+    let connectedBefore = false
     while (!stopped) {
       const token = deps.token()
       if (!token) {
@@ -82,10 +95,12 @@ export const startLiveUpdates = (onKeys: (keys: string[]) => void, deps: Deps): 
         continue
       }
       controller = new AbortController()
-      // Signed out, or someone else signed in: drop this stream and reconnect with the new token.
+      // Signed out, or someone else signed in: drop this stream and reconnect.
+      // (A renewed token for the same person keeps the stream: it was checked at connect.)
       const current = controller
+      const person = deps.who()
       const watch = setInterval(() => {
-        if (deps.token() !== token) current.abort()
+        if (!deps.token() || deps.who() !== person) current.abort()
       }, 5000)
       try {
         const res = await deps.fetchFn(`${API_URL}/events/stream`, {
@@ -95,13 +110,21 @@ export const startLiveUpdates = (onKeys: (keys: string[]) => void, deps: Deps): 
         if (res.status === 401) {
           await deps.refreshToken().catch(() => undefined)
         } else if (res.ok && res.body) {
-          backoff = 1000
           const reader = res.body.getReader()
+          let first = true
           const decoder = new TextDecoder()
           let buffer = ''
           for (;;) {
             const { value, done } = await reader.read()
             if (done || stopped) break
+            if (first) {
+              first = false
+              // Data arrived, so the stream works: reset the backoff, and after a reconnect
+              // refresh everything, since what changed while it was down sent no event.
+              backoff = 1000
+              if (connectedBefore) queue(ALL_KEYS)
+              connectedBefore = true
+            }
             const parsed = parseEvents(buffer + decoder.decode(value, { stream: true }))
             buffer = parsed.rest
             for (const e of parsed.events) {
@@ -129,6 +152,6 @@ export const startLiveUpdates = (onKeys: (keys: string[]) => void, deps: Deps): 
   return () => {
     stopped = true
     controller?.abort()
-    if (timer) clearTimeout(timer)
+    for (const b of batches) if (b.timer) clearTimeout(b.timer)
   }
 }

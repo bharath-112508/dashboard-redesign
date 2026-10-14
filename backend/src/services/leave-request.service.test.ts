@@ -1090,5 +1090,15 @@ describe('someone who filed leave for a report does not also decide it (redesign
             code: ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING,
         });
     });
+
+    it('still lets the person who filed it cancel it', async () => {
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: ['leave_request.approve'] } as never);
+        const r = baseRequest({ applied_by: manager.id, status: 'rejected' });
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        stubReportingManager(manager.id);
+        // Past the guard: a rejected request cannot be cancelled (409), not "you filed this" (403).
+        await expect(svc.cancelLeave(r._id, { cancellation_reason: 'wrong dates' }, manager as never)).rejects.toMatchObject({ statusCode: 409 });
+    });
 });
 

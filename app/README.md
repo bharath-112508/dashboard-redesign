@@ -38,7 +38,7 @@ What comes from the backend so far:
 
 - **Phase 1e:** leave on the profile page — requests, balance, notices; adding, approving and rejecting (`src/api/http/leave.ts`, `src/api/users/leaveBook.ts`).
 
-- **Live updates:** while signed in, the app keeps the backend's change stream open (`GET /events/stream`, `src/api/http/live.ts`). When anyone changes tickets, comments, epics, sprints, time, leave, people, roles, companies or the permission grid, the pages showing that data refetch it within about a second — no reload. Events carry only the kind of data that changed; what is shown is always refetched with your own rights. The stream reconnects on its own and renews the token when it expires.
+- **Live updates:** while signed in, the app keeps the backend's change stream open (`GET /events/stream`, `src/api/http/live.ts`). When anyone changes tickets, comments, epics, sprints, time, leave, people, roles, companies or the permission grid, the pages showing that data refetch it within about a second — no reload. Events carry only the kind of data that changed; what is shown is always refetched with your own rights. The stream reconnects on its own and renews the token when it expires. After a reconnect everything is refetched once (changes made meanwhile sent no event); company pages refetch at most every 5 s; nothing is refetched while your own save is in flight. Each open tab holds one stream: the plain HTTP/1.1 dev server allows about 6 connections per host, so with more than ~5 tabs open API calls can stall — fine behind HTTP/2 in production.
 
 DevOps and questions still show the mock data.
 

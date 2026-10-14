@@ -142,13 +142,20 @@ export const useLiveSync = () => {
   useEffect(() => server.subscribe(() => qc.invalidateQueries()), [qc])
   useEffect(() => {
     if (!apiMode) return
-    return startLiveUpdates(keys => keys.forEach(k => qc.invalidateQueries({ queryKey: [k] })), {
+    const refetch = (keys: string[]) => {
+      // While a write is in flight its own events would undo its optimistic change; it refetches when it settles.
+      if (qc.isMutating()) return
+      keys.forEach(k => qc.invalidateQueries({ queryKey: [k] }))
+    }
+    return startLiveUpdates(refetch, {
       fetchFn: (url, init) => fetch(url, init),
       token: () => readTokens()?.access ?? null,
+      who: () => readSession()?.personId ?? null,
       // A call through the API client renews an expired access token.
       refreshToken: () => api.get('/auth/me'),
       wait: ms => new Promise(r => setTimeout(r, ms)),
       batchMs: 300,
+      heavyBatchMs: 5000,
     })
   }, [qc])
 }

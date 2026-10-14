@@ -291,6 +291,21 @@ describe('notifyLeaveSubmitted', () => {
         expect(notified.sort()).toEqual([String(managerId), String(adminId)].sort());
     });
 
+    it('leaves out the person who filed it on someone\'s behalf (they may not decide it) (redesign)', async () => {
+        userFindByIdMock.mockImplementation((id: Types.ObjectId) =>
+            id.equals(requesterId)
+                ? queryReturning({ ...requester, internal_profile: { reporting_manager_id: managerId } })
+                : queryReturning(requester)
+        );
+        userFindOneMock.mockReturnValue(queryReturning(manager));
+        userFindMock.mockReturnValue(queryReturning([admin]));
+
+        await dispatcher.notifyLeaveSubmitted({ ...baseInput, filed_by: managerId });
+
+        const notified = notificationCreateMock.mock.calls.map((c) => String(c[0].user_id));
+        expect(notified).toEqual([String(adminId)]);
+    });
+
     // The admin reads these in Slack; email is noise in a busy inbox. The
     // in-app row still lands, so nothing is lost by opting out.
     it('skips the email for a recipient who opted out, but still writes in-app', async () => {
