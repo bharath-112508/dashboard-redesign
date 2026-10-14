@@ -396,11 +396,12 @@ export interface AccessConfig {
   devTypes: string[]
 }
 
-export type LeaveType = 'Annual' | 'Sick' | 'Holiday' | 'Personal'
+/** The design's types in mock mode (Annual, Sick, Holiday, Personal); the backend's leave type names in API mode. */
+export type LeaveType = string
 export type LeaveStatus = 'Pending' | 'Approved' | 'Rejected'
 
 export interface LeaveRequest {
-  id: number
+  id: string
   /** Directory person id. */
   userId: PersonId
   type: LeaveType

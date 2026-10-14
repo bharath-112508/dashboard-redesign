@@ -11,7 +11,7 @@ export type UsersCommand =
   | { type: 'access.setPerm'; role: Role; perm: string; on: boolean }
   | { type: 'access.addDevType'; name: string }
   | { type: 'leave.create'; request: LeaveRequest }
-  | { type: 'leave.decide'; id: number; status: Exclude<LeaveStatus, 'Pending'>; by: string; when: string }
+  | { type: 'leave.decide'; id: string; status: Exclude<LeaveStatus, 'Pending'>; by: string; when: string }
 
 const PREFIX = /^(user|access|leave)\./
 
@@ -96,7 +96,7 @@ export const reduceUsers = (db: Db, c: { type: string }): Db => {
     }
     case 'leave.create': {
       const leave = db.leave ?? []
-      const id = leave.some(r => r.id === cmd.request.id) ? nextId(leave.map(r => r.id)) : cmd.request.id
+      const id = leave.some(r => r.id === cmd.request.id) ? nextPersonId(leave.map(r => r.id)) : cmd.request.id
       // New requests always start Pending; only a decision changes that.
       return { ...db, leave: [...leave, { ...cmd.request, id, status: 'Pending' }] }
     }

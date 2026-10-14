@@ -81,8 +81,8 @@ const isDb = (v: unknown): v is Db => {
  * Everything else is kept, so nobody loses their tickets on upgrade.
  */
 const migrate = (v: unknown): unknown => {
-  if (isObj(v) && v.version === 2) return stringEntryIds(stringTaskIds(stringPersonIds(migrate3(upgrade2(v)))))
-  if (isObj(v) && typeof v.version === 'number' && v.version >= 3 && v.version <= DB_VERSION) return stringEntryIds(stringTaskIds(stringPersonIds(migrate3(v))))
+  if (isObj(v) && v.version === 2) return stringLeaveIds(stringEntryIds(stringTaskIds(stringPersonIds(migrate3(upgrade2(v))))))
+  if (isObj(v) && typeof v.version === 'number' && v.version >= 3 && v.version <= DB_VERSION) return stringLeaveIds(stringEntryIds(stringTaskIds(stringPersonIds(migrate3(v)))))
   return v
 }
 
@@ -112,6 +112,16 @@ export const stringPersonIds = (v: unknown): unknown => {
       contacts: each(c.contacts, k => ({ ...k, personId: s(k.personId) })),
       projects: each(c.projects, withTeam),
     })),
+  }
+}
+
+/** Version 8: leave request ids are strings, as the backend's are. Safe to run on every load. */
+export const stringLeaveIds = (v: unknown): unknown => {
+  if (!isObj(v)) return v
+  return {
+    ...v,
+    version: DB_VERSION,
+    leave: Array.isArray(v.leave) ? v.leave.map(r => (isObj(r) && typeof r.id === 'number' ? { ...r, id: String(r.id) } : r)) : v.leave,
   }
 }
 

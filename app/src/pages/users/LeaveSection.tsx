@@ -65,7 +65,7 @@ export function LeaveSection({ person, leave, notes, canEdit, session }: Props) 
 
   const onAdd = handleSubmit(async v => {
     setError(null)
-    const id = Math.max(0, ...leave.map(r => r.id)) + 1
+    const id = String(Math.max(0, ...leave.map(r => Number(r.id)).filter(Number.isFinite)) + 1)
     try {
       await send({
         type: 'leave.create',
