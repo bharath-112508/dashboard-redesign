@@ -55,12 +55,22 @@ const leaveFrom = (r: BackendLeave): LeaveRequest => ({
  * backend's admin list leaves them out). Cancelled requests are not shown;
  * the design has no Cancelled state.
  */
+/** Leave is read when it overlaps a year back to two years ahead, not since the beginning. */
+export const leaveWindow = (now = new Date()) => {
+  const day = (years: number) => {
+    const d = new Date(now.getFullYear() + years, now.getMonth(), now.getDate())
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  return `from_date=${day(-1)}&to_date=${day(2)}`
+}
+
 const readLeave = async (session: Session | null): Promise<LeaveRequest[]> => {
   if (!session || isClientRole(session.role)) return []
+  const window = leaveWindow()
   const [list, own] = await Promise.all([
-    allPages<BackendLeave>('/leaves'),
+    allPages<BackendLeave>(`/leaves?${window}`),
     // The backend's admin and manager lists leave out the reviewer's own requests.
-    session.role === 'super' || session.role === 'pm' ? allPages<BackendLeave>(`/leaves?user_id=${session.personId}`) : Promise.resolve([]),
+    session.role === 'super' || session.role === 'pm' ? allPages<BackendLeave>(`/leaves?user_id=${session.personId}&${window}`) : Promise.resolve([]),
   ])
   const byId = new Map([...list, ...own].map(r => [r.id, r]))
   return [...byId.values()].filter(r => r.status !== 'cancelled').map(leaveFrom)

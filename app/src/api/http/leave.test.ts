@@ -4,7 +4,13 @@ import type { Session } from '../types'
 const { get, post } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('./client', async importOriginal => ({ ...(await importOriginal<typeof import('./client')>()), api: { get, post } }))
 
-const { fetchLeave, fetchLeaveNotices, fetchLeaveBook, sendLeaveCommand, isLeaveApiCommand } = await import('./leave')
+const { fetchLeave, fetchLeaveNotices, fetchLeaveBook, sendLeaveCommand, isLeaveApiCommand, leaveWindow } = await import('./leave')
+
+describe('leaveWindow', () => {
+  it('is leave overlapping a year back to two years ahead', () => {
+    expect(leaveWindow(new Date('2026-10-14T12:00:00'))).toBe('from_date=2025-10-14&to_date=2028-10-14')
+  })
+})
 
 const admin: Session = { personId: 'a0', name: 'Vilje Admin', email: 'a@x', role: 'super', org: 'Viljetech' }
 const dev: Session = { personId: 'u1', name: 'Rahul', email: 'r@x', role: 'dev', org: 'Viljetech' }
@@ -40,7 +46,7 @@ describe('fetchLeave', () => {
       path.includes('user_id=a0') ? [req('r3', { user_id: 'a0', user: { id: 'a0', full_name: 'Vilje Admin' } })] : [req('r1'), req('r2', { status: 'cancelled' })],
     )
     const out = await fetchLeave(admin)
-    expect(get.mock.calls.map(c => c[0])).toEqual(['/leaves?limit=100&page=1', '/leaves?user_id=a0&limit=100&page=1'])
+    expect(get.mock.calls.map(c => c[0])).toEqual([`/leaves?${leaveWindow()}&limit=100&page=1`, `/leaves?user_id=a0&${leaveWindow()}&limit=100&page=1`])
     expect(out.map(r => [r.id, r.userId, r.type, r.status])).toEqual([
       ['r1', 'u1', 'Casual Leave', 'Pending'],
       ['r3', 'a0', 'Casual Leave', 'Pending'],
@@ -51,7 +57,7 @@ describe('fetchLeave', () => {
     const pm: Session = { ...dev, personId: 'm1', role: 'pm' }
     get.mockResolvedValue([])
     await fetchLeave(pm)
-    expect(get.mock.calls.map(c => c[0])).toEqual(['/leaves?limit=100&page=1', '/leaves?user_id=m1&limit=100&page=1'])
+    expect(get.mock.calls.map(c => c[0])).toEqual([`/leaves?${leaveWindow()}&limit=100&page=1`, `/leaves?user_id=m1&${leaveWindow()}&limit=100&page=1`])
   })
 
   it("keeps the backend's day count (half days) and the person's name", async () => {
