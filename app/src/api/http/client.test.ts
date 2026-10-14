@@ -20,6 +20,15 @@ describe('api client', () => {
     writeTokens({ access: 'a1', refresh: 'r1' })
   })
 
+  it('gives up on a request that hangs, so one stuck call cannot block the next writes', async () => {
+    const f = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_res, rej) => init.signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError')))),
+    )
+    const api = createClient('http://x/api/v1', f, undefined, 20)
+    await expect(api.get('/tasks')).rejects.toThrow('The server took too long to answer.')
+  })
+
   it('sends the bearer token and unwraps { data }', async () => {
     const f = vi.fn(async (_url: string, _init: RequestInit) => json(200, { data: { id: 'u1' } }))
     const api = createClient('http://x/api/v1', f)

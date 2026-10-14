@@ -74,16 +74,25 @@ export const fetchCompanies = async (session: Session | null): Promise<Company[]
   return Promise.all(
     companies.map(async c => {
       const own = projects.filter(p => p.company_id === c.id)
+      // A project whose epics can't be read is shown without them rather than failing every company.
       const withEpics = await Promise.all(
         own.map(async p => {
-          const [stories, used] = await Promise.all([allPages<BackendStory>(`/projects/${p.id}/stories`), p.support_plan ? hoursUsedThisMonth(p.id) : 0])
+          const [stories, used] = await Promise.all([
+            allPages<BackendStory>(`/projects/${p.id}/stories`).catch(() => []),
+            p.support_plan ? hoursUsedThisMonth(p.id) : 0,
+          ])
           return clientProjectFrom(p, stories.map(epicFromStory), used)
         }),
       )
       // Contacts: staff see every company's; a client admin only their own; a client user may not list them.
       const mayList = !clientUser && (!isClientRole(session.role) || c.id === session.orgId)
       // Removing a contact deactivates them, so deactivated people are not contacts.
-      const people = mayList ? await allPages<BackendRepresentative>(`/companies/${c.id}/representatives`) : []
+      const people = mayList
+        ? await allPages<BackendRepresentative>(`/companies/${c.id}/representatives`).catch(err => {
+            console.warn('Could not read the contacts of a company', c.id, err)
+            return []
+          })
+        : []
       const contacts = people.filter(p => p.status !== 'deactivated').map(contactFrom)
       return companyFrom(c, withEpics, contacts)
     }),

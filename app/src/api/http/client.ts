@@ -44,7 +44,7 @@ const acrossTabs = <T>(fn: () => Promise<T>): Promise<T> =>
  * just retries. Only a refused refresh (401/403) signs the user out; a network
  * error, 5xx or 429 keeps the tokens so the next call can try again.
  */
-export const createClient = (base: string, fetchImpl: Fetch, signedOut: () => void = () => undefined) => {
+export const createClient = (base: string, fetchImpl: Fetch, signedOut: () => void = () => undefined, timeoutMs = 30_000) => {
   let refreshing: Promise<boolean> | null = null
 
   /** Refreshes the tokens a call was sent with. True when there are fresh tokens to retry with. */
@@ -77,7 +77,19 @@ export const createClient = (base: string, fetchImpl: Fetch, signedOut: () => vo
     const t = readTokens()
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (t) headers.Authorization = `Bearer ${t.access}`
-    const res = await fetchImpl(`${base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+    // A call that hangs gives up, so it cannot block the writes queued behind it.
+    const abort = new AbortController()
+    const timer = setTimeout(() => abort.abort(), timeoutMs)
+    const res = await fetchImpl(`${base}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: abort.signal,
+    })
+      .catch(err => {
+        throw abort.signal.aborted ? new Error('The server took too long to answer.') : err
+      })
+      .finally(() => clearTimeout(timer))
     // A 401 with no tokens at all: the session outlived them, so sign out here too.
     if (res.status === 401 && !t && !path.startsWith('/auth/')) signedOut()
     if (res.status === 401 && t && !retried && !path.startsWith('/auth/login')) {

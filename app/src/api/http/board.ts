@@ -94,7 +94,10 @@ export const loadBoard = async (session: Session | null): Promise<Board> => {
   const index = emptyIndex()
   noteWho(session?.personId ?? '')
   if (!session) return { workspace: { statuses: DEFAULT_STATUSES, epics: [], sprints: [], devopsLinks: {} }, tasks: [], index }
-  const data = await Promise.all((await liveProjects()).map(readProject))
+  // A project whose reads fail (archived meanwhile, or refused) is left out rather than failing the whole board.
+  const read = await Promise.allSettled((await liveProjects()).map(readProject))
+  read.forEach(r => r.status === 'rejected' && console.warn('Could not read a project for the board', r.reason))
+  const data = read.flatMap(r => (r.status === 'fulfilled' ? [r.value] : []))
 
   // People are named in the app: names of every project's members.
   const nameOf = new Map<string, string>()

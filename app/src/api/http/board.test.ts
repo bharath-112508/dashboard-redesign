@@ -87,6 +87,17 @@ describe('loadBoard', () => {
     get.mockReset()
   })
 
+  it("leaves out a project whose reads fail (e.g. archived meanwhile) instead of failing the whole board", async () => {
+    serve({
+      ...p1Routes([task('t1', 1)]),
+      '/projects?limit=100&page=1': [project('p1', 'AFSP'), project('p2', 'GONE')],
+      // p2's reads are not served: they fail.
+    })
+    const { tasks, workspace } = await loadBoard(staff)
+    expect(tasks.map(t => t.id)).toEqual(['t1'])
+    expect(workspace.epics.length).toBeGreaterThan(0)
+  })
+
   it('gives the default statuses, then each custom one', async () => {
     serve(p1Routes([], [], { '/projects/p1/custom-statuses': { defaults: [], custom: [{ id: 'x', key: 'qa', label: 'QA', order: 5, is_terminal: false, is_active: true }] } }))
     const { workspace } = await loadBoard(staff)
