@@ -184,7 +184,7 @@ export function UserForm({ person, scope, session, people, companies, internal, 
     try {
       if (!person) {
         const id = nextPersonId(people)
-        await send({
+        const result = await send({
           type: 'user.create',
           person: {
             ...shared,
@@ -195,7 +195,7 @@ export function UserForm({ person, scope, session, people, companies, internal, 
             last: 'Invited',
           },
         })
-        show(apiMode ? `Invited ${shared.name}. They get an email to set their password.` : `Invited ${shared.name}. No email is sent yet.`)
+        show(result?.notice ?? (apiMode ? `Invited ${shared.name}. They get an email to set their password.` : `Invited ${shared.name}. No email is sent yet.`))
         onClose()
         return
       }

@@ -109,7 +109,7 @@ export function CompanyFormModal({
         return
       }
       if (!company) return
-      await send({
+      const result = await send({
         type: 'company.update',
         id: company.id,
         patch: fields,
@@ -118,6 +118,7 @@ export function CompanyFormModal({
         mainPersonId: company.contacts[0]?.personId ?? null,
       })
       onClose()
+      if (result?.notice) show(result.notice)
     } catch {
       setSaveError('The company could not be saved. Try again.')
     }

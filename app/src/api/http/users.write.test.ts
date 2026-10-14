@@ -96,6 +96,16 @@ describe('user.create', () => {
     expect(post).toHaveBeenCalledWith('/projects/p2/members', { add: ['u9'] })
   })
 
+  it('keeps the person when a later step fails, and says which steps did not save', async () => {
+    post.mockImplementation(async (path: string) => {
+      if (path === '/users') return { id: 'u9' }
+      if (path.endsWith('/members')) throw new Error('down')
+      return {}
+    })
+    const out = await sendUserCommand({ type: 'user.create', person: person({ id: 'tmp', projects: ['p2'] }) })
+    expect(out).toEqual({ id: 'u9', notice: 'Kari Berg was added, but their projects did not save. Edit them to try again.' })
+  })
+
   it('adds a DevOps engineer as staff holding the devops role', async () => {
     await sendUserCommand({ type: 'user.create', person: person({ id: 'tmp', role: 'devops', projects: 'all' }) })
     expect(post.mock.calls[0][1]).toMatchObject({ role: 'employee' })

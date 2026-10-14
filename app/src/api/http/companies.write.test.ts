@@ -195,6 +195,15 @@ describe('company contacts', () => {
     expect(post).toHaveBeenCalledWith('/projects/p1/representatives', { add: ['u9'] })
   })
 
+  it('keeps a new contact when rostering fails, and says so', async () => {
+    post.mockImplementation(async (path: string) => {
+      if (path === '/companies/c1/representatives') return { id: 'u9' }
+      throw new Error('down')
+    })
+    const out = await sendCompanyCommand({ type: 'company.contact.save', companyId: 'c1', index: null, contact: contact({ admin: true, projects: ['p1'] }) }, TODAY)
+    expect(out).toEqual({ id: 'u9', notice: expect.stringMatching(/was added, but the client admin role and their projects did not save/) })
+  })
+
   it("edits a contact: name and title, and only the project changes", async () => {
     get.mockResolvedValueOnce({ id: 'u9', full_name: 'Kari', email: 'kari@test.example', role: 'representative', status: 'active', projects: [{ id: 'p1' }, { id: 'p2' }] })
     patch.mockResolvedValue({})

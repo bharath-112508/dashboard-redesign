@@ -114,7 +114,11 @@ const useCommandMutation = (toastOnError = false) => {
       }
       return { prev }
     },
-    // Hook-level, so it runs even when the window that sent the write has closed.
+    // Hook-level, so these run even when the window that sent the write has closed.
+    // A notice: saved, but part of it was not (async callers show it with their own message).
+    onSuccess: res => {
+      if (toastOnError && apiMode && res?.notice) show(res.notice)
+    },
     onError: (err, _cmd, ctx) => {
       if (ctx) Object.entries(ctx.prev).forEach(([k, v]) => qc.setQueryData([k], v))
       if (toastOnError && apiMode) show(writeErrorMessage(err))

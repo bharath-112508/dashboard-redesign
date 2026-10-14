@@ -175,7 +175,17 @@ const refuse = (message: string) => new ApiError(403, 'FORBIDDEN', message)
 const mayChangeRoles = () => readSession()?.role === 'super'
 
 /** Creates a client contact: the user, their admin role, and their projects. Returns their id. */
-export const createContact = async (companyId: string, c: CompanyContact): Promise<PersonId> => {
+/**
+ * The steps after a person is created. Each is tried and the person is kept either way
+ * (adding them again would only be refused as a taken email); the notice names what did not save.
+ */
+export const finishSteps = async (who: string, steps: [string, false | (() => Promise<unknown>)][]) => {
+  const failed: string[] = []
+  for (const [what, run] of steps) if (run) await run().catch(() => failed.push(what))
+  return failed.length ? `${who} was added, but ${failed.join(' and ')} did not save. Edit them to try again.` : undefined
+}
+
+export const createContact = async (companyId: string, c: CompanyContact): Promise<{ id: PersonId; notice?: string }> => {
   if (c.admin && !mayChangeRoles()) throw refuse('Only an admin can make a contact a client admin.')
   const { id } = await api.post<{ id: string }>(`/companies/${companyId}/representatives`, {
     email: c.email,
@@ -185,9 +195,11 @@ export const createContact = async (companyId: string, c: CompanyContact): Promi
     // They choose their own password from an emailed link; nobody sees the random one.
     send_invite: true,
   })
-  if (c.admin) await api.post(`/users/${id}/change-role`, { new_role: 'client' })
-  for (const p of c.projects) await roster(p, 'representatives', 'add', id)
-  return id
+  const notice = await finishSteps(c.name || c.email, [
+    ['the client admin role', !!c.admin && (() => api.post(`/users/${id}/change-role`, { new_role: 'client' }))],
+    ['their projects', c.projects.length > 0 && (async () => { for (const p of c.projects) await roster(p, 'representatives', 'add', id) })],
+  ])
+  return notice ? { id, notice } : { id }
 }
 
 const updateContact = async (companyId: string, c: CompanyContact & { personId: PersonId }) => {
@@ -237,9 +249,14 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
       // A backend contact is a login account, so it needs an email. A contact that fails
       // must not hide the company that was created: the page opens it, says which contact failed, and it can be added there.
       const failed: string[] = []
+      const notes: string[] = []
       for (const k of c.contacts)
-        if (k.email) await createContact(id, k).catch((err: unknown) => failed.push(`${k.name || k.email} could not be added as a contact: ${err instanceof Error ? err.message : 'unknown error'}`))
-      return failed.length ? { id, notice: `The company was created, but ${failed.join('; ')}. Add them on the company page.` } : { id }
+        if (k.email)
+          await createContact(id, k)
+            .then(r => r.notice && notes.push(r.notice))
+            .catch((err: unknown) => failed.push(`${k.name || k.email} could not be added as a contact: ${err instanceof Error ? err.message : 'unknown error'}`))
+      const notice = [failed.length ? `The company was created, but ${failed.join('; ')}. Add them on the company page.` : '', ...notes].filter(Boolean).join(' ')
+      return notice ? { id, notice } : { id }
     }
     case 'company.update': {
       const body = companyBody(cmd.patch)
@@ -254,7 +271,10 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
             ...(cmd.main.email !== before?.email ? { email: cmd.main.email } : {}),
           }
           if (Object.keys(changes).length) await api.patch(`/users/${cmd.mainPersonId}`, changes)
-        } else await createContact(cmd.id, { personId: null, name: cmd.main.name, role: 'Main contact', email: cmd.main.email, projects: [] })
+        } else {
+          const { notice } = await createContact(cmd.id, { personId: null, name: cmd.main.name, role: 'Main contact', email: cmd.main.email, projects: [] })
+          if (notice) return { notice }
+        }
       }
       return {}
     }
@@ -268,13 +288,13 @@ export const sendCompanyCommand = async (cmd: CompanyApiCommand, today: string):
         await updateContact(cmd.companyId, { ...c, personId: c.personId })
         return {}
       }
-      return { id: await createContact(cmd.companyId, c) }
+      return createContact(cmd.companyId, c)
     }
     case 'clientTeam.add': {
       // A member is a real client user who can sign in, on every live project of their company.
       const m = cmd.member
       const projects = (await liveProjects()).filter(p => p.company_id === m.companyId).map(p => p.id)
-      return { id: await createContact(m.companyId, { personId: null, name: m.name, role: m.title ?? '', email: m.email, projects }) }
+      return createContact(m.companyId, { personId: null, name: m.name, role: m.title ?? '', email: m.email, projects })
     }
     case 'company.contact.remove':
       // By person, never by position: removing deactivates a real account.

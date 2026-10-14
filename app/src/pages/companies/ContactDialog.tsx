@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { useSendAsync } from '../../api/queries'
 import type { ClientProject, CompanyContact } from '../../api/types'
 import { Dialog, btnPrimary, btnSecondary, errorCls, fieldCls, labelCls } from '../../components/Dialog'
+import { useToast } from '../shell/toast'
 
 const schema = z.object({
   name: z.string().trim().min(1, 'Add a name'),
@@ -34,6 +35,7 @@ export function ContactDialog({
   onClose: () => void
 }) {
   const send = useSendAsync()
+  const show = useToast()
   const [saveError, setSaveError] = useState<string | null>(null)
   const form = useForm<Form>({
     resolver: zodResolver(schema),
@@ -58,13 +60,14 @@ export function ContactDialog({
   const onSubmit = form.handleSubmit(async v => {
     setSaveError(null)
     try {
-      await send({
+      const result = await send({
         type: 'company.contact.save',
         companyId,
         index,
         contact: { personId: contact?.personId ?? null, name: v.name, role: v.role, email: v.email, projects: v.projects, admin: v.admin },
       })
       onClose()
+      if (result?.notice) show(result.notice)
     } catch {
       setSaveError('The contact could not be saved. Try again.')
     }

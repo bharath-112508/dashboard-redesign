@@ -1,5 +1,5 @@
 import { ApiError, api } from './client'
-import { allPages, createContact, liveProjects, passwordLength, randomPassword } from './companies'
+import { allPages, createContact, finishSteps, liveProjects, passwordLength, randomPassword } from './companies'
 import { personFromUser, type BackendUser } from './mappers'
 import { DEFAULT_DEV_TYPES, DEFAULT_PERMS } from '../users/access'
 import { readSession } from '../session/store'
@@ -123,7 +123,7 @@ const savePhoto = async (id: string, photo: string | undefined, current: string 
   await api.post(`/users/${id}/profile-photo`, { blob_container: t.blob_container, blob_key: t.blob_key, ...meta })
 }
 
-const createUser = async (p: Person): Promise<string> => {
+const createUser = async (p: Person): Promise<{ id: string; notice?: string }> => {
   const role = backendRoleOf(p.role)
   if (CLIENT_SIDE.has(role)) {
     if (p.org === 'vt') throw refuse('A client person needs their company.')
@@ -138,11 +138,13 @@ const createUser = async (p: Person): Promise<string> => {
     initial_password: randomPassword(await passwordLength()),
     internal_profile: { employment_type: p.emp === 'freelancer' ? 'freelancer' : 'staff', ...(p.devType ? { dev_type: p.devType } : {}) },
   })
-  await api.post(`/users/${id}/reset-password`, {})
-  if (p.role === 'devops') await setDevops(id, true)
-  await syncProjects(id, p.projects)
-  await savePhoto(id, p.photo, null)
-  return id
+  const notice = await finishSteps(p.name, [
+    ['the invitation email', () => api.post(`/users/${id}/reset-password`, {})],
+    ['the DevOps role', p.role === 'devops' && (() => setDevops(id, true))],
+    ['their projects', () => syncProjects(id, p.projects)],
+    ['their photo', () => savePhoto(id, p.photo, null)],
+  ])
+  return notice ? { id, notice } : { id }
 }
 
 const updateUser = async (id: string, patch: Partial<Person>) => {
@@ -184,7 +186,7 @@ const saveAccess = async (body: { perms?: Partial<Record<Role, string[]>>; dev_t
 export const sendUserCommand = async (cmd: UserApiCommand): Promise<{ id?: string }> => {
   switch (cmd.type) {
     case 'user.create':
-      return { id: await createUser(cmd.person) }
+      return createUser(cmd.person)
     case 'user.update':
       await updateUser(cmd.id, cmd.patch)
       return {}
