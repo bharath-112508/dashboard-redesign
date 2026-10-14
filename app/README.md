@@ -40,7 +40,20 @@ What comes from the backend so far:
 
 - **Live updates:** while signed in, the app keeps the backend's change stream open (`GET /events/stream`, `src/api/http/live.ts`). When anyone changes tickets, comments, epics, sprints, time, leave, people, roles, companies or the permission grid, the pages showing that data refetch it within about a second — no reload. Events carry only the kind of data that changed; what is shown is always refetched with your own rights. The stream reconnects on its own and renews the token when it expires. After a reconnect everything is refetched once (changes made meanwhile sent no event); company pages refetch at most every 5 s; nothing is refetched while your own save is in flight. Each open tab holds one stream: the plain HTTP/1.1 dev server allows about 6 connections per host, so with more than ~5 tabs open API calls can stall — fine behind HTTP/2 in production.
 
-DevOps and questions still show the mock data.
+- **Phase 1f:** the DevOps board (items and settings), questions to clients and DevOps requests (`src/api/http/devops.ts`).
+
+The client team list and InvoiceMatch still show the mock data.
+
+DevOps, questions and requests in API mode:
+
+- **Storage:** new backend collections `devops_items` (one per project, keyed `OPS-<n>`, the board's fields kept as the app shapes them), `client_questions` and `devops_requests`, plus `devops_settings` in system settings. The board starts empty; DevOps adds items for real projects with **+ New**.
+- **Who may do what:** the team (every staff role) reads everything and raises and answers questions and requests. Only admins and DevOps engineers change DevOps items and Settings. A client sees the DevOps items, questions and requests of their own company's projects (a client user only the projects they are on), replies to their questions, edits their own messages and marks a question solved or reopens it. Authors, times and a message's side come from the backend, not the browser.
+- **Locks:** a saved initial due date and saved dev phase due dates cannot be changed through the API either (the Settings rules; both are locked until Settings are first saved, as in the design).
+- **Settings:** until someone saves Settings the design's defaults are used, with the directory's DevOps engineers as the people. A rename in Settings moves the items on it (saved item by item after the settings).
+- **Ids:** new items, questions and requests take the next number, as in mock mode; if someone else just took it, the save is refused ("Try again").
+- **Files** in questions stay inside the record (no blob upload yet), so a message's files must fit the backend's 1 MB request limit.
+- **Request time logs** (Timesheet page) are stored on the request, not as timesheet entries, as in the design.
+- A question raised from Tickets with only a sprint belongs to that sprint's project.
 
 Leave in API mode:
 
@@ -70,7 +83,7 @@ Timesheets in API mode:
 - You can only log your own time: picking someone else in the Tickets timesheet is refused.
 - A ticket's **Log time** adds a billable entry on that ticket for you.
 - A support plan's hours used this month are the project's billable hours from the timesheets.
-- DevOps request time logs are still the mock (DevOps phase).
+- DevOps request time logs are saved on the request (see the DevOps section above).
 - My timesheet's "today" is the design's fixed date (10 Oct 2026), while the dashboard uses the real date; both are as in mock mode.
 
 Epics, sprints and tickets in API mode:
