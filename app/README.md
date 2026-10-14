@@ -45,8 +45,8 @@ What comes from the backend so far:
 - **Phase 1g:** the client portal's team (Add member).
 
 - **Phase 1h:** the Dashboard's last sample figures (`src/api/dashboard/live.ts`). In API mode:
-  - **Budget vs hours used:** per client project, the budget is the sum of its tickets' estimates (there is no "hours sold" field) and used is the time logged on it; projects without estimates are left out, the most used first, four at most.
-  - **Leave & attendance** (super admin) and **Approvals** (admin): who is off today, then pending requests, upcoming first and then the latest overdue ones, five at most. The admin's **Pending leave** and **Pending comp-off** count the pending requests (comp-off = a type named "Comp…").
+  - **Budget vs hours used:** per client project, the budget is the sum of its tickets' estimates (there is no "hours sold" field; a subtask counts when its parent has none) and used is every hour ever logged on it (`/timesheets/summary?group_by=project`). Done projects and projects without estimates are left out; the most used first, four at most. On the Demo DB the estimates are much smaller than the hours logged, so both projects read "over budget".
+  - **Leave & attendance** (super admin) and **Approvals** (admin): who is off today (Work From Home is not "off"), then pending requests, upcoming first and then the latest overdue ones, five at most. Your own requests are left out, since you cannot decide them. The admin's **Pending leave** and **Pending comp-off** count the pending requests (comp-off = a type named "Comp…").
   - Mock mode keeps the design's sample figures (`src/api/dashboard/static.ts`).
 
 Client team in API mode:

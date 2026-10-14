@@ -57,7 +57,7 @@ describe('startLiveUpdates', () => {
     await vi.waitFor(() => expect(seen.length).toBeGreaterThan(0))
     stop()
     expect(fetchFn.mock.calls[0][1].headers).toEqual({ Authorization: 'Bearer tok', Accept: 'text/event-stream' })
-    expect(seen.flat().sort()).toEqual(['entries', 'tasks', 'ticketDetails', 'weekSubmissions', 'companies'].sort())
+    expect(seen.flat().sort()).toEqual(['entries', 'tasks', 'ticketDetails', 'weekSubmissions', 'companies', 'projectHours'].sort())
   })
 
   it('refreshes everything after reconnecting, since changes made meanwhile sent no event', async () => {

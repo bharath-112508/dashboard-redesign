@@ -9,7 +9,7 @@ vi.mock('./board', () => ({
   boardIndex: { tasks: new Map([['t1', { id: 't1', title: 'Login', epic: 'e1' }]]), projectOfTask: new Map([['t1', 'p1']]) },
 }))
 
-const { fetchEntries, fetchWeekSubmissions, rangeStart } = await import('./timesheet')
+const { fetchEntries, fetchProjectHours, fetchWeekSubmissions, rangeStart } = await import('./timesheet')
 
 const dev: Session = { personId: 'u1', name: 'Chary', email: 'c@x', role: 'dev', org: 'Viljetech' }
 const pm: Session = { ...dev, personId: 'u2', name: 'Rahul', role: 'pm' }
@@ -100,5 +100,17 @@ describe('fetchWeekSubmissions', () => {
 
   it('reads nothing for a client', async () => {
     expect(await fetchWeekSubmissions(client)).toEqual([])
+  })
+})
+
+describe('fetchProjectHours', () => {
+  it("reads every hour ever logged per project (billable + non-billable), for the dashboard's budgets", async () => {
+    get.mockReset()
+    get.mockResolvedValueOnce([
+      { project: { id: 'p1' }, billable_total_minutes: 120, non_billable_total_minutes: 30 },
+      { project: null, billable_total_minutes: 60, non_billable_total_minutes: 0 },
+    ])
+    expect(await fetchProjectHours()).toEqual({ p1: 2.5 })
+    expect(get).toHaveBeenCalledWith('/timesheets/summary?group_by=project')
   })
 })

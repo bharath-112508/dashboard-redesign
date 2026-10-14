@@ -7,6 +7,17 @@ const entry = (task: string | null, bill: number, non = 0, project?: string) => 
 const company = (name: string, projects: { id: string; name: string; epics: string[] }[], archived = false) =>
   ({ id: name, name, archived, projects: projects.map(p => ({ ...p, epics: p.epics.map(id => ({ id })) })) }) as unknown as Company
 
+describe('budgetsFrom: all-time hours, subtask estimates, finished projects', () => {
+  it("uses the backend's all-time hours per project when given, counts a subtask's estimate when its parent has none, and leaves done projects out", () => {
+    const companies = [
+      company('Aurora', [{ id: 'p1', name: 'Portal', epics: ['s1'] }]),
+      { ...company('Nordmark', [{ id: 'p3', name: 'Fleet', epics: ['s3'] }]), projects: [{ id: 'p3', name: 'Fleet', epics: [{ id: 's3' }], state: 'done' }] } as unknown as Company,
+    ]
+    const tasks = [task('t1', 's1', '0'), task('t5', 's1', '8', { parent: 't1' } as never), task('t6', 's1', '30'), task('t7', 's1', '5', { parent: 't6' } as never), task('t3', 's3', '20')]
+    expect(budgetsFrom(companies, tasks, [entry('t6', 2)], { p1: 33.6 })).toEqual([{ title: 'Aurora · Portal', hours: 34, sold: 38, meta: '34h of 38h · 4h left' }])
+  })
+})
+
 describe('budgetsFrom', () => {
   it('uses the tickets\' estimates as the budget and the logged hours as used, most used first', () => {
     const companies = [
@@ -55,6 +66,17 @@ describe('leave figures', () => {
     expect(rows).toHaveLength(5)
     expect(rows.map(r => r.meta.split(' · ')[1])).toEqual(['20 Oct – 20 Oct', '21 Oct – 21 Oct', '22 Oct – 22 Oct', '23 Oct – 23 Oct', '26 Oct – 26 Oct'])
     expect(leaveRows(many.slice(0, 3), people, '2026-10-14').map(r => r.meta.split(' · ')[1])).toEqual(['20 Oct – 20 Oct', '1 Sep – 1 Sep', '1 Jul – 1 Jul'])
+  })
+
+  it("leaves out Work From Home from 'Off today' and the viewer's own requests from what waits for them", () => {
+    const mine = [
+      req('w', 'u2', 'Work From Home', '2026-10-14', '2026-10-14', 'Approved'),
+      req('m', 'u1', 'Casual Leave', '2026-10-20', '2026-10-20', 'Pending'),
+      req('o', 'u2', 'Casual Leave', '2026-10-21', '2026-10-21', 'Pending'),
+    ]
+    expect(leaveRows(mine, people, '2026-10-14', 'u1').map(r => r.title)).toEqual(['Chary · 1 day'])
+    expect(approvalRows(mine, people, '2026-10-14', 'u1').map(r => r.title)).toEqual(['Chary · Casual Leave'])
+    expect(pendingCounts(mine, 'u1')).toEqual({ leave: 1, compoff: 0, oldestLeave: '2026-10-21' })
   })
 
   it('counts pending leave and comp-off apart, and lists them for approval', () => {

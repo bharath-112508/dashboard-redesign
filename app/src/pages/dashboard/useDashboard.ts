@@ -1,4 +1,6 @@
 import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { fetchProjectHours } from '../../api/http/timesheet'
 import { useCompanies, useDevops, useEntries, useInternalProjects, useLeave, useQuestions, useRequests, useTasks, useWorkspace } from '../../api/queries'
 import { apiMode } from '../../api/http/config'
 import { usePeople } from '../../api/people/directory'
@@ -21,6 +23,12 @@ export const useDashboard = (me: Session) => {
   const requests = useRequests()
   const internal = useInternalProjects()
   const leave = useLeave()
+  // API mode: all-time hours per project for the budgets (team readers only: super admin, admin, project manager).
+  const projectHours = useQuery({
+    queryKey: ['projectHours'],
+    queryFn: fetchProjectHours,
+    enabled: apiMode && (me.role === 'super' || me.role === 'admin' || me.role === 'pm'),
+  })
 
   const ready =
     people.data !== undefined &&
@@ -32,7 +40,8 @@ export const useDashboard = (me: Session) => {
     devops.data !== undefined &&
     requests.data !== undefined &&
     internal.data !== undefined &&
-    leave.data !== undefined
+    // A failed leave read leaves two widgets empty, not the whole page loading.
+    (leave.data !== undefined || leave.isError)
 
   const model: Dashboard | null = useMemo(() => {
     if (!ready) return null
@@ -47,13 +56,14 @@ export const useDashboard = (me: Session) => {
         devops: devops.data!,
         requests: requests.data ?? [],
         leave: leave.data ?? [],
+        hoursByProject: projectHours.data,
         live: apiMode,
       },
       me,
       todayIso(),
     )
     // Each store is replaced as a whole when it changes, so its reference is the dependency.
-  }, [ready, me, people.data, companies.data, tasks.data, entries.data, questions.data, workspace.data, devops.data, requests.data, leave.data])
+  }, [ready, me, people.data, companies.data, tasks.data, entries.data, questions.data, workspace.data, devops.data, requests.data, leave.data, projectHours.data])
 
   return {
     ready,

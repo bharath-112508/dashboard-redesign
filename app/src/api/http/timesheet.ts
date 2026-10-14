@@ -28,6 +28,14 @@ const readsTeam = (s: Session) => s.role === 'super' || s.role === 'pm'
  * board is not waited for (an entry's epic is filled in when the board is
  * already loaded; pages find it from the ticket otherwise).
  */
+/** All-time hours logged per project id (the backend's summary, scoped to who may read them), for the dashboard's budgets. */
+export const fetchProjectHours = async (): Promise<Record<string, number>> => {
+  const rows = await api.get<{ project: { id: string } | null; billable_total_minutes: number; non_billable_total_minutes: number }[]>(
+    '/timesheets/summary?group_by=project',
+  )
+  return Object.fromEntries(rows.filter(r => r.project).map(r => [r.project!.id, (r.billable_total_minutes + r.non_billable_total_minutes) / 60]))
+}
+
 export const fetchEntries = async (session: Session | null): Promise<TimeEntry[]> => {
   if (!session || isClientRole(session.role)) return []
   const from = rangeStart()

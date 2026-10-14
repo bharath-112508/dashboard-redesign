@@ -28,7 +28,7 @@ const KEYS_OF: Record<string, string[]> = {
   projects: ['workspace', 'tasks', 'companies', 'internalProjects', 'people'],
   sprints: ['workspace', 'tasks'],
   stories: ['workspace', 'tasks', 'companies'],
-  timesheets: ['entries', 'weekSubmissions', 'companies'],
+  timesheets: ['entries', 'weekSubmissions', 'companies', 'projectHours'],
   leaves: ['leave', 'notifications', 'leaveBook'],
   'leave-balances': ['leaveBook'],
   // Client contacts are users too, shown on the Companies pages.

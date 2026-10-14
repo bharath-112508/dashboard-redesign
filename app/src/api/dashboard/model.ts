@@ -195,6 +195,8 @@ export interface DashboardData {
   /** API mode: leave requests, and `live` to compute the figures that are fixed samples in mock mode (./static.ts). */
   leave?: LeaveRequest[]
   live?: boolean
+  /** API mode: all-time hours logged per backend project id (the timesheet summary). */
+  hoursByProject?: Record<string, number>
 }
 
 const SCOPE: Partial<Record<Role, string>> = {
@@ -392,7 +394,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
     body: {
       kind: 'prog',
       empty: 'No budgets yet',
-      rows: (d.live ? budgetsFrom(d.companies, d.tasks, d.entries) : BUDGETS).map((b, i): ProgRow => {
+      rows: (d.live ? budgetsFrom(d.companies, d.tasks, d.entries, d.hoursByProject) : BUDGETS).map((b, i): ProgRow => {
         const over = b.hours > b.sold
         return {
           id: `b-${i}`,
@@ -557,7 +559,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
           link: 'Users',
           href: ROUTE.users,
           icon: 'cal',
-          body: { kind: 'list', empty: 'Nothing waiting for you', rows: staticRows(d.live ? leaveRows(d.leave ?? [], d.people, today) : LEAVE_ATTENDANCE, ROUTE.users) },
+          body: { kind: 'list', empty: 'Nothing waiting for you', rows: staticRows(d.live ? leaveRows(d.leave ?? [], d.people, today, me.personId) : LEAVE_ATTENDANCE, ROUTE.users) },
         },
       ],
     }
@@ -567,7 +569,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
     const idle = countable.reduce((a, p) => a + idleOf(teamWeek.filter(e => e.userId === p.id), week, today), 0)
     const weekCap = countable.length * WEEK_HOURS
     const epics = new Set(overdueTasks.map(t => epicName(t.epic)))
-    const pend = d.live ? pendingCounts(d.leave ?? []) : null
+    const pend = d.live ? pendingCounts(d.leave ?? [], me.personId) : null
     return {
       kpis: [
         pend
@@ -587,7 +589,7 @@ export const buildDashboard = (d: DashboardData, me: Session, today: string, now
           link: 'Users',
           href: ROUTE.users,
           icon: 'cal',
-          body: { kind: 'list', empty: 'Nothing waiting for you', rows: staticRows(d.live ? approvalRows(d.leave ?? [], d.people, today) : APPROVALS, ROUTE.users) },
+          body: { kind: 'list', empty: 'Nothing waiting for you', rows: staticRows(d.live ? approvalRows(d.leave ?? [], d.people, today, me.personId) : APPROVALS, ROUTE.users) },
         },
         hoursByEmployee(),
         overdueWidget(),
