@@ -25,6 +25,9 @@ const teamOnly = (caller: ProjectCaller, what: string) => {
     if (isClientCaller(caller)) throw AppError.forbidden(`Clients cannot ${what}.`);
 };
 
+/** Lists return at most the newest this many questions or requests. */
+const MAX_LIST = 2000;
+
 const taken = () => AppError.conflict('Someone else just added one with that number. Try again.');
 /** A unique-index clash between the check and the insert is the same clash. */
 const createOrConflict = async <T>(make: () => Promise<T>): Promise<T> => {
@@ -74,10 +77,12 @@ const loadQuestion = async (number: number, caller: ProjectCaller) => {
 
 export const listQuestions = async (caller: ProjectCaller) => {
     const ids = await visibleProjectIds(caller);
+    // ponytail: the newest MAX_LIST only; page the list if a workspace ever holds more.
     const rows = await ClientQuestion.find(ids ? { project_id: { $in: ids } } : {})
-        .sort({ number: 1 })
+        .sort({ number: -1 })
+        .limit(MAX_LIST)
         .lean<ClientQuestionDocument[]>();
-    return rows.map(toPublicQuestion);
+    return rows.reverse().map(toPublicQuestion);
 };
 
 export const createQuestion = async (body: Data & { number: number; title: string }, caller: ProjectCaller) => {
@@ -204,6 +209,7 @@ export const listRequests = async (caller: ProjectCaller) => {
     const ids = await visibleProjectIds(caller);
     const rows = await DevopsRequest.find(ids ? { project_id: { $in: ids } } : {})
         .sort({ number: -1 })
+        .limit(MAX_LIST)
         .lean<DevopsRequestDocument[]>();
     return rows.map((r) => (ids ? forClient(toPublicRequest(r)) : toPublicRequest(r)));
 };

@@ -52,9 +52,13 @@ describe('questions', () => {
     it("lists only a client's company questions", async () => {
         const p = new Types.ObjectId();
         m.visible.mockResolvedValue([p]);
-        m.qFind.mockReturnValue({ sort: () => lean([]) });
-        await svc.listQuestions(client());
+        const sort = vi.fn(() => ({ limit: () => lean([{ number: 2 }, { number: 1 }]) }));
+        m.qFind.mockReturnValue({ sort });
+        const out = await svc.listQuestions(client());
         expect(m.qFind).toHaveBeenCalledWith({ project_id: { $in: [p] } });
+        // The newest 2000, shown oldest first.
+        expect(sort).toHaveBeenCalledWith({ number: -1 });
+        expect(out.map((q) => q.number)).toEqual([1, 2]);
     });
 
     it('is raised by the team only', async () => {
@@ -210,7 +214,7 @@ describe('DevOps requests', () => {
         const p = new Types.ObjectId();
         m.visible.mockResolvedValue([p]);
         const row = { number: 1, devops_key: 'OPS-1', project_id: p, text: 'Need staging', status: 'Open', comments: [{ by: 'Arjun', text: 'internal', when: new Date(), side: 'devops' }], history: [{ by: 'A', text: 't', when: new Date() }], logs: [{ h: 2 }] };
-        m.rFind.mockReturnValue({ sort: () => lean([row]) });
+        m.rFind.mockReturnValue({ sort: () => ({ limit: () => lean([row]) }) });
         const [r] = await svc.listRequests(client());
         expect(r).toMatchObject({ number: 1, text: 'Need staging', status: 'Open', comments: [], history: [], logs: [] });
     });
