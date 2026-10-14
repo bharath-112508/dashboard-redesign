@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAccess, useSendAsync } from '../../api/queries'
+import { apiMode } from '../../api/http/config'
 import { usePeople } from '../../api/people/directory'
 import { ROLE_LABEL } from '../../api/session/access'
 import type { Role } from '../../api/types'
@@ -15,7 +16,9 @@ interface Props {
 const COL = 'minmax(230px,1fr)'
 
 /** Role cards, the permission matrix (super admin column locked) and developer types. */
-export function RolesTab({ canEdit }: Props) {
+export function RolesTab({ canEdit: mayEdit }: Props) {
+  // API mode: what a role may do is set on the server, so the matrix is shown for reference only.
+  const canEdit = mayEdit && !apiMode
   const people = usePeople().data ?? []
   const access = useAccess().data
   const send = useSendAsync()
@@ -53,8 +56,10 @@ export function RolesTab({ canEdit }: Props) {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-[13px] leading-[1.55] text-slate">
-        Changes here are saved for the team, but they do not change which pages a role can open. Page access follows the fixed role map.
-        {!canEdit && ' You can view this matrix; only a super admin or admin can change it.'}
+        {apiMode
+          ? 'Shown for reference. What each role can do is set by the role itself on the server, so these boxes cannot be changed here.'
+          : 'Changes here are saved for the team, but they do not change which pages a role can open. Page access follows the fixed role map.'}
+        {!apiMode && !canEdit && ' You can view this matrix; only a super admin or admin can change it.'}
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -178,7 +183,7 @@ export function RolesTab({ canEdit }: Props) {
             </span>
           ))}
         </div>
-        {canEdit && (
+        {mayEdit && (
           <div className="mt-3 flex max-w-[460px] flex-wrap gap-2">
             <input
               className={`${field} flex-1`}

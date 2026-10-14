@@ -8,7 +8,7 @@ import { useSendAsync } from '../../api/queries'
 import { ROLE_LABEL } from '../../api/session/access'
 import { writeSession } from '../../api/session/store'
 import type { Company, InternalProject, Person, Role, Session } from '../../api/types'
-import { projectPool, projectsToSave, isClientPerson } from '../../api/users/derive'
+import { offersAllProjects, projectPool, projectsToSave, isClientPerson } from '../../api/users/derive'
 import {
   CLIENT_PERSON_COLOUR,
   EMAIL_RE,
@@ -134,6 +134,8 @@ export function UserForm({ person, scope, session, people, companies, internal, 
   })
   const v = watch()
   const client = isClientRoleKey(v.role as Role)
+  // API mode: "All projects" only where the backend really shows every project.
+  const allOk = offersAllProjects(v.role as Role, apiMode, person?.projects)
   const pool = client && !v.company ? [] : projectPool(companies, internal, client ? v.company : undefined)
   const shownPool = pq.trim() ? pool.filter(p => (p.name + ' ' + p.company).toLowerCase().includes(pq.trim().toLowerCase())) : pool
   const title = isNew ? 'Add a user' : person.name
@@ -169,7 +171,8 @@ export function UserForm({ person, scope, session, people, companies, internal, 
     const isClient = isClientRoleKey(values.role as Role)
     const org = isClient ? values.company : 'vt'
     const allowed = projectPool(companies, internal, isClient ? values.company : undefined).map(p => p.id)
-    const projects: 'all' | string[] = values.access === 'all' ? 'all' : projectsToSave(values.projects, allowed, projectsLoaded)
+    const projects: 'all' | string[] =
+      values.access === 'all' && offersAllProjects(values.role as Role, apiMode, person?.projects) ? 'all' : projectsToSave(values.projects, allowed, projectsLoaded)
     const role = values.role as Role
     const shared = {
       name: values.name.trim(),
@@ -388,19 +391,23 @@ export function UserForm({ person, scope, session, people, companies, internal, 
 
         <div className="mt-5">
           <span className={label}>Project access</span>
-          <div className="flex flex-wrap gap-4 text-[13.5px] text-ink">
-            <label className="flex items-center gap-1.5">
-              <input type="radio" value="all" {...register('access')} />
-              {client ? 'All company projects' : 'All projects, including new ones'}
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" value="pick" {...register('access')} /> Choose projects
-            </label>
-          </div>
+          {allOk ? (
+            <div className="flex flex-wrap gap-4 text-[13.5px] text-ink">
+              <label className="flex items-center gap-1.5">
+                <input type="radio" value="all" {...register('access')} />
+                {client ? 'All company projects' : 'All projects, including new ones'}
+              </label>
+              <label className="flex items-center gap-1.5">
+                <input type="radio" value="pick" {...register('access')} /> Choose projects
+              </label>
+            </div>
+          ) : (
+            <p className="text-[12.5px] text-slate">This role sees only the projects chosen here.</p>
+          )}
           {v.role === 'super' && (
             <p className="mt-1.5 text-[12px] text-slate">Super admins always have access to every project, including new ones.</p>
           )}
-          {v.access === 'pick' && (
+          {(v.access === 'pick' || !allOk) && (
             <div className="mt-2.5 rounded-[12px] border-[1.5px] border-line-2 p-3">
               <input className={field} placeholder="Search projects" aria-label="Search projects" value={pq} onChange={e => setPq(e.target.value)} />
               <div className="mt-2.5 flex flex-wrap gap-1.5">

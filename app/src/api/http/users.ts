@@ -1,5 +1,5 @@
 import { ApiError, api } from './client'
-import { allPages, createContact, finishSteps, liveProjects, passwordLength, randomPassword } from './companies'
+import { allPages, createContact, finishSteps, liveProjects, roster, passwordLength, randomPassword } from './companies'
 import { personFromUser, type BackendUser } from './mappers'
 import { DEFAULT_DEV_TYPES, DEFAULT_PERMS } from '../users/access'
 import { readSession } from '../session/store'
@@ -22,7 +22,8 @@ const selfOf = (s: Session): Person => ({
 })
 
 /** Backend roles that see every project. */
-const SEES_ALL = new Set(['admin', 'manager'])
+/** Backend roles shown every project (a client admin: every project of their company). */
+const SEES_ALL = new Set(['admin', 'manager', 'client'])
 
 /**
  * The people directory. Staff list the backend's users (an admin also the
@@ -44,7 +45,9 @@ export const fetchPeopleApi = async (session: Session | null): Promise<Person[]>
   ])
   return users.map(u => {
     const p = personFromUser(u)
-    return SEES_ALL.has(u.role) ? p : { ...p, projects: projects.filter(x => x.member_ids?.includes(u.id)).map(x => x.id) }
+    // Staff are on a project's members, client users on its client list.
+    const on = (x: (typeof projects)[number]) => (u.role === 'representative' ? x.representative_ids : x.member_ids)?.includes(u.id)
+    return SEES_ALL.has(u.role) ? p : { ...p, projects: projects.filter(on).map(x => x.id) }
   })
 }
 
@@ -147,6 +150,16 @@ const createUser = async (p: Person): Promise<{ id: string; notice?: string }> =
   return notice ? { id, notice } : { id }
 }
 
+/** Puts a client user on exactly these projects' client lists, among their own company's projects. */
+const syncClientProjects = async (id: string, companyId: string | undefined, projects: string[]) => {
+  const wants = new Set(projects)
+  for (const p of (await liveProjects()).filter(x => x.company_id === companyId)) {
+    const has = (p.representative_ids ?? []).includes(id)
+    if (has && !wants.has(p.id)) await roster(p.id, 'representatives', 'remove', id)
+    if (!has && wants.has(p.id)) await roster(p.id, 'representatives', 'add', id)
+  }
+}
+
 const updateUser = async (id: string, patch: Partial<Person>) => {
   const before = await api.get<BackendUser>(`/users/${id}`)
   const target = patch.role ? backendRoleOf(patch.role, before.role) : before.role
@@ -174,7 +187,11 @@ const updateUser = async (id: string, patch: Partial<Person>) => {
   }
   if (patch.active !== undefined && patch.active !== (before.status === 'active'))
     await api.post(`/users/${id}/${patch.active ? 'reactivate' : 'deactivate'}`, {})
-  if (patch.projects !== undefined && !CLIENT_SIDE.has(target)) await syncProjects(id, patch.projects)
+  if (patch.projects !== undefined) {
+    if (!CLIENT_SIDE.has(target)) await syncProjects(id, patch.projects)
+    // A client admin sees every company project; a client user is on each project's client list.
+    else if (target === 'representative' && patch.projects !== 'all') await syncClientProjects(id, before.client_profile?.company_id, patch.projects)
+  }
   if ('photo' in patch) await savePhoto(id, patch.photo, before.profile_photo_url)
 }
 

@@ -159,7 +159,7 @@ export const randomPassword = (length: number): string => {
 }
 
 /** Adds or removes one person on a project roster (`members` or `representatives`). */
-const roster = (projectId: string, list: 'members' | 'representatives', change: 'add' | 'remove', person: PersonId) =>
+export const roster = (projectId: string, list: 'members' | 'representatives', change: 'add' | 'remove', person: PersonId) =>
   api.post(`/projects/${projectId}/${list}`, { [change]: [person] })
 
 /** A password length inside the backend's policy (public settings), aiming for 16. */

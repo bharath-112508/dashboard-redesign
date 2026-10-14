@@ -30,7 +30,7 @@ beforeEach(() => {
   liveProjects.mockReset()
   liveProjects.mockResolvedValue([
     { id: 'p1', member_ids: ['u1', 'u2'] },
-    { id: 'p2', member_ids: ['u2'] },
+    { id: 'p2', member_ids: ['u2'], representative_ids: ['k2'] },
   ])
 })
 
@@ -40,6 +40,8 @@ describe('fetchPeopleApi', () => {
       user('a0', { role: 'admin', role_keys: ['admin'] }),
       user('u1', { internal_profile: { dev_type: 'Backend' }, profile_photo_url: 'https://x/p.jpg' }),
       user('u2', { role_keys: ['employee', 'devops'], status: 'deactivated' }),
+      user('k1', { role: 'client', role_keys: ['client'], client_profile: { company_id: 'c1' } }),
+      user('k2', { role: 'representative', role_keys: ['representative'], client_profile: { company_id: 'c1' } }),
     ])
     const people = await fetchPeopleApi(admin)
     expect(get).toHaveBeenCalledWith('/users?show_deleted=true&limit=100&page=1')
@@ -47,6 +49,9 @@ describe('fetchPeopleApi', () => {
       ['a0', 'super', undefined, '', true, 'all'],
       ['u1', 'dev', 'Backend', 'https://x/p.jpg', true, ['p1']],
       ['u2', 'devops', undefined, '', false, ['p1', 'p2']],
+      // A client admin sees every project of their company; a client user only the ones they are on.
+      ['k1', 'cadmin', undefined, '', true, 'all'],
+      ['k2', 'cuser', undefined, '', true, ['p2']],
     ])
   })
 

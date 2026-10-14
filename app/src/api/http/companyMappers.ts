@@ -27,6 +27,8 @@ export interface BackendProject {
   start_date: string
   end_date: string | null
   member_ids: string[]
+  /** The client users on the project. */
+  representative_ids?: string[]
   company_id: string | null
   area?: string
   support_plan?: { until: string; quota_hours: number } | null

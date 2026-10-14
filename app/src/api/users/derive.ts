@@ -1,4 +1,4 @@
-import type { Company, InternalProject, LeaveRequest, Person, PersonId, Task, TimeEntry, Workspace } from '../types'
+import type { Company, InternalProject, LeaveRequest, Person, PersonId, Role, Task, TimeEntry, Workspace } from '../types'
 import { addDays, isIso, plural, TODAY } from '../../lib/dates'
 import { taskKey } from '../../domain/tasks'
 import { ANNUAL_ALLOWANCE, DAY_HOURS } from './access'
@@ -123,3 +123,13 @@ export const annualLeft = (leave: LeaveRequest[], userId: PersonId) => ANNUAL_AL
  */
 export const projectsToSave = (picked: string[], allowed: string[], listLoaded: boolean): string[] =>
   listLoaded ? picked.filter(id => allowed.includes(id)) : picked
+
+/**
+ * Whether the user form offers "All projects". In API mode it is only true for the roles the
+ * backend shows every project to (super admin, a new project manager, who is created as a
+ * manager) or every company project to (client admin); anyone else sees only the projects
+ * they are added to. `current`: the person's projects as the list shows them.
+ */
+export const offersAllProjects = (role: Role, api: boolean, current?: Person['projects']) =>
+  // An existing project manager may be a team lead on the server, who sees only their projects.
+  !api || role === 'super' || role === 'cadmin' || (role === 'pm' && (current === undefined || current === 'all'))

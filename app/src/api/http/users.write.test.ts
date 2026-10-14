@@ -124,6 +124,23 @@ describe('user.create', () => {
 })
 
 describe('user.update', () => {
+  it("sets a client user's projects on the projects' client lists, within their company", async () => {
+    get.mockImplementation(async (path: string) => {
+      if (path === '/users/k2') return backendUser({ id: 'k2', role: 'representative', role_keys: ['representative'], client_profile: { company_id: 'c1' }, internal_profile: undefined })
+      throw new Error(`unexpected ${path}`)
+    })
+    liveProjects.mockResolvedValue([
+      { id: 'p1', company_id: 'c1', member_ids: [], representative_ids: ['k2'] },
+      { id: 'p2', company_id: 'c1', member_ids: [], representative_ids: [] },
+      { id: 'p3', company_id: 'c2', member_ids: [], representative_ids: ['k2'] },
+    ])
+    await sendUserCommand({ type: 'user.update', id: 'k2', patch: { projects: ['p2'] } })
+    expect(post.mock.calls).toEqual([
+      ['/projects/p1/representatives', { remove: ['k2'] }],
+      ['/projects/p2/representatives', { add: ['k2'] }],
+    ])
+  })
+
   it('sends only what changed', async () => {
     await sendUserCommand({ type: 'user.update', id: 'u9', patch: person({ name: 'Kari B', devType: 'Mobile' }) })
     expect(patch).toHaveBeenCalledWith('/users/u9', { full_name: 'Kari B', internal_profile: { dev_type: 'Mobile' } })
