@@ -13,6 +13,8 @@ const m = vi.hoisted(() => ({
     itemFindOne: vi.fn(),
     visible: vi.fn(),
     nameOf: vi.fn(),
+    audit: vi.fn(),
+    loadProject: vi.fn(),
 }));
 
 vi.mock('../models/client-question.model.js', () => ({ ClientQuestion: { find: m.qFind, findOne: m.qFindOne, create: m.qCreate } }));
@@ -25,6 +27,9 @@ vi.mock('./devops.service.js', () => ({
     nameOf: m.nameOf,
     isClientCaller: (c: { role: string }) => c.role === 'client' || c.role === 'representative',
 }));
+
+vi.mock('./audit.service.js', () => ({ recordAudit: m.audit }));
+vi.mock('./project.service.js', () => ({ loadProjectForCaller: m.loadProject }));
 
 const svc = await import('./client-question.service.js');
 
@@ -124,6 +129,38 @@ describe('question photos', () => {
         q.photos = Array.from({ length: 20 }, (_, i) => img(i));
         await expect(svc.addPhotos(1, [img(21)], staff())).rejects.toMatchObject({ statusCode: 422 });
         await expect(svc.addPhotos(1, [img(2)], client())).rejects.toMatchObject({ statusCode: 403 });
+    });
+});
+
+describe('audit trail', () => {
+    const audited = () => ({ id: new Types.ObjectId(), role: 'employee', audit: { actor_id: 'x' } }) as never;
+    const actions = () => m.audit.mock.calls.map((c) => [c[1].action, c[1].after.change]);
+
+    it('records messages, message edits, photos and request comments', async () => {
+        const me = audited();
+        const q = doc({ number: 1, project_id: null, photos: [] as unknown[], messages: [] as { by_id: Types.ObjectId }[] });
+        m.qFindOne.mockResolvedValue(q);
+        await svc.addMessage(1, { text: 'a', files: [] }, me);
+        await svc.editMessage(1, 0, 'b', me);
+        await svc.addPhotos(1, [{ name: 'p.png' }], me);
+        m.rFindOne.mockResolvedValue(doc({ number: 2, comments: [] as unknown[], history: [], logs: [] }));
+        await svc.addRequestComment(2, { text: 'c', side: 'devops' }, me);
+        expect(actions()).toEqual([
+            ['client_question.update', 'message'],
+            ['client_question.update', 'message_edit'],
+            ['client_question.update', 'photos'],
+            ['devops_request.update', 'comment'],
+        ]);
+    });
+});
+
+describe('question project', () => {
+    it("refuses a ticket on a project the caller cannot open", async () => {
+        m.qFindOne.mockReturnValue(lean(null));
+        m.taskFindById.mockReturnValue(lean({ project_id: new Types.ObjectId() }));
+        m.loadProject.mockRejectedValue(Object.assign(new Error('Project not found'), { statusCode: 404 }));
+        await expect(svc.createQuestion({ number: 7, title: 'DNS', task_id: String(new Types.ObjectId()) }, staff())).rejects.toMatchObject({ statusCode: 404 });
+        expect(m.qCreate).not.toHaveBeenCalled();
     });
 });
 

@@ -9,7 +9,7 @@ import { recordAudit } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { AppError } from '../utils/app-error.js';
 import { ERROR_CODES } from '../constants/error-codes.js';
-import type { ProjectCaller } from './project.service.js';
+import { loadProjectForCaller, type ProjectCaller } from './project.service.js';
 
 /**
  * Redesign: questions the team raises to clients, and requests the team
@@ -89,6 +89,8 @@ export const createQuestion = async (body: Data & { number: number; title: strin
         ? await Sprint.findById(sprintId).select('project_id').lean<{ project_id: Types.ObjectId } | null>()
         : null;
     const project_id = task?.project_id ?? (await projectOfKey(body.devops_key as string | undefined)) ?? sprint?.project_id ?? null;
+    // Its client will read it, so it may only go on a project the caller can open.
+    if (project_id) await loadProjectForCaller(project_id, caller);
     const by = await nameOf(caller.id);
     const doc = await createOrConflict(() =>
         ClientQuestion.create({ ...body, task_id: task ? (body.task_id as string) : null, project_id, by, by_id: caller.id, messages: [] } as Partial<ClientQuestionDocument>)
@@ -122,6 +124,7 @@ export const addPhotos = async (number: number, files: unknown[], caller: Projec
     }
     d.photos = [...(d.photos ?? []), ...files];
     await d.save();
+    await audit(caller, AUDIT_ACTIONS.CLIENT_QUESTION_UPDATE, AUDIT_TARGET_KINDS.CLIENT_QUESTION, d._id, { number, change: 'photos', count: files.length });
     return toPublicQuestion(d);
 };
 
@@ -136,6 +139,7 @@ export const addMessage = async (number: number, body: { text: string; files: un
         when: new Date(),
     });
     await d.save();
+    await audit(caller, AUDIT_ACTIONS.CLIENT_QUESTION_UPDATE, AUDIT_TARGET_KINDS.CLIENT_QUESTION, d._id, { number, change: 'message', index: d.messages.length - 1 });
     return toPublicQuestion(d);
 };
 
@@ -147,6 +151,7 @@ export const editMessage = async (number: number, index: number, text: string, c
     msg.text = text;
     d.markModified('messages');
     await d.save();
+    await audit(caller, AUDIT_ACTIONS.CLIENT_QUESTION_UPDATE, AUDIT_TARGET_KINDS.CLIENT_QUESTION, d._id, { number, change: 'message_edit', index });
     return toPublicQuestion(d);
 };
 
@@ -227,5 +232,6 @@ export const addRequestComment = async (number: number, body: { text: string; si
     const d = await loadRequest(number);
     d.comments.push({ by: await nameOf(caller.id), by_id: caller.id, text: body.text, when: new Date(), side: body.side });
     await d.save();
+    await audit(caller, AUDIT_ACTIONS.DEVOPS_REQUEST_UPDATE, AUDIT_TARGET_KINDS.DEVOPS_REQUEST, d._id, { number, change: 'comment', side: body.side });
     return toPublicRequest(d);
 };
