@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Task } from './types'
+import type { Command } from './commands'
 
 const { fetchCompanies, fetchInternalProjects, sendCompanyCommand } = vi.hoisted(() => ({
   fetchCompanies: vi.fn(async () => [{ id: 'c1' }]),
@@ -17,16 +18,19 @@ vi.mock('./http/board', () => ({
   sendBoardCommand,
   isBoardApiCommand: (c: { type: string }) => c.type.startsWith('task.'),
 }))
-const { fetchDevops, fetchQuestions, fetchRequests } = vi.hoisted(() => ({
+const { fetchDevops, fetchQuestions, fetchRequests, sendDevopsCommand } = vi.hoisted(() => ({
   fetchDevops: vi.fn(async () => ({ projects: [{ key: 'OPS-1' }], settings: {} })),
   fetchQuestions: vi.fn(async () => [{ id: 3 }]),
   fetchRequests: vi.fn(async () => [{ id: 2 }]),
+  sendDevopsCommand: vi.fn(async (): Promise<{ id?: string }> => ({})),
 }))
 vi.mock('./http/devops', () => ({
   fetchLinkedWorkspace: () => fetchWorkspace(),
   fetchDevops,
   fetchQuestions,
   fetchRequests,
+  isDevopsApiCommand: (c: { type: string }) => c.type.startsWith('question.'),
+  sendDevopsCommand,
 }))
 const { fetchEntries, fetchWeekSubmissions, sendTimeCommand } = vi.hoisted(() => ({
   sendTimeCommand: vi.fn(async (): Promise<{ id?: string }> => ({ id: 'x9' })),
@@ -105,6 +109,16 @@ describe('server.send in API mode', () => {
   it('passes other backend errors through unchanged', async () => {
     sendCompanyCommand.mockRejectedValueOnce(new ApiError(409, 'DUPLICATE_RESOURCE', 'Taken'))
     await expect(server.send({ type: 'company.archive', id: 'c1', archived: true, at: null })).rejects.toMatchObject({ status: 409 })
+  })
+})
+
+describe('server.send for DevOps, question and request commands in API mode', () => {
+  it('sends them to the backend and shows a taken id as a refusal', async () => {
+    const cmd: Command = { type: 'question.message', id: 3, message: { who: 'A', side: 'team', text: 'Hi', when: 'just now', files: [] } }
+    await server.send(cmd)
+    expect(sendDevopsCommand).toHaveBeenCalledWith(cmd, expect.objectContaining({ personId: 'a0' }))
+    sendDevopsCommand.mockRejectedValueOnce(new ApiError(409, 'DUPLICATE_RESOURCE', 'Someone else just added one with that number. Try again.'))
+    await expect(server.send(cmd)).rejects.toBeInstanceOf(RefusedError)
   })
 })
 

@@ -3,8 +3,10 @@ import { boardIndex, fetchWorkspace } from './board'
 import { ago } from './ticketDetails'
 import { fetchPeopleApi } from './users'
 import { createDevopsSeed } from '../devops/seed'
+import { reduceDevops, type DevopsCommand } from '../devops/commands'
+import type { Command } from '../commands'
 import type { DevopsDb, DvProject, DvSettings } from '../devops/types'
-import type { ChatFile, ChatMessage, DevopsRequest, Priority, Question, Session, Workspace } from '../types'
+import type { ChatFile, ChatMessage, Db, DevopsRequest, Priority, Question, Session, Workspace } from '../types'
 
 /**
  * The DevOps board, questions to clients and DevOps requests from the backend
@@ -172,3 +174,153 @@ const requestFrom = (r: BackendRequest, now: Date): DevopsRequest => ({
 
 export const fetchRequests = async (session: Session | null, now = new Date()): Promise<DevopsRequest[]> =>
   session ? (await api.get<BackendRequest[]>('/devops-requests')).map(r => requestFrom(r, now)) : []
+
+// ─── Writes ─────────────────────────────────────────────────────────────
+
+type DevopsApiCommand = Extract<
+  Command,
+  {
+    type:
+      | DevopsCommand['type']
+      | 'question.create'
+      | 'question.update'
+      | 'question.message'
+      | 'question.editMessage'
+      | 'tickets.question.seen'
+      | 'request.create'
+      | 'request.update'
+      | 'request.comment'
+      | 'batch'
+  }
+>
+
+const SINGLE = new Set([
+  'devops.project.create',
+  'devops.project.update',
+  'devops.option.add',
+  'devops.settings.save',
+  'question.create',
+  'question.update',
+  'question.message',
+  'question.editMessage',
+  'tickets.question.seen',
+  'request.create',
+  'request.update',
+  'request.comment',
+])
+
+export const isDevopsApiCommand = (cmd: { type: string; cmds?: { type: string }[] }): cmd is DevopsApiCommand =>
+  cmd.type === 'batch' ? !!cmd.cmds?.length && cmd.cmds.every(isDevopsApiCommand) : SINGLE.has(cmd.type)
+
+/** Keeps the fields the backend takes, renamed (app name → backend name). */
+const pick = (patch: object, names: Record<string, string>) =>
+  Object.fromEntries(Object.entries(patch).flatMap(([k, v]) => (k in names && v !== undefined ? [[names[k], v]] : [])))
+
+const QUESTION_FIELDS = { title: 'title', text: 'text', photos: 'photos', qtype: 'qtype', qprio: 'qprio', sprint: 'sprint', solved: 'solved', seenT: 'seen_t' }
+const REQUEST_FIELDS = {
+  type: 'type',
+  prio: 'prio',
+  to: 'to',
+  text: 'text',
+  desc: 'desc',
+  due: 'due',
+  start: 'start',
+  est: 'est',
+  status: 'status',
+  logs: 'logs',
+  seenT: 'seen_t',
+  statusSeen: 'status_seen',
+}
+
+/**
+ * Settings changes reuse the board's own reducer (the one place that knows how
+ * a rename moves items): the result's settings are saved, then each item it changed.
+ * ponytail: not atomic; an item write that fails after the settings save leaves that item on the old name until it is edited.
+ */
+const saveSettingsChange = async (cmd: DevopsCommand, session: Session | null, now: Date) => {
+  const before = await fetchDevops(session, now)
+  const after = reduceDevops({ devops: before } as Db, cmd).devops
+  await api.put('/devops/settings', { settings: after.settings })
+  for (const p of after.projects) {
+    const old = before.projects.find(x => x.key === p.key)
+    if (!old) continue
+    const changed = Object.fromEntries(
+      Object.entries(p).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify((old as unknown as Record<string, unknown>)[k])),
+    )
+    if (Object.keys(changed).length) await api.patch(`/devops/items/${p.key}`, { patch: datesIn(changed, now) })
+  }
+}
+
+export const sendDevopsCommand = async (cmd: DevopsApiCommand, session: Session | null, now = new Date()): Promise<{ id?: string }> => {
+  switch (cmd.type) {
+    case 'batch':
+      for (const c of cmd.cmds) await sendDevopsCommand(c as DevopsApiCommand, session, now)
+      return {}
+    case 'devops.project.create': {
+      const { key, ...data } = cmd.project
+      await api.post('/devops/items', { key, project_id: cmd.project.project?.id, data: datesIn(data, now) })
+      return {}
+    }
+    case 'devops.project.update':
+      await api.patch(`/devops/items/${cmd.key}`, { patch: datesIn(cmd.patch, now), ...(cmd.log ? { log: cmd.log } : {}) })
+      return {}
+    case 'devops.option.add':
+    case 'devops.settings.save':
+      await saveSettingsChange(cmd, session, now)
+      return {}
+    case 'question.create': {
+      const q = cmd.question
+      await api.post('/questions', {
+        number: q.id,
+        title: q.title,
+        text: q.text,
+        photos: q.photos ?? [],
+        qtype: q.qtype ?? '',
+        qprio: q.qprio ?? '',
+        sprint: q.sprint ?? null,
+        task_id: q.task,
+        devops_key: q.project ?? null,
+        from_devops: !!q.fromDevops,
+      })
+      return {}
+    }
+    case 'question.update': {
+      const body = pick(cmd.patch, QUESTION_FIELDS)
+      if (Object.keys(body).length) await api.patch(`/questions/${cmd.id}`, body)
+      return {}
+    }
+    case 'tickets.question.seen':
+      await api.patch(`/questions/${cmd.id}`, { seen_t: cmd.seen })
+      return {}
+    case 'question.message':
+      await api.post(`/questions/${cmd.id}/messages`, { text: cmd.message.text, files: cmd.message.files ?? [] })
+      return {}
+    case 'question.editMessage':
+      // -1 is an answer stored apart from the chat, which only older browser stores have.
+      if (cmd.index >= 0) await api.patch(`/questions/${cmd.id}/messages/${cmd.index}`, { text: cmd.text })
+      return {}
+    case 'request.create': {
+      const r = cmd.request
+      await api.post('/devops-requests', {
+        number: r.id,
+        devops_key: r.key,
+        ...pick({ pname: r.pname, rkey: r.rkey, type: r.type, prio: r.prio, to: r.to, text: r.text, raised: r.raised, desc: r.desc, due: r.due, start: r.start, est: r.est }, {
+          pname: 'pname',
+          rkey: 'rkey',
+          raised: 'raised',
+          ...REQUEST_FIELDS,
+        }),
+      })
+      return {}
+    }
+    case 'request.update':
+      await api.patch(`/devops-requests/${cmd.id}`, {
+        patch: datesIn(pick(cmd.patch, REQUEST_FIELDS), now),
+        ...(cmd.log ? { log: { text: cmd.log.text } } : {}),
+      })
+      return {}
+    case 'request.comment':
+      await api.post(`/devops-requests/${cmd.id}/comments`, { text: cmd.comment.text, side: cmd.comment.side })
+      return {}
+  }
+}

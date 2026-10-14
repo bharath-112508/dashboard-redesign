@@ -14,7 +14,7 @@ import { apiMode } from './http/config'
 import { fetchCompanies, fetchInternalProjects, isCompanyApiCommand, sendCompanyCommand } from './http/companies'
 import { ApiError } from './http/client'
 import { fetchTasks, isBoardApiCommand, sendBoardCommand } from './http/board'
-import { fetchDevops, fetchLinkedWorkspace, fetchQuestions, fetchRequests } from './http/devops'
+import { fetchDevops, fetchLinkedWorkspace, fetchQuestions, fetchRequests, isDevopsApiCommand, sendDevopsCommand } from './http/devops'
 import { fetchEntries, fetchWeekSubmissions, isTimeApiCommand, sendTimeCommand } from './http/timesheet'
 import { fetchAccessApi, fetchPeopleApi, isUserApiCommand, sendUserCommand } from './http/users'
 import { fetchLeave, fetchLeaveNotices, isLeaveApiCommand, sendLeaveCommand } from './http/leave'
@@ -558,6 +558,8 @@ export const server = {
     if (apiMode && isUserApiCommand(cmd)) return sendToApi(() => sendUserCommand(cmd), false, true)
     // A conflict here is an overlap or too little balance: shown with the backend's reason.
     if (apiMode && isLeaveApiCommand(cmd)) return sendToApi(() => sendLeaveCommand(cmd, readSession()), false, true)
+    // A conflict here is a new id someone else just took.
+    if (apiMode && isDevopsApiCommand(cmd)) return sendToApi(() => sendDevopsCommand(cmd, readSession()), false, true)
     await sleep(LATENCY_MS)
     return exclusive(() =>
       acrossTabs(async () => {
