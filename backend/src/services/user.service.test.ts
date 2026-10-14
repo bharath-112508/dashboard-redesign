@@ -1051,6 +1051,31 @@ describe('updateUser — email change safety', () => {
         expect(t.email).toBe('b@x.io');
     });
 
+    it("also protects an admin whose admin role comes from extra roles (legacy role says manager)", async () => {
+        const adminRole = new Types.ObjectId();
+        const t = sampleUser({ role: ROLES.MANAGER, role_ids: [adminRole], email: 'b@x.io' });
+        userFindByIdMock.mockResolvedValueOnce(t);
+        roleKeysByIdsMock.mockResolvedValueOnce(new Map([[adminRole.toString(), 'admin']]));
+
+        await expect(svc.updateUser(asAdmin(t, { email: 'a@x.io' }))).rejects.toMatchObject({ statusCode: 403 });
+        expect(t.email).toBe('b@x.io');
+    });
+
+    it('records the change in the audit log and signs the account out everywhere', async () => {
+        const t = sampleUser({ role: ROLES.EMPLOYEE, email: 'old@x.io' });
+        userFindByIdMock.mockResolvedValueOnce(t);
+        userExistsMock.mockResolvedValueOnce(null);
+        const audit = { actor_id: new Types.ObjectId(), actor_role: 'admin' } as never;
+
+        await svc.updateUser({ ...asAdmin(t, { email: 'new@x.io' }), audit });
+
+        expect(recordAuditMock).toHaveBeenCalledWith(
+            audit,
+            expect.objectContaining({ action: 'user.email_change', before: { email: 'old@x.io' }, after: { email: 'new@x.io' } })
+        );
+        expect(refreshUpdateManyMock).toHaveBeenCalledWith({ user_id: t._id, revoked_at: null }, expect.anything());
+    });
+
     it('turns a duplicate-key race on save into 409 EMAIL_ALREADY_EXISTS', async () => {
         const t = sampleUser({ role: ROLES.EMPLOYEE, email: 'old@x.io' });
         (t as unknown as { save: () => Promise<unknown> }).save = vi.fn().mockRejectedValueOnce({ code: 11000, keyPattern: { email: 1 } });

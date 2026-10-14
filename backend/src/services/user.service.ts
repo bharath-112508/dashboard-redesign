@@ -393,6 +393,8 @@ export const updateUser = async (input: {
     /** Resolved permission set of the caller — used to grant employment-only editors. */
     caller_permissions?: readonly string[];
     patch: UpdateUserBody;
+    /** Redesign: audit context, so an email change (the sign-in identity) is recorded. */
+    audit?: AuditContext;
 }): Promise<Record<string, unknown>> => {
     const target = await User.findById(input.target_id);
     if (!target) {
@@ -506,9 +508,13 @@ export const updateUser = async (input: {
     if (patch.slack_user_id !== undefined) target.slack_user_id = patch.slack_user_id;
     // Only an admin's patch still carries `email` here (self and employment edits are whitelisted above).
     let emailChanged = false;
+    const previousEmail = target.email;
     if (patch.email !== undefined && patch.email !== target.email) {
         // One admin must not be able to point another admin's account at their own inbox and reset it.
-        if (target.role === ROLES.ADMIN && !isSelf) {
+        // Admin through any role counts (the legacy `role` cache can say manager for a multi-role admin).
+        const keyOf = await roleKeysByIds((target.role_ids ?? []) as Types.ObjectId[]);
+        const targetIsAdmin = target.role === ROLES.ADMIN || [...keyOf.values()].includes(ROLES.ADMIN);
+        if (targetIsAdmin && !isSelf) {
             throw AppError.forbidden("An admin's email can only be changed by that admin.", ERROR_CODES.FORBIDDEN);
         }
         if (await User.exists({ email: patch.email, _id: { $ne: target._id } })) {
@@ -535,6 +541,16 @@ export const updateUser = async (input: {
     }
 
     if (emailChanged) {
+        if (input.audit) {
+            await recordAudit(input.audit, {
+                action: AUDIT_ACTIONS.USER_EMAIL_CHANGE,
+                target: { kind: AUDIT_TARGET_KINDS.USER, id: target._id },
+                before: { email: previousEmail },
+                after: { email: target.email },
+            });
+        }
+        // The sign-in identity changed: existing sessions end, so whoever held the old one must sign in again.
+        await revokeAllRefreshTokens(target._id);
         // Links already sent went to the old address: they must stop working. A client contact
         // (who may never have chosen a password) gets a fresh invite at the new address.
         await revokePendingPasswordLinks(target._id);

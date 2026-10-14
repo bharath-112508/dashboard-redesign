@@ -96,6 +96,7 @@ export const patchUser = async (req: Request, res: Response): Promise<Response> 
         // full editor and restrict the patch accordingly.
         caller_permissions: req.user!.permissions,
         patch: req.body as UpdateUserBody,
+        audit: buildAuditContext(req),
     });
     return ok(res, user);
 };
