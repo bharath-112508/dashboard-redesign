@@ -29,3 +29,14 @@ export const readFiles = (list: FileList | File[] | null | undefined): Promise<C
 }
 
 export const isImageName = (name: string) => /\.(png|jpe?g|gif|webp|svg)$/i.test(name)
+
+/**
+ * A stored link or file address that is safe to open: web links, mail links, uploaded
+ * blobs and attached files (data URLs, except HTML pages). Anything that could run
+ * script in the app (`javascript:` and the like) gives undefined, so the link is inert.
+ */
+export const safeHref = (url: string | null | undefined): string | undefined => {
+  const u = (url ?? '').trim()
+  if (/^data:text\/html/i.test(u)) return undefined
+  return /^(https?:\/\/|mailto:|blob:|data:)/i.test(u) ? u : undefined
+}

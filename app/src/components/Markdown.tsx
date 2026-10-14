@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { safeHref } from '../lib/files'
 
 const INLINE = /(\*\*[^*]+\*\*|_[^_]+_|`[^`]+`|\[[^\]]+\]\([^)]+\)|@[A-Za-z]+)/
 
@@ -25,7 +26,7 @@ function inline(text: string, k: number): ReactNode[] {
       )
     else if (s.startsWith('['))
       parts.push(
-        <a key={key} href={s.slice(s.indexOf('(') + 1, -1)} target="_blank" rel="noreferrer" className="hover:text-blue hover:underline">
+        <a key={key} href={safeHref(s.slice(s.indexOf('(') + 1, -1))} target="_blank" rel="noreferrer" className="hover:text-blue hover:underline">
           {s.slice(1, s.indexOf(']'))}
         </a>,
       )

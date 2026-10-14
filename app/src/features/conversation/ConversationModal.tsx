@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Attachment, ChatFile, ChatMessage, ClientPriority, Question, Task, TaskId } from '../../api/types'
 import { Avatar, CloseButton, Icon, Label, PATHS } from '../../components/ui'
 import { diff, fmt, todayLabel, TODAY } from '../../lib/dates'
-import { isImageName, readFiles } from '../../lib/files'
+import { isImageName, readFiles, safeHref } from '../../lib/files'
 import { questionTags } from '../../lib/theme'
 import { initials } from '../../lib/media'
 import { usePage } from '../../state/page'
@@ -390,7 +390,7 @@ function Photos({
           {photos.map((p, i) => (
             <a
               key={p.name + i}
-              href={p.url || undefined}
+              href={safeHref(p.url)}
               target="_blank"
               rel="noreferrer"
               download={p.name}
@@ -611,7 +611,7 @@ function Chat({ m, close }: { m: Model; close: () => void }) {
                     {c.files.map((f, j) => (
                       <a
                         key={f.name + j}
-                        href={f.url || undefined}
+                        href={safeHref(f.url)}
                         target="_blank"
                         rel="noreferrer"
                         download={f.name}

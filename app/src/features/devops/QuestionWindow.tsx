@@ -3,7 +3,7 @@ import { useQuestions, useSend } from '../../api/queries'
 import type { ChatFile, ChatMessage, Question } from '../../api/types'
 import { threadOf } from '../../domain/questions'
 import { fileExt } from '../../domain/tasks'
-import { readFiles } from '../../lib/files'
+import { readFiles, safeHref } from '../../lib/files'
 import { questionTags } from '../../lib/theme'
 import { useDv } from './ctx'
 import { member } from './model'
@@ -152,7 +152,7 @@ function Inner({ q }: { q: Question }) {
           {photos.length ? (
             <div className="mt-2.5 grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(150px,1fr))' }}>
               {photos.map((p, i) => (
-                <a key={p.name + i} href={p.url || undefined} target="_blank" rel="noreferrer" download={p.name} className="block overflow-hidden rounded-xl bg-canvas text-ink no-underline shadow-[0_0_0_1.5px_#D6DEE8]">
+                <a key={p.name + i} href={safeHref(p.url)} target="_blank" rel="noreferrer" download={p.name} className="block overflow-hidden rounded-xl bg-canvas text-ink no-underline shadow-[0_0_0_1.5px_#D6DEE8]">
                   {p.img && p.url ? (
                     <span role="img" aria-label={p.name} className="block h-[110px] w-full bg-canvas bg-cover bg-center bg-no-repeat" style={{ backgroundImage: `url("${p.url}")` }} />
                   ) : (
@@ -203,7 +203,7 @@ function Inner({ q }: { q: Question }) {
                     {c.files?.length > 0 && (
                       <div className="flex flex-wrap gap-1.5" style={{ justifyContent: mine ? 'flex-end' : 'flex-start' }}>
                         {c.files.map((f, j) => (
-                          <a key={f.name + j} href={f.url || undefined} target="_blank" rel="noreferrer" download={f.name} className="inline-flex max-w-[240px] items-center gap-2 rounded-[9px] bg-white px-2 py-1.5 text-ink no-underline shadow-[inset_0_0_0_1.5px_#D6DEE8]">
+                          <a key={f.name + j} href={safeHref(f.url)} target="_blank" rel="noreferrer" download={f.name} className="inline-flex max-w-[240px] items-center gap-2 rounded-[9px] bg-white px-2 py-1.5 text-ink no-underline shadow-[inset_0_0_0_1.5px_#D6DEE8]">
                             {f.img && f.url ? (
                               <span role="img" aria-label={f.name} className="size-10 flex-none rounded-md bg-canvas bg-cover bg-center bg-no-repeat" style={{ backgroundImage: `url("${f.url}")` }} />
                             ) : (

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useActorName, useActorSend } from '../../state/access'
 import type { ChatFile, Task } from '../../api/types'
 import { Avatar, Icon, PATHS } from '../../components/ui'
-import { readFiles } from '../../lib/files'
+import { readFiles, safeHref } from '../../lib/files'
 import { usePerson } from '../../state/page'
 
 /**
@@ -61,7 +61,7 @@ export function ClientChat({ bug }: { bug: Task }) {
                     {c.files.map((f, j) => (
                       <a
                         key={f.name + j}
-                        href={f.url || undefined}
+                        href={safeHref(f.url)}
                         target="_blank"
                         rel="noreferrer"
                         download={f.name}
