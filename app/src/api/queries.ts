@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useEffect } from 'react'
 import { useToast } from '../pages/shell/toast'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { reduce, touches, type Command, type Resource } from './commands'
@@ -93,8 +93,10 @@ export const refuseBeforeSending = (qc: QueryClient, cmd: Command) => {
   if (why) throw new RefusedError(why)
 }
 
-const useCommandMutation = () => {
+/** `toastOnError`: say why when the write fails (API mode; fire-and-forget writes, whose callers show nothing themselves). */
+const useCommandMutation = (toastOnError = false) => {
   const qc = useQueryClient()
+  const show = useToast()
   return useMutation({
     mutationFn: async (cmd: Command) => {
       refuseBeforeSending(qc, cmd)
@@ -112,8 +114,10 @@ const useCommandMutation = () => {
       }
       return { prev }
     },
-    onError: (_err, _cmd, ctx) => {
+    // Hook-level, so it runs even when the window that sent the write has closed.
+    onError: (err, _cmd, ctx) => {
       if (ctx) Object.entries(ctx.prev).forEach(([k, v]) => qc.setQueryData([k], v))
+      if (toastOnError && apiMode) show(writeErrorMessage(err))
     },
     onSettled: (_data, _err, cmd) => {
       refetchKeysAfter(cmd).forEach(k => refetchAfterWrites.add(k))
@@ -130,16 +134,16 @@ const useCommandMutation = () => {
 
 /** Data that changes when another kind of data does (on the backend or in what the pages derive). */
 const RELATED: Partial<Record<string, string[]>> = {
-  tasks: ['ticketDetails', 'companies'],
+  tasks: ['ticketDetails', 'companies', 'entries'],
   workspace: ['tasks', 'companies'],
   entries: ['projectHours', 'companies'],
   weekSubmissions: ['entries'],
   leave: ['leaveBook', 'notifications'],
-  people: ['companies'],
+  people: ['companies', 'internalProjects'],
   companies: ['people', 'internalProjects', 'workspace', 'tasks'],
-  internalProjects: ['workspace', 'tasks'],
+  internalProjects: ['workspace', 'tasks', 'people'],
   devops: ['workspace'],
-  clientTeam: ['companies'],
+  clientTeam: ['companies', 'people'],
 }
 
 /** What to refetch after a write: what it touched and what depends on that (not every resource: at production size that is hundreds of requests). */
@@ -151,15 +155,30 @@ export const refetchKeysAfter = (cmd: Command): string[] => {
 /** Keys of writes that settled while others were still in flight, refetched by the last one. */
 const refetchAfterWrites = new Set<string>()
 
+/**
+ * Live refetches that wait while a write is in flight (its own change events would undo its
+ * optimistic update) and run once writes are done, instead of being dropped.
+ */
+export const heldRefetch = (isBusy: () => boolean, invalidate: (key: string) => void) => {
+  const waiting = new Set<string>()
+  const flush = () => {
+    if (isBusy() || !waiting.size) return
+    const keys = [...waiting]
+    waiting.clear()
+    keys.forEach(invalidate)
+  }
+  const refetch = (keys: string[]) => {
+    keys.forEach(k => waiting.add(k))
+    flush()
+  }
+  return { refetch, flush }
+}
+
 /** What a failed write tells the person: the backend's reason for a refusal, else a plain message. */
 export const writeErrorMessage = (err: unknown) => (err instanceof RefusedError ? err.message : 'That change could not be saved. Try again.')
 
-/** Fire and forget: the write is applied optimistically; an error rolls it back and says why. */
-export const useSend = () => {
-  const { mutate } = useCommandMutation()
-  const show = useToast()
-  return useCallback((cmd: Command) => mutate(cmd, { onError: err => show(writeErrorMessage(err)) }), [mutate, show])
-}
+/** Fire and forget: the write is applied optimistically; an error rolls it back (and, in API mode, says why). */
+export const useSend = () => useCommandMutation(true).mutate
 
 /**
  * Like useSend, but resolves once the server has applied the command and the
@@ -177,12 +196,10 @@ export const useLiveSync = () => {
   useEffect(() => server.subscribe(() => qc.invalidateQueries()), [qc])
   useEffect(() => {
     if (!apiMode) return
-    const refetch = (keys: string[]) => {
-      // While a write is in flight its own events would undo its optimistic change; it refetches when it settles.
-      if (qc.isMutating()) return
-      keys.forEach(k => qc.invalidateQueries({ queryKey: [k] }))
-    }
-    return startLiveUpdates(refetch, {
+    // While a write is in flight its own events would undo its optimistic change: hold them until writes are done.
+    const held = heldRefetch(() => qc.isMutating() > 0, k => void qc.invalidateQueries({ queryKey: [k] }))
+    const unsubscribe = qc.getMutationCache().subscribe(() => held.flush())
+    const stop = startLiveUpdates(held.refetch, {
       fetchFn: (url, init) => fetch(url, init),
       token: () => readTokens()?.access ?? null,
       who: () => readSession()?.personId ?? null,
@@ -192,6 +209,10 @@ export const useLiveSync = () => {
       batchMs: 300,
       heavyBatchMs: 5000,
     })
+    return () => {
+      unsubscribe()
+      stop()
+    }
   }, [qc])
 }
 

@@ -86,8 +86,10 @@ export function LoginPage() {
       return
     }
     // Nothing read for someone else (or before signing in) may show for this person.
-    qc.clear()
+    if (apiMode) qc.clear()
     startSession(result.session)
+    // The directory depends on who is signed in, so load it again (mock mode keeps the rest).
+    if (!apiMode) await qc.invalidateQueries({ queryKey: qk.people })
     navigate('/dashboard', { replace: true })
   })
 

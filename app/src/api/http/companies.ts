@@ -58,9 +58,9 @@ export const liveProjects = async () => (await allPages<BackendProject>('/projec
  * caller; client users may not read companies at all, so theirs is built
  * from the session.
  */
-// ponytail: one request per project (epics) and per company (contacts), and every write refetches all of it
-// (queries.ts onSettled). Fine at Demo DB size; at production size add one backend endpoint that returns
-// companies with their projects, epic summaries and contacts, and refetch only what a command touched.
+// ponytail: one request per project (epics) and per company (contacts), refetched after any write that touches
+// companies (queries.ts refetchKeysAfter). Fine at Demo DB size; at production size add one backend endpoint that
+// returns companies with their projects, epic summaries and contacts.
 export const fetchCompanies = async (session: Session | null): Promise<Company[]> => {
   if (!session) return []
   const projects = (await liveProjects()).filter(p => p.company_id)

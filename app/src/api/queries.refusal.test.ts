@@ -65,9 +65,37 @@ describe('writeErrorMessage', () => {
 describe('refetchKeysAfter', () => {
   it('refetches what a write touched and what depends on it, not everything', async () => {
     const { refetchKeysAfter } = await import('./queries')
-    expect(refetchKeysAfter({ type: 'task.delete', id: '1' }).sort()).toEqual(['companies', 'tasks', 'ticketDetails'].sort())
+    expect(refetchKeysAfter({ type: 'task.delete', id: '1' }).sort()).toEqual(['companies', 'entries', 'tasks', 'ticketDetails'].sort())
     const leave = refetchKeysAfter({ type: 'leave.decide', id: 'r1', status: 'Approved', by: 'A', when: '2026-10-14' })
     expect(leave).toEqual(expect.arrayContaining(['leave', 'leaveBook', 'notifications']))
     expect(leave).not.toContain('tasks')
+  })
+})
+
+describe('heldRefetch (live updates during a write)', () => {
+  it('keeps what changed while a write was in flight and refetches it once the write is done, instead of dropping it', async () => {
+    const { heldRefetch } = await import('./queries')
+    let busy = true
+    const done: string[] = []
+    const h = heldRefetch(() => busy, k => done.push(k))
+    h.refetch(['tasks', 'companies'])
+    h.refetch(['tasks'])
+    expect(done).toEqual([])
+    h.flush()
+    expect(done).toEqual([])
+    busy = false
+    h.flush()
+    expect(done.sort()).toEqual(['companies', 'tasks'])
+    h.refetch(['leave'])
+    expect(done).toContain('leave')
+  })
+})
+
+describe('refetchKeysAfter: what other pages derive', () => {
+  it('refreshes people when projects change and the reverse, and the timesheet when tickets change', async () => {
+    const { refetchKeysAfter } = await import('./queries')
+    expect(refetchKeysAfter({ type: 'project.internal.setState', id: 'i1', state: 'done' } as never)).toEqual(expect.arrayContaining(['people']))
+    expect(refetchKeysAfter({ type: 'clientTeam.add', member: { id: 'x', companyId: 'c1', name: 'A', email: 'a@x' } })).toEqual(expect.arrayContaining(['people', 'companies']))
+    expect(refetchKeysAfter({ type: 'task.delete', id: '1' })).toEqual(expect.arrayContaining(['entries']))
   })
 })

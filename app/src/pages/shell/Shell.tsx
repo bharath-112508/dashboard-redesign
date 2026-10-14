@@ -124,8 +124,8 @@ function Frame({ session, page, children }: { session: Session; page: PageName; 
   const signOut = () => {
     if (apiMode) void apiSignOut()
     clearSession()
-    // The next person must never see this person's data, not even for a moment.
-    qc.clear()
+    // The next person must never see this person's data, not even for a moment (API mode; mock data is shared).
+    if (apiMode) qc.clear()
     navigate(PAGE_PATH.Login, { replace: true })
   }
 

@@ -70,14 +70,14 @@ export const cardAvatars = (names: string[], person: (n: string) => Person = gre
 export const nextEntryId = (entries: TimeEntry[]) =>
   String(Math.max(0, ...entries.map(e => Number(e.id)).filter(Number.isFinite)) + 1)
 
-/**
- * The ticket a `?ticket=` value names: a number ("12") or a key ("PMT-12").
- * Returns null for anything else, so a bad link opens nothing.
- */
 /** The ticket a link names: by id, by the backend id a draft became (`alias`), or by its key (My tickets links use the key, e.g. RTP-2). */
 export const findTicket = (tasks: Task[], id: TaskId, alias?: TaskId | null): Task | undefined =>
   tasks.find(t => t.id === id) ?? (alias ? tasks.find(t => t.id === alias) : undefined) ?? tasks.find(t => t.subKey === id)
 
+/**
+ * The ticket a `?ticket=` value names: a number ("12") or a key ("PMT-12").
+ * Returns null for anything else, so a bad link opens nothing.
+ */
 export const ticketIdFromParam = (v: string | null | undefined): TaskId | null => {
   if (v == null) return null
   const m = /^(?:PMT-)?(\d+)$/i.exec(v.trim())

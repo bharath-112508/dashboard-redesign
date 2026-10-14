@@ -73,9 +73,10 @@ export function TicketDrawer({ id }: { id: TaskId }) {
   // Client-reported bugs open in the bug window; a link to one of them lands there.
   const isBug = !!raw0?.clientBug
   useEffect(() => {
-    if (isClient && isBug) overlay.open('bug', id, { replace: true })
+    // By the ticket's own id: a link may name it by key.
+    if (isClient && isBug && raw0) overlay.open('bug', raw0.id, { replace: true })
     // Only the item and the role decide the redirect.
-  }, [isClient, isBug, id])
+  }, [isClient, isBug, raw0?.id])
 
   const go = (to: TaskId, tab: Tab = 'details', stack = navStack) => {
     setNavStack(stack)

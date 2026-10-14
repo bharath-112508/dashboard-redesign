@@ -395,6 +395,8 @@ export const updateUser = async (input: {
     patch: UpdateUserBody;
     /** Redesign: audit context, so an email change (the sign-in identity) is recorded. */
     audit?: AuditContext;
+    /** Redesign: the caller's session (refresh-token row), kept when they change their own email. */
+    caller_session_id?: string;
 }): Promise<Record<string, unknown>> => {
     const target = await User.findById(input.target_id);
     if (!target) {
@@ -550,7 +552,10 @@ export const updateUser = async (input: {
             });
         }
         // The sign-in identity changed: existing sessions end, so whoever held the old one must sign in again.
-        await revokeAllRefreshTokens(target._id);
+        // Someone changing their own email keeps the session they are using (else their own save is cut off).
+        const keep = isSelf && input.caller_session_id && Types.ObjectId.isValid(input.caller_session_id) ? new Types.ObjectId(input.caller_session_id) : null;
+        if (keep) await RefreshToken.updateMany({ user_id: target._id, revoked_at: null, _id: { $ne: keep } }, { $set: { revoked_at: new Date() } });
+        else await revokeAllRefreshTokens(target._id);
         // Links already sent went to the old address: they must stop working. A client contact
         // (who may never have chosen a password) gets a fresh invite at the new address.
         await revokePendingPasswordLinks(target._id);

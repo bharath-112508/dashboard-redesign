@@ -97,6 +97,7 @@ export const patchUser = async (req: Request, res: Response): Promise<Response> 
         caller_permissions: req.user!.permissions,
         patch: req.body as UpdateUserBody,
         audit: buildAuditContext(req),
+        caller_session_id: req.user!.sid,
     });
     return ok(res, user);
 };

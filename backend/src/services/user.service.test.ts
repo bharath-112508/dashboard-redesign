@@ -1076,6 +1076,19 @@ describe('updateUser — email change safety', () => {
         expect(refreshUpdateManyMock).toHaveBeenCalledWith({ user_id: t._id, revoked_at: null }, expect.anything());
     });
 
+    it('keeps the session making the request when someone changes their own email; signs out the rest', async () => {
+        const me = new Types.ObjectId();
+        const sid = new Types.ObjectId();
+        const t = sampleUser({ _id: me, role: ROLES.ADMIN, email: 'me@x.io' });
+        userFindByIdMock.mockResolvedValueOnce(t);
+        userExistsMock.mockResolvedValueOnce(null);
+
+        await svc.updateUser({ ...asAdmin(t, { email: 'me2@x.io' }), caller_id: me, caller_session_id: sid.toString() });
+
+        expect(t.email).toBe('me2@x.io');
+        expect(refreshUpdateManyMock).toHaveBeenCalledWith({ user_id: me, revoked_at: null, _id: { $ne: sid } }, expect.anything());
+    });
+
     it('turns a duplicate-key race on save into 409 EMAIL_ALREADY_EXISTS', async () => {
         const t = sampleUser({ role: ROLES.EMPLOYEE, email: 'old@x.io' });
         (t as unknown as { save: () => Promise<unknown> }).save = vi.fn().mockRejectedValueOnce({ code: 11000, keyPattern: { email: 1 } });
