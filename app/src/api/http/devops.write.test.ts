@@ -145,8 +145,16 @@ describe('DevOps requests', () => {
       NOW,
     )
     expect(patch).toHaveBeenCalledWith('/devops-requests/4', {
-      patch: { status: 'Done', seen_t: 1, status_seen: 'Done', logs: [{ h: 2, by: 'Arjun', when: '2026-10-14T12:00:00.000Z', date: '2026-10-14' }] },
+      patch: { status: 'Done', seen_t: 1, status_seen: 'Done' },
       log: { text: 'Status changed to Done' },
+      add_logs: [{ h: 2, by: 'Arjun', when: '2026-10-14T12:00:00.000Z', date: '2026-10-14' }],
+    })
+    // A removal sends the list left, with the length it was made from (one more).
+    const saved = { h: 1, by: 'Raj', when: '2d ago', at: '2026-10-12T09:00:00.000Z', shown: '2d ago', date: '2026-10-12' }
+    await sendDevopsCommand({ type: 'request.update', id: 4, patch: { logs: [saved] } }, me, NOW)
+    expect(patch).toHaveBeenLastCalledWith('/devops-requests/4', {
+      patch: { logs: [{ h: 1, by: 'Raj', when: '2026-10-12T09:00:00.000Z', date: '2026-10-12' }] },
+      logs_if_count: 2,
     })
     await sendDevopsCommand({ type: 'request.comment', id: 4, comment: { by: 'Arjun', text: 'Ready', when: 'just now', side: 'devops' } }, me, NOW)
     expect(post).toHaveBeenCalledWith('/devops-requests/4/comments', { text: 'Ready', side: 'devops' })

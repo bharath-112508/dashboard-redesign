@@ -104,7 +104,14 @@ devopsRequestRoutes.patch(
     '/:number',
     validate({
         params: num,
-        body: z.object({ patch: z.object(requestFields).partial().strict(), log: z.object({ text: long }).strict().optional() }).strict(),
+        body: z
+            .object({
+                patch: z.object(requestFields).partial().strict(),
+                log: z.object({ text: long }).strict().optional(),
+                add_logs: requestFields.logs.max(50).optional(),
+                logs_if_count: z.number().int().min(0).optional(),
+            })
+            .strict(),
     }),
     call((req) => svc.updateRequest(Number(req.params.number), req.body, projectCallerFrom(req)))
 );

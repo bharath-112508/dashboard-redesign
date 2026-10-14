@@ -154,6 +154,19 @@ describe('audit trail', () => {
     });
 });
 
+describe('request hours', () => {
+    it("adds new hours to what the server has, and refuses a removal made on an out-of-date list", async () => {
+        const r = doc({ number: 3, comments: [], history: [] as unknown[], logs: [{ h: 1, by: 'Raj' }] as unknown[] });
+        m.rFindOne.mockResolvedValue(r);
+        await svc.updateRequest(3, { patch: {}, add_logs: [{ h: 2, by: 'Arjun' }] }, staff());
+        expect(r.logs).toEqual([{ h: 1, by: 'Raj' }, { h: 2, by: 'Arjun' }]);
+        await expect(svc.updateRequest(3, { patch: { logs: [] }, logs_if_count: 1 }, staff())).rejects.toMatchObject({ statusCode: 409 });
+        expect(r.logs).toHaveLength(2);
+        await svc.updateRequest(3, { patch: { logs: [{ h: 2, by: 'Arjun' }] }, logs_if_count: 2 }, staff());
+        expect(r.logs).toEqual([{ h: 2, by: 'Arjun' }]);
+    });
+});
+
 describe('question project', () => {
     it("refuses a ticket on a project the caller cannot open", async () => {
         m.qFindOne.mockReturnValue(lean(null));

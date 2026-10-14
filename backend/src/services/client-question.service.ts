@@ -217,10 +217,23 @@ export const createRequest = async (body: Data & { number: number; devops_key: s
     return toPublicRequest(doc);
 };
 
-export const updateRequest = async (number: number, body: { patch: Data; log?: { text: string } }, caller: ProjectCaller) => {
+/**
+ * `add_logs` appends hours to what the server has, so two people logging at once both
+ * land. A whole `logs` list (a removal) needs `logs_if_count`, the length it was made
+ * from: a list made before someone else logged would otherwise erase their hours.
+ */
+export const updateRequest = async (
+    number: number,
+    body: { patch: Data; log?: { text: string }; add_logs?: unknown[]; logs_if_count?: number },
+    caller: ProjectCaller
+) => {
     teamOnly(caller, 'change DevOps requests');
     const d = await loadRequest(number);
+    if (body.logs_if_count !== undefined && (d.logs ?? []).length !== body.logs_if_count) {
+        throw AppError.conflict('Someone else just changed the hours on this request. Try again.');
+    }
     Object.assign(d, body.patch);
+    if (body.add_logs?.length) d.logs = [...(d.logs ?? []), ...body.add_logs];
     if (body.log) d.history.unshift({ by: await nameOf(caller.id), text: body.log.text, when: new Date() });
     await d.save();
     await audit(caller, AUDIT_ACTIONS.DEVOPS_REQUEST_UPDATE, AUDIT_TARGET_KINDS.DEVOPS_REQUEST, d._id, { number, fields: Object.keys(body.patch) });

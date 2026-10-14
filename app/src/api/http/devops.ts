@@ -323,12 +323,20 @@ export const sendDevopsCommand = async (cmd: DevopsApiCommand, session: Session 
       })
       return {}
     }
-    case 'request.update':
+    case 'request.update': {
+      // Hours: new entries (no stored `at`) are added to what the server has, so two
+      // people logging at once both land. A list with none is a removal (the app
+      // removes one entry at a time); the server refuses it if the list has changed since.
+      const { logs, ...rest } = cmd.patch
+      const added = (logs ?? []).filter(l => !('at' in l))
+      const patch = datesIn(pick(added.length || !logs ? rest : cmd.patch, REQUEST_FIELDS), now)
       await api.patch(`/devops-requests/${cmd.id}`, {
-        patch: datesIn(pick(cmd.patch, REQUEST_FIELDS), now),
+        patch,
         ...(cmd.log ? { log: { text: cmd.log.text } } : {}),
+        ...(added.length ? { add_logs: datesIn(added, now) } : logs ? { logs_if_count: logs.length + 1 } : {}),
       })
       return {}
+    }
     case 'request.comment':
       await api.post(`/devops-requests/${cmd.id}/comments`, { text: cmd.comment.text, side: cmd.comment.side })
       return {}
