@@ -52,7 +52,7 @@ const leaveFrom = (r: BackendLeave): LeaveRequest => ({
  * backend's admin list leaves them out). Cancelled requests are not shown;
  * the design has no Cancelled state.
  */
-export const fetchLeave = async (session: Session | null): Promise<LeaveRequest[]> => {
+const readLeave = async (session: Session | null): Promise<LeaveRequest[]> => {
   if (!session || isClientRole(session.role)) return []
   const [list, own] = await Promise.all([
     allPages<BackendLeave>('/leaves'),
@@ -61,6 +61,19 @@ export const fetchLeave = async (session: Session | null): Promise<LeaveRequest[
   ])
   const byId = new Map([...list, ...own].map(r => [r.id, r]))
   return [...byId.values()].filter(r => r.status !== 'cancelled').map(leaveFrom)
+}
+
+let inflight: { who: string; list: Promise<LeaveRequest[]> } | null = null
+/** One read per refetch round: the requests and the notices are asked for at the same time. */
+export const fetchLeave = (session: Session | null): Promise<LeaveRequest[]> => {
+  const who = session?.personId ?? ''
+  if (inflight?.who !== who) {
+    const list = readLeave(session).finally(() => {
+      if (inflight?.list === list) inflight = null
+    })
+    inflight = { who, list }
+  }
+  return inflight.list
 }
 
 /**

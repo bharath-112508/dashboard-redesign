@@ -35,7 +35,7 @@ import {
     type ComputedSegment,
     type SegmentEngineResult,
 } from './leave-segment.engine.js';
-import { notifyLeaveDecided, notifyLeaveSubmitted } from './notification-dispatcher.service.js';
+import { notifyLeaveDecided, notifyLeaveFiledOnBehalf, notifyLeaveSubmitted } from './notification-dispatcher.service.js';
 import { recordAudit, type AuditContext } from './audit.service.js';
 import { AUDIT_ACTIONS, AUDIT_TARGET_KINDS } from '../constants/audit.js';
 import { withTransaction } from '../utils/with-transaction.js';
@@ -166,6 +166,10 @@ const assertCanReviewScoped = async (
     // `system.admin` rather than `role === 'admin'` — same staleness applies
     // to the scoping bypass as to the gate above.
     if (callerCan(permissions, PERMISSIONS.SYSTEM_ADMIN)) return;
+    // Redesign: a manager who filed a report's leave does not also decide it.
+    if (req.applied_by && caller.id.equals(req.applied_by)) {
+        throw AppError.forbidden('You filed this request, so someone else must decide it');
+    }
     if (!(await isDirectReportOf(req.user_id, caller.id))) {
         throw AppError.forbidden('You can only review leave requests from your direct reports');
     }
@@ -642,6 +646,8 @@ export const applyLeave = async (
     try {
         created = await LeaveRequest.create({
             user_id: applicantId,
+            // Redesign: who filed it, when it was someone else (they then may not decide it, unless admin).
+            applied_by: applicantId.equals(caller.id) ? null : caller.id,
             requested_leave_type_id: requestedType._id,
             start_date: body.start_date,
             end_date: body.end_date,
@@ -718,6 +724,16 @@ export const applyLeave = async (
     // Notify reviewers in-app + email. The dispatcher never throws — failures
     // are logged as `NOTIFICATION_DISPATCH_FAILED` and the apply still
     // returns 2xx (API_Contract §15.500).
+    if (!applicantId.equals(caller.id)) {
+        await notifyLeaveFiledOnBehalf({
+            request_id: created._id,
+            user_id: applicantId,
+            actor_id: caller.id,
+            leave_type_label: leaveTypeLabel(requestedType),
+            start_date: body.start_date,
+            end_date: body.end_date,
+        });
+    }
     await notifyLeaveSubmitted({
         request_id: created._id,
         requester_id: applicantId,

@@ -56,6 +56,8 @@ export interface LeaveRequestDocument extends Document {
     requires_additional_approval: boolean;
     additional_approval_reason: string | null;
     approver_id: Types.ObjectId | null;
+    /** Redesign: who filed the request when it was not the person themselves. */
+    applied_by?: Types.ObjectId | null;
     approver_remarks: string;
     acted_at: Date | null;
     cancelled_at: Date | null;
@@ -144,6 +146,7 @@ const leaveRequestSchema = new Schema<LeaveRequestDocument>(
         requires_additional_approval: { type: Boolean, required: true, default: false },
         additional_approval_reason: { type: String, default: null },
         approver_id: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
+        applied_by: { type: Schema.Types.ObjectId, ref: COLLECTIONS.USERS, default: null },
         approver_remarks: { type: String, default: '' },
         acted_at: { type: Date, default: null },
         cancelled_at: { type: Date, default: null },

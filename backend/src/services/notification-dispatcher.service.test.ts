@@ -1075,6 +1075,22 @@ describe('person-affecting admin dispatchers', () => {
         expect(row.link_url).toBe(`/projects/${projectId.toString()}`);
     });
 
+    it('tells a person when leave was filed in their name (redesign)', async () => {
+        await dispatcher.notifyLeaveFiledOnBehalf({
+            request_id: new Types.ObjectId(),
+            user_id: requesterId,
+            actor_id: adminId,
+            leave_type_label: 'WFH — Work From Home',
+            start_date: '2026-12-15',
+            end_date: '2026-12-15',
+        });
+        expect(notificationCreateMock).toHaveBeenCalledTimes(1);
+        const row = notificationCreateMock.mock.calls[0][0];
+        expect(row.type).toBe('leave_requested');
+        expect(row.title).toContain('WFH');
+        expect(row.body).toContain('2026-12-15');
+    });
+
     it('notifies the user whose leave balance was adjusted', async () => {
         await dispatcher.notifyLeaveBalanceAdjusted({
             balance_id: balanceId,

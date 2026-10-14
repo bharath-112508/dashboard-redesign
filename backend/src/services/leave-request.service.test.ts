@@ -125,6 +125,7 @@ vi.mock('./leave-segment.engine.js', async () => {
 vi.mock('./notification-dispatcher.service.js', () => ({
     notifyLeaveDecided: notifyDecidedMock,
     notifyLeaveSubmitted: vi.fn(),
+    notifyLeaveFiledOnBehalf: vi.fn(),
 }));
 
 // The approve/reject/cancel guards now ask for effective PERMISSIONS rather
@@ -1068,3 +1069,26 @@ describe('admins may approve their own leave (redesign, the user\'s call)', () =
         await expect(svc.approveLeave(r._id, { approver_remarks: '' }, manager)).rejects.toMatchObject({ statusCode: 403 });
     });
 });
+
+describe('someone who filed leave for a report does not also decide it (redesign)', () => {
+    it('refuses a manager approving a request they filed', async () => {
+        const manager = { id: new Types.ObjectId(), role: ROLES.MANAGER };
+        vi.mocked(resolvePermissionsForUser).mockResolvedValue({ permissions: ['leave_request.approve'] } as never);
+        const r = baseRequest({ applied_by: manager.id });
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        stubReportingManager(manager.id);
+        await expect(svc.approveLeave(r._id, { approver_remarks: '' }, manager)).rejects.toMatchObject({ statusCode: 403 });
+        expect(leaveRequestFindOneAndUpdateMock).not.toHaveBeenCalled();
+    });
+
+    it('lets an admin decide a request they filed (admins may approve their own, the user\'s call)', async () => {
+        const admin = { id: new Types.ObjectId(), role: ROLES.ADMIN };
+        const r = baseRequest({ applied_by: admin.id });
+        leaveRequestFindByIdMock.mockResolvedValueOnce(r);
+        leaveRequestFindOneAndUpdateMock.mockResolvedValueOnce(null);
+        await expect(svc.approveLeave(r._id, { approver_remarks: '' }, admin)).rejects.toMatchObject({
+            code: ERROR_CODES.CORRECTION_REQUEST_NOT_PENDING,
+        });
+    });
+});
+

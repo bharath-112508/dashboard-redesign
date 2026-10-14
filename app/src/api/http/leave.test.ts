@@ -75,6 +75,14 @@ describe('fetchLeaveNotices', () => {
   })
 })
 
+describe('one read per visit', () => {
+  it('shares the leave list between the requests and the notices', async () => {
+    get.mockResolvedValue([req('r1', { status: 'approved', acted_at: '2026-10-12T10:00:00.000Z' })])
+    await Promise.all([fetchLeave(dev), fetchLeaveNotices(dev)])
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('fetchLeaveBook', () => {
   it('uses the backend\'s types and the main type\'s balance for the signed-in person', async () => {
     get.mockImplementation(async (path: string) => {

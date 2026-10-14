@@ -1027,6 +1027,31 @@ export const notifyLeaveBalanceAdjusted = async (input: {
     );
 };
 
+/** Redesign: tells a person that someone filed leave in their name (an admin, or their manager). */
+export const notifyLeaveFiledOnBehalf = async (input: {
+    request_id: Types.ObjectId;
+    user_id: Types.ObjectId;
+    actor_id: Types.ObjectId;
+    leave_type_label: string;
+    start_date: string;
+    end_date: string;
+}): Promise<void> => {
+    if (input.user_id.equals(input.actor_id)) return;
+    const actor = await findUserById(input.actor_id).catch(() => null);
+    const days = input.start_date === input.end_date ? input.start_date : `${input.start_date} – ${input.end_date}`;
+    await notifyOne(
+        input.user_id,
+        {
+            type: NOTIFICATION_TYPES.LEAVE_REQUESTED,
+            title: `${input.leave_type_label} was requested for you`,
+            body: `${actor?.full_name ?? 'An administrator'} requested it for ${days}.`,
+            link_url: '/leaves',
+            related_entity: { kind: RELATED_ENTITY_KINDS.LEAVE_REQUEST, id: input.request_id },
+        },
+        'notify.leave_filed_on_behalf'
+    );
+};
+
 export const notifyCompOffAdjusted = async (input: {
     user_id: Types.ObjectId;
     actor_id: Types.ObjectId;
