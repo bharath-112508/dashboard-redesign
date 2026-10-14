@@ -32,7 +32,9 @@ function Inner({ q }: { q: Question }) {
   const [pend, setPend] = useState<ChatFile[]>([])
   const end = useRef<HTMLDivElement>(null)
   const T = threadOf(q)
-  useEffect(() => end.current?.scrollIntoView({ block: 'end' }), [T.length])
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: 'end' })
+  }, [T.length])
   const close = () => open({ question: null }, true)
   const [st, stBg, stC] = questionStatus(q)
   const [boxTx, boxDot] = STATUS_BOX[st]

@@ -278,6 +278,9 @@ test.describe('DevOps board', () => {
     await panel.getByRole('button', { name: 'Raise to client', exact: true }).click()
     await expect(page).toHaveURL(/question=\d+/)
     await expect(page.getByText('Need DNS access for the new domain', { exact: true }).first()).toBeVisible()
+    await expect
+      .poll(() => page.evaluate(() => (localStorage.getItem('vt.clients.db') ?? '').includes('Need DNS access for the new domain')))
+      .toBe(true)
     await page.reload()
     await expect(page).toHaveURL(/question=\d+/)
     await expect(page.getByText('Need DNS access for the new domain', { exact: true }).first()).toBeVisible()
