@@ -85,9 +85,9 @@ export function LoginPage() {
       form.setError(result.field, { type: 'manual', message: result.message })
       return
     }
+    // Nothing read for someone else (or before signing in) may show for this person.
+    qc.clear()
     startSession(result.session)
-    // The directory depends on who is signed in (API mode), so load it again.
-    await qc.invalidateQueries({ queryKey: qk.people })
     navigate('/dashboard', { replace: true })
   })
 

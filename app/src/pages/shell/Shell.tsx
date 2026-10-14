@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { useLiveSync, useCompanies } from '../../api/queries'
 import { findPerson, usePeople } from '../../api/people/directory'
 import { canAccess, isClientRole, ROLE_LABEL } from '../../api/session/access'
@@ -73,6 +74,7 @@ function AccessDenied({ role, page }: { role: Session['role']; page: PageName })
 /** The page frame: sidebar, top bar with search, the Back button and the page itself. */
 function Frame({ session, page, children }: { session: Session; page: PageName; children: ReactNode }) {
   useLiveSync()
+  const qc = useQueryClient()
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const [collapsed, setCollapsed] = useState(readCollapsed)
@@ -122,6 +124,8 @@ function Frame({ session, page, children }: { session: Session; page: PageName; 
   const signOut = () => {
     if (apiMode) void apiSignOut()
     clearSession()
+    // The next person must never see this person's data, not even for a moment.
+    qc.clear()
     navigate(PAGE_PATH.Login, { replace: true })
   }
 
