@@ -128,7 +128,7 @@ describe('updateItem', () => {
         expect(filter).toEqual({ key: 'OPS-7' });
         expect(update.$set).toMatchObject({ 'data.initDue': '2026-11-30', 'data.devDue': '2026-11-01', 'data.prio': 'High', 'data.updatedBy': 'Arjun' });
         expect(Object.keys(update.$set).some((k) => k === 'data' || k === 'data.logs')).toBe(false);
-        expect(update.$push['data.logs'].$position).toBe(0);
+        expect(update.$push['data.logs']).toMatchObject({ $position: 0, $slice: 500 });
         expect(update.$push['data.logs'].$each[0]).toMatchObject({ type: 'Field change', text: 'Priority changed to High', by: 'Arjun' });
         expect(d.save).not.toHaveBeenCalled();
     });

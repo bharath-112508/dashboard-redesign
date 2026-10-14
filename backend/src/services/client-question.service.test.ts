@@ -167,6 +167,24 @@ describe('request hours', () => {
     });
 });
 
+describe('limits', () => {
+    it('stops a question chat and a request thread at 1000 entries', async () => {
+        m.qFindOne.mockResolvedValue(doc({ number: 1, project_id: null, messages: Array(1000).fill({}) }));
+        await expect(svc.addMessage(1, { text: 'x', files: [] }, staff())).rejects.toMatchObject({ statusCode: 422 });
+        m.rFindOne.mockResolvedValue(doc({ number: 2, comments: Array(1000).fill({}), history: [], logs: [] }));
+        await expect(svc.addRequestComment(2, { text: 'x', side: 'devops' }, staff())).rejects.toMatchObject({ statusCode: 422 });
+    });
+
+    it('keeps a request\'s newest 500 history lines and at most 2000 hour entries', async () => {
+        const r = doc({ number: 3, comments: [], history: Array(500).fill({ text: 'old' }) as unknown[], logs: Array(2000).fill({ h: 1 }) as unknown[] });
+        m.rFindOne.mockResolvedValue(r);
+        await svc.updateRequest(3, { patch: {}, log: { text: 'new' } }, staff());
+        expect(r.history).toHaveLength(500);
+        expect(r.history[0]).toMatchObject({ text: 'new' });
+        await expect(svc.updateRequest(3, { patch: {}, add_logs: [{ h: 1 }] }, staff())).rejects.toMatchObject({ statusCode: 422 });
+    });
+});
+
 describe('question project', () => {
     it("refuses a ticket on a project the caller cannot open", async () => {
         m.qFindOne.mockReturnValue(lean(null));

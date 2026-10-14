@@ -113,6 +113,9 @@ const rulesOf = async () => {
     return s?.rules ?? { lockInitial: true, lockDevDue: true };
 };
 
+/** An item keeps its newest this many activity entries. */
+const MAX_ITEM_LOGS = 500;
+
 export const updateItem = async (
     key: string,
     body: { patch: Data; log?: { type: string; text: string; detail?: string } },
@@ -133,7 +136,7 @@ export const updateItem = async (
         { key },
         {
             $set: { ...Object.fromEntries(Object.entries(fields).map(([k, v]) => [`data.${k}`, v])), 'data.updatedBy': by, updated_by: caller.id },
-            ...(body.log ? { $push: { 'data.logs': { $each: [{ ...body.log, by, when: new Date().toISOString() }], $position: 0 } } } : {}),
+            ...(body.log ? { $push: { 'data.logs': { $each: [{ ...body.log, by, when: new Date().toISOString() }], $position: 0, $slice: MAX_ITEM_LOGS } } } : {}),
         },
         { new: true }
     );

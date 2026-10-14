@@ -128,8 +128,17 @@ export const addPhotos = async (number: number, files: unknown[], caller: Projec
     return toPublicQuestion(d);
 };
 
+/** A request keeps its newest this many history lines, and holds at most this many hour entries. */
+const MAX_HISTORY = 500;
+const MAX_REQUEST_LOGS = 2000;
+
+/** A question chat or a request thread holds at most this many entries (each is stored inside its document). */
+const MAX_THREAD = 1000;
+const full = () => AppError.unprocessable(`This conversation has reached ${MAX_THREAD} messages. Start a new one.`, ERROR_CODES.VALIDATION_ERROR);
+
 export const addMessage = async (number: number, body: { text: string; files: unknown[] }, caller: ProjectCaller) => {
     const d = await loadQuestion(number, caller);
+    if (d.messages.length >= MAX_THREAD) throw full();
     d.messages.push({
         who: await nameOf(caller.id),
         by_id: caller.id,
@@ -232,9 +241,12 @@ export const updateRequest = async (
     if (body.logs_if_count !== undefined && (d.logs ?? []).length !== body.logs_if_count) {
         throw AppError.conflict('Someone else just changed the hours on this request. Try again.');
     }
+    if ((d.logs ?? []).length + (body.add_logs?.length ?? 0) > MAX_REQUEST_LOGS) {
+        throw AppError.unprocessable(`A request can hold at most ${MAX_REQUEST_LOGS} hour entries.`, ERROR_CODES.VALIDATION_ERROR);
+    }
     Object.assign(d, body.patch);
     if (body.add_logs?.length) d.logs = [...(d.logs ?? []), ...body.add_logs];
-    if (body.log) d.history.unshift({ by: await nameOf(caller.id), text: body.log.text, when: new Date() });
+    if (body.log) d.history = [{ by: await nameOf(caller.id), text: body.log.text, when: new Date() }, ...d.history].slice(0, MAX_HISTORY);
     await d.save();
     await audit(caller, AUDIT_ACTIONS.DEVOPS_REQUEST_UPDATE, AUDIT_TARGET_KINDS.DEVOPS_REQUEST, d._id, { number, fields: Object.keys(body.patch) });
     return toPublicRequest(d);
@@ -243,6 +255,7 @@ export const updateRequest = async (
 export const addRequestComment = async (number: number, body: { text: string; side: 'tickets' | 'devops' }, caller: ProjectCaller) => {
     teamOnly(caller, 'reply on DevOps requests');
     const d = await loadRequest(number);
+    if (d.comments.length >= MAX_THREAD) throw full();
     d.comments.push({ by: await nameOf(caller.id), by_id: caller.id, text: body.text, when: new Date(), side: body.side });
     await d.save();
     await audit(caller, AUDIT_ACTIONS.DEVOPS_REQUEST_UPDATE, AUDIT_TARGET_KINDS.DEVOPS_REQUEST, d._id, { number, change: 'comment', side: body.side });
