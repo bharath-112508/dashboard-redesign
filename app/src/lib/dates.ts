@@ -1,5 +1,13 @@
-/** The design's fixed "today". The mock data is written around this date. */
-export const TODAY = '2026-10-10'
+import { apiMode } from '../api/http/config'
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** "Today": the design's fixed day in mock mode (the mock data is written around it), the real local day in API mode. */
+export const todayFor = (api: boolean, now: Date = new Date()) =>
+  api ? `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}` : '2026-10-10'
+
+/** The app's "today", fixed when the page loads. ponytail: a tab left open past midnight keeps yesterday until reloaded. */
+export const TODAY = todayFor(apiMode)
 
 export const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 

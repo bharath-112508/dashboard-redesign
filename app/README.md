@@ -97,7 +97,7 @@ Timesheets in API mode:
 - A ticket's **Log time** adds a billable entry on that ticket for you.
 - A support plan's hours used this month are the project's billable hours from the timesheets.
 - DevOps request time logs are saved on the request (see the DevOps section above).
-- My timesheet's "today" is the design's fixed date (10 Oct 2026), while the dashboard uses the real date; both are as in mock mode.
+- "Today" is the real local date in API mode (the design's fixed 10 Oct 2026 stays in mock mode).
 
 Epics, sprints and tickets in API mode:
 
